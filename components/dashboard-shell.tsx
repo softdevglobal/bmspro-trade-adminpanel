@@ -1,8 +1,7 @@
 "use client";
 
 import { Sidebar } from "@/components/sidebar";
-import { auth } from "@/lib/firebase/client";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState } from "react";
 
 export function DashboardShell({
@@ -14,14 +13,9 @@ export function DashboardShell({
   subtitle?: string;
   children: React.ReactNode;
 }) {
-  const [user, setUser] = useState<User | null>(auth.currentUser);
+  const { user } = useAuth();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
 
   useEffect(() => {
     function handleResize() {

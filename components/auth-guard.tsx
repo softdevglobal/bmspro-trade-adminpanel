@@ -1,40 +1,20 @@
 "use client";
 
-import { auth, db } from "@/lib/firebase/client";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
+  const { status } = useAuth();
   const router = useRouter();
-  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
+    if (status === "unauthenticated") {
+      router.replace("/login");
+    }
+  }, [status, router]);
 
-      try {
-        const snap = await getDoc(doc(db, "super_admins", user.uid));
-        if (!snap.exists() || snap.data()?.isActive === false) {
-          await signOut(auth);
-          router.replace("/login");
-          return;
-        }
-        setIsReady(true);
-      } catch {
-        await signOut(auth);
-        router.replace("/login");
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
-
-  if (!isReady) {
+  if (status === "loading") {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
@@ -47,6 +27,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     );
+  }
+
+  if (status === "unauthenticated") {
+    return null;
   }
 
   return <>{children}</>;

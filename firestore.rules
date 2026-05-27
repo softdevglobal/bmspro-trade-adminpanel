@@ -15,14 +15,37 @@ service cloud.firestore {
         );
     }
 
+    function isBusinessOwner() {
+      return isSignedIn()
+        && request.auth.token.businessId is string
+        && (
+          request.auth.token.role == 'owner'
+          || request.auth.token.role == 'admin'
+        );
+    }
+
+    function ownsBusiness(businessId) {
+      return isBusinessOwner() && request.auth.token.businessId == businessId;
+    }
+
     // Login gate: each user may read only their own super_admins document.
-    // Writes are server-only (Admin SDK / seed script).
     match /super_admins/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
       allow create, update, delete: if false;
     }
 
-    // Super admins can access all other collections in the admin portal.
+    // Business owners read their workspace; super admins read all.
+    match /businesses/{businessId} {
+      allow read: if isSuperAdmin() || ownsBusiness(businessId);
+      allow create, update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create, update, delete: if false;
+    }
+
+    // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();
     }

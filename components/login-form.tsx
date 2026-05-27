@@ -1,15 +1,17 @@
 "use client";
 
-import { auth, db } from "@/lib/firebase/client";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { useAuth } from "@/lib/auth/auth-context";
+import { FormEvent, useRef, useState } from "react";
 
 type FirebaseAuthError = { code?: string; message?: string };
 
-function describeAuthError(error: FirebaseAuthError): string {
-  switch (error.code) {
+function describeAuthError(error: unknown): string {
+  if (error instanceof Error && error.message === "UNAUTHORIZED") {
+    return "This account is not authorized. Use an owner or admin login.";
+  }
+
+  const code = (error as FirebaseAuthError).code;
+  switch (code) {
     case "auth/invalid-email":
       return "That email address looks invalid.";
     case "auth/user-disabled":
@@ -23,56 +25,51 @@ function describeAuthError(error: FirebaseAuthError): string {
     case "auth/network-request-failed":
       return "Network error. Check your connection and try again.";
     default:
-      return error.message ?? "Something went wrong. Please try again.";
+      return (error as FirebaseAuthError).message ?? "Something went wrong. Please try again.";
   }
 }
 
 export function LoginForm() {
-  const router = useRouter();
+  const { login } = useAuth();
+  const formRef = useRef<HTMLFormElement>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleLogin(email: string, password: string) {
     setErrorMessage(null);
     setIsSubmitting(true);
-
-    const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "").trim();
-    const password = String(formData.get("password") ?? "");
-
     try {
-      const credential = await signInWithEmailAndPassword(auth, email, password);
-      const uid = credential.user.uid;
-
-      const superAdminSnap = await getDoc(doc(db, "super_admins", uid));
-      if (!superAdminSnap.exists()) {
-        await signOut(auth);
-        setErrorMessage(
-          "This account is not authorized for the admin portal."
-        );
-        return;
-      }
-
-      const data = superAdminSnap.data();
-      if (data?.isActive === false) {
-        await signOut(auth);
-        setErrorMessage("Your admin access has been deactivated.");
-        return;
-      }
-
-      router.push("/dashboard");
-      router.refresh();
+      await login(email, password);
     } catch (error) {
-      setErrorMessage(describeAuthError(error as FirebaseAuthError));
+      setErrorMessage(describeAuthError(error));
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSubmitting) return;
+
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+    void handleLogin(email, password);
+  }
+
+  function submitFromEnter() {
+    if (isSubmitting) return;
+    formRef.current?.requestSubmit();
+  }
+
   return (
-    <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
+    <form
+      ref={formRef}
+      className="flex flex-col gap-4"
+      onSubmit={handleSubmit}
+      noValidate
+    >
       {errorMessage && (
         <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
           <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
@@ -100,6 +97,20 @@ export function LoginForm() {
             autoComplete="email"
             required
             placeholder="admin@business.com"
+            enterKeyHint="next"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                const passwordInput = document.getElementById(
+                  "password"
+                ) as HTMLInputElement | null;
+                if (passwordInput?.value.trim()) {
+                  submitFromEnter();
+                } else {
+                  passwordInput?.focus();
+                }
+              }
+            }}
             className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container-low pl-12 pr-3 font-body text-body-md text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
           />
         </div>
@@ -131,6 +142,13 @@ export function LoginForm() {
             autoComplete="current-password"
             required
             placeholder="Enter your password"
+            enterKeyHint="go"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitFromEnter();
+              }
+            }}
             className="h-11 w-full rounded-lg border border-outline-variant bg-surface-container-low pl-12 pr-11 font-body text-body-md text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
           />
           <button

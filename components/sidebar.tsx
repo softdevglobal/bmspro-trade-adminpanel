@@ -1,9 +1,9 @@
 "use client";
 
-import { auth } from "@/lib/firebase/client";
-import { onAuthStateChanged, signOut, type User } from "firebase/auth";
+import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
+import { useAuth } from "@/lib/auth/auth-context";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const NAV_ITEMS = [
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "#", label: "Availability", icon: "schedule" },
   { href: "#", label: "Customers", icon: "group" },
   { href: "#", label: "Services", icon: "settings_suggest" },
+  { href: "/dashboard/tenants", label: "Tenants", icon: "domain", superAdmin: true },
   { href: "#", label: "Settings", icon: "settings" },
 ] as const;
 
@@ -32,24 +33,31 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(auth.currentUser);
+  const { user, logout, role } = useAuth();
+
+  const roleLabel =
+    role === "super_admin"
+      ? "Super Admin"
+      : role === "business_owner"
+        ? "Business Owner"
+        : "User";
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const showLabels = isExpanded || isMobileOpen;
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
 
   useEffect(() => {
     onCloseMobile();
   }, [pathname, onCloseMobile]);
 
-  async function handleSignOut() {
-    await signOut(auth);
-    router.replace("/login");
-    router.refresh();
+  async function confirmSignOut() {
+    setIsSigningOut(true);
+    try {
+      await logout();
+    } finally {
+      setIsSigningOut(false);
+      setSignOutOpen(false);
+    }
   }
 
   function navItemClass(isActive: boolean) {
@@ -120,7 +128,9 @@ export function Sidebar({
             showLabels ? "px-3" : "items-center px-2"
           }`}
         >
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter(
+            (item) => !("superAdmin" in item && item.superAdmin) || role === "super_admin"
+          ).map((item) => {
             const isActive =
               item.href !== "#" &&
               (pathname === item.href ||
@@ -203,7 +213,7 @@ export function Sidebar({
         >
           <button
             type="button"
-            onClick={handleSignOut}
+            onClick={() => setSignOutOpen(true)}
             title="Sign out"
             className={
               showLabels
@@ -232,7 +242,7 @@ export function Sidebar({
             {showLabels && (
               <div className="min-w-0 flex-1">
                 <p className="truncate font-body text-[13px] font-semibold text-inverse-on-surface">
-                  Super Admin
+                  {roleLabel}
                 </p>
                 <p className="truncate font-body text-[11px] text-outline-variant">
                   {user?.email ?? ""}
@@ -242,6 +252,13 @@ export function Sidebar({
           </div>
         </div>
       </aside>
+
+      <SignOutConfirmModal
+        open={signOutOpen}
+        onCancel={() => setSignOutOpen(false)}
+        onConfirm={() => void confirmSignOut()}
+        isLoading={isSigningOut}
+      />
     </>
   );
 }

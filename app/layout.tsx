@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Bitter, Saira } from "next/font/google";
+import { Providers } from "@/components/providers";
 import "./globals.css";
 
 const saira = Saira({
@@ -42,7 +43,7 @@ export default function RootLayout({
         className="min-h-dvh flex flex-col bg-background text-on-background selection:bg-secondary-container selection:text-on-secondary-container"
         style={{ ["--font-finlandica" as string]: "'Finlandica', sans-serif" }}
       >
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
