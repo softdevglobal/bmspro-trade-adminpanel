@@ -9,13 +9,13 @@ import { useEffect, useState } from "react";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
   { href: "#", label: "Calendar", icon: "calendar_month" },
-  { href: "#", label: "Bookings", icon: "assignment" },
+  { href: "/dashboard/bookings", label: "Bookings", icon: "assignment" },
   { href: "#", label: "Messages", icon: "chat" },
   { href: "#", label: "Team", icon: "handshake" },
   { href: "#", label: "Availability", icon: "schedule" },
   { href: "#", label: "Customers", icon: "group" },
   { href: "#", label: "Services", icon: "settings_suggest" },
-  { href: "#", label: "Settings", icon: "settings" },
+  { href: "/dashboard/settings", label: "Settings", icon: "settings" },
 ] as const;
 
 type SidebarProps = {
