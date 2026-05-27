@@ -22,6 +22,10 @@ type StaffPayload = {
   availability: string[];
 };
 
+type TimestampLike = {
+  toDate: () => Date;
+};
+
 async function requireBusinessUser(request: Request): Promise<
   | { ok: true; uid: string; email: string | undefined; businessId: string }
   | { ok: false; status: number; error: string }
@@ -50,6 +54,30 @@ async function requireBusinessUser(request: Request): Promise<
 
 function sanitizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function sanitizeStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function timestampMillis(value: unknown) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof (value as TimestampLike).toDate === "function"
+  ) {
+    return (value as TimestampLike).toDate().getTime();
+  }
+
+  return 0;
+}
+
+function timestampIso(value: unknown) {
+  const millis = timestampMillis(value);
+  return millis > 0 ? new Date(millis).toISOString() : null;
 }
 
 function parseStaffPayload(raw: unknown):
@@ -161,4 +189,50 @@ export async function POST(request: Request) {
     { ok: true, staffId: staffRef.id },
     { status: 201 }
   );
+}
+
+export async function GET(request: Request) {
+  const auth = await requireBusinessUser(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status }
+    );
+  }
+
+  const snapshot = await adminDb
+    .collection("users")
+    .where("businessId", "==", auth.businessId)
+    .get();
+
+  const staff = snapshot.docs
+    .map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        fullName: sanitizeString(data.fullName) || "Unnamed Staff",
+        email: sanitizeString(data.email),
+        phone: sanitizeString(data.phone) || null,
+        role: sanitizeString(data.role),
+        skills: sanitizeStringArray(data.skills),
+        availability: sanitizeStringArray(data.availability),
+        status: sanitizeString(data.status) || "active",
+        createdAt: timestampIso(data.createdAt),
+        createdAtMillis: timestampMillis(data.createdAt),
+      };
+    })
+    .filter((member) => member.role === "staff")
+    .sort((a, b) => b.createdAtMillis - a.createdAtMillis)
+    .map((member) => ({
+      id: member.id,
+      fullName: member.fullName,
+      email: member.email,
+      phone: member.phone,
+      skills: member.skills,
+      availability: member.availability,
+      status: member.status,
+      createdAt: member.createdAt,
+    }));
+
+  return NextResponse.json({ ok: true, staff });
 }

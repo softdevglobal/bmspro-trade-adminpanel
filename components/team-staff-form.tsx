@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const STEPS = ["Details", "Skills", "Availability"] as const;
 
@@ -23,6 +23,17 @@ type StaffFormState = {
   availability: string[];
 };
 
+type StaffMember = {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  skills: string[];
+  availability: string[];
+  status: string;
+  createdAt: string | null;
+};
+
 const EMPTY_FORM: StaffFormState = {
   fullName: "",
   phone: "",
@@ -38,6 +49,9 @@ export function TeamStaffForm() {
   const [error, setError] = useState<string | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [isLoadingStaff, setIsLoadingStaff] = useState(false);
+  const [staffListError, setStaffListError] = useState<string | null>(null);
 
   const canSubmit = useMemo(
     () =>
@@ -84,6 +98,49 @@ export function TeamStaffForm() {
     setIsSaving(false);
   }
 
+  const loadStaffMembers = useCallback(async () => {
+    if (!user) return;
+
+    setIsLoadingStaff(true);
+    setStaffListError(null);
+
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/team/staff", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        staff?: StaffMember[];
+        error?: string;
+      };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Could not load staff members.");
+      }
+
+      setStaffMembers(data.staff ?? []);
+    } catch (loadError) {
+      setStaffListError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Could not load staff members.",
+      );
+    } finally {
+      setIsLoadingStaff(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadStaffMembers();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadStaffMembers]);
+
   async function saveStaff() {
     if (!user) {
       setError("Please sign in again before saving staff.");
@@ -123,6 +180,7 @@ export function TeamStaffForm() {
         throw new Error(data.error || "Could not save this staff member.");
       }
 
+      await loadStaffMembers();
       setSuccessName(form.fullName.trim());
     } catch (saveError) {
       setError(
@@ -274,6 +332,13 @@ export function TeamStaffForm() {
         </aside>
       </div>
 
+      <StaffMembersList
+        members={staffMembers}
+        isLoading={isLoadingStaff}
+        error={staffListError}
+        onRefresh={() => void loadStaffMembers()}
+      />
+
       {successName && (
         <SuccessModal
           name={successName}
@@ -406,6 +471,218 @@ function AvailabilityRow({
       <span className="relative h-6 w-11 rounded-full bg-outline-variant transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:border after:border-outline-variant after:bg-white after:transition-all peer-checked:bg-primary peer-checked:after:translate-x-full" />
     </label>
   );
+}
+
+function StaffMembersList({
+  members,
+  isLoading,
+  error,
+  onRefresh,
+}: {
+  members: StaffMember[];
+  isLoading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="mt-gutter rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding shadow-sm">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
+              Staff Members
+            </h3>
+            <span className="rounded-full bg-primary/10 px-3 py-1 font-body text-[12px] font-bold text-primary">
+              {members.length}
+            </span>
+          </div>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            People already saved in the users table as staff.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={isLoading}
+          className="flex w-fit items-center gap-2 rounded-lg border border-outline-variant bg-surface-container px-4 py-2 font-body text-label-bold text-label-bold text-on-surface transition-colors hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span
+            className={`material-symbols-outlined text-[18px] ${
+              isLoading ? "animate-spin" : ""
+            }`}
+          >
+            refresh
+          </span>
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-error-container bg-error-container/40 px-4 py-3 font-body text-body-md text-on-error-container">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low">
+          <div className="flex items-center gap-3 font-body text-body-md text-on-surface-variant">
+            <span className="material-symbols-outlined animate-spin text-primary">
+              progress_activity
+            </span>
+            Loading staff members...
+          </div>
+        </div>
+      ) : members.length === 0 ? (
+        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low p-6 text-center">
+          <span className="material-symbols-outlined mb-3 text-[40px] text-outline">
+            groups
+          </span>
+          <h4 className="font-body text-body-lg font-bold text-on-surface">
+            No staff members yet
+          </h4>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            Staff you save from the form above will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          {members.map((member) => (
+            <StaffMemberCard key={member.id} member={member} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function StaffMemberCard({ member }: { member: StaffMember }) {
+  return (
+    <article className="rounded-xl border border-outline-variant bg-surface p-5 transition-all hover:border-primary/40 hover:shadow-md">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-fixed-dim font-body text-[15px] font-bold text-on-primary-fixed">
+            {initialsFor(member.fullName)}
+          </div>
+          <div className="min-w-0">
+            <h4 className="truncate font-body text-body-lg font-bold text-on-surface">
+              {member.fullName}
+            </h4>
+            <p className="truncate font-body text-[13px] text-on-surface-variant">
+              {member.email || "No email"}
+            </p>
+          </div>
+        </div>
+        <StatusBadge status={member.status} />
+      </div>
+
+      <div className="space-y-4">
+        <StaffMetaRow
+          icon="call"
+          label="Phone"
+          value={member.phone || "Not provided"}
+        />
+        <StaffMetaRow
+          icon="event_available"
+          label="Availability"
+          value={
+            member.availability.length > 0
+              ? member.availability.join(", ")
+              : "None selected"
+          }
+        />
+        <StaffMetaRow
+          icon="calendar_today"
+          label="Added"
+          value={formatDate(member.createdAt)}
+        />
+      </div>
+
+      <div className="mt-5 border-t border-outline-variant/50 pt-4">
+        <p className="mb-2 font-body text-[12px] font-bold uppercase text-on-surface-variant">
+          Skills
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {member.skills.length > 0 ? (
+            member.skills.map((skill) => (
+              <span
+                key={skill}
+                className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 font-body text-[12px] font-bold text-primary"
+              >
+                {skill}
+              </span>
+            ))
+          ) : (
+            <span className="font-body text-[13px] italic text-outline">
+              No skills added
+            </span>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function StaffMetaRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="material-symbols-outlined mt-0.5 text-[18px] text-outline">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="font-body text-[11px] font-bold uppercase text-on-surface-variant">
+          {label}
+        </p>
+        <p className="break-words font-body text-[14px] text-on-surface">
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase();
+  const className =
+    normalized === "invited"
+      ? "bg-primary-fixed text-on-primary-fixed"
+      : normalized === "inactive"
+        ? "bg-error-container text-on-error-container"
+        : "bg-secondary-container/40 text-on-secondary-container";
+
+  return (
+    <span
+      className={`shrink-0 rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase ${className}`}
+    >
+      {status || "active"}
+    </span>
+  );
+}
+
+function initialsFor(name: string) {
+  const initials = name
+    .split(" ")
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("");
+
+  return initials.toUpperCase() || "ST";
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "Not available";
+
+  return new Intl.DateTimeFormat("en-AU", {
+    dateStyle: "medium",
+  }).format(new Date(value));
 }
 
 function StaffPreview({ form }: { form: StaffFormState }) {
