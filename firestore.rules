@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn()
+        && (
+          request.auth.token.superAdmin == true
+          || request.auth.token.role == 'super_admin'
+        );
+    }
+
+    // Login gate: each user may read only their own super_admins document.
+    // Writes are server-only (Admin SDK / seed script).
+    match /super_admins/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create, update, delete: if false;
+    }
+
+    // Super admins can access all other collections in the admin portal.
+    match /{document=**} {
+      allow read, write: if isSuperAdmin();
+    }
+  }
+}
