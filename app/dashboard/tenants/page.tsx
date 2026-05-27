@@ -10,7 +10,7 @@ export default function TenantsPage() {
   return (
     <DashboardShell
       title="Tenants"
-      subtitle="Businesses onboarded onto BMS Pro Trade. Review pending sign-ups or onboard a new business directly."
+      subtitle="Businesses onboarded onto BMS Pro Trade. View active and suspended tenants or onboard a new business directly."
     >
       <TenantsTable />
     </DashboardShell>

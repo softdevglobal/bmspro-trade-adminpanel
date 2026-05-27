@@ -33,11 +33,13 @@ const STATUS_LABEL: Record<TenantDetail["status"], string> = {
   suspended: "Suspended",
 };
 
+type TenantFilter = "all" | "active" | "suspended";
+
 export function TenantsTable() {
   const [tenants, setTenants] = useState<TenantDetail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | TenantDetail["status"]>("all");
+  const [filter, setFilter] = useState<TenantFilter>("all");
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<TenantDetail | null>(
     null
@@ -84,10 +86,11 @@ export function TenantsTable() {
 
   const counts = {
     all: tenants.length,
-    pending_review: tenants.filter((t) => t.status === "pending_review").length,
     active: tenants.filter((t) => t.status === "active").length,
     suspended: tenants.filter((t) => t.status === "suspended").length,
   };
+
+  const showEmptyOnboardCta = filter === "all" || filter === "active";
 
   return (
     <div className="flex flex-col gap-4">
@@ -98,12 +101,6 @@ export function TenantsTable() {
             count={counts.all}
             active={filter === "all"}
             onClick={() => setFilter("all")}
-          />
-          <FilterChip
-            label="Pending"
-            count={counts.pending_review}
-            active={filter === "pending_review"}
-            onClick={() => setFilter("pending_review")}
           />
           <FilterChip
             label="Active"
@@ -180,18 +177,24 @@ export function TenantsTable() {
                 <tr>
                   <td colSpan={7} className="px-5 py-10 text-center">
                     <p className="font-body text-body-md text-on-surface-variant">
-                      No tenants{filter !== "all" ? ` with status “${STATUS_LABEL[filter]}”` : ""} yet.
+                      No tenants
+                      {filter !== "all"
+                        ? ` with status “${filter === "active" ? "Active" : "Suspended"}”`
+                        : ""}{" "}
+                      yet.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setOnboardOpen(true)}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">
-                        add
-                      </span>
-                      Onboard new business
-                    </button>
+                    {showEmptyOnboardCta && (
+                      <button
+                        type="button"
+                        onClick={() => setOnboardOpen(true)}
+                        className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          add
+                        </span>
+                        Onboard new business
+                      </button>
+                    )}
                   </td>
                 </tr>
               ) : (
