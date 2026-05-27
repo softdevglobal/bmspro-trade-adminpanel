@@ -53,6 +53,16 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /service_templates/{templateId} {
+      allow read: if isSuperAdmin() || (isBusinessOwner() && resource.data.isActive == true);
+      allow create, update, delete: if false;
+    }
+
+    match /services/{serviceId} {
+      allow read: if isSuperAdmin() || ownsBusiness(resource.data.businessId);
+      allow create, update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();
