@@ -193,6 +193,7 @@ function businessDocument(
     businessPhone: value.businessPhone,
     businessEmail: value.accountEmail,
     mainSuburb: `${value.state}, ${value.postcode}`,
+    serviceAreas: value.serviceAreas,
     ownerUid: options.ownerUid ?? null,
     owner: {
       fullName: value.ownerFullName || null,

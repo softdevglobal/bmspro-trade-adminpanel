@@ -102,7 +102,41 @@ export type OnboardingPayload = {
   password?: string;
   confirmPassword?: string;
   selectedPlanId: PlanId;
+  serviceAreas: string[];
 };
+
+export const MAX_SERVICE_AREAS = 20;
+export const MIN_SERVICE_AREAS = 1;
+
+/**
+ * Title-case a service area string while preserving digits (postcodes).
+ * "south melbourne 3205" -> "South Melbourne 3205".
+ * Each word's first letter is capitalised; numbers and existing capitals
+ * inside the same token are left alone.
+ */
+export function titleCaseServiceArea(value: string): string {
+  if (!value) return value;
+  return value.replace(/(^|[\s\-/])([a-z])/g, (_, sep, ch: string) =>
+    sep + ch.toUpperCase()
+  );
+}
+
+/** Strip blanks, trim, and title-case each entry. */
+export function normaliseServiceAreas(values: string[] | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const trimmed = (raw ?? "").trim().replace(/\s+/g, " ");
+    if (!trimmed) continue;
+    const cased = titleCaseServiceArea(trimmed);
+    const key = cased.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cased);
+  }
+  return out.slice(0, MAX_SERVICE_AREAS);
+}
 
 export type TenantStatus = "pending_review" | "active" | "suspended";
 
@@ -158,6 +192,20 @@ export function validateBusinessStep(
   }
   if (!isValidPhone(businessPhone)) {
     return { ok: false, error: "Please enter a valid business phone number." };
+  }
+
+  const serviceAreas = normaliseServiceAreas(payload.serviceAreas);
+  if (serviceAreas.length < MIN_SERVICE_AREAS) {
+    return {
+      ok: false,
+      error: "Add at least one service area you cover.",
+    };
+  }
+  if (serviceAreas.some((a) => a.length < 2)) {
+    return {
+      ok: false,
+      error: "Each service area must be at least 2 characters.",
+    };
   }
 
   return { ok: true };
@@ -233,6 +281,7 @@ export function validateOnboardingPayload(
     ownerFullName: (payload.ownerFullName ?? "").trim(),
     accountEmail: (payload.accountEmail ?? "").trim().toLowerCase(),
     selectedPlanId: payload.selectedPlanId as PlanId,
+    serviceAreas: normaliseServiceAreas(payload.serviceAreas),
   };
 
   if (options.requirePassword) {
