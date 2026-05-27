@@ -14,7 +14,7 @@ const NAV_ITEMS = [
   { href: "#", label: "Team", icon: "handshake" },
   { href: "#", label: "Availability", icon: "schedule" },
   { href: "#", label: "Customers", icon: "group" },
-  { href: "#", label: "Services", icon: "settings_suggest" },
+  { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
   { href: "/dashboard/tenants", label: "Tenants", icon: "domain", superAdmin: true },
   { href: "/dashboard/settings", label: "Settings", icon: "settings" },
 ] as const;
