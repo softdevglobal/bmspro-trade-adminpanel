@@ -1,6 +1,10 @@
 import "server-only";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
+  isReservedSlug,
+  slugifyBusinessName,
+} from "@/lib/onboarding/booking-slug";
+import {
   validateOnboardingPayload,
   SUBSCRIPTION_PLANS,
   ADMIN_CREATED_DEFAULT_PASSWORD,
@@ -9,6 +13,31 @@ import {
   type TenantStatus,
 } from "@/lib/onboarding/types";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
+
+/**
+ * Find an unused booking slug for a new business. Falls back to appending a
+ * short random suffix if the preferred slug is taken or reserved.
+ */
+async function reserveBookingSlug(name: string): Promise<string> {
+  const base = slugifyBusinessName(name) || "business";
+  const candidates = [base];
+  if (isReservedSlug(base)) candidates.length = 0;
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const candidate =
+      candidates.shift() ??
+      `${base}-${Math.random().toString(36).slice(2, 6)}`;
+    if (isReservedSlug(candidate)) continue;
+    const existing = await adminDb
+      .collection("businesses")
+      .where("bookingSlug", "==", candidate)
+      .limit(1)
+      .get();
+    if (existing.empty) return candidate;
+  }
+  // Last resort — should never get here.
+  return `${base}-${Date.now().toString(36)}`;
+}
 
 type CreateTenantOptions = {
   source: TenantSource;
@@ -111,6 +140,7 @@ async function createTenantWithOwnerAccount(
     const businessRef = adminDb.collection("businesses").doc();
     const tenantId = businessRef.id;
     const now = FieldValue.serverTimestamp();
+    const bookingSlug = await reserveBookingSlug(value.businessName);
 
     await adminAuth.setCustomUserClaims(uid, {
       role: "owner",
@@ -124,6 +154,7 @@ async function createTenantWithOwnerAccount(
         status: options.status,
         source: options.source,
         ownerUid: uid,
+        bookingSlug,
         createdByUid: options.createdByUid ?? null,
         createdByEmail: options.createdByEmail ?? null,
       })
@@ -172,6 +203,7 @@ function businessDocument(
     status: TenantStatus;
     source: TenantSource;
     ownerUid?: string | null;
+    bookingSlug: string;
     createdByUid?: string | null;
     createdByEmail?: string | null;
   }
@@ -194,6 +226,8 @@ function businessDocument(
     businessEmail: value.accountEmail,
     mainSuburb: `${value.state}, ${value.postcode}`,
     serviceAreas: value.serviceAreas,
+    bookingSlug: options.bookingSlug,
+    bookingPath: `/booknow/${options.bookingSlug}`,
     ownerUid: options.ownerUid ?? null,
     owner: {
       fullName: value.ownerFullName || null,

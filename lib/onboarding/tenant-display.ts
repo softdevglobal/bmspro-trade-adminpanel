@@ -28,6 +28,8 @@ export type TenantDetail = {
   timezone: string | null;
   mainSuburb: string;
   serviceAreas: string[];
+  bookingSlug: string | null;
+  bookingPath: string | null;
   plan: TenantPlan | null;
   status: "pending_review" | "active" | "suspended";
   source: "self_signup" | "super_admin_create";

@@ -1,3 +1,4 @@
+import { BookingLinkCard } from "@/components/booking-link-card";
 import { DashboardShell } from "@/components/dashboard-shell";
 import Link from "next/link";
 
@@ -14,6 +15,8 @@ export default function DashboardPage() {
       title="Dashboard"
       subtitle="Overview of bookings, assignments and messages that need attention."
     >
+      <BookingLinkCard variant="ephemeral" />
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {KPI_CARDS.map((card) => (
           <div

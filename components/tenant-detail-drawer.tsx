@@ -7,7 +7,7 @@ import {
 } from "@/lib/onboarding/tenant-display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 type Props = {
   tenant: TenantDetail | null;
@@ -206,6 +206,10 @@ function DrawerPanel({
             )}
           </DetailSection>
 
+          <DetailSection title="Booking engine">
+            <BookingLinkRow tenant={tenant} />
+          </DetailSection>
+
           <DetailSection title="Plan">
             {tenant.plan ? (
               <>
@@ -278,6 +282,69 @@ function DetailSection({
         {children}
       </dl>
     </section>
+  );
+}
+
+function BookingLinkRow({ tenant }: { tenant: TenantDetail }) {
+  const [copied, setCopied] = useState(false);
+
+  const slug = tenant.bookingSlug;
+  const path = tenant.bookingPath ?? (slug ? `/booknow/${slug}` : null);
+
+  if (!slug || !path) {
+    return (
+      <DetailRow
+        label="Booking link"
+        value="Not generated"
+      />
+    );
+  }
+
+  const fullUrl =
+    typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
+  const displayUrl = fullUrl.replace(/^https?:\/\//, "");
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard not available — silently ignore */
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <dt className="font-body text-[12px] font-semibold text-on-surface-variant">
+          Public URL
+        </dt>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1 rounded-md bg-primary-fixed px-2 py-1 font-body text-[11px] font-semibold text-primary transition-colors hover:bg-primary-fixed-dim"
+        >
+          <span className="material-symbols-outlined text-[14px]">
+            {copied ? "check" : "content_copy"}
+          </span>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <a
+        href={path}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block break-all rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 font-mono text-[12px] text-primary hover:bg-surface-container"
+      >
+        {displayUrl}
+      </a>
+      <p className="font-body text-[11px] text-on-surface-variant">
+        Slug{" "}
+        <span className="font-mono font-semibold text-on-surface">{slug}</span>{" "}
+        — auto-generated from the business name on onboarding.
+      </p>
+    </div>
   );
 }
 

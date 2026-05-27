@@ -55,6 +55,16 @@ function mapTenantDoc(doc: QueryDocumentSnapshot): TenantDetail {
           .map((v) => (typeof v === "string" ? v.trim() : ""))
           .filter((v): v is string => v.length > 0)
       : [],
+    bookingSlug:
+      typeof data.bookingSlug === "string" && data.bookingSlug.length > 0
+        ? data.bookingSlug
+        : null,
+    bookingPath:
+      typeof data.bookingPath === "string" && data.bookingPath.length > 0
+        ? data.bookingPath
+        : typeof data.bookingSlug === "string" && data.bookingSlug.length > 0
+          ? `/booknow/${data.bookingSlug}`
+          : null,
     plan: plan?.name
       ? {
           name: plan.name,
