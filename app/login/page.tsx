@@ -1,5 +1,6 @@
 import { LoginForm } from "@/components/login-form";
 import { LoginRedirect } from "@/components/login-redirect";
+import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -109,9 +110,34 @@ export default function LoginPage() {
 
             <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-5 shadow-[0_4px_20px_rgba(15,23,42,0.04)] sm:p-6">
               <LoginForm />
+
+              <div className="mt-4 border-t border-outline-variant pt-4">
+                <Link
+                  href="/onboard"
+                  className="group flex items-center gap-2.5 rounded-lg border border-primary/30 bg-primary-fixed/50 px-3 py-2.5 transition-all hover:border-primary/50 hover:bg-primary-fixed/70 hover:shadow-sm"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-on-primary">
+                    <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                      rocket_launch
+                    </span>
+                  </div>
+                  <p className="min-w-0 flex-1 font-body text-[13px] leading-tight text-on-surface">
+                    <span className="font-semibold">New here?</span>{" "}
+                    <span className="text-on-surface-variant">
+                      Set up your business
+                    </span>
+                  </p>
+                  <span className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md bg-primary px-3 font-body text-[12px] font-semibold text-on-primary transition-all group-hover:bg-primary/90">
+                    Onboard
+                    <span className="material-symbols-outlined text-[16px]">
+                      arrow_forward
+                    </span>
+                  </span>
+                </Link>
+              </div>
             </div>
 
-            <p className="mt-5 flex items-center justify-center gap-1.5 font-body text-[13px] text-on-surface-variant">
+            <p className="mt-4 flex items-center justify-center gap-1.5 font-body text-[13px] text-on-surface-variant">
               <span className="material-symbols-outlined text-[16px] text-outline">
                 shield_lock
               </span>
