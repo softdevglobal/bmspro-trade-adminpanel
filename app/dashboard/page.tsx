@@ -1,4 +1,5 @@
 import { DashboardShell } from "@/components/dashboard-shell";
+import Link from "next/link";
 
 const KPI_CARDS = [
   { label: "Today's bookings", value: "12", icon: "assignment", trend: "+3" },
@@ -67,22 +68,35 @@ export default function DashboardPage() {
           </h3>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {[
-              { label: "Add booking", icon: "add" },
-              { label: "Open calendar", icon: "calendar_month" },
-              { label: "View queue", icon: "list_alt" },
-              { label: "Team partners", icon: "handshake" },
-            ].map((action) => (
-              <button
-                key={action.label}
-                type="button"
-                className="flex items-center gap-3 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 font-body text-label-bold text-label-bold text-on-surface transition-colors hover:bg-surface-container"
-              >
-                <span className="material-symbols-outlined text-[20px] text-primary">
-                  {action.icon}
-                </span>
-                {action.label}
-              </button>
-            ))}
+              { label: "Add booking", icon: "add", href: "#" },
+              { label: "Open calendar", icon: "calendar_month", href: "#" },
+              { label: "View queue", icon: "list_alt", href: "#" },
+              { label: "Team partners", icon: "handshake", href: "#" },
+              { label: "Settings", icon: "settings", href: "/dashboard/settings" },
+            ].map((action) => {
+              const className =
+                "flex items-center gap-3 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-3 font-body text-label-bold text-label-bold text-on-surface transition-colors hover:bg-surface-container";
+
+              if (action.href !== "#") {
+                return (
+                  <Link key={action.label} href={action.href} className={className}>
+                    <span className="material-symbols-outlined text-[20px] text-primary">
+                      {action.icon}
+                    </span>
+                    {action.label}
+                  </Link>
+                );
+              }
+
+              return (
+                <button key={action.label} type="button" className={className}>
+                  <span className="material-symbols-outlined text-[20px] text-primary">
+                    {action.icon}
+                  </span>
+                  {action.label}
+                </button>
+              );
+            })}
           </div>
         </section>
       </div>
