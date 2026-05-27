@@ -56,7 +56,9 @@ export function TeamStaffForm() {
   const canSubmit = useMemo(
     () =>
       form.fullName.trim().length > 0 &&
+      form.phone.trim().length > 0 &&
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
+      form.skills.length > 0 &&
       form.availability.length > 0,
     [form],
   );
@@ -76,6 +78,7 @@ export function TeamStaffForm() {
           : [...current.skills, skill],
       };
     });
+    setError(null);
   }
 
   function toggleAvailability(day: string) {
@@ -88,6 +91,7 @@ export function TeamStaffForm() {
           : [...current.availability, day],
       };
     });
+    setError(null);
   }
 
   function resetForm() {
@@ -141,6 +145,29 @@ export function TeamStaffForm() {
     return () => window.clearTimeout(timeoutId);
   }, [loadStaffMembers]);
 
+  function detailsAreValid() {
+    return (
+      form.fullName.trim().length > 0 &&
+      form.phone.trim().length > 0 &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+    );
+  }
+
+  function goToNextStep() {
+    if (currentStep === 1 && !detailsAreValid()) {
+      setError("Enter a name, mobile number and valid email address.");
+      return;
+    }
+
+    if (currentStep === 2 && form.skills.length === 0) {
+      setError("Select at least one working skill.");
+      return;
+    }
+
+    setError(null);
+    setCurrentStep((step) => Math.min(STEPS.length, step + 1));
+  }
+
   async function saveStaff() {
     if (!user) {
       setError("Please sign in again before saving staff.");
@@ -148,7 +175,9 @@ export function TeamStaffForm() {
     }
 
     if (!canSubmit) {
-      setError("Enter a name, valid email and at least one availability option.");
+      setError(
+        "Enter a name, mobile number, valid email, working skill and availability.",
+      );
       return;
     }
 
@@ -202,13 +231,18 @@ export function TeamStaffForm() {
           <div className="min-h-[420px] rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding shadow-sm">
             {currentStep === 1 && (
               <section>
-                <SectionHeading icon="person" title="Personal Information" />
+                <SectionHeading
+                  icon="person"
+                  title="Personal Information"
+                  required
+                />
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                   <TextField
                     label="Full Name"
                     placeholder="e.g. Jordan Smith"
                     value={form.fullName}
                     onChange={(value) => updateField("fullName", value)}
+                    required
                   />
                   <TextField
                     label="Mobile Number"
@@ -216,6 +250,7 @@ export function TeamStaffForm() {
                     type="tel"
                     value={form.phone}
                     onChange={(value) => updateField("phone", value)}
+                    required
                   />
                   <div className="md:col-span-2">
                     <TextField
@@ -224,6 +259,7 @@ export function TeamStaffForm() {
                       type="email"
                       value={form.email}
                       onChange={(value) => updateField("email", value)}
+                      required
                     />
                   </div>
                 </div>
@@ -236,8 +272,9 @@ export function TeamStaffForm() {
                   icon="construction"
                   title="Work Skills"
                   description="Select the areas this staff member is qualified for."
+                  required
                 />
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-3" aria-required="true">
                   {SKILLS.map((skill) => {
                     const selected = form.skills.includes(skill.label);
                     return (
@@ -268,8 +305,9 @@ export function TeamStaffForm() {
                   icon="calendar_month"
                   title="Typical Availability"
                   description="Which days can they take on jobs?"
+                  required
                 />
-                <div className="space-y-3">
+                <div className="space-y-3" aria-required="true">
                   {AVAILABILITY.map((day) => (
                     <AvailabilityRow
                       key={day}
@@ -302,9 +340,7 @@ export function TeamStaffForm() {
             {currentStep < STEPS.length ? (
               <button
                 type="button"
-                onClick={() =>
-                  setCurrentStep((step) => Math.min(STEPS.length, step + 1))
-                }
+                onClick={goToNextStep}
                 className="rounded-lg bg-primary px-8 py-3 font-body text-label-bold text-label-bold text-on-primary transition-all hover:bg-primary/90 active:scale-95"
               >
                 {currentStep === 1 ? "Next: Skills" : "Next: Availability"}
@@ -399,16 +435,19 @@ function SectionHeading({
   icon,
   title,
   description,
+  required = false,
 }: {
   icon: string;
   title: string;
   description?: string;
+  required?: boolean;
 }) {
   return (
     <div className="mb-6">
       <h3 className="flex items-center gap-2 font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
         <span className="material-symbols-outlined text-primary">{icon}</span>
         {title}
+        {required && <RequiredMark />}
       </h3>
       {description && (
         <p className="mt-2 font-body text-body-md text-on-surface-variant">
@@ -425,26 +464,38 @@ function TextField({
   onChange,
   placeholder,
   type = "text",
+  required = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   type?: "text" | "email" | "tel";
+  required?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-2">
       <span className="font-body text-label-bold text-label-bold text-on-surface-variant">
         {label}
+        {required && <RequiredMark />}
       </span>
       <input
         type={type}
+        required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         className="min-h-12 rounded-lg border border-outline-variant bg-surface px-4 font-body text-body-md text-on-surface transition-all placeholder:text-outline focus:border-primary focus:outline-none focus:ring-0"
       />
     </label>
+  );
+}
+
+function RequiredMark() {
+  return (
+    <span className="ml-1 text-error" aria-label="required">
+      *
+    </span>
   );
 }
 

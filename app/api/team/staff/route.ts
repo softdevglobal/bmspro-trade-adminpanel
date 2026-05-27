@@ -17,7 +17,7 @@ const STAFF_AVAILABILITY = new Set(["Weekdays", "Saturdays", "Sundays"]);
 type StaffPayload = {
   fullName: string;
   email: string;
-  phone: string | null;
+  phone: string;
   skills: string[];
   availability: string[];
 };
@@ -108,8 +108,16 @@ function parseStaffPayload(raw: unknown):
     return { ok: false, error: "Full name is required." };
   }
 
+  if (!phone) {
+    return { ok: false, error: "Mobile number is required." };
+  }
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { ok: false, error: "A valid email address is required." };
+  }
+
+  if (skills.length === 0) {
+    return { ok: false, error: "Select at least one working skill." };
   }
 
   if (availability.length === 0) {
@@ -121,7 +129,7 @@ function parseStaffPayload(raw: unknown):
     value: {
       fullName,
       email,
-      phone: phone || null,
+      phone,
       skills,
       availability,
     },
