@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { href: "#", label: "Calendar", icon: "calendar_month" },
   { href: "/dashboard/bookings", label: "Bookings", icon: "assignment" },
   { href: "#", label: "Messages", icon: "chat" },
-  { href: "#", label: "Team", icon: "handshake" },
+  { href: "/dashboard/team", label: "Team", icon: "groups" },
   { href: "#", label: "Availability", icon: "schedule" },
   { href: "#", label: "Customers", icon: "group" },
   { href: "#", label: "Services", icon: "settings_suggest" },
