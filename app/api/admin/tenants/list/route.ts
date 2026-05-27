@@ -50,6 +50,11 @@ function mapTenantDoc(doc: QueryDocumentSnapshot): TenantDetail {
     postcode: data.postcode ?? "",
     timezone: data.timezone ?? null,
     mainSuburb: data.mainSuburb ?? "",
+    serviceAreas: Array.isArray(data.serviceAreas)
+      ? (data.serviceAreas as unknown[])
+          .map((v) => (typeof v === "string" ? v.trim() : ""))
+          .filter((v): v is string => v.length > 0)
+      : [],
     plan: plan?.name
       ? {
           name: plan.name,

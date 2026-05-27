@@ -5,11 +5,14 @@ import {
   AU_TIMEZONES,
   BUSINESS_STRUCTURES,
   BUSINESS_TYPES,
+  MAX_SERVICE_AREAS,
   SUBSCRIPTION_PLANS,
   ADMIN_CREATED_DEFAULT_PASSWORD,
   iconForBusinessType,
   formatAbn,
+  normaliseServiceAreas,
   passwordStrength,
+  titleCaseServiceArea,
   validateAccountStep,
   validateBusinessStep,
   validatePlanStep,
@@ -53,6 +56,7 @@ type FormState = {
   password: string;
   confirmPassword: string;
   selectedPlanId: PlanId | undefined;
+  serviceAreas: string[];
 };
 
 const INITIAL_STATE: FormState = {
@@ -71,6 +75,7 @@ const INITIAL_STATE: FormState = {
   password: "",
   confirmPassword: "",
   selectedPlanId: undefined,
+  serviceAreas: [""],
 };
 
 const STEPS = [
@@ -148,6 +153,31 @@ export function BusinessOnboardingForm({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function updateServiceArea(index: number, value: string) {
+    setForm((current) => {
+      const next = [...current.serviceAreas];
+      next[index] = titleCaseServiceArea(value);
+      return { ...current, serviceAreas: next };
+    });
+  }
+
+  function addServiceArea() {
+    setForm((current) => {
+      if (current.serviceAreas.length >= MAX_SERVICE_AREAS) return current;
+      return { ...current, serviceAreas: [...current.serviceAreas, ""] };
+    });
+  }
+
+  function removeServiceArea(index: number) {
+    setForm((current) => {
+      if (current.serviceAreas.length <= 1) {
+        return { ...current, serviceAreas: [""] };
+      }
+      const next = current.serviceAreas.filter((_, i) => i !== index);
+      return { ...current, serviceAreas: next };
+    });
+  }
+
   function validateCurrentStep(): string | null {
     if (step === 1) {
       const result = validateBusinessStep(form);
@@ -204,9 +234,13 @@ export function BusinessOnboardingForm({
       }
 
       const { password, confirmPassword, ...rest } = form;
+      const cleanedRest = {
+        ...rest,
+        serviceAreas: normaliseServiceAreas(rest.serviceAreas),
+      };
       const body = requirePassword
-        ? { ...rest, password, confirmPassword }
-        : rest;
+        ? { ...cleanedRest, password, confirmPassword }
+        : cleanedRest;
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -540,6 +574,15 @@ export function BusinessOnboardingForm({
                 />
               </div>
             </Field>
+
+            <SectionDivider label="Service areas" />
+
+            <ServiceAreasField
+              values={form.serviceAreas}
+              onUpdate={updateServiceArea}
+              onAdd={addServiceArea}
+              onRemove={removeServiceArea}
+            />
           </div>
         )}
 
@@ -883,6 +926,38 @@ function PreviewPanel({
           )}
         </div>
 
+        {(() => {
+          const areas = form.serviceAreas
+            .map((a) => a.trim())
+            .filter(Boolean);
+          if (areas.length === 0) return null;
+          return (
+            <div className="mt-5 border-t border-outline-variant pt-4">
+              <p className="mb-2 flex items-center gap-1.5 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                <span className="material-symbols-outlined text-[14px] text-primary">
+                  radar
+                </span>
+                Service areas
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {areas.slice(0, 8).map((area) => (
+                  <span
+                    key={area}
+                    className="inline-flex items-center rounded-full bg-primary-fixed px-2.5 py-0.5 font-body text-[11px] font-semibold text-primary"
+                  >
+                    {area}
+                  </span>
+                ))}
+                {areas.length > 8 && (
+                  <span className="inline-flex items-center rounded-full bg-surface-container px-2.5 py-0.5 font-body text-[11px] font-semibold text-on-surface-variant">
+                    +{areas.length - 8}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="mt-6">
           <div className="mb-2 flex items-center justify-between font-body text-[12px] font-semibold text-on-surface-variant">
             <span>Step {step} of 3</span>
@@ -897,17 +972,145 @@ function PreviewPanel({
         </div>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl bg-primary p-5 text-on-primary">
-        <p className="font-body text-[12px] font-semibold uppercase tracking-wider opacity-90">
-          Pro tip
-        </p>
-        <p className="mt-1 font-body text-body-md leading-relaxed opacity-95">
-          {mode === "self_signup"
-            ? "You're almost done — finish onboarding to access your dashboard."
-            : "The tenant is created immediately and activated for use."}
+      <ContextualProTip form={form} step={step} mode={mode} />
+    </>
+  );
+}
+
+function ContextualProTip({
+  form,
+  step,
+  mode,
+}: {
+  form: FormState;
+  step: Step;
+  mode: Mode;
+}) {
+  const tip = useMemo(() => {
+    if (step === 1) {
+      if (form.businessName.trim().length < 2) {
+        return {
+          icon: "storefront",
+          label: "Step 1 · Business",
+          title: "Start with your business name",
+          message:
+            "Pick the trade you specialise in and add your registered business name first.",
+        };
+      }
+      if (form.postcode.length !== 4 || !form.businessAddress.trim()) {
+        return {
+          icon: "location_on",
+          label: "Step 1 · Location",
+          title: "Add your base location",
+          message:
+            "We use your address and postcode to set the centre of your service area.",
+        };
+      }
+      const filledAreas = form.serviceAreas.filter(
+        (a) => a.trim().length >= 2
+      ).length;
+      if (filledAreas === 0) {
+        return {
+          icon: "radar",
+          label: "Step 1 · Service areas",
+          title: "List the suburbs you cover",
+          message:
+            "Reception will use these to confirm whether a customer is inside your service area.",
+        };
+      }
+      return {
+        icon: "check_circle",
+        label: "Step 1 · Looking good",
+        title: "Business details complete",
+        message: "Tap Continue to set up your owner account.",
+      };
+    }
+
+    if (step === 2) {
+      if (form.ownerFullName.trim().length < 2) {
+        return {
+          icon: "person",
+          label: "Step 2 · Account",
+          title: "Tell us who's in charge",
+          message:
+            "Add the business owner's full name — it appears on every invoice and booking.",
+        };
+      }
+      if (mode === "self_signup") {
+        if (form.password.length < 8) {
+          return {
+            icon: "lock",
+            label: "Step 2 · Security",
+            title: "Pick a strong password",
+            message:
+              "At least 8 characters. Mix letters, numbers, and a symbol for the best protection.",
+          };
+        }
+        if (form.password !== form.confirmPassword) {
+          return {
+            icon: "rule",
+            label: "Step 2 · Confirm",
+            title: "Re-enter your password",
+            message:
+              "Both passwords must match before you can continue to your plan.",
+          };
+        }
+      }
+      return {
+        icon: "mark_email_read",
+        label: "Step 2 · Almost there",
+        title: "Account ready",
+        message:
+          mode === "self_signup"
+            ? "Continue to choose the plan that fits your team."
+            : "The owner will sign in with the default password 00001111.",
+      };
+    }
+
+    // Step 3 — Plan
+    if (!form.selectedPlanId) {
+      return {
+        icon: "workspace_premium",
+        label: "Step 3 · Plan",
+        title: "Choose what suits your team",
+        message:
+          "Trade Pro is the most popular — full job tracking, quotes, and invoices.",
+      };
+    }
+    return {
+      icon: "rocket_launch",
+      label: "Step 3 · Ready to launch",
+      title:
+        mode === "self_signup"
+          ? "You're one tap away"
+          : "Tenant ready to create",
+      message:
+        mode === "self_signup"
+          ? "Submit to activate your dashboard and sign in straight away."
+          : "Submit to provision the business — the owner can sign in immediately.",
+    };
+  }, [form, step, mode]);
+
+  return (
+    <div
+      key={tip.title}
+      className="mt-4 overflow-hidden rounded-2xl bg-primary p-5 text-on-primary"
+    >
+      <div className="flex items-center gap-2 opacity-90">
+        <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+          {tip.icon}
+        </span>
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider">
+          {tip.label}
         </p>
       </div>
-    </>
+      <p className="mt-2 font-display text-[16px] font-semibold leading-tight">
+        {tip.title}
+      </p>
+      <p className="mt-1.5 font-body text-[13px] leading-relaxed opacity-90">
+        {tip.message}
+      </p>
+    </div>
   );
 }
 
@@ -1008,6 +1211,90 @@ function SectionDivider({ label }: { label: string }) {
         {label}
       </span>
       <div className="h-px flex-1 bg-outline-variant" />
+    </div>
+  );
+}
+
+function ServiceAreasField({
+  values,
+  onUpdate,
+  onAdd,
+  onRemove,
+}: {
+  values: string[];
+  onUpdate: (index: number, value: string) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+}) {
+  const filled = values.filter((v) => v.trim().length >= 2).length;
+  const canAdd = values.length < MAX_SERVICE_AREAS;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-fixed/30 px-3 py-2.5">
+        <span className="material-symbols-outlined material-symbols-filled mt-0.5 shrink-0 text-[20px] text-primary">
+          radar
+        </span>
+        <p className="font-body text-[12px] text-on-surface-variant">
+          List the suburbs, towns, or regions you cover. Reception uses these
+          to confirm whether a job address is inside your service area. Add as
+          many as you need.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {values.map((value, index) => {
+          const isOnlyRow = values.length === 1;
+          return (
+            <div key={index} className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <span className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-outline">
+                  location_on
+                </span>
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(e) => onUpdate(index, e.target.value)}
+                  autoCapitalize="words"
+                  spellCheck={false}
+                  placeholder={
+                    index === 0
+                      ? "e.g. Lynbrook 3975"
+                      : "Another suburb, town, or region"
+                  }
+                  className={`h-12 w-full rounded-lg border border-outline-variant bg-surface-container-low pl-10 pr-3 font-body text-body-md text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20`}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(index)}
+                disabled={isOnlyRow && !value.trim()}
+                aria-label={`Remove service area ${index + 1}`}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-outline-variant text-on-surface-variant transition-colors hover:border-error/40 hover:bg-error-container/40 hover:text-error disabled:opacity-40 disabled:hover:border-outline-variant disabled:hover:bg-transparent disabled:hover:text-on-surface-variant"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  close
+                </span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={!canAdd}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-primary/40 bg-primary-fixed/40 px-3 py-2 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary-fixed/70 disabled:opacity-50"
+        >
+          <span className="material-symbols-outlined text-[18px]">add</span>
+          Add another area
+        </button>
+        <span className="font-body text-[11px] text-on-surface-variant">
+          {filled} added · max {MAX_SERVICE_AREAS}
+        </span>
+      </div>
     </div>
   );
 }

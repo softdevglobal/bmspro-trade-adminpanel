@@ -45,6 +45,14 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Booking intake attempts: write-only audit log from server; admins/owners read.
+    match /booking_intake_attempts/{attemptId} {
+      allow read: if isSuperAdmin()
+        || (isBusinessOwner()
+            && resource.data.businessId == request.auth.token.businessId);
+      allow create, update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();

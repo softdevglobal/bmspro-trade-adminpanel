@@ -186,6 +186,26 @@ function DrawerPanel({
             />
           </DetailSection>
 
+          <DetailSection title="Service areas">
+            {tenant.serviceAreas && tenant.serviceAreas.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 px-4 py-3">
+                {tenant.serviceAreas.map((area) => (
+                  <span
+                    key={area}
+                    className="inline-flex items-center gap-1 rounded-full bg-primary-fixed px-2.5 py-1 font-body text-[12px] font-semibold text-primary"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">
+                      location_on
+                    </span>
+                    {area}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <DetailRow label="Coverage" value="—" />
+            )}
+          </DetailSection>
+
           <DetailSection title="Plan">
             {tenant.plan ? (
               <>

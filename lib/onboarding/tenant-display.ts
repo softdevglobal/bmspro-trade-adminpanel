@@ -27,6 +27,7 @@ export type TenantDetail = {
   postcode: string;
   timezone: string | null;
   mainSuburb: string;
+  serviceAreas: string[];
   plan: TenantPlan | null;
   status: "pending_review" | "active" | "suspended";
   source: "self_signup" | "super_admin_create";
