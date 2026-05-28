@@ -12,7 +12,7 @@ export const CUSTOMER_FIXED_NAV_INNER_CLASS =
 /** Reserves space below the fixed floating pill nav. */
 export function CustomerNavSpacer() {
   return (
-    <div className="h-[3.25rem] shrink-0 sm:h-[4.35rem]" aria-hidden />
+    <div className="h-[3.5rem] shrink-0 sm:h-[4.75rem]" aria-hidden />
   );
 }
 

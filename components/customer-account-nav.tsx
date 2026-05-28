@@ -44,19 +44,20 @@ const NAV_PILL_INNER = `flex w-full min-w-0 items-center rounded-full bg-stone-1
 const PRIMARY_NAV_BTN =
   "relative z-10 flex h-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-to-br from-primary via-primary to-primary-container px-4 font-body font-bold text-on-primary shadow-md shadow-primary/25 ring-2 ring-primary/20 transition-all active:scale-[0.98] sm:min-w-[11.5rem] sm:gap-2.5 sm:px-10 sm:shadow-lg sm:shadow-primary/30 md:min-w-[13rem] md:px-12";
 
-/** Icon-only guest CTAs — labels live in aria-label / title only */
-const GUEST_ICON_BTN =
-  "relative z-10 flex h-full w-[2.85rem] shrink-0 items-center justify-center overflow-hidden rounded-2xl transition-all active:scale-95 sm:w-[3.35rem] sm:rounded-[22px]";
+const GUEST_BTN_BASE =
+  "relative z-10 flex h-full shrink-0 items-center justify-center overflow-hidden rounded-full font-body font-bold transition-all active:scale-95 max-sm:aspect-square max-sm:w-11 max-sm:px-0 sm:min-h-0 sm:gap-2 sm:px-6";
 
-function GuestIconButton({
+function GuestAuthButton({
   icon,
   filled,
+  label,
   ariaLabel,
   onClick,
   variant,
 }: {
   icon: string;
   filled?: boolean;
+  label: string;
   ariaLabel: string;
   onClick: () => void;
   variant: "join" | "signin";
@@ -69,10 +70,10 @@ function GuestIconButton({
       onClick={onClick}
       aria-label={ariaLabel}
       title={ariaLabel}
-      className={`${GUEST_ICON_BTN} ${
+      className={`${GUEST_BTN_BASE} ${
         isJoin
-          ? "bg-gradient-to-br from-primary via-primary to-primary-container text-on-primary shadow-[0_8px_20px_-6px_rgba(0,74,198,0.55)] ring-2 ring-primary/25 hover:brightness-105"
-          : "border-2 border-stone-200/90 bg-white text-primary shadow-sm ring-1 ring-white hover:border-primary/35 hover:bg-primary/5 hover:shadow-md"
+          ? "bg-gradient-to-br from-primary via-primary to-primary-container text-on-primary shadow-[0_8px_20px_-6px_rgba(0,74,198,0.55)] ring-2 ring-primary/25 hover:brightness-105 sm:min-w-[7rem]"
+          : "border-2 border-stone-200/90 bg-white text-on-surface shadow-sm ring-1 ring-white hover:border-primary/35 hover:bg-primary/5 hover:shadow-md sm:min-w-[7.25rem]"
       }`}
     >
       {isJoin ? (
@@ -80,27 +81,18 @@ function GuestIconButton({
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_0%,rgba(255,255,255,0.28),transparent_55%)]"
         />
-      ) : (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-[3px] rounded-[14px] border border-dashed border-primary/15 sm:inset-1 sm:rounded-[18px]"
-        />
-      )}
+      ) : null}
       <span
-        className={`material-symbols-outlined relative z-10 text-[22px] sm:text-[26px] ${
+        className={`material-symbols-outlined relative z-10 text-[26px] leading-none sm:text-[22px] ${
           filled ? "material-symbols-filled" : ""
-        }`}
+        } ${isJoin ? "" : "text-primary"}`}
+        aria-hidden
       >
         {icon}
       </span>
-      {isJoin ? (
-        <span
-          aria-hidden
-          className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold text-stone-900 shadow-sm ring-2 ring-white"
-        >
-          +
-        </span>
-      ) : null}
+      <span className="relative z-10 hidden whitespace-nowrap sm:inline sm:text-[14px]">
+        {label}
+      </span>
     </button>
   );
 }
@@ -327,35 +319,37 @@ export function CustomerGuestNav({
   return (
     <nav aria-label="Account access" className="w-full min-w-0">
       <div className={NAV_PILL_OUTER}>
-        <div className={`${NAV_PILL_INNER} justify-between gap-2 sm:gap-3`}>
-          <div className="flex min-w-0 flex-1 items-center gap-2 pl-0.5 sm:gap-2.5 sm:pl-1">
-            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary ring-1 ring-primary/15 sm:h-9 sm:w-9">
-              <span className="material-symbols-outlined text-[18px] sm:text-[20px]">
+        <div className={`${NAV_PILL_INNER} h-12 justify-between gap-1.5 sm:h-14 sm:gap-3`}>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-0.5 sm:gap-2.5 sm:pl-1">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary ring-1 ring-primary/15 sm:h-9 sm:w-9">
+              <span className="material-symbols-outlined text-[20px] sm:text-[20px]">
                 storefront
               </span>
             </span>
             <div className="min-w-0 text-left">
-              <p className="truncate font-body text-[10px] font-bold uppercase tracking-wider text-primary/75 sm:text-[11px]">
+              <p className="hidden truncate font-body text-[10px] font-bold uppercase tracking-wider text-primary/75 sm:block sm:text-[11px]">
                 Booking with
               </p>
-              <p className="truncate font-display text-[14px] font-semibold text-on-surface sm:text-[16px]">
+              <p className="truncate font-display text-[13px] font-semibold text-on-surface sm:text-[16px]">
                 {businessName}
               </p>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <GuestIconButton
+          <div className="flex h-full shrink-0 items-stretch gap-1.5 sm:gap-2">
+            <GuestAuthButton
               variant="join"
-              icon="rocket_launch"
+              icon="person_add"
               filled
-              ariaLabel={`Get started — create account for ${businessName}`}
+              label="Join"
+              ariaLabel={`Join — create account for ${businessName}`}
               onClick={() => openAuth({ mode: "signup", businessName })}
             />
-            <GuestIconButton
+            <GuestAuthButton
               variant="signin"
               icon="login"
-              ariaLabel={`Welcome back — sign in to ${businessName}`}
+              label="Sign in"
+              ariaLabel={`Sign in to ${businessName}`}
               onClick={() => openAuth({ mode: "signin", businessName })}
             />
           </div>
