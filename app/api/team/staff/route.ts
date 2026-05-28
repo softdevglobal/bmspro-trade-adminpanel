@@ -27,6 +27,8 @@ type StaffUpdatePayload = StaffPayload & {
   id: string;
 };
 
+type StaffStatus = "active" | "suspended";
+
 type TimestampLike = {
   toDate: () => Date;
 };
@@ -158,6 +160,32 @@ function parseStaffUpdatePayload(raw: unknown):
   return { ok: true, value: { ...parsed.value, id } };
 }
 
+function parseStaffStatusPayload(raw: unknown):
+  | { ok: true; value: { id: string; status: StaffStatus } }
+  | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, error: "Invalid request body." };
+  }
+
+  const input = raw as Record<string, unknown>;
+  const id = sanitizeString(input.id);
+  const status = sanitizeString(input.status);
+
+  if (!id) {
+    return { ok: false, error: "Staff ID is required." };
+  }
+
+  if (status !== "active" && status !== "suspended") {
+    return { ok: false, error: "Invalid staff status." };
+  }
+
+  return { ok: true, value: { id, status } };
+}
+
+function staffStatus(value: unknown): StaffStatus {
+  return value === "suspended" ? "suspended" : "active";
+}
+
 async function getOwnedStaffRef(
   staffId: string,
   businessId: string
@@ -259,6 +287,7 @@ export async function POST(request: Request) {
       role: "staff",
       skills: parsed.value.skills,
       availability: parsed.value.availability,
+      status: "active",
       isActive: true,
       createdByUid: auth.uid,
       createdByEmail: auth.email ?? null,
@@ -320,6 +349,7 @@ export async function GET(request: Request) {
         role: sanitizeString(data.role),
         skills: sanitizeStringArray(data.skills),
         availability: sanitizeStringArray(data.availability),
+        status: staffStatus(data.status),
         createdAt: timestampIso(data.createdAt),
         createdAtMillis: timestampMillis(data.createdAt),
       };
@@ -333,6 +363,7 @@ export async function GET(request: Request) {
       phone: member.phone,
       skills: member.skills,
       availability: member.availability,
+      status: member.status,
       createdAt: member.createdAt,
     }));
 
@@ -356,6 +387,51 @@ export async function PATCH(request: Request) {
       { ok: false, error: "Invalid request body." },
       { status: 400 }
     );
+  }
+
+  if (
+    body &&
+    typeof body === "object" &&
+    "status" in (body as Record<string, unknown>)
+  ) {
+    const parsedStatus = parseStaffStatusPayload(body);
+    if (!parsedStatus.ok) {
+      return NextResponse.json(parsedStatus, { status: 400 });
+    }
+
+    const owned = await getOwnedStaffRef(parsedStatus.value.id, auth.businessId);
+    if (!owned.ok) {
+      return NextResponse.json(
+        { ok: false, error: owned.error },
+        { status: owned.status }
+      );
+    }
+
+    try {
+      await adminAuth.updateUser(parsedStatus.value.id, {
+        disabled: parsedStatus.value.status === "suspended",
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string }).code;
+      if (code !== "auth/user-not-found") {
+        return NextResponse.json(
+          { ok: false, error: "Could not update this staff member account." },
+          { status: 400 }
+        );
+      }
+    }
+
+    await owned.ref.update({
+      status: parsedStatus.value.status,
+      isActive: parsedStatus.value.status === "active",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return NextResponse.json({
+      ok: true,
+      staffId: parsedStatus.value.id,
+      status: parsedStatus.value.status,
+    });
   }
 
   const parsed = parseStaffUpdatePayload(body);
