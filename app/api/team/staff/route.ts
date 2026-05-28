@@ -88,10 +88,13 @@ function parseAvailability(value: unknown, allowedServiceAreas: string[]) {
       return {
         day,
         isOff: item.isOff === true,
-        serviceAreas: sanitizeStringArray(item.serviceAreas).filter(
-          (area) =>
-            allowedServiceAreas.length === 0 || allowedServiceAreas.includes(area),
-        ),
+        serviceAreas: sanitizeStringArray(item.serviceAreas)
+          .filter(
+            (area) =>
+              allowedServiceAreas.length === 0 ||
+              allowedServiceAreas.includes(area),
+          )
+          .slice(0, 1),
       };
     })
     .filter((item) => WEEK_DAYS.has(item.day));
@@ -125,7 +128,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   const input = raw as Record<string, unknown>;
   const fullName = sanitizeString(input.fullName);
   const email = sanitizeString(input.email).toLowerCase();
-  const phone = sanitizeString(input.phone);
+  const phone = sanitizeString(input.phone).replace(/\D/g, "");
   const staffType = sanitizeString(input.staffType);
   const availability = parseAvailability(input.availability, allowedServiceAreas);
 
@@ -134,7 +137,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   }
 
   if (!phone) {
-    return { ok: false, error: "Mobile number is required." };
+    return { ok: false, error: "Mobile number is required (digits only)." };
   }
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -156,7 +159,17 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   ) {
     return {
       ok: false,
-      error: "Select service areas for each working day or mark it off.",
+      error: "Select one service area for each working day or mark it off.",
+    };
+  }
+
+  if (
+    allowedServiceAreas.length > 0 &&
+    workingDays.some((day) => day.serviceAreas.length > 1)
+  ) {
+    return {
+      ok: false,
+      error: "Only one service area can be selected per day.",
     };
   }
 
