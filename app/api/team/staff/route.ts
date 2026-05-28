@@ -4,23 +4,30 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const STAFF_SKILLS = new Set([
-  "Electrical",
-  "Plumbing",
-  "Carpentry",
-  "HVAC",
-  "General Maintenance",
-]);
-
-const STAFF_AVAILABILITY = new Set(["Weekdays", "Saturdays", "Sundays"]);
+const WEEK_DAY_IDS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const;
+const WEEK_DAYS = new Set<string>(WEEK_DAY_IDS);
 const DEFAULT_STAFF_PASSWORD = "00001111";
+
+type DayAvailability = {
+  day: string;
+  isOff: boolean;
+  serviceAreas: string[];
+};
 
 type StaffPayload = {
   fullName: string;
   email: string;
   phone: string;
-  skills: string[];
-  availability: string[];
+  staffType: string;
+  availability: DayAvailability[];
 };
 
 type StaffUpdatePayload = StaffPayload & {
@@ -69,6 +76,27 @@ function sanitizeStringArray(value: unknown) {
     : [];
 }
 
+function parseAvailability(value: unknown, allowedServiceAreas: string[]) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item): item is Record<string, unknown> => {
+      return Boolean(item) && typeof item === "object";
+    })
+    .map((item) => {
+      const day = sanitizeString(item.day).toLowerCase();
+      return {
+        day,
+        isOff: item.isOff === true,
+        serviceAreas: sanitizeStringArray(item.serviceAreas).filter(
+          (area) =>
+            allowedServiceAreas.length === 0 || allowedServiceAreas.includes(area),
+        ),
+      };
+    })
+    .filter((item) => WEEK_DAYS.has(item.day));
+}
+
 function timestampMillis(value: unknown) {
   if (
     value &&
@@ -87,7 +115,7 @@ function timestampIso(value: unknown) {
   return millis > 0 ? new Date(millis).toISOString() : null;
 }
 
-function parseStaffPayload(raw: unknown):
+function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   | { ok: true; value: StaffPayload }
   | { ok: false; error: string } {
   if (!raw || typeof raw !== "object") {
@@ -98,18 +126,8 @@ function parseStaffPayload(raw: unknown):
   const fullName = sanitizeString(input.fullName);
   const email = sanitizeString(input.email).toLowerCase();
   const phone = sanitizeString(input.phone);
-  const skills = Array.isArray(input.skills)
-    ? input.skills.filter(
-        (skill): skill is string =>
-          typeof skill === "string" && STAFF_SKILLS.has(skill)
-      )
-    : [];
-  const availability = Array.isArray(input.availability)
-    ? input.availability.filter(
-        (item): item is string =>
-          typeof item === "string" && STAFF_AVAILABILITY.has(item)
-      )
-    : [];
+  const staffType = sanitizeString(input.staffType);
+  const availability = parseAvailability(input.availability, allowedServiceAreas);
 
   if (!fullName) {
     return { ok: false, error: "Full name is required." };
@@ -123,12 +141,23 @@ function parseStaffPayload(raw: unknown):
     return { ok: false, error: "A valid email address is required." };
   }
 
-  if (skills.length === 0) {
-    return { ok: false, error: "Select at least one working skill." };
+  if (!staffType) {
+    return { ok: false, error: "Type a staff role." };
   }
 
-  if (availability.length === 0) {
+  const workingDays = availability.filter((day) => !day.isOff);
+  if (availability.length !== WEEK_DAYS.size || workingDays.length === 0) {
     return { ok: false, error: "Select at least one availability option." };
+  }
+
+  if (
+    allowedServiceAreas.length > 0 &&
+    workingDays.some((day) => day.serviceAreas.length === 0)
+  ) {
+    return {
+      ok: false,
+      error: "Select service areas for each working day or mark it off.",
+    };
   }
 
   return {
@@ -137,16 +166,16 @@ function parseStaffPayload(raw: unknown):
       fullName,
       email,
       phone,
-      skills,
+      staffType,
       availability,
     },
   };
 }
 
-function parseStaffUpdatePayload(raw: unknown):
+function parseStaffUpdatePayload(raw: unknown, allowedServiceAreas: string[]):
   | { ok: true; value: StaffUpdatePayload }
   | { ok: false; error: string } {
-  const parsed = parseStaffPayload(raw);
+  const parsed = parseStaffPayload(raw, allowedServiceAreas);
   if (!parsed.ok) return parsed;
 
   const id =
@@ -184,6 +213,61 @@ function parseStaffStatusPayload(raw: unknown):
 
 function staffStatus(value: unknown): StaffStatus {
   return value === "suspended" ? "suspended" : "active";
+}
+
+async function getBusinessServiceAreas(businessId: string) {
+  const snap = await adminDb.collection("businesses").doc(businessId).get();
+  const areas = snap.data()?.serviceAreas;
+  return sanitizeStringArray(areas);
+}
+
+function staffType(value: unknown, legacySkills: unknown) {
+  const type = sanitizeString(value);
+  if (type) return type;
+
+  const skills = sanitizeStringArray(legacySkills);
+  if (skills.some((skill) => skill.toLowerCase() === "electrical")) {
+    return "Electrician";
+  }
+  if (skills.some((skill) => skill.toLowerCase() === "plumbing")) {
+    return "Plumber";
+  }
+
+  return "";
+}
+
+function availabilityForResponse(
+  value: unknown,
+  serviceAreas: string[],
+): DayAvailability[] {
+  if (Array.isArray(value) && value.some((item) => typeof item === "object")) {
+    const parsed = parseAvailability(value, serviceAreas);
+    return WEEK_DAY_IDS.map((day) => {
+      const existing = parsed.find((item) => item.day === day);
+      return (
+        existing ?? {
+          day,
+          isOff: false,
+          serviceAreas: [],
+        }
+      );
+    });
+  }
+
+  const legacy = sanitizeStringArray(value);
+  return WEEK_DAY_IDS.map((day) => {
+    const isWeekday = !["saturday", "sunday"].includes(day);
+    const available =
+      (isWeekday && legacy.includes("Weekdays")) ||
+      (day === "saturday" && legacy.includes("Saturdays")) ||
+      (day === "sunday" && legacy.includes("Sundays"));
+
+    return {
+      day,
+      isOff: !available,
+      serviceAreas: available ? serviceAreas : [],
+    };
+  });
 }
 
 async function getOwnedStaffRef(
@@ -227,7 +311,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = parseStaffPayload(body);
+  const serviceAreas = await getBusinessServiceAreas(auth.businessId);
+  const parsed = parseStaffPayload(body, serviceAreas);
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
   }
@@ -285,7 +370,7 @@ export async function POST(request: Request) {
       phone: parsed.value.phone,
       businessId: auth.businessId,
       role: "staff",
-      skills: parsed.value.skills,
+      staffType: parsed.value.staffType,
       availability: parsed.value.availability,
       status: "active",
       isActive: true,
@@ -333,6 +418,7 @@ export async function GET(request: Request) {
     );
   }
 
+  const serviceAreas = await getBusinessServiceAreas(auth.businessId);
   const snapshot = await adminDb
     .collection("users")
     .where("businessId", "==", auth.businessId)
@@ -347,8 +433,8 @@ export async function GET(request: Request) {
         email: sanitizeString(data.email),
         phone: sanitizeString(data.phone) || null,
         role: sanitizeString(data.role),
-        skills: sanitizeStringArray(data.skills),
-        availability: sanitizeStringArray(data.availability),
+        staffType: staffType(data.staffType, data.skills),
+        availability: availabilityForResponse(data.availability, serviceAreas),
         status: staffStatus(data.status),
         createdAt: timestampIso(data.createdAt),
         createdAtMillis: timestampMillis(data.createdAt),
@@ -361,13 +447,13 @@ export async function GET(request: Request) {
       fullName: member.fullName,
       email: member.email,
       phone: member.phone,
-      skills: member.skills,
+      staffType: member.staffType,
       availability: member.availability,
       status: member.status,
       createdAt: member.createdAt,
     }));
 
-  return NextResponse.json({ ok: true, staff });
+  return NextResponse.json({ ok: true, staff, serviceAreas });
 }
 
 export async function PATCH(request: Request) {
@@ -434,7 +520,8 @@ export async function PATCH(request: Request) {
     });
   }
 
-  const parsed = parseStaffUpdatePayload(body);
+  const serviceAreas = await getBusinessServiceAreas(auth.businessId);
+  const parsed = parseStaffUpdatePayload(body, serviceAreas);
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
   }
@@ -486,7 +573,7 @@ export async function PATCH(request: Request) {
     email: parsed.value.email,
     fullName: parsed.value.fullName,
     phone: parsed.value.phone,
-    skills: parsed.value.skills,
+    staffType: parsed.value.staffType,
     availability: parsed.value.availability,
     updatedAt: FieldValue.serverTimestamp(),
   });
