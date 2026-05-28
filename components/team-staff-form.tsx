@@ -64,6 +64,8 @@ export function TeamStaffForm() {
   const [viewTarget, setViewTarget] = useState<StaffMember | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [statusTarget, setStatusTarget] = useState<StaffMember | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [search, setSearch] = useState("");
 
   const canSubmit = useMemo(
@@ -329,10 +331,11 @@ export function TeamStaffForm() {
   }
 
   async function updateStaffStatus(member: StaffMember) {
-    if (!user) return;
+    if (!user || isUpdatingStatus) return;
 
     const nextStatus: StaffStatus =
       member.status === "suspended" ? "active" : "suspended";
+    setIsUpdatingStatus(true);
     setStaffListError(null);
 
     try {
@@ -365,6 +368,7 @@ export function TeamStaffForm() {
       setViewTarget((current) =>
         current?.id === member.id ? { ...current, status: nextStatus } : current,
       );
+      setStatusTarget(null);
       void loadStaffMembers();
     } catch (statusError) {
       setStaffListError(
@@ -372,6 +376,8 @@ export function TeamStaffForm() {
           ? statusError.message
           : "Could not update staff status.",
       );
+    } finally {
+      setIsUpdatingStatus(false);
     }
   }
 
@@ -389,7 +395,7 @@ export function TeamStaffForm() {
         onView={setViewTarget}
         onEdit={openEditStaff}
         onDelete={setDeleteTarget}
-        onToggleStatus={(member) => void updateStaffStatus(member)}
+        onToggleStatus={setStatusTarget}
       />
 
       {setupOpen && (
@@ -436,7 +442,18 @@ export function TeamStaffForm() {
           setViewTarget(null);
           openEditStaff(member);
         }}
-        onToggleStatus={(member) => void updateStaffStatus(member)}
+        onToggleStatus={setStatusTarget}
+      />
+
+      <StaffStatusConfirmModal
+        member={statusTarget}
+        isLoading={isUpdatingStatus}
+        onCancel={() => {
+          if (!isUpdatingStatus) setStatusTarget(null);
+        }}
+        onConfirm={() => {
+          if (statusTarget) void updateStaffStatus(statusTarget);
+        }}
       />
 
       <DeleteConfirmModal
@@ -1478,6 +1495,120 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <dd className="font-body text-[13px] text-on-surface sm:max-w-[58%] sm:text-right">
         {value}
       </dd>
+    </div>
+  );
+}
+
+function StaffStatusConfirmModal({
+  member,
+  isLoading,
+  onCancel,
+  onConfirm,
+}: {
+  member: StaffMember | null;
+  isLoading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isSuspended = member?.status === "suspended";
+  const actionLabel = isSuspended ? "reactivate" : "suspend";
+
+  useEffect(() => {
+    if (!member) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isLoading) onCancel();
+    }
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [member, isLoading, onCancel]);
+
+  if (!member) return null;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close dialog"
+        onClick={onCancel}
+        disabled={isLoading}
+        className="absolute inset-0 bg-on-background/50 backdrop-blur-sm"
+      />
+
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="staff-status-confirm-title"
+        aria-describedby="staff-status-confirm-desc"
+        className="relative w-full max-w-[420px] overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl"
+      >
+        <div className="px-6 pt-6 text-center">
+          <div
+            className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
+              isSuspended
+                ? "bg-primary-fixed text-primary"
+                : "bg-[#fff8eb] text-[#b45309]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[28px]">
+              {isSuspended ? "person" : "person_off"}
+            </span>
+          </div>
+          <h2
+            id="staff-status-confirm-title"
+            className="font-display text-headline-sm font-semibold text-on-surface"
+          >
+            {isSuspended ? "Reactivate staff member?" : "Suspend staff member?"}
+          </h2>
+          <p
+            id="staff-status-confirm-desc"
+            className="mt-2 font-body text-body-md text-on-surface-variant"
+          >
+            Are you sure you want to {actionLabel}{" "}
+            <span className="font-semibold text-on-surface">{member.fullName}</span>
+            ?
+          </p>
+        </div>
+
+        <div className="mt-6 flex flex-col-reverse gap-2 border-t border-outline-variant bg-surface-container-low px-6 py-4 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isLoading}
+            className="flex h-11 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-lowest px-5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:opacity-60"
+          >
+            No, cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isLoading}
+            className={`flex h-11 items-center justify-center gap-2 rounded-lg px-5 font-body text-[14px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-70 ${
+              isSuspended
+                ? "bg-primary text-on-primary hover:bg-primary/90"
+                : "bg-[#b45309] text-white hover:bg-[#9a3412]"
+            }`}
+          >
+            {isLoading ? (
+              <>
+                <span className="material-symbols-outlined animate-spin text-[18px]">
+                  progress_activity
+                </span>
+                Updating...
+              </>
+            ) : isSuspended ? (
+              "Yes, reactivate"
+            ) : (
+              "Yes, suspend"
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
