@@ -1,57 +1,39 @@
 "use client";
 
-import type { BookingBusiness } from "@/app/booknow/[slug]/page";
+import type { BookingBusiness, BookingService } from "@/app/booknow/[slug]/page";
 import { iconForBusinessType } from "@/lib/onboarding/types";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 
 type Props = {
   business: BookingBusiness;
+  services: BookingService[];
 };
 
-const STATS = [
-  {
-    icon: "schedule",
-    label: "Avg response",
-    value: "< 30 min",
-    accent: "text-amber-700",
-    tintFrom: "rgba(255,222,185,0.55)",
-  },
-  {
-    icon: "verified_user",
-    label: "Verified pros",
-    value: "100%",
-    accent: "text-emerald-700",
-    tintFrom: "rgba(206,228,212,0.55)",
-  },
-  {
-    icon: "star",
-    label: "Customer rating",
-    value: "4.9/5",
-    accent: "text-rose-700",
-    tintFrom: "rgba(255,210,210,0.55)",
-  },
-] as const;
+export type ServiceAddress = {
+  street: string;
+  suburb: string;
+  state: string;
+  postcode: string;
+};
 
-const STEPS = [
-  {
-    icon: "edit_note",
-    title: "Tell us the job",
-    description: "Share your trade need, location and a preferred time.",
-  },
-  {
-    icon: "schedule_send",
-    title: "We confirm",
-    description: "The team reviews and confirms your booking in minutes.",
-  },
-  {
-    icon: "engineering",
-    title: "Get it sorted",
-    description: "A vetted local pro shows up on time and gets the job done.",
-  },
-] as const;
+function formatServiceAddress(address: ServiceAddress): string {
+  return [address.street, address.suburb, address.state, address.postcode]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(", ");
+}
 
-export function BookingEngine({ business }: Props) {
+function isServiceAddressComplete(address: ServiceAddress): boolean {
+  return (
+    address.street.trim().length >= 3 &&
+    address.suburb.trim().length >= 2 &&
+    address.state.trim().length >= 2 &&
+    address.postcode.trim().length >= 4
+  );
+}
+
+export function BookingEngine({ business, services }: Props) {
   const reducedMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
 
@@ -119,18 +101,15 @@ export function BookingEngine({ business }: Props) {
           </div>
 
           <div className="relative mt-10">
-            <BookingCta
+            <ServiceBookingFlow
               businessName={business.businessName}
+              services={services}
               reducedMotion={!!reducedMotion}
               phoneHref={phoneHref}
               emailHref={emailHref}
             />
           </div>
         </motion.section>
-
-        <StatsStrip reducedMotion={!!reducedMotion} />
-
-        <HowItWorks reducedMotion={!!reducedMotion} />
 
         <BookingFooter
           business={business}
@@ -346,7 +325,7 @@ function RadarVisualization({
 
   return (
     <div className="relative mx-auto flex aspect-square w-full max-w-[400px] items-center justify-center">
-      {/* Concentric grid rings - warm neutral */}
+      {/* Concentric grid rings — brand blue */}
       <svg
         viewBox="0 0 200 200"
         className="absolute inset-0 h-full w-full"
@@ -354,8 +333,8 @@ function RadarVisualization({
       >
         <defs>
           <radialGradient id="radarGrad" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="rgba(180,150,110,0.12)" />
-            <stop offset="100%" stopColor="rgba(180,150,110,0)" />
+            <stop offset="0%" stopColor="rgba(67,123,255,0.14)" />
+            <stop offset="100%" stopColor="rgba(67,123,255,0)" />
           </radialGradient>
         </defs>
         <circle cx="100" cy="100" r="95" fill="url(#radarGrad)" />
@@ -366,7 +345,7 @@ function RadarVisualization({
             cy="100"
             r={r}
             fill="none"
-            stroke="rgba(124,94,58,0.22)"
+            stroke="rgba(67,123,255,0.28)"
             strokeWidth="1"
             strokeDasharray={r === 95 ? "0" : "3 3"}
           />
@@ -376,7 +355,7 @@ function RadarVisualization({
           y1="100"
           x2="195"
           y2="100"
-          stroke="rgba(124,94,58,0.18)"
+          stroke="rgba(67,123,255,0.2)"
           strokeWidth="0.6"
         />
         <line
@@ -384,12 +363,12 @@ function RadarVisualization({
           y1="5"
           x2="100"
           y2="195"
-          stroke="rgba(124,94,58,0.18)"
+          stroke="rgba(67,123,255,0.2)"
           strokeWidth="0.6"
         />
       </svg>
 
-      {/* Sweep - warm amber tint */}
+      {/* Rotating sweep — brand blue */}
       {!reducedMotion && (
         <motion.div
           aria-hidden
@@ -399,7 +378,7 @@ function RadarVisualization({
           className="absolute inset-0 [mask:radial-gradient(circle,black,transparent_70%)]"
           style={{
             background:
-              "conic-gradient(from 0deg, transparent 0deg, rgba(217,164,86,0.18) 30deg, transparent 60deg, transparent 360deg)",
+              "conic-gradient(from 0deg, transparent 0deg, rgba(67,123,255,0.22) 30deg, transparent 60deg, transparent 360deg)",
             borderRadius: "9999px",
           }}
         />
@@ -496,94 +475,205 @@ function RadarVisualization({
 }
 
 /* ==========================================================================
- * Booking CTA
+ * Service booking flow — address first, then service
  * ========================================================================== */
 
-function BookingCta({
+const EMPTY_ADDRESS: ServiceAddress = {
+  street: "",
+  suburb: "",
+  state: "",
+  postcode: "",
+};
+
+const BOOKING_INPUT_CLASS =
+  "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10";
+
+function ServiceBookingFlow({
   businessName,
+  services,
   phoneHref,
   emailHref,
   reducedMotion,
 }: {
   businessName: string;
+  services: BookingService[];
   phoneHref: string | null;
   emailHref: string | null;
   reducedMotion: boolean;
 }) {
-  return (
-    <div className="relative overflow-hidden rounded-[24px] border border-primary/30 bg-gradient-to-br from-primary via-primary to-primary/85 p-6 text-on-primary shadow-[0_24px_50px_-20px_rgba(67,123,255,0.45)] sm:p-8">
-      {!reducedMotion && (
-        <>
-          <motion.div
-            aria-hidden
-            initial={{ x: -120, y: -120, scale: 0.8 }}
-            animate={{ x: -80, y: -100, scale: 1 }}
-            transition={{
-              duration: 4,
-              repeat: Infinity,
-              repeatType: "reverse",
-              ease: "easeInOut",
-            }}
-            className="pointer-events-none absolute -left-16 -top-16 h-56 w-56 rounded-full bg-on-primary/12 blur-3xl"
-          />
-          <motion.div
-            aria-hidden
-            initial={{ x: 80, y: 80, scale: 1 }}
-            animate={{ x: 40, y: 60, scale: 1.15 }}
-            transition={{
-              duration: 5,
-              repeat: Infinity,
-              repeatType: "reverse",
-              ease: "easeInOut",
-            }}
-            className="pointer-events-none absolute -bottom-20 -right-10 h-72 w-72 rounded-full bg-on-primary/12 blur-3xl"
-          />
-        </>
-      )}
+  const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
-      <div className="relative grid gap-6 lg:grid-cols-[1.4fr_1fr] lg:items-center">
+  const addressComplete = isServiceAddressComplete(address);
+  const selectedService = services.find((s) => s.id === selectedServiceId) ?? null;
+  const canContinue = addressComplete && selectedService !== null;
+
+  function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
+    setAddress((prev) => ({ ...prev, [key]: value }));
+    setSubmitted(false);
+  }
+
+  function handleContinue() {
+    if (!canContinue) return;
+    setSubmitted(true);
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-[24px] border border-stone-200/90 bg-white/95 p-6 shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)] sm:p-8">
+      <div className="relative space-y-6 text-on-surface">
         <div>
-          <div className="flex items-center gap-2 font-body text-[11px] font-bold uppercase tracking-wider text-on-primary/80">
-            <span className="material-symbols-outlined material-symbols-filled text-[14px]">
+          <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-[#faf8f5] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-600">
+            <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
               event_available
             </span>
-            Booking engine
+            Book online
           </div>
-          <h3 className="mt-2 font-display text-headline-sm font-semibold sm:text-headline-md">
-            Request a booking with {businessName}
+          <h3 className="mt-3 font-display text-headline-sm font-semibold text-on-surface sm:text-headline-md">
+            Book a service with {businessName}
           </h3>
-          <p className="mt-1 font-body text-body-md text-on-primary/85">
-            The customer booking form is launching soon. In the meantime,
-            reach out directly &mdash; usually replies within an hour.
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            Browse services below, then add your address to continue booking.
           </p>
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+          <BookingStepHeader
+            step={1}
+            title="Service address"
+            hint="Required"
+            active
+          />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            Where should our team carry out this job?
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Street address
+              </span>
+              <input
+                type="text"
+                value={address.street}
+                onChange={(e) => updateAddress("street", e.target.value)}
+                placeholder="e.g. 12 Main Street"
+                autoComplete="street-address"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+            <label className="block">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Suburb
+              </span>
+              <input
+                type="text"
+                value={address.suburb}
+                onChange={(e) => updateAddress("suburb", e.target.value)}
+                placeholder="e.g. Kandy"
+                autoComplete="address-level2"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+            <label className="block">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                State
+              </span>
+              <input
+                type="text"
+                value={address.state}
+                onChange={(e) => updateAddress("state", e.target.value)}
+                placeholder="e.g. NSW"
+                autoComplete="address-level1"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+            <label className="block sm:col-span-2 sm:max-w-[12rem]">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Postcode
+              </span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={address.postcode}
+                onChange={(e) => updateAddress("postcode", e.target.value)}
+                placeholder="e.g. 2000"
+                autoComplete="postal-code"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+          <BookingStepHeader step={2} title="Choose a service" active />
+
+          {services.length === 0 ? (
+            <p className="mt-4 font-body text-body-md text-on-surface-variant">
+              No services are available to book online yet. Please call or
+              email the business directly.
+            </p>
+          ) : (
+            <ul className="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+              {services.map((service, index) => (
+                <li
+                  key={service.id}
+                  className={index > 0 ? "border-t border-stone-200" : ""}
+                >
+                  <BookingServiceListItem
+                    service={service}
+                    selected={selectedServiceId === service.id}
+                    onSelect={() => {
+                      setSelectedServiceId((current) =>
+                        current === service.id ? null : service.id,
+                      );
+                      setSubmitted(false);
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {submitted && selectedService ? (
+          <div
+            role="status"
+            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[13px] text-emerald-900"
+          >
+            <p className="font-semibold">Ready for scheduling</p>
+            <p className="mt-1 text-emerald-800/90">
+              <span className="font-semibold">{selectedService.name}</span> at{" "}
+              {formatServiceAddress(address)}. Date &amp; time selection is
+              coming soon — use Call or Email below to confirm now.
+            </p>
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-3 border-t border-stone-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <motion.button
             type="button"
-            whileHover={reducedMotion ? undefined : { scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            disabled
-            className="group relative inline-flex items-center justify-center gap-2 rounded-xl bg-on-primary px-5 py-3.5 font-body text-label-bold text-primary shadow-lg disabled:cursor-not-allowed"
+            whileHover={reducedMotion || !canContinue ? undefined : { scale: 1.02 }}
+            whileTap={canContinue ? { scale: 0.98 } : undefined}
+            disabled={!canContinue}
+            onClick={handleContinue}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-label-bold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
           >
             <span className="material-symbols-outlined material-symbols-filled text-[18px]">
               calendar_add_on
             </span>
-            Start a booking
-            <span className="ml-1 rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
-              Soon
-            </span>
+            Continue booking
           </motion.button>
 
           <div className="flex gap-3">
             {phoneHref ? (
               <motion.a
                 href={phoneHref}
-                whileHover={reducedMotion ? undefined : { scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-on-primary/40 bg-on-primary/10 px-4 py-2.5 font-body text-label-bold text-on-primary backdrop-blur transition-colors hover:bg-on-primary/20"
+                whileHover={reducedMotion ? undefined : { scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none"
               >
-                <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                <span className="material-symbols-outlined material-symbols-filled text-[18px] text-stone-600">
                   call
                 </span>
                 Call
@@ -592,11 +682,11 @@ function BookingCta({
             {emailHref ? (
               <motion.a
                 href={emailHref}
-                whileHover={reducedMotion ? undefined : { scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-on-primary/40 bg-on-primary/10 px-4 py-2.5 font-body text-label-bold text-on-primary backdrop-blur transition-colors hover:bg-on-primary/20"
+                whileHover={reducedMotion ? undefined : { scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none"
               >
-                <span className="material-symbols-outlined text-[18px]">
+                <span className="material-symbols-outlined text-[18px] text-stone-600">
                   mail
                 </span>
                 Email
@@ -609,118 +699,217 @@ function BookingCta({
   );
 }
 
-/* ==========================================================================
- * Stats strip
- * ========================================================================== */
-
-function StatsStrip({ reducedMotion }: { reducedMotion: boolean }) {
+function BookingStepHeader({
+  step,
+  title,
+  hint,
+  active,
+}: {
+  step: number;
+  title: string;
+  hint?: string;
+  active: boolean;
+}) {
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 18 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.3 }}
-      transition={{ duration: 0.5, ease: "easeOut" }}
-      className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3"
-    >
-      {STATS.map((stat, idx) => (
-        <motion.div
-          key={stat.label}
-          initial={{ opacity: 0, y: 18 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.5 }}
-          transition={{ delay: idx * 0.08, duration: 0.45, ease: "easeOut" }}
-          whileHover={reducedMotion ? undefined : { y: -4 }}
-          className="relative overflow-hidden rounded-2xl border border-white/80 bg-white/85 p-5 shadow-[0_10px_30px_-15px_rgba(31,29,26,0.15)] backdrop-blur-xl"
-          style={{
-            backgroundImage: `linear-gradient(135deg, ${stat.tintFrom} 0%, rgba(255,255,255,0) 60%)`,
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={`flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-sm ${stat.accent}`}
-            >
-              <span className="material-symbols-outlined material-symbols-filled text-[20px]">
-                {stat.icon}
-              </span>
-            </div>
-            <div>
-              <p className="font-display text-[22px] font-bold text-on-surface">
-                {stat.value}
-              </p>
-              <p className="font-body text-[12px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                {stat.label}
-              </p>
-            </div>
-          </div>
-        </motion.div>
-      ))}
-    </motion.section>
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className={`flex h-7 w-7 items-center justify-center rounded-full font-body text-[12px] font-bold ${
+          active
+            ? "bg-stone-800 text-white"
+            : "bg-stone-200 text-stone-500"
+        }`}
+      >
+        {step}
+      </span>
+      <h4 className="font-display text-[15px] font-semibold text-on-surface">
+        {title}
+      </h4>
+      {hint ? (
+        <span className="font-body text-[11px] text-on-surface-variant">
+          {hint}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
-/* ==========================================================================
- * How it works
- * ========================================================================== */
+function BookingServiceListItem({
+  service,
+  selected,
+  onSelect,
+}: {
+  service: BookingService;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const hasTasks = service.tasks.length > 0;
+  const tasksTransition = reducedMotion
+    ? { duration: 0.15 }
+    : { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const };
 
-function HowItWorks({ reducedMotion }: { reducedMotion: boolean }) {
   return (
-    <section className="mt-14">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, amount: 0.4 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="mb-8 text-center"
-      >
-        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          How it works
-        </p>
-        <h2 className="mt-2 font-display text-headline-md font-semibold text-on-surface">
-          Three steps. Done in minutes.
-        </h2>
-      </motion.div>
-
-      <div className="relative grid grid-cols-1 gap-4 md:grid-cols-3">
-        {/* dotted connector — desktop only */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute left-[16%] right-[16%] top-12 hidden h-px md:block"
-          style={{
-            backgroundImage:
-              "linear-gradient(to right, rgba(67,123,255,0.35) 50%, transparent 0%)",
-            backgroundSize: "10px 1px",
-            backgroundRepeat: "repeat-x",
-          }}
-        />
-
-        {STEPS.map((step, idx) => (
-          <motion.div
-            key={step.title}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.4 }}
-            transition={{ delay: idx * 0.1, duration: 0.5, ease: "easeOut" }}
-            whileHover={reducedMotion ? undefined : { y: -4 }}
-            className="relative rounded-2xl border border-stone-200/80 bg-white/90 p-6 text-center shadow-[0_10px_25px_-15px_rgba(31,29,26,0.15)] backdrop-blur-xl"
-          >
-            <div className="relative mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-stone-900 to-stone-800 text-white shadow-lg">
-              <span className="material-symbols-outlined material-symbols-filled text-[22px]">
-                {step.icon}
-              </span>
-              <span className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-primary font-body text-[11px] font-bold text-on-primary">
-                {idx + 1}
+    <div
+      className={`transition-colors ${
+        selected ? "bg-primary-fixed/25" : "bg-white hover:bg-stone-50/80"
+      }`}
+    >
+      <div className="flex items-stretch gap-3 p-3 sm:gap-4 sm:p-4">
+        <div className="relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl bg-stone-100 sm:h-20 sm:w-20">
+          {service.imageUrl ? (
+            <img
+              src={service.imageUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-stone-100 to-stone-200">
+              <span className="material-symbols-outlined material-symbols-filled text-[28px] text-stone-400 sm:text-[32px]">
+                {service.skillIcon}
               </span>
             </div>
-            <h3 className="mt-4 font-display text-[16px] font-semibold text-on-surface">
-              {step.title}
-            </h3>
-            <p className="mt-1 font-body text-body-md text-on-surface-variant">
-              {step.description}
-            </p>
-          </motion.div>
-        ))}
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex min-w-0 flex-1 flex-col items-start gap-1.5 text-left"
+        >
+          <p className="line-clamp-2 font-display text-[15px] font-semibold leading-snug text-on-surface sm:text-[16px]">
+            {service.name}
+          </p>
+
+          {service.businessType ? (
+            <span className="inline-flex items-center gap-1 font-body text-[11px] font-semibold text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                {service.skillIcon}
+              </span>
+              {service.businessType}
+            </span>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2 font-body text-[11px] font-semibold text-on-surface-variant">
+            <span className="inline-flex items-center gap-0.5 text-on-surface">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                schedule
+              </span>
+              {service.durationLabel}
+            </span>
+            <span aria-hidden className="text-stone-300">
+              ·
+            </span>
+            <span className="inline-flex items-center gap-0.5 text-on-surface">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                checklist
+              </span>
+              {service.taskCount} {service.taskCount === 1 ? "task" : "tasks"}
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-label={selected ? "Selected service" : `Select ${service.name}`}
+          className="flex shrink-0 items-center self-center"
+        >
+          <span
+            className={`flex h-6 w-6 items-center justify-center rounded-full border-2 transition-colors ${
+              selected
+                ? "border-primary bg-primary text-on-primary"
+                : "border-stone-300 bg-white text-transparent group-hover:border-stone-400"
+            }`}
+          >
+            {selected ? (
+              <span className="material-symbols-outlined material-symbols-filled text-[16px]">
+                check
+              </span>
+            ) : null}
+          </span>
+        </button>
       </div>
-    </section>
+
+      {hasTasks ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setTasksOpen((open) => !open)}
+            aria-expanded={tasksOpen}
+            className="flex w-full items-center justify-between gap-2 border-t border-stone-100 px-3 py-2.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-stone-50 sm:px-4"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[16px] text-primary">
+                checklist
+              </span>
+              {`${tasksOpen ? "Hide" : "View"} what's included (${service.taskCount})`}
+            </span>
+            <motion.span
+              animate={{ rotate: tasksOpen ? 180 : 0 }}
+              transition={tasksTransition}
+              className="material-symbols-outlined text-[20px] text-stone-500"
+            >
+              expand_more
+            </motion.span>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {tasksOpen ? (
+              <motion.div
+                key="tasks-panel"
+                initial={
+                  reducedMotion
+                    ? { opacity: 0 }
+                    : { height: 0, opacity: 0 }
+                }
+                animate={
+                  reducedMotion
+                    ? { opacity: 1 }
+                    : { height: "auto", opacity: 1 }
+                }
+                exit={
+                  reducedMotion
+                    ? { opacity: 0 }
+                    : { height: 0, opacity: 0 }
+                }
+                transition={tasksTransition}
+                className="overflow-hidden"
+              >
+                <ul className="space-y-2.5 border-t border-stone-100 bg-[#faf8f5] px-3 py-3 sm:px-4 sm:py-3.5">
+                  {service.tasks.map((task, index) => (
+                    <motion.li
+                      key={task.id}
+                      initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        ...tasksTransition,
+                        delay: reducedMotion ? 0 : 0.04 + index * 0.03,
+                      }}
+                      className="flex gap-2.5"
+                    >
+                      <span className="material-symbols-outlined material-symbols-filled mt-0.5 shrink-0 text-[15px] text-primary">
+                        check_circle
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-body text-[12px] font-semibold text-on-surface">
+                          {task.title}
+                        </p>
+                        {task.description ? (
+                          <p className="mt-0.5 font-body text-[11px] leading-snug text-on-surface-variant">
+                            {task.description}
+                          </p>
+                        ) : null}
+                      </div>
+                    </motion.li>
+                  ))}
+                </ul>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </>
+      ) : null}
+    </div>
   );
 }
 

@@ -1,10 +1,14 @@
 import { BookingEngine } from "@/components/booking-engine";
+import { loadBookingServices, type BookingService } from "@/lib/booking/public";
 import { adminDb } from "@/lib/firebase/admin";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
+export type { BookingService };
+
 export type BookingBusiness = {
+  id: string;
   slug: string;
   businessName: string;
   businessType: string;
@@ -27,8 +31,10 @@ async function loadBusinessBySlug(
     .get();
 
   if (snap.empty) return null;
-  const data = snap.docs[0].data();
+  const doc = snap.docs[0];
+  const data = doc.data();
   return {
+    id: doc.id,
     slug,
     businessName: typeof data.businessName === "string" ? data.businessName : "",
     businessType: typeof data.businessType === "string" ? data.businessType : "",
@@ -72,5 +78,7 @@ export default async function BookNowPage({
   const business = await loadBusinessBySlug(slug);
   if (!business) notFound();
 
-  return <BookingEngine business={business} />;
+  const services = await loadBookingServices(business.id);
+
+  return <BookingEngine business={business} services={services} />;
 }
