@@ -102,6 +102,7 @@ export function BookingEngine({ business, services }: Props) {
 
           <div className="relative mt-10">
             <ServiceBookingFlow
+              slug={business.slug}
               businessName={business.businessName}
               services={services}
               reducedMotion={!!reducedMotion}
@@ -488,36 +489,218 @@ const EMPTY_ADDRESS: ServiceAddress = {
 const BOOKING_INPUT_CLASS =
   "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10";
 
+type RequestType = "existing_service" | "custom_quote";
+type SlotTimeRange = "morning" | "afternoon";
+
+type PreferredSlot = { date: string; timeRange: SlotTimeRange };
+
+const TIME_RANGE_OPTIONS: { id: SlotTimeRange; label: string; hint: string }[] =
+  [
+    { id: "morning", label: "Morning", hint: "8am – 12pm" },
+    { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm" },
+  ];
+
+function formatLocalDateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function todayIso(): string {
+  return formatLocalDateInput(new Date());
+}
+
+function formatPrettyDate(iso: string): string {
+  if (!iso) return "";
+  const parsed = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function ServiceBookingFlow({
+  slug,
   businessName,
   services,
   phoneHref,
   emailHref,
   reducedMotion,
 }: {
+  slug: string;
   businessName: string;
   services: BookingService[];
   phoneHref: string | null;
   emailHref: string | null;
   reducedMotion: boolean;
 }) {
+  const [requestType, setRequestType] = useState<RequestType>(
+    services.length > 0 ? "existing_service" : "custom_quote",
+  );
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+    null,
+  );
+  const [customTitle, setCustomTitle] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
-  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([
+    { date: "", timeRange: "morning" },
+  ]);
+  const [customer, setCustomer] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+  });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(
+    null,
+  );
+
+  const minDate = useMemo(() => todayIso(), []);
+  const selectedService =
+    services.find((service) => service.id === selectedServiceId) ?? null;
 
   const addressComplete = isServiceAddressComplete(address);
-  const selectedService = services.find((s) => s.id === selectedServiceId) ?? null;
-  const canContinue = addressComplete && selectedService !== null;
+
+  const requestStepValid =
+    requestType === "existing_service"
+      ? selectedService !== null
+      : customTitle.trim().length >= 3 &&
+        customDescription.trim().length >= 10;
+
+  const slotsValid =
+    preferredSlots.length > 0 &&
+    preferredSlots.every((slot) => slot.date.trim().length > 0) &&
+    new Set(preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`))
+      .size === preferredSlots.length;
+
+  const customerValid =
+    customer.fullName.trim().length >= 2 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim()) &&
+    customer.phone.replace(/\D/g, "").length > 0;
+
+  const canSubmit =
+    requestStepValid &&
+    addressComplete &&
+    slotsValid &&
+    customerValid &&
+    !submitting &&
+    !submittedRequestId;
 
   function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
-    setSubmitted(false);
+    setSubmitError(null);
   }
 
-  function handleContinue() {
-    if (!canContinue) return;
-    setSubmitted(true);
+  function updateCustomer(
+    field: "fullName" | "email" | "phone",
+    value: string,
+  ) {
+    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    setCustomer((prev) => ({ ...prev, [field]: next }));
+    setSubmitError(null);
   }
+
+  function updateSlot<K extends keyof PreferredSlot>(
+    index: number,
+    key: K,
+    value: PreferredSlot[K],
+  ) {
+    setPreferredSlots((prev) =>
+      prev.map((slot, idx) => (idx === index ? { ...slot, [key]: value } : slot)),
+    );
+    setSubmitError(null);
+  }
+
+  function addSlot() {
+    setPreferredSlots((prev) => {
+      if (prev.length >= 3) return prev;
+      return [...prev, { date: "", timeRange: "morning" }];
+    });
+  }
+
+  function removeSlot(index: number) {
+    setPreferredSlots((prev) =>
+      prev.length === 1 ? prev : prev.filter((_, idx) => idx !== index),
+    );
+  }
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const response = await fetch("/api/booking/inspection-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          requestType,
+          serviceId:
+            requestType === "existing_service" ? selectedServiceId : null,
+          customRequest:
+            requestType === "custom_quote"
+              ? {
+                  title: customTitle.trim(),
+                  description: customDescription.trim(),
+                }
+              : null,
+          customer: {
+            fullName: customer.fullName.trim(),
+            email: customer.email.trim().toLowerCase(),
+            phone: customer.phone,
+          },
+          address,
+          preferredSlots,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        requestId?: string;
+      };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(
+          payload.error ?? "Could not submit your request. Please try again.",
+        );
+      }
+
+      setSubmittedRequestId(payload.requestId ?? "ok");
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Could not submit your request. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (submittedRequestId) {
+    return (
+      <SubmittedConfirmation
+        businessName={businessName}
+        requestType={requestType}
+        selectedServiceName={selectedService?.name ?? customTitle}
+        address={address}
+        preferredSlots={preferredSlots}
+        phoneHref={phoneHref}
+        emailHref={emailHref}
+        reducedMotion={reducedMotion}
+      />
+    );
+  }
+
+  const existingServiceAvailable = services.length > 0;
 
   return (
     <div className="relative overflow-hidden rounded-[24px] border border-stone-200/90 bg-white/95 p-6 shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)] sm:p-8">
@@ -527,25 +710,125 @@ function ServiceBookingFlow({
             <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
               event_available
             </span>
-            Book online
+            Inspection visit request
           </div>
           <h3 className="mt-3 font-display text-headline-sm font-semibold text-on-surface sm:text-headline-md">
-            Book a service with {businessName}
+            Request a visit with {businessName}
           </h3>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Browse services below, then add your address to continue booking.
+            Tell us what you need and pick up to 3 dates that suit you. The
+            team will confirm a visit time and an inspector.
           </p>
         </div>
 
+        {/* Step 1 — Request type */}
+        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+          <BookingStepHeader step={1} title="What do you need?" active />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            Choose an existing service or describe a custom job for a quote.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <RequestTypeOption
+              icon="format_list_bulleted"
+              label="Request an existing service"
+              description="Pick from the services this business offers."
+              selected={requestType === "existing_service"}
+              disabled={!existingServiceAvailable}
+              onSelect={() => {
+                setRequestType("existing_service");
+                setSubmitError(null);
+              }}
+            />
+            <RequestTypeOption
+              icon="request_quote"
+              label="Custom quotation request"
+              description="Describe the work and we'll inspect and quote."
+              selected={requestType === "custom_quote"}
+              onSelect={() => {
+                setRequestType("custom_quote");
+                setSubmitError(null);
+              }}
+            />
+          </div>
+
+          {requestType === "existing_service" ? (
+            existingServiceAvailable ? (
+              <ul className="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+                {services.map((service, index) => (
+                  <li
+                    key={service.id}
+                    className={index > 0 ? "border-t border-stone-200" : ""}
+                  >
+                    <BookingServiceListItem
+                      service={service}
+                      selected={selectedServiceId === service.id}
+                      onSelect={() => {
+                        setSelectedServiceId((current) =>
+                          current === service.id ? null : service.id,
+                        );
+                        setSubmitError(null);
+                      }}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 font-body text-body-md text-on-surface-variant">
+                No published services yet — switch to a custom request below.
+              </p>
+            )
+          ) : (
+            <div className="mt-4 grid gap-3">
+              <label className="block">
+                <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                  Job title
+                </span>
+                <input
+                  type="text"
+                  value={customTitle}
+                  onChange={(event) => {
+                    setCustomTitle(event.target.value);
+                    setSubmitError(null);
+                  }}
+                  placeholder="e.g. Replace kitchen tap and check leak"
+                  className={BOOKING_INPUT_CLASS}
+                  maxLength={120}
+                />
+              </label>
+              <label className="block">
+                <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                  What needs doing?
+                </span>
+                <textarea
+                  value={customDescription}
+                  onChange={(event) => {
+                    setCustomDescription(event.target.value);
+                    setSubmitError(null);
+                  }}
+                  rows={4}
+                  placeholder="Tell us the scope, materials involved, urgency, etc."
+                  className={`${BOOKING_INPUT_CLASS} resize-y`}
+                  maxLength={1500}
+                />
+                <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                  At least 10 characters so the team can size up the visit.
+                </span>
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Step 2 — Address */}
         <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
           <BookingStepHeader
-            step={1}
+            step={2}
             title="Service address"
             hint="Required"
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Where should our team carry out this job?
+            Where should the inspector visit?
           </p>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -570,7 +853,7 @@ function ServiceBookingFlow({
                 type="text"
                 value={address.suburb}
                 onChange={(e) => updateAddress("suburb", e.target.value)}
-                placeholder="e.g. Kandy"
+                placeholder="e.g. Surry Hills"
                 autoComplete="address-level2"
                 className={BOOKING_INPUT_CLASS}
               />
@@ -605,64 +888,196 @@ function ServiceBookingFlow({
           </div>
         </div>
 
+        {/* Step 3 — Preferred dates */}
         <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
-          <BookingStepHeader step={2} title="Choose a service" active />
+          <BookingStepHeader
+            step={3}
+            title="Preferred dates & times"
+            hint={`${preferredSlots.length} of 3`}
+            active
+          />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            Pick up to 3 windows that work for you. The owner will confirm one
+            (or propose alternatives).
+          </p>
 
-          {services.length === 0 ? (
-            <p className="mt-4 font-body text-body-md text-on-surface-variant">
-              No services are available to book online yet. Please call or
-              email the business directly.
-            </p>
-          ) : (
-            <ul className="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-              {services.map((service, index) => (
-                <li
-                  key={service.id}
-                  className={index > 0 ? "border-t border-stone-200" : ""}
-                >
-                  <BookingServiceListItem
-                    service={service}
-                    selected={selectedServiceId === service.id}
-                    onSelect={() => {
-                      setSelectedServiceId((current) =>
-                        current === service.id ? null : service.id,
-                      );
-                      setSubmitted(false);
-                    }}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul className="mt-4 space-y-3">
+            {preferredSlots.map((slot, index) => (
+              <li
+                key={index}
+                className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <span className="material-symbols-outlined text-[14px]">
+                        event
+                      </span>
+                    </span>
+                    Option {index + 1}
+                  </span>
+                  {preferredSlots.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => removeSlot(index)}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-stone-100"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        close
+                      </span>
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,180px),1fr] sm:items-start">
+                  <label className="block">
+                    <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                      Date
+                    </span>
+                    <input
+                      type="date"
+                      min={minDate}
+                      value={slot.date}
+                      onChange={(event) =>
+                        updateSlot(index, "date", event.target.value)
+                      }
+                      className={BOOKING_INPUT_CLASS}
+                    />
+                  </label>
+                  <div>
+                    <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                      Time range
+                    </span>
+                    <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {TIME_RANGE_OPTIONS.map((option) => {
+                        const checked = slot.timeRange === option.id;
+                        return (
+                          <button
+                            type="button"
+                            key={option.id}
+                            onClick={() =>
+                              updateSlot(index, "timeRange", option.id)
+                            }
+                            className={`flex flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                              checked
+                                ? "border-primary bg-primary/10 ring-1 ring-primary/20"
+                                : "border-stone-200 bg-white hover:border-stone-300"
+                            }`}
+                          >
+                            <span
+                              className={`font-body text-[13px] font-semibold ${
+                                checked ? "text-primary" : "text-on-surface"
+                              }`}
+                            >
+                              {option.label}
+                            </span>
+                            <span className="font-body text-[11px] text-on-surface-variant">
+                              {option.hint}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {preferredSlots.length < 3 ? (
+            <button
+              type="button"
+              onClick={addSlot}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              Add another date
+            </button>
+          ) : null}
         </div>
 
-        {submitted && selectedService ? (
+        {/* Step 4 — Contact details */}
+        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+          <BookingStepHeader
+            step={4}
+            title="Your contact details"
+            hint="Required"
+            active
+          />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            We&apos;ll use this to confirm the visit time and reach you on the
+            day.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Full name
+              </span>
+              <input
+                type="text"
+                value={customer.fullName}
+                onChange={(e) => updateCustomer("fullName", e.target.value)}
+                placeholder="e.g. Alex Thompson"
+                autoComplete="name"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+            <label className="block">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Mobile number
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={customer.phone}
+                onChange={(e) => updateCustomer("phone", e.target.value)}
+                placeholder="0400000000"
+                autoComplete="tel"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+            <label className="block">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Email
+              </span>
+              <input
+                type="email"
+                value={customer.email}
+                onChange={(e) => updateCustomer("email", e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                className={BOOKING_INPUT_CLASS}
+              />
+            </label>
+          </div>
+        </div>
+
+        {submitError ? (
           <div
-            role="status"
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[13px] text-emerald-900"
+            role="alert"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
           >
-            <p className="font-semibold">Ready for scheduling</p>
-            <p className="mt-1 text-emerald-800/90">
-              <span className="font-semibold">{selectedService.name}</span> at{" "}
-              {formatServiceAddress(address)}. Date &amp; time selection is
-              coming soon — use Call or Email below to confirm now.
-            </p>
+            {submitError}
           </div>
         ) : null}
 
         <div className="flex flex-col gap-3 border-t border-stone-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <motion.button
             type="button"
-            whileHover={reducedMotion || !canContinue ? undefined : { scale: 1.02 }}
-            whileTap={canContinue ? { scale: 0.98 } : undefined}
-            disabled={!canContinue}
-            onClick={handleContinue}
+            whileHover={
+              reducedMotion || !canSubmit ? undefined : { scale: 1.02 }
+            }
+            whileTap={canSubmit ? { scale: 0.98 } : undefined}
+            disabled={!canSubmit}
+            onClick={handleSubmit}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-label-bold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
           >
             <span className="material-symbols-outlined material-symbols-filled text-[18px]">
-              calendar_add_on
+              {submitting ? "progress_activity" : "send"}
             </span>
-            Continue booking
+            {submitting ? "Sending request…" : "Submit inspection request"}
           </motion.button>
 
           <div className="flex gap-3">
@@ -696,6 +1111,156 @@ function ServiceBookingFlow({
         </div>
       </div>
     </div>
+  );
+}
+
+function RequestTypeOption({
+  icon,
+  label,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: string;
+  label: string;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onSelect}
+      disabled={disabled}
+      className={`flex h-full items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+        selected
+          ? "border-primary bg-white shadow-[0_8px_20px_-12px_rgba(67,123,255,0.4)] ring-1 ring-primary/20"
+          : "border-stone-200 bg-white hover:border-stone-300"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          selected
+            ? "bg-primary text-on-primary"
+            : "bg-primary/10 text-primary"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </span>
+      <span className="flex-1">
+        <span className="block font-body text-[14px] font-semibold text-on-surface">
+          {label}
+        </span>
+        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
+          {description}
+        </span>
+      </span>
+      <span
+        aria-hidden
+        className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+          selected
+            ? "border-primary bg-primary text-on-primary"
+            : "border-stone-300 bg-white text-transparent"
+        }`}
+      >
+        {selected ? (
+          <span className="material-symbols-outlined text-[14px]">check</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+function SubmittedConfirmation({
+  businessName,
+  requestType,
+  selectedServiceName,
+  address,
+  preferredSlots,
+  phoneHref,
+  emailHref,
+  reducedMotion,
+}: {
+  businessName: string;
+  requestType: RequestType;
+  selectedServiceName: string;
+  address: ServiceAddress;
+  preferredSlots: PreferredSlot[];
+  phoneHref: string | null;
+  emailHref: string | null;
+  reducedMotion: boolean;
+}) {
+  return (
+    <motion.div
+      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      className="overflow-hidden rounded-[24px] border border-emerald-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(16,185,129,0.25)] sm:p-8"
+    >
+      <div className="flex items-start gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          <span className="material-symbols-outlined material-symbols-filled text-[24px]">
+            check_circle
+          </span>
+        </span>
+        <div className="flex-1">
+          <h3 className="font-display text-headline-sm font-semibold text-on-surface">
+            Request sent to {businessName}
+          </h3>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            Thanks — the team will review your{" "}
+            {requestType === "existing_service"
+              ? "service request"
+              : "custom quote request"}
+            {selectedServiceName ? ` for ${selectedServiceName}` : ""} and
+            confirm an inspection time at {formatServiceAddress(address)}.
+          </p>
+
+          <div className="mt-4 rounded-xl border border-stone-200 bg-[#faf8f5] p-4">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Your preferred windows
+            </p>
+            <ul className="mt-2 space-y-1.5 font-body text-[13px] text-on-surface">
+              {preferredSlots.map((slot, index) => (
+                <li key={index} className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[16px] text-primary">
+                    event_available
+                  </span>
+                  {formatPrettyDate(slot.date)} · {slot.timeRange}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            {phoneHref ? (
+              <a
+                href={phoneHref}
+                className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50"
+              >
+                <span className="material-symbols-outlined text-[18px] text-stone-600">
+                  call
+                </span>
+                Call now
+              </a>
+            ) : null}
+            {emailHref ? (
+              <a
+                href={emailHref}
+                className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50"
+              >
+                <span className="material-symbols-outlined text-[18px] text-stone-600">
+                  mail
+                </span>
+                Email
+              </a>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

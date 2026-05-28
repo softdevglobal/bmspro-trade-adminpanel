@@ -1,0 +1,13 @@
+import { DashboardShell } from "@/components/dashboard-shell";
+import { InspectionVisitsBoard } from "@/components/inspection-visits-board";
+
+export default function InspectionVisitsPage() {
+  return (
+    <DashboardShell
+      title="Inspection visits"
+      subtitle="Review customer requests, schedule visits and assign an inspector."
+    >
+      <InspectionVisitsBoard />
+    </DashboardShell>
+  );
+}

@@ -6,10 +6,24 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
+/** Today is /dashboard only — not parent of other /dashboard/* routes. */
+function isNavItemActive(pathname: string, href: string): boolean {
+  if (href === "#") return false;
+  if (href === "/dashboard") {
+    return pathname === "/dashboard";
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
   { href: "#", label: "Calendar", icon: "calendar_month" },
   { href: "/dashboard/bookings", label: "Bookings", icon: "assignment" },
+  {
+    href: "/dashboard/inspection-visits",
+    label: "Inspection visits",
+    icon: "event_available",
+  },
   { href: "#", label: "Messages", icon: "chat" },
   { href: "/dashboard/team", label: "Team", icon: "groups" },
   { href: "#", label: "Availability", icon: "schedule" },
@@ -131,10 +145,7 @@ export function Sidebar({
           {NAV_ITEMS.filter(
             (item) => !("superAdmin" in item && item.superAdmin) || role === "super_admin"
           ).map((item) => {
-            const isActive =
-              item.href !== "#" &&
-              (pathname === item.href ||
-                pathname.startsWith(`${item.href}/`));
+            const isActive = isNavItemActive(pathname, item.href);
 
             const inner = (
               <>

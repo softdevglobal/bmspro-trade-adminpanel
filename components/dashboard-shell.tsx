@@ -14,8 +14,17 @@ export function DashboardShell({
   children: React.ReactNode;
 }) {
   const { user } = useAuth();
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("dashboard-sidebar-expanded");
+    if (stored === "false") {
+      setIsExpanded(false);
+    } else if (stored === "true") {
+      setIsExpanded(true);
+    }
+  }, []);
 
   useEffect(() => {
     function handleResize() {
@@ -39,7 +48,13 @@ export function DashboardShell({
   }, [isMobileOpen]);
 
   const closeMobile = useCallback(() => setIsMobileOpen(false), []);
-  const toggleExpand = useCallback(() => setIsExpanded((v) => !v), []);
+  const toggleExpand = useCallback(() => {
+    setIsExpanded((current) => {
+      const next = !current;
+      sessionStorage.setItem("dashboard-sidebar-expanded", String(next));
+      return next;
+    });
+  }, []);
 
   const email = user?.email ?? "Admin";
 
