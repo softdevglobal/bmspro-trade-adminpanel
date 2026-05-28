@@ -29,11 +29,11 @@ export function ServiceOwnerCard({
 
   return (
     <article
-      className={`mx-auto flex w-full max-w-[18.5rem] flex-col overflow-hidden rounded-2xl shadow-[0_6px_20px_rgba(0,42,150,0.08)] ring-1 ring-outline-variant/40 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(0,74,198,0.14)] hover:ring-primary/25 ${
+      className={`flex w-full max-w-none flex-col overflow-hidden rounded-2xl shadow-[0_6px_20px_rgba(0,42,150,0.08)] ring-1 ring-outline-variant/40 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(0,74,198,0.14)] hover:ring-primary/25 sm:mx-auto sm:max-w-[18.5rem] ${
         service.isActive ? "" : "opacity-90 saturate-[0.85]"
       }`}
     >
-      <div className="relative h-[10.5rem] w-full overflow-hidden">
+      <div className="relative h-[12.5rem] w-full overflow-hidden sm:h-[10.5rem]">
         {service.imageUrl ? (
           <img
             src={service.imageUrl}
@@ -90,18 +90,18 @@ export function ServiceOwnerCard({
           </button>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 px-3.5 pb-3.5 pt-8">
-          <h3 className="line-clamp-2 font-display text-[1.125rem] font-semibold leading-snug text-white">
+        <div className="absolute inset-x-0 bottom-0 px-4 pb-4 pt-9 sm:px-3.5 sm:pb-3.5 sm:pt-8">
+          <h3 className="line-clamp-2 font-display text-[1.25rem] font-semibold leading-snug text-white sm:text-[1.125rem]">
             {service.name}
           </h3>
-          <p className="mt-0.5 line-clamp-1 font-body text-[11px] text-white/85">
+          <p className="mt-0.5 line-clamp-1 font-body text-[12px] text-white/85 sm:text-[11px]">
             {tradeLabel}
           </p>
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 bg-gradient-to-b from-primary-fixed/40 via-surface-container-low to-surface-container-low px-3.5 py-3.5">
-        <div className="flex flex-wrap items-center gap-1.5 font-body text-[11px] font-semibold text-on-surface-variant">
+      <div className="flex flex-1 flex-col gap-3.5 bg-gradient-to-b from-primary-fixed/40 via-surface-container-low to-surface-container-low px-4 py-4 sm:gap-3 sm:px-3.5 sm:py-3.5">
+        <div className="flex flex-wrap items-center gap-2 font-body text-[12px] font-semibold text-on-surface-variant sm:gap-1.5 sm:text-[11px]">
           <span className="inline-flex items-center gap-0.5 text-on-surface">
             <span className="material-symbols-outlined text-[13px] text-primary">
               schedule
@@ -120,31 +120,31 @@ export function ServiceOwnerCard({
         </div>
 
         {service.tasks.length > 0 ? (
-          <ul className="min-h-[3.5rem] flex-1 space-y-1.5 rounded-lg border border-primary-fixed/50 bg-surface-container-lowest/75 px-3 py-2.5 backdrop-blur-sm">
+          <ul className="min-h-[4rem] flex-1 space-y-2 rounded-lg border border-primary-fixed/50 bg-surface-container-lowest/75 px-3.5 py-3 backdrop-blur-sm sm:min-h-[3.5rem] sm:space-y-1.5 sm:px-3 sm:py-2.5">
             {previewTasks.map((task) => (
-              <li key={task.id} className="flex items-center gap-1.5">
-                <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
+              <li key={task.id} className="flex items-center gap-2 sm:gap-1.5">
+                <span className="material-symbols-outlined material-symbols-filled text-[16px] text-primary sm:text-[14px]">
                   check_circle
                 </span>
-                <span className="line-clamp-1 font-body text-[11px] font-semibold text-on-surface">
+                <span className="line-clamp-1 font-body text-[12px] font-semibold text-on-surface sm:text-[11px]">
                   {task.title}
                 </span>
               </li>
             ))}
             {hiddenTaskCount > 0 ? (
-              <li className="pl-[1.35rem] font-body text-[11px] font-semibold text-primary">
+              <li className="pl-[1.5rem] font-body text-[12px] font-semibold text-primary sm:pl-[1.35rem] sm:text-[11px]">
                 +{hiddenTaskCount} more
               </li>
             ) : null}
           </ul>
         ) : (
-          <div className="min-h-[3.5rem] flex-1" />
+          <div className="min-h-[4rem] flex-1 sm:min-h-[3.5rem]" />
         )}
 
         <button
           type="button"
           onClick={onView}
-          className="inline-flex w-full items-center justify-center gap-0.5 py-1 font-body text-[13px] font-bold text-primary transition-colors hover:text-primary/80"
+          className="inline-flex w-full items-center justify-center gap-0.5 py-2 font-body text-[14px] font-bold text-primary transition-colors hover:text-primary/80 sm:py-1 sm:text-[13px]"
         >
           View details
           <span className="material-symbols-outlined text-[16px]">arrow_forward</span>

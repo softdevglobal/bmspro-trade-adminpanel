@@ -1343,7 +1343,7 @@ export default function ServicesPage() {
             ) : null}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,18.5rem)] sm:justify-items-start">
+          <div className="grid grid-cols-1 gap-5 justify-items-stretch sm:grid-cols-[repeat(auto-fill,18.5rem)] sm:justify-items-start sm:gap-4">
             {filteredServices.map((service) => (
               <ServiceOwnerCard
                 key={service.id}
