@@ -5,7 +5,7 @@ export default function TeamPage() {
   return (
     <DashboardShell
       title="Team"
-      subtitle="Add staff members who work inside your business."
+      subtitle="View staff members and setup new users for your business."
     >
       <TeamStaffForm />
     </DashboardShell>

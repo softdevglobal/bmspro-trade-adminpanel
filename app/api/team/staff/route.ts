@@ -1,5 +1,5 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -20,6 +20,10 @@ type StaffPayload = {
   phone: string;
   skills: string[];
   availability: string[];
+};
+
+type StaffUpdatePayload = StaffPayload & {
+  id: string;
 };
 
 type TimestampLike = {
@@ -136,6 +140,45 @@ function parseStaffPayload(raw: unknown):
   };
 }
 
+function parseStaffUpdatePayload(raw: unknown):
+  | { ok: true; value: StaffUpdatePayload }
+  | { ok: false; error: string } {
+  const parsed = parseStaffPayload(raw);
+  if (!parsed.ok) return parsed;
+
+  const id =
+    raw && typeof raw === "object"
+      ? sanitizeString((raw as Record<string, unknown>).id)
+      : "";
+  if (!id) {
+    return { ok: false, error: "Staff ID is required." };
+  }
+
+  return { ok: true, value: { ...parsed.value, id } };
+}
+
+async function getOwnedStaffRef(
+  staffId: string,
+  businessId: string
+): Promise<
+  | { ok: true; ref: DocumentReference }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection("users").doc(staffId);
+  const snap = await ref.get();
+
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Staff member not found." };
+  }
+
+  const data = snap.data();
+  if (data?.businessId !== businessId || data?.role !== "staff") {
+    return { ok: false, status: 404, error: "Staff member not found." };
+  }
+
+  return { ok: true, ref };
+}
+
 export async function POST(request: Request) {
   const auth = await requireBusinessUser(request);
   if (!auth.ok) {
@@ -243,4 +286,92 @@ export async function GET(request: Request) {
     }));
 
   return NextResponse.json({ ok: true, staff });
+}
+
+export async function PATCH(request: Request) {
+  const auth = await requireBusinessUser(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status }
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Invalid request body." },
+      { status: 400 }
+    );
+  }
+
+  const parsed = parseStaffUpdatePayload(body);
+  if (!parsed.ok) {
+    return NextResponse.json(parsed, { status: 400 });
+  }
+
+  const owned = await getOwnedStaffRef(parsed.value.id, auth.businessId);
+  if (!owned.ok) {
+    return NextResponse.json(
+      { ok: false, error: owned.error },
+      { status: owned.status }
+    );
+  }
+
+  const existing = await adminDb
+    .collection("users")
+    .where("email", "==", parsed.value.email)
+    .limit(2)
+    .get();
+
+  const duplicate = existing.docs.some((doc) => doc.id !== parsed.value.id);
+  if (duplicate) {
+    return NextResponse.json(
+      { ok: false, error: "A user with this email already exists." },
+      { status: 400 }
+    );
+  }
+
+  await owned.ref.update({
+    email: parsed.value.email,
+    fullName: parsed.value.fullName,
+    phone: parsed.value.phone,
+    skills: parsed.value.skills,
+    availability: parsed.value.availability,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return NextResponse.json({ ok: true, staffId: parsed.value.id });
+}
+
+export async function DELETE(request: Request) {
+  const auth = await requireBusinessUser(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status }
+    );
+  }
+
+  const staffId = sanitizeString(new URL(request.url).searchParams.get("id"));
+  if (!staffId) {
+    return NextResponse.json(
+      { ok: false, error: "Staff ID is required." },
+      { status: 400 }
+    );
+  }
+
+  const owned = await getOwnedStaffRef(staffId, auth.businessId);
+  if (!owned.ok) {
+    return NextResponse.json(
+      { ok: false, error: owned.error },
+      { status: owned.status }
+    );
+  }
+
+  await owned.ref.delete();
+
+  return NextResponse.json({ ok: true });
 }
