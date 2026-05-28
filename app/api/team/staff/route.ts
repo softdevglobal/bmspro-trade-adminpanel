@@ -13,6 +13,7 @@ const STAFF_SKILLS = new Set([
 ]);
 
 const STAFF_AVAILABILITY = new Set(["Weekdays", "Saturdays", "Sundays"]);
+const DEFAULT_STAFF_PASSWORD = "00001111";
 
 type StaffPayload = {
   fullName: string;
@@ -216,30 +217,82 @@ export async function POST(request: Request) {
     );
   }
 
-  const staffRef = adminDb.collection("users").doc();
+  try {
+    await adminAuth.getUserByEmail(parsed.value.email);
+    return NextResponse.json(
+      { ok: false, error: "A user with this email already exists." },
+      { status: 400 }
+    );
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code !== "auth/user-not-found") {
+      return NextResponse.json(
+        { ok: false, error: "Could not verify email availability." },
+        { status: 400 }
+      );
+    }
+  }
+
+  let authUid: string | null = null;
   const now = FieldValue.serverTimestamp();
 
-  await staffRef.set({
-    uid: staffRef.id,
-    email: parsed.value.email,
-    fullName: parsed.value.fullName,
-    phone: parsed.value.phone,
-    businessId: auth.businessId,
-    role: "staff",
-    skills: parsed.value.skills,
-    availability: parsed.value.availability,
-    status: "invited",
-    isActive: true,
-    createdByUid: auth.uid,
-    createdByEmail: auth.email ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
+  try {
+    const authUser = await adminAuth.createUser({
+      email: parsed.value.email,
+      password: DEFAULT_STAFF_PASSWORD,
+      displayName: parsed.value.fullName,
+      emailVerified: false,
+    });
+    authUid = authUser.uid;
 
-  return NextResponse.json(
-    { ok: true, staffId: staffRef.id },
-    { status: 201 }
-  );
+    await adminAuth.setCustomUserClaims(authUid, {
+      role: "staff",
+      businessId: auth.businessId,
+    });
+
+    await adminDb.collection("users").doc(authUid).set({
+      uid: authUid,
+      email: parsed.value.email,
+      fullName: parsed.value.fullName,
+      phone: parsed.value.phone,
+      businessId: auth.businessId,
+      role: "staff",
+      skills: parsed.value.skills,
+      availability: parsed.value.availability,
+      isActive: true,
+      createdByUid: auth.uid,
+      createdByEmail: auth.email ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return NextResponse.json(
+      { ok: true, staffId: authUid },
+      { status: 201 }
+    );
+  } catch (error: unknown) {
+    if (authUid) {
+      try {
+        await adminAuth.deleteUser(authUid);
+      } catch {
+        /* rollback best-effort */
+      }
+    }
+
+    const code = (error as { code?: string }).code;
+    if (code === "auth/email-already-exists") {
+      return NextResponse.json(
+        { ok: false, error: "A user with this email already exists." },
+        { status: 400 }
+      );
+    }
+
+    console.error("create staff failed:", error);
+    return NextResponse.json(
+      { ok: false, error: "Could not create this staff member." },
+      { status: 400 }
+    );
+  }
 }
 
 export async function GET(request: Request) {
@@ -267,7 +320,6 @@ export async function GET(request: Request) {
         role: sanitizeString(data.role),
         skills: sanitizeStringArray(data.skills),
         availability: sanitizeStringArray(data.availability),
-        status: sanitizeString(data.status) || "active",
         createdAt: timestampIso(data.createdAt),
         createdAtMillis: timestampMillis(data.createdAt),
       };
@@ -281,7 +333,6 @@ export async function GET(request: Request) {
       phone: member.phone,
       skills: member.skills,
       availability: member.availability,
-      status: member.status,
       createdAt: member.createdAt,
     }));
 
@@ -334,6 +385,27 @@ export async function PATCH(request: Request) {
     );
   }
 
+  try {
+    await adminAuth.updateUser(parsed.value.id, {
+      email: parsed.value.email,
+      displayName: parsed.value.fullName,
+    });
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code === "auth/email-already-exists") {
+      return NextResponse.json(
+        { ok: false, error: "A user with this email already exists." },
+        { status: 400 }
+      );
+    }
+    if (code !== "auth/user-not-found") {
+      return NextResponse.json(
+        { ok: false, error: "Could not update this staff member account." },
+        { status: 400 }
+      );
+    }
+  }
+
   await owned.ref.update({
     email: parsed.value.email,
     fullName: parsed.value.fullName,
@@ -372,6 +444,17 @@ export async function DELETE(request: Request) {
   }
 
   await owned.ref.delete();
+  try {
+    await adminAuth.deleteUser(staffId);
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code !== "auth/user-not-found") {
+      return NextResponse.json(
+        { ok: false, error: "Staff was removed, but auth cleanup failed." },
+        { status: 400 }
+      );
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

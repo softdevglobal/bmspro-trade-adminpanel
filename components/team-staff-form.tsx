@@ -31,11 +31,9 @@ type StaffMember = {
   phone: string | null;
   skills: string[];
   availability: string[];
-  status: string;
   createdAt: string | null;
 };
 
-type StaffFilter = "all" | "invited" | "active";
 type SetupMode = "create" | "edit";
 
 const EMPTY_FORM: StaffFormState = {
@@ -64,7 +62,6 @@ export function TeamStaffForm() {
   const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<StaffFilter>("all");
 
   const canSubmit = useMemo(
     () =>
@@ -76,35 +73,18 @@ export function TeamStaffForm() {
     [form],
   );
 
-  const staffCounts = useMemo(
-    () => ({
-      all: staffMembers.length,
-      invited: staffMembers.filter(
-        (member) => member.status.toLowerCase() === "invited",
-      ).length,
-      active: staffMembers.filter(
-        (member) => member.status.toLowerCase() === "active",
-      ).length,
-    }),
-    [staffMembers],
-  );
-
   const filteredStaffMembers = useMemo(() => {
     const query = search.trim().toLowerCase();
     return staffMembers.filter((member) => {
-      const status = member.status.toLowerCase();
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "invited" ? status === "invited" : status === "active");
       const matchesSearch =
         !query ||
         member.fullName.toLowerCase().includes(query) ||
         member.email.toLowerCase().includes(query) ||
         member.skills.some((skill) => skill.toLowerCase().includes(query));
 
-      return matchesFilter && matchesSearch;
+      return matchesSearch;
     });
-  }, [filter, search, staffMembers]);
+  }, [search, staffMembers]);
 
   function updateField(field: keyof StaffFormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -350,12 +330,9 @@ export function TeamStaffForm() {
       <StaffMembersList
         members={filteredStaffMembers}
         totalCount={staffMembers.length}
-        counts={staffCounts}
-        filter={filter}
         search={search}
         isLoading={isLoadingStaff}
         error={staffListError}
-        onFilterChange={setFilter}
         onSearchChange={setSearch}
         onRefresh={() => void loadStaffMembers()}
         onSetup={openSetup}
@@ -966,50 +943,12 @@ function ReviewMetaRow({
   );
 }
 
-function TeamFilterChip({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        active
-          ? "flex h-9 items-center gap-2 rounded-full bg-primary px-3 font-body text-[13px] font-semibold text-on-primary"
-          : "flex h-9 items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-semibold text-on-surface hover:bg-surface-container-low"
-      }
-    >
-      {label}
-      <span
-        className={
-          active
-            ? "rounded-full bg-on-primary/20 px-1.5 py-0.5 text-[11px]"
-            : "rounded-full bg-surface-variant px-1.5 py-0.5 text-[11px] text-on-surface-variant"
-        }
-      >
-        {count}
-      </span>
-    </button>
-  );
-}
-
 function StaffMembersList({
   members,
   totalCount,
-  counts,
-  filter,
   search,
   isLoading,
   error,
-  onFilterChange,
   onSearchChange,
   onRefresh,
   onSetup,
@@ -1019,12 +958,9 @@ function StaffMembersList({
 }: {
   members: StaffMember[];
   totalCount: number;
-  counts: Record<StaffFilter, number>;
-  filter: StaffFilter;
   search: string;
   isLoading: boolean;
   error: string | null;
-  onFilterChange: (filter: StaffFilter) => void;
   onSearchChange: (search: string) => void;
   onRefresh: () => void;
   onSetup: () => void;
@@ -1035,25 +971,13 @@ function StaffMembersList({
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="flex flex-wrap gap-2">
-          <TeamFilterChip
-            label="All"
-            count={counts.all}
-            active={filter === "all"}
-            onClick={() => onFilterChange("all")}
-          />
-          <TeamFilterChip
-            label="Invited"
-            count={counts.invited}
-            active={filter === "invited"}
-            onClick={() => onFilterChange("invited")}
-          />
-          <TeamFilterChip
-            label="Active"
-            count={counts.active}
-            active={filter === "active"}
-            onClick={() => onFilterChange("active")}
-          />
+        <div>
+          <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
+            Staff members
+          </h3>
+          <p className="font-body text-body-md text-on-surface-variant">
+            {totalCount} {totalCount === 1 ? "person" : "people"} saved as staff.
+          </p>
         </div>
 
         <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -1186,7 +1110,7 @@ function StaffMemberCard({
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
           </span>
-          {member.status || "active"}
+          Staff
         </span>
 
         <div className="absolute right-2 top-2 z-10 flex gap-0.5">
@@ -1371,9 +1295,6 @@ function StaffDetailDrawer({
               <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">
                 Staff member
               </p>
-              <span className="mt-2 inline-flex items-center rounded-full border border-primary/20 bg-primary-fixed px-2.5 py-1 font-body text-[11px] font-semibold uppercase text-on-primary-fixed-variant">
-                {member.status || "active"}
-              </span>
             </div>
           </div>
           <button
@@ -1409,7 +1330,6 @@ function StaffDetailDrawer({
           </DetailSection>
 
           <DetailSection title="Record">
-            <DetailRow label="Status" value={member.status || "active"} />
             <DetailRow label="Created" value={formatDate(member.createdAt)} />
           </DetailSection>
         </div>
