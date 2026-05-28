@@ -4,24 +4,32 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-const STEPS = ["Details", "Skills", "Availability"] as const;
+const STEPS = ["Details", "Role", "Availability"] as const;
 
-const SKILLS = [
-  { label: "Electrical", icon: "bolt" },
-  { label: "Plumbing", icon: "plumbing" },
-  { label: "Carpentry", icon: "carpenter" },
-  { label: "HVAC", icon: "ac_unit" },
-  { label: "General Maintenance", icon: "home_repair_service" },
+const WEEK_DAYS = [
+  { id: "monday", label: "Monday" },
+  { id: "tuesday", label: "Tuesday" },
+  { id: "wednesday", label: "Wednesday" },
+  { id: "thursday", label: "Thursday" },
+  { id: "friday", label: "Friday" },
+  { id: "saturday", label: "Saturday" },
+  { id: "sunday", label: "Sunday" },
 ] as const;
 
-const AVAILABILITY = ["Weekdays", "Saturdays", "Sundays"] as const;
+type WeekDayId = (typeof WEEK_DAYS)[number]["id"];
+
+type DayAvailability = {
+  day: WeekDayId;
+  isOff: boolean;
+  serviceAreas: string[];
+};
 
 type StaffFormState = {
   fullName: string;
   phone: string;
   email: string;
-  skills: string[];
-  availability: string[];
+  staffType: string;
+  availability: DayAvailability[];
 };
 
 type StaffStatus = "active" | "suspended";
@@ -31,26 +39,37 @@ type StaffMember = {
   fullName: string;
   email: string;
   phone: string | null;
-  skills: string[];
-  availability: string[];
+  staffType: string;
+  availability: DayAvailability[];
   status: StaffStatus;
   createdAt: string | null;
 };
 
 type SetupMode = "create" | "edit";
 
-const EMPTY_FORM: StaffFormState = {
-  fullName: "",
-  phone: "",
-  email: "",
-  skills: [],
-  availability: ["Weekdays"],
-};
+function defaultAvailability(): DayAvailability[] {
+  return WEEK_DAYS.map((day) => ({
+    day: day.id,
+    isOff: false,
+    serviceAreas: [],
+  }));
+}
+
+function emptyForm(): StaffFormState {
+  return {
+    fullName: "",
+    phone: "",
+    email: "",
+    staffType: "",
+    availability: defaultAvailability(),
+  };
+}
 
 export function TeamStaffForm() {
   const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
-  const [form, setForm] = useState<StaffFormState>(EMPTY_FORM);
+  const [serviceAreas, setServiceAreas] = useState<string[]>([]);
+  const [form, setForm] = useState<StaffFormState>(() => emptyForm());
   const [error, setError] = useState<string | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
   const [successMode, setSuccessMode] = useState<SetupMode>("create");
@@ -69,13 +88,8 @@ export function TeamStaffForm() {
   const [search, setSearch] = useState("");
 
   const canSubmit = useMemo(
-    () =>
-      form.fullName.trim().length > 0 &&
-      form.phone.trim().length > 0 &&
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
-      form.skills.length > 0 &&
-      form.availability.length > 0,
-    [form],
+    () => staffFormValidationError(form, serviceAreas) === null,
+    [form, serviceAreas],
   );
 
   const filteredStaffMembers = useMemo(() => {
@@ -85,45 +99,63 @@ export function TeamStaffForm() {
         !query ||
         member.fullName.toLowerCase().includes(query) ||
         member.email.toLowerCase().includes(query) ||
-        member.skills.some((skill) => skill.toLowerCase().includes(query));
+        staffTypeLabel(member.staffType).toLowerCase().includes(query);
 
       return matchesSearch;
     });
   }, [search, staffMembers]);
 
-  function updateField(field: keyof StaffFormState, value: string) {
+  function updateField(
+    field: "fullName" | "phone" | "email",
+    value: string,
+  ) {
     setForm((current) => ({ ...current, [field]: value }));
     setError(null);
   }
 
-  function toggleSkill(skill: string) {
+  function updateStaffType(staffType: string) {
+    setForm((current) => ({ ...current, staffType }));
+    setError(null);
+  }
+
+  function toggleOffDay(day: WeekDayId) {
     setForm((current) => {
-      const selected = current.skills.includes(skill);
       return {
         ...current,
-        skills: selected
-          ? current.skills.filter((item) => item !== skill)
-          : [...current.skills, skill],
+        availability: current.availability.map((item) =>
+          item.day === day
+            ? {
+                ...item,
+                isOff: !item.isOff,
+                serviceAreas: item.isOff ? item.serviceAreas : [],
+              }
+            : item,
+        ),
       };
     });
     setError(null);
   }
 
-  function toggleAvailability(day: string) {
-    setForm((current) => {
-      const selected = current.availability.includes(day);
-      return {
-        ...current,
-        availability: selected
-          ? current.availability.filter((item) => item !== day)
-          : [...current.availability, day],
-      };
-    });
+  function toggleDayServiceArea(day: WeekDayId, area: string) {
+    setForm((current) => ({
+      ...current,
+      availability: current.availability.map((item) => {
+        if (item.day !== day) return item;
+        const selected = item.serviceAreas.includes(area);
+        return {
+          ...item,
+          isOff: false,
+          serviceAreas: selected
+            ? item.serviceAreas.filter((value) => value !== area)
+            : [...item.serviceAreas, area],
+        };
+      }),
+    }));
     setError(null);
   }
 
   function resetFormState() {
-    setForm(EMPTY_FORM);
+    setForm(emptyForm());
     setCurrentStep(1);
     setError(null);
     setIsSaving(false);
@@ -141,8 +173,8 @@ export function TeamStaffForm() {
       fullName: member.fullName,
       phone: member.phone ?? "",
       email: member.email,
-      skills: member.skills,
-      availability: member.availability,
+      staffType: member.staffType,
+      availability: normalizeAvailability(member.availability, serviceAreas),
     });
     setCurrentStep(1);
     setError(null);
@@ -179,6 +211,7 @@ export function TeamStaffForm() {
       const data = (await response.json()) as {
         ok?: boolean;
         staff?: StaffMember[];
+        serviceAreas?: string[];
         error?: string;
       };
 
@@ -187,6 +220,7 @@ export function TeamStaffForm() {
       }
 
       setStaffMembers(data.staff ?? []);
+      setServiceAreas(data.serviceAreas ?? []);
     } catch (loadError) {
       setStaffListError(
         loadError instanceof Error
@@ -220,8 +254,13 @@ export function TeamStaffForm() {
       return;
     }
 
-    if (currentStep === 2 && form.skills.length === 0) {
-      setError("Select at least one working skill.");
+    if (currentStep === 2 && !form.staffType.trim()) {
+      setError("Type a staff role, e.g. Plumber or Electrician.");
+      return;
+    }
+
+    if (currentStep === 3 && !availabilityIsValid(form.availability, serviceAreas)) {
+      setError("Select service areas for each working day or mark the day off.");
       return;
     }
 
@@ -237,7 +276,8 @@ export function TeamStaffForm() {
 
     if (!canSubmit) {
       setError(
-        "Enter a name, mobile number, valid email, working skill and availability.",
+        staffFormValidationError(form, serviceAreas) ??
+          "Could not validate this staff member.",
       );
       return;
     }
@@ -258,7 +298,7 @@ export function TeamStaffForm() {
           fullName: form.fullName.trim(),
           phone: form.phone.trim(),
           email: form.email.trim(),
-          skills: form.skills,
+          staffType: form.staffType.trim(),
           availability: form.availability,
         }),
       });
@@ -427,9 +467,11 @@ export function TeamStaffForm() {
             <StaffSetupStepContent
               currentStep={currentStep}
               form={form}
+              serviceAreas={serviceAreas}
               onUpdateField={updateField}
-              onToggleSkill={toggleSkill}
-              onToggleAvailability={toggleAvailability}
+              onStaffTypeChange={updateStaffType}
+              onToggleOffDay={toggleOffDay}
+              onToggleServiceArea={toggleDayServiceArea}
             />
           </form>
         </StaffSetupModal>
@@ -488,15 +530,19 @@ export function TeamStaffForm() {
 function StaffSetupStepContent({
   currentStep,
   form,
+  serviceAreas,
   onUpdateField,
-  onToggleSkill,
-  onToggleAvailability,
+  onStaffTypeChange,
+  onToggleOffDay,
+  onToggleServiceArea,
 }: {
   currentStep: number;
   form: StaffFormState;
-  onUpdateField: (field: keyof StaffFormState, value: string) => void;
-  onToggleSkill: (skill: string) => void;
-  onToggleAvailability: (day: string) => void;
+  serviceAreas: string[];
+  onUpdateField: (field: "fullName" | "phone" | "email", value: string) => void;
+  onStaffTypeChange: (staffType: string) => void;
+  onToggleOffDay: (day: WeekDayId) => void;
+  onToggleServiceArea: (day: WeekDayId, area: string) => void;
 }) {
   if (currentStep === 1) {
     return (
@@ -549,57 +595,24 @@ function StaffSetupStepContent({
     return (
       <>
         <StaffSetupHero
-          eyebrow="Step 2 · Staff capability"
-          title="What work can they handle?"
-          description="Select the work skills that should be considered when assigning bookings and jobs."
+          eyebrow="Step 2 · Staff role"
+          title="What role does this staff member have?"
+          description="Type the role used when assigning bookings and jobs."
           icon="construction"
         />
 
         <StaffWizardSection
           icon="home_repair_service"
-          title="Working skills"
-          subtitle="Select at least one qualified area."
+          title="Role"
+          subtitle="Enter a role such as Plumber, Electrician, HVAC Technician or Supervisor."
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" aria-required="true">
-            {SKILLS.map((skill) => {
-              const selected = form.skills.includes(skill.label);
-              return (
-                <button
-                  key={skill.label}
-                  type="button"
-                  onClick={() => onToggleSkill(skill.label)}
-                  className={`group relative overflow-hidden rounded-2xl border p-4 text-left transition-all duration-200 ${
-                    selected
-                      ? "border-2 border-primary bg-primary-fixed/35 shadow-md shadow-primary/10 ring-2 ring-primary/15"
-                      : "border-outline-variant bg-surface-container-lowest hover:border-primary/30 hover:shadow-md"
-                  }`}
-                >
-                  <span
-                    className={`flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${
-                      selected
-                        ? "bg-primary text-on-primary"
-                        : "bg-surface-container-high text-outline group-hover:bg-primary-fixed group-hover:text-primary"
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[24px]">
-                      {skill.icon}
-                    </span>
-                  </span>
-                  <p className="mt-3 font-body text-[15px] font-semibold text-on-surface">
-                    {skill.label}
-                  </p>
-                  <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
-                    Available for matching bookings and job assignments.
-                  </p>
-                  {selected ? (
-                    <span className="material-symbols-outlined material-symbols-filled absolute right-3 top-3 text-[22px] text-primary">
-                      check_circle
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
+          <TextField
+            label="Role"
+            placeholder="e.g. Plumber, Electrician"
+            value={form.staffType}
+            onChange={onStaffTypeChange}
+            required
+          />
         </StaffWizardSection>
       </>
     );
@@ -610,22 +623,23 @@ function StaffSetupStepContent({
       <StaffSetupHero
         eyebrow="Step 3 · Availability"
         title="When can they take jobs?"
-        description="Choose their typical availability and review the staff profile before saving."
+        description="Choose all seven days, mark off days, and assign service areas to each working day."
         icon="event_available"
       />
 
       <StaffWizardSection
         icon="calendar_month"
         title="Typical availability"
-        subtitle="Select at least one working pattern."
+        subtitle="Working days need at least one service area. Off days do not."
       >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-required="true">
-          {AVAILABILITY.map((day) => (
-            <AvailabilityChoiceCard
-              key={day}
-              label={day}
-              checked={form.availability.includes(day)}
-              onToggle={() => onToggleAvailability(day)}
+        <div className="grid grid-cols-1 gap-3" aria-required="true">
+          {form.availability.map((day) => (
+            <DayAvailabilityCard
+              key={day.day}
+              availability={day}
+              serviceAreas={serviceAreas}
+              onToggleOff={() => onToggleOffDay(day.day)}
+              onToggleArea={(area) => onToggleServiceArea(day.day, area)}
             />
           ))}
         </div>
@@ -765,8 +779,8 @@ function StaffSetupModal({
             </h2>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
               {mode === "edit"
-                ? "Update contact details, skills and availability for this staff user."
-                : "Add contact details, skills and availability for this staff user."}
+                ? "Update contact details, role and availability for this staff user."
+                : "Add contact details, role and availability for this staff user."}
             </p>
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant sm:max-w-md">
               <div
@@ -888,48 +902,96 @@ function RequiredMark() {
   );
 }
 
-function AvailabilityChoiceCard({
-  label,
-  checked,
-  onToggle,
+function DayAvailabilityCard({
+  availability,
+  serviceAreas,
+  onToggleOff,
+  onToggleArea,
 }: {
-  label: string;
-  checked: boolean;
-  onToggle: () => void;
+  availability: DayAvailability;
+  serviceAreas: string[];
+  onToggleOff: () => void;
+  onToggleArea: (area: string) => void;
 }) {
+  const dayLabel = dayName(availability.day);
+
   return (
-    <button
-      type="button"
-      onClick={onToggle}
+    <div
       className={`relative overflow-hidden rounded-2xl border p-4 text-left transition-all duration-200 ${
-        checked
-          ? "border-2 border-primary bg-primary-fixed/35 shadow-md shadow-primary/10 ring-2 ring-primary/15"
-          : "border-outline-variant bg-surface-container-lowest hover:border-primary/30 hover:shadow-md"
+        availability.isOff
+          ? "border-outline-variant bg-surface-container-lowest opacity-80"
+          : "border-primary/30 bg-primary-fixed/20 shadow-sm"
       }`}
     >
-      <span
-        className={`flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${
-          checked
-            ? "bg-primary text-on-primary"
-            : "bg-surface-container-high text-outline"
-        }`}
-      >
-        <span className="material-symbols-outlined text-[24px]">
-          event_available
-        </span>
-      </span>
-      <p className="mt-3 font-body text-[15px] font-semibold text-on-surface">
-        {label}
-      </p>
-      <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
-        {checked ? "Available for jobs" : "Tap to include"}
-      </p>
-      {checked ? (
-        <span className="material-symbols-outlined material-symbols-filled absolute right-3 top-3 text-[22px] text-primary">
-          check_circle
-        </span>
-      ) : null}
-    </button>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className={`flex h-11 w-11 items-center justify-center rounded-xl ${
+              availability.isOff
+                ? "bg-surface-container-high text-outline"
+                : "bg-primary text-on-primary"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[24px]">
+              {availability.isOff ? "event_busy" : "event_available"}
+            </span>
+          </span>
+          <div>
+            <p className="font-body text-[15px] font-semibold text-on-surface">
+              {dayLabel}
+            </p>
+            <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
+              {availability.isOff
+                ? "Off day"
+                : `${availability.serviceAreas.length} service area${
+                    availability.serviceAreas.length === 1 ? "" : "s"
+                  } selected`}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onToggleOff}
+          className={`rounded-lg px-3 py-2 font-body text-[12px] font-semibold transition-colors ${
+            availability.isOff
+              ? "bg-primary text-on-primary hover:bg-primary/90"
+              : "border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container"
+          }`}
+        >
+          {availability.isOff ? "Mark working" : "Mark off"}
+        </button>
+      </div>
+
+      {!availability.isOff && (
+        <div className="mt-4">
+          {serviceAreas.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-outline-variant bg-surface-container-lowest px-3 py-3 font-body text-[12px] text-on-surface-variant">
+              No business service areas configured yet.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {serviceAreas.map((area) => {
+                const selected = availability.serviceAreas.includes(area);
+                return (
+                  <button
+                    key={area}
+                    type="button"
+                    onClick={() => onToggleArea(area)}
+                    className={`rounded-full border px-3 py-1.5 font-body text-[12px] font-semibold transition-all ${
+                      selected
+                        ? "border-primary bg-primary text-on-primary"
+                        : "border-outline-variant bg-surface-container-lowest text-on-surface hover:border-primary/40"
+                    }`}
+                  >
+                    {area}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -968,18 +1030,16 @@ function StaffReviewPanel({ form }: { form: StaffFormState }) {
 
       <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2">
         <ReviewMetaRow
-          icon="construction"
-          label="Skills"
-          value={form.skills.length > 0 ? form.skills.join(", ") : "No skills"}
+          icon={staffTypeIcon(form.staffType)}
+          label="Role"
+          value={staffTypeLabel(form.staffType)}
         />
         <ReviewMetaRow
           icon="event_available"
           label="Availability"
-          value={
-            form.availability.length > 0
-              ? form.availability.join(", ")
-              : "No availability"
-          }
+          value={`${workingDayCount(form.availability)} working day${
+            workingDayCount(form.availability) === 1 ? "" : "s"
+          }`}
         />
       </div>
     </section>
@@ -1119,7 +1179,7 @@ function StaffMembersList({
           <p className="mt-1 font-body text-body-md text-on-surface-variant">
             {totalCount === 0
               ? "Setup your first staff member to start assigning jobs."
-              : "Try clearing search or changing the status filter."}
+              : "Try a different staff name, email or role."}
           </p>
           {totalCount === 0 ? (
             <button
@@ -1163,7 +1223,8 @@ function StaffMemberCard({
   onDelete: () => void;
   onToggleStatus: () => void;
 }) {
-  const primarySkill = member.skills[0] ?? "Staff";
+  const roleLabel = staffTypeLabel(member.staffType);
+  const serviceAreaLabels = serviceAreasForStaff(member);
   const isSuspended = member.status === "suspended";
 
   return (
@@ -1246,7 +1307,7 @@ function StaffMemberCard({
             {member.fullName}
           </h3>
           <p className="mt-0.5 line-clamp-1 font-body text-[11px] text-white/85">
-            {primarySkill}
+            {roleLabel}
           </p>
         </div>
       </div>
@@ -1266,7 +1327,7 @@ function StaffMemberCard({
             <span className="material-symbols-outlined text-[13px] text-primary">
               event_available
             </span>
-            {member.availability.length}
+            {workingDayCount(member.availability)}
           </span>
         </div>
 
@@ -1275,23 +1336,23 @@ function StaffMemberCard({
             {member.email || "No email"}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {member.skills.length > 0 ? (
-              member.skills.slice(0, 3).map((skill) => (
+            {serviceAreaLabels.length > 0 ? (
+              serviceAreaLabels.slice(0, 3).map((area) => (
                 <span
-                  key={skill}
+                  key={area}
                   className="rounded-full bg-primary/10 px-2 py-0.5 font-body text-[10px] font-bold text-primary"
                 >
-                  {skill}
+                  {area}
                 </span>
               ))
             ) : (
               <span className="font-body text-[11px] italic text-outline">
-                No skills added
+                No service areas
               </span>
             )}
-            {member.skills.length > 3 ? (
+            {serviceAreaLabels.length > 3 ? (
               <span className="rounded-full bg-primary-fixed px-2 py-0.5 font-body text-[10px] font-bold text-on-primary-fixed-variant">
-                +{member.skills.length - 3}
+                +{serviceAreaLabels.length - 3}
               </span>
             ) : null}
           </div>
@@ -1302,9 +1363,7 @@ function StaffMemberCard({
             Added {formatDate(member.createdAt)}
           </span>
           <span className="line-clamp-1 max-w-28 text-right font-body text-[11px] font-bold text-primary">
-            {member.availability.length > 0
-              ? member.availability.join(", ")
-              : "No availability"}
+            {workingDayCount(member.availability)} working
           </span>
         </div>
 
@@ -1416,17 +1475,29 @@ function StaffDetailDrawer({
 
           <DetailSection title="Work profile">
             <DetailRow
-              label="Skills"
-              value={member.skills.length > 0 ? member.skills.join(", ") : "—"}
+              label="Role"
+              value={staffTypeLabel(member.staffType)}
             />
             <DetailRow
-              label="Availability"
-              value={
-                member.availability.length > 0
-                  ? member.availability.join(", ")
-                  : "—"
-              }
+              label="Working days"
+              value={`${workingDayCount(member.availability)} of 7`}
             />
+          </DetailSection>
+
+          <DetailSection title="Weekly service areas">
+            {member.availability.map((day) => (
+              <DetailRow
+                key={day.day}
+                label={dayName(day.day)}
+                value={
+                  day.isOff
+                    ? "Off day"
+                    : day.serviceAreas.length > 0
+                      ? day.serviceAreas.join(", ")
+                      : "No service areas"
+                }
+              />
+            ))}
           </DetailSection>
 
           <DetailSection title="Record">
@@ -1496,6 +1567,109 @@ function DetailRow({ label, value }: { label: string; value: string }) {
         {value}
       </dd>
     </div>
+  );
+}
+
+function staffTypeLabel(value: string) {
+  return value.trim() || "No role";
+}
+
+function staffTypeIcon(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.includes("plumb")) return "plumbing";
+  if (normalized.includes("electric")) return "bolt";
+  return "badge";
+}
+
+function dayName(day: WeekDayId) {
+  return WEEK_DAYS.find((item) => item.id === day)?.label ?? day;
+}
+
+function normalizeAvailability(
+  availability: unknown,
+  serviceAreas: string[],
+): DayAvailability[] {
+  if (Array.isArray(availability)) {
+    const byDay = new Map<string, unknown>();
+    for (const item of availability) {
+      if (item && typeof item === "object") {
+        const rawDay = (item as Record<string, unknown>).day;
+        if (typeof rawDay === "string") byDay.set(rawDay, item);
+      }
+    }
+
+    return WEEK_DAYS.map((day) => {
+      const raw = byDay.get(day.id);
+      if (!raw || typeof raw !== "object") {
+        return {
+          day: day.id,
+          isOff: false,
+          serviceAreas: [],
+        };
+      }
+
+      const record = raw as Record<string, unknown>;
+      return {
+        day: day.id,
+        isOff: record.isOff === true,
+        serviceAreas: Array.isArray(record.serviceAreas)
+          ? record.serviceAreas.filter(
+              (area): area is string =>
+                typeof area === "string" &&
+                (serviceAreas.length === 0 || serviceAreas.includes(area)),
+            )
+          : [],
+      };
+    });
+  }
+
+  return defaultAvailability();
+}
+
+function staffFormValidationError(
+  form: StaffFormState,
+  serviceAreas: string[],
+) {
+  if (
+    !form.fullName.trim() ||
+    !form.phone.trim() ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+  ) {
+    return "Enter a name, mobile number and valid email address.";
+  }
+
+  if (!form.staffType.trim()) {
+    return "Type a staff role, e.g. Plumber or Electrician.";
+  }
+
+  if (!availabilityIsValid(form.availability, serviceAreas)) {
+    return "Select service areas for each working day or mark the day off.";
+  }
+
+  return null;
+}
+
+function availabilityIsValid(
+  availability: DayAvailability[],
+  serviceAreas: string[],
+) {
+  const workingDays = availability.filter((day) => !day.isOff);
+  if (workingDays.length === 0) return false;
+  if (serviceAreas.length === 0) return true;
+  return workingDays.every((day) => day.serviceAreas.length > 0);
+}
+
+function workingDayCount(availability: DayAvailability[]) {
+  return availability.filter((day) => !day.isOff).length;
+}
+
+function serviceAreasForStaff(member: StaffMember) {
+  return Array.from(
+    new Set(
+      member.availability.flatMap((day) =>
+        day.isOff ? [] : day.serviceAreas,
+      ),
+    ),
   );
 }
 
