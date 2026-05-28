@@ -141,6 +141,7 @@ function mapInspectionDoc(
         : null,
     customRequest,
     customer: parseCustomer(data.customer),
+    customerId: typeof data.customerId === "string" ? data.customerId : null,
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),
@@ -159,6 +160,7 @@ function mapInspectionDoc(
 export async function createInspectionRequest(
   businessId: string,
   input: InspectionRequestInput,
+  options: { customerId?: string | null } = {},
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; error: string }
@@ -188,6 +190,7 @@ export async function createInspectionRequest(
     serviceBusinessType,
     customRequest: input.customRequest,
     customer: input.customer,
+    customerId: options.customerId ?? null,
     address: input.address,
     preferredSlots: input.preferredSlots,
     ownerProposedSlots: [],

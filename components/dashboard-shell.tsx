@@ -4,13 +4,67 @@ import { Sidebar } from "@/components/sidebar";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState } from "react";
 
+const PAGE_ICONS: Record<string, string> = {
+  Dashboard: "dashboard",
+  Bookings: "assignment",
+  "Inspection visits": "event_available",
+  Team: "groups",
+  Services: "settings_suggest",
+  Settings: "settings",
+  Tenants: "domain",
+};
+
+function iconForPageTitle(title: string, override?: string) {
+  if (override) return override;
+  return PAGE_ICONS[title] ?? "article";
+}
+
+function DashboardPageHeader({
+  title,
+  subtitle,
+  icon,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: string;
+}) {
+  return (
+    <div className="relative mb-4 min-w-0 overflow-hidden rounded-2xl bg-on-background shadow-[0_10px_28px_-12px_rgba(25,27,35,0.45)] sm:mb-6 sm:rounded-[20px]">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/25 via-primary/5 to-transparent"
+      />
+      <div className="relative flex min-w-0 items-start gap-3 px-4 py-4 sm:gap-4 sm:px-6 sm:py-5">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary shadow-[0_4px_14px_rgba(0,74,198,0.35)] sm:h-12 sm:w-12">
+          <span className="material-symbols-outlined material-symbols-filled text-[24px] sm:text-[26px]">
+            {icon}
+          </span>
+        </span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <h2 className="font-display text-[20px] font-bold leading-tight text-inverse-on-surface sm:text-[26px]">
+            {title}
+          </h2>
+          {subtitle ? (
+            <p className="mt-1 font-body text-[13px] leading-snug text-inverse-on-surface/75 sm:text-[15px]">
+              {subtitle}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DashboardShell({
   title,
   subtitle,
+  icon,
   children,
 }: {
   title: string;
   subtitle?: string;
+  /** Material Symbols name; inferred from page title when omitted. */
+  icon?: string;
   children: React.ReactNode;
 }) {
   const { user } = useAuth();
@@ -63,7 +117,7 @@ export function DashboardShell({
     : "lg:ml-sidebar-width";
 
   return (
-    <div className="min-h-dvh bg-background text-on-background">
+    <div className="min-h-dvh overflow-x-hidden bg-background text-on-background">
       <Sidebar
         isExpanded={isExpanded}
         isMobileOpen={isMobileOpen}
@@ -72,9 +126,9 @@ export function DashboardShell({
       />
 
       <div
-        className={`flex min-h-dvh flex-col transition-[margin] duration-300 ease-in-out ml-0 ${mainOffsetClass}`}
+        className={`flex min-h-dvh min-w-0 flex-col overflow-x-hidden transition-[margin] duration-300 ease-in-out ml-0 ${mainOffsetClass}`}
       >
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-outline-variant bg-surface/80 px-4 backdrop-blur-md sm:px-gutter">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b border-outline-variant bg-surface/80 px-3 backdrop-blur-md sm:h-16 sm:px-gutter">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -124,17 +178,12 @@ export function DashboardShell({
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-container-max flex-1 p-4 sm:p-gutter">
-          <div className="mb-6 sm:mb-8">
-            <h2 className="font-display text-[26px] font-semibold text-on-surface sm:text-display-md">
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="mt-1 font-body text-body-md text-on-surface-variant">
-                {subtitle}
-              </p>
-            )}
-          </div>
+        <main className="mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden px-3 py-4 sm:max-w-container-max sm:p-gutter">
+          <DashboardPageHeader
+            title={title}
+            subtitle={subtitle}
+            icon={iconForPageTitle(title, icon)}
+          />
           {children}
         </main>
       </div>

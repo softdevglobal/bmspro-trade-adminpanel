@@ -4,6 +4,18 @@ import type { BookingBusiness, BookingService } from "@/app/booknow/[slug]/page"
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
+import {
+  CUSTOMER_FIXED_NAV_BAR_CLASS,
+  CUSTOMER_FIXED_NAV_INNER_CLASS,
+  CustomerBookingShell,
+  CustomerNavSpacer,
+} from "@/components/customer-booking-shell";
+import {
+  CustomerAccountNav,
+  CustomerGuestNav,
+} from "@/components/customer-account-nav";
+import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
+import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 
 type Props = {
   business: BookingBusiness;
@@ -35,7 +47,6 @@ function isServiceAddressComplete(address: ServiceAddress): boolean {
 
 export function BookingEngine({ business, services }: Props) {
   const reducedMotion = useReducedMotion();
-  const [copied, setCopied] = useState(false);
 
   const location = useMemo(() => {
     if (business.state && business.postcode) {
@@ -51,56 +62,38 @@ export function BookingEngine({ business, services }: Props) {
     ? `mailto:${business.businessEmail}`
     : null;
 
-  async function handleShare() {
-    if (typeof window === "undefined") return;
-    const url = window.location.href;
-    const nav = navigator as Navigator & {
-      share?: (data: ShareData) => Promise<void>;
-    };
-    try {
-      if (typeof nav.share === "function") {
-        await nav.share({
-          title: business.businessName,
-          text: `Book ${business.businessName} on BMS Pro Trade`,
-          url,
-        });
-        return;
-      }
-      await nav.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* user cancelled */
-    }
-  }
+  useEffect(() => {
+    rememberBookingSlug(business.slug);
+  }, [business.slug]);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#fbf8f3] text-on-surface">
-      <AnimatedBackdrop reducedMotion={!!reducedMotion} />
+    <CustomerBookingShell
+      backdrop={<AnimatedBackdrop reducedMotion={!!reducedMotion} />}
+    >
+      <TopBar businessName={business.businessName} />
 
-      <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-6 sm:px-6 sm:py-10">
-        <TopBar onShare={handleShare} copied={copied} />
-
-        {/* Hero split */}
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="relative mt-8 overflow-hidden rounded-[32px] border border-white/80 bg-white/85 p-6 shadow-[0_24px_60px_-24px_rgba(31,29,26,0.18)] backdrop-blur-xl sm:p-10"
-        >
-          <div className="relative grid gap-10 lg:grid-cols-[1.2fr_1fr] lg:items-center">
+      {/* Hero split — same card footprint as account panel */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        className="relative mt-4 flex min-h-[min(72vh,640px)] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:rounded-[24px] sm:p-6"
+      >
+          <div className="relative grid gap-5 lg:grid-cols-[1.2fr_1fr] lg:items-center lg:gap-10">
             <HeroContent
               business={business}
               location={location}
               reducedMotion={!!reducedMotion}
             />
-            <RadarVisualization
-              business={business}
-              reducedMotion={!!reducedMotion}
-            />
+            <div className="hidden lg:block">
+              <RadarVisualization
+                business={business}
+                reducedMotion={!!reducedMotion}
+              />
+            </div>
           </div>
 
-          <div className="relative mt-10">
+          <div className="relative mt-6 border-t border-stone-200/70 pt-6 sm:mt-10 sm:border-t-0 sm:pt-0">
             <ServiceBookingFlow
               slug={business.slug}
               businessName={business.businessName}
@@ -112,13 +105,12 @@ export function BookingEngine({ business, services }: Props) {
           </div>
         </motion.section>
 
-        <BookingFooter
-          business={business}
-          phoneHref={phoneHref}
-          emailHref={emailHref}
-        />
-      </div>
-    </main>
+      <BookingFooter
+        business={business}
+        phoneHref={phoneHref}
+        emailHref={emailHref}
+      />
+    </CustomerBookingShell>
   );
 }
 
@@ -126,39 +118,31 @@ export function BookingEngine({ business, services }: Props) {
  * Top bar
  * ========================================================================== */
 
-function TopBar({
-  onShare,
-  copied,
-}: {
-  onShare: () => void;
-  copied: boolean;
-}) {
+function TopBar({ businessName }: { businessName: string }) {
+  const { status } = useCustomerAuth();
+
+  if (status === "loading") {
+    return <CustomerNavSpacer />;
+  }
+
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: "easeOut" }}
-      className="flex items-center justify-between"
-    >
-      <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-white/95 px-3 py-1.5 shadow-sm backdrop-blur">
-        <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
-          bolt
-        </span>
-        <span className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          BMS Pro Trade
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={onShare}
-        className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/80 px-3 py-1.5 font-body text-[12px] font-semibold text-on-surface shadow-sm backdrop-blur transition-all hover:scale-105 hover:bg-white"
+    <>
+      <motion.header
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className={CUSTOMER_FIXED_NAV_BAR_CLASS}
       >
-        <span className="material-symbols-outlined text-[16px]">
-          {copied ? "check" : "ios_share"}
-        </span>
-        {copied ? "Link copied" : "Share"}
-      </button>
-    </motion.header>
+        <div className={CUSTOMER_FIXED_NAV_INNER_CLASS}>
+          {status === "authenticated" ? (
+            <CustomerAccountNav />
+          ) : (
+            <CustomerGuestNav businessName={businessName} />
+          )}
+        </div>
+      </motion.header>
+      <CustomerNavSpacer />
+    </>
   );
 }
 
@@ -204,7 +188,7 @@ function HeroContent({
 
       <motion.h1
         variants={itemVariants}
-        className="mt-4 font-display text-[34px] font-bold leading-[1.05] tracking-tight text-on-surface sm:text-[48px]"
+        className="mt-3 font-display text-[26px] font-bold leading-[1.08] tracking-tight text-on-surface sm:mt-4 sm:text-[48px]"
       >
         Book{" "}
         <span className="relative inline-block">
@@ -225,7 +209,7 @@ function HeroContent({
 
       <motion.p
         variants={itemVariants}
-        className="mt-3 font-body text-body-lg text-on-surface-variant"
+        className="mt-2 hidden font-body text-body-lg text-on-surface-variant sm:block"
       >
         Local trade pros, online booking, no callbacks. Pick a time and
         we&apos;ll confirm in minutes.
@@ -487,18 +471,37 @@ const EMPTY_ADDRESS: ServiceAddress = {
 };
 
 const BOOKING_INPUT_CLASS =
-  "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10";
+  "mt-1 w-full min-w-0 rounded-xl border border-stone-200 bg-white px-3 py-3 font-body text-[16px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 sm:py-2.5 sm:text-[14px]";
+
+const BOOKING_STEP_PANEL_CLASS =
+  "w-full min-w-0 rounded-xl border border-stone-200 bg-[#faf8f5] p-3 sm:rounded-2xl sm:p-5";
 
 type RequestType = "existing_service" | "custom_quote";
 type SlotTimeRange = "morning" | "afternoon";
 
 type PreferredSlot = { date: string; timeRange: SlotTimeRange };
 
-const TIME_RANGE_OPTIONS: { id: SlotTimeRange; label: string; hint: string }[] =
-  [
-    { id: "morning", label: "Morning", hint: "8am – 12pm" },
-    { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm" },
-  ];
+const TIME_RANGE_OPTIONS: {
+  id: SlotTimeRange;
+  label: string;
+  hint: string;
+  icon: string;
+}[] = [
+  { id: "morning", label: "Morning", hint: "8am – 12pm", icon: "wb_twilight" },
+  { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
+];
+
+const DAYS_PER_PAGE = 8;
+const MAX_DAY_PAGES = 8;
+
+type DayOption = {
+  iso: string;
+  weekdayShort: string;
+  dayNum: number;
+  monthShort: string;
+  isToday: boolean;
+  isTomorrow: boolean;
+};
 
 function formatLocalDateInput(date: Date): string {
   const year = date.getFullYear();
@@ -521,6 +524,468 @@ function formatPrettyDate(iso: string): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function atLocalNoon(date: Date): Date {
+  const next = new Date(date);
+  next.setHours(12, 0, 0, 0);
+  return next;
+}
+
+function firstBookableDay(from = new Date()): Date {
+  return atLocalNoon(from);
+}
+
+function buildDayOption(date: Date): DayOption {
+  const iso = formatLocalDateInput(date);
+  const today = todayIso();
+  const tomorrowDate = atLocalNoon(new Date());
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = formatLocalDateInput(tomorrowDate);
+
+  return {
+    iso,
+    weekdayShort: date.toLocaleDateString(undefined, { weekday: "short" }),
+    dayNum: date.getDate(),
+    monthShort: date.toLocaleDateString(undefined, { month: "short" }),
+    isToday: iso === today,
+    isTomorrow: iso === tomorrow,
+  };
+}
+
+function getDayPage(pageIndex: number, pageSize: number): DayOption[] {
+  let cursor = firstBookableDay();
+  const toSkip = pageIndex * pageSize;
+
+  for (let i = 0; i < toSkip; i += 1) {
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const options: DayOption[] = [];
+  for (let i = 0; i < pageSize; i += 1) {
+    options.push(buildDayOption(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return options;
+}
+
+function dayOptionFromIso(iso: string): DayOption | null {
+  if (!iso) return null;
+  const parsed = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return buildDayOption(parsed);
+}
+
+function isBeforeMinDate(iso: string, minDate: string): boolean {
+  return iso < minDate;
+}
+
+function monthStartMondayOffset(year: number, month: number): number {
+  const first = new Date(year, month, 1);
+  return (first.getDay() + 6) % 7;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function BookingMonthCalendar({
+  selectedIso,
+  minDate,
+  onSelect,
+}: {
+  selectedIso: string;
+  minDate: string;
+  onSelect: (iso: string) => void;
+}) {
+  const initialView = selectedIso
+    ? new Date(`${selectedIso}T12:00:00`)
+    : atLocalNoon(new Date());
+  const [viewYear, setViewYear] = useState(initialView.getFullYear());
+  const [viewMonth, setViewMonth] = useState(initialView.getMonth());
+
+  const today = todayIso();
+  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(
+    undefined,
+    { month: "long", year: "numeric" },
+  );
+
+  const minView = useMemo(() => {
+    const parsed = new Date(`${minDate}T12:00:00`);
+    return { year: parsed.getFullYear(), month: parsed.getMonth() };
+  }, [minDate]);
+
+  const canGoPrev =
+    viewYear > minView.year ||
+    (viewYear === minView.year && viewMonth > minView.month);
+
+  function shiftMonth(delta: number) {
+    const next = new Date(viewYear, viewMonth + delta, 1);
+    setViewYear(next.getFullYear());
+    setViewMonth(next.getMonth());
+  }
+
+  const gridCells = useMemo(() => {
+    const offset = monthStartMondayOffset(viewYear, viewMonth);
+    const totalDays = daysInMonth(viewYear, viewMonth);
+    const cells: Array<{ iso: string; dayNum: number } | null> = [];
+
+    for (let i = 0; i < offset; i += 1) cells.push(null);
+    for (let day = 1; day <= totalDays; day += 1) {
+      const date = new Date(viewYear, viewMonth, day, 12, 0, 0, 0);
+      cells.push({ iso: formatLocalDateInput(date), dayNum: day });
+    }
+    return cells;
+  }, [viewYear, viewMonth]);
+
+  const weekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
+
+  return (
+    <div className="mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-2 shadow-sm">
+      <div className="flex items-center justify-between gap-1">
+        <button
+          type="button"
+          disabled={!canGoPrev}
+          onClick={() => shiftMonth(-1)}
+          aria-label="Previous month"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <span className="material-symbols-outlined text-[16px]">
+            chevron_left
+          </span>
+        </button>
+        <p className="truncate font-body text-[12px] font-bold text-on-surface">
+          {monthLabel}
+        </p>
+        <button
+          type="button"
+          onClick={() => shiftMonth(1)}
+          aria-label="Next month"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary"
+        >
+          <span className="material-symbols-outlined text-[16px]">
+            chevron_right
+          </span>
+        </button>
+      </div>
+
+      <div className="mt-1.5 grid grid-cols-7 gap-px">
+        {weekdayLabels.map((label, index) => (
+          <span
+            key={`${label}-${index}`}
+            className="flex h-5 items-center justify-center font-body text-[9px] font-bold text-on-surface-variant"
+          >
+            {label}
+          </span>
+        ))}
+        {gridCells.map((cell, index) => {
+          if (!cell) {
+            return (
+              <span key={`empty-${index}`} className="h-7" aria-hidden />
+            );
+          }
+
+          const past = isBeforeMinDate(cell.iso, minDate);
+          const disabled = past;
+          const selected = selectedIso === cell.iso;
+          const isToday = cell.iso === today;
+
+          return (
+            <button
+              key={cell.iso}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSelect(cell.iso)}
+              className={`flex h-7 w-full items-center justify-center rounded-md font-body text-[11px] font-semibold leading-none transition-colors ${
+                disabled
+                  ? "cursor-not-allowed text-stone-300"
+                  : selected
+                    ? "bg-primary text-on-primary"
+                    : isToday
+                      ? "bg-primary/12 text-primary ring-1 ring-primary/25"
+                      : "text-on-surface hover:bg-stone-100"
+              }`}
+            >
+              {cell.dayNum}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PreferredSlotPicker({
+  slot,
+  slotIndex,
+  minDate,
+  allSlots,
+  dayPage,
+  onDayPageChange,
+  onDateChange,
+  onTimeChange,
+}: {
+  slot: PreferredSlot;
+  slotIndex: number;
+  minDate: string;
+  allSlots: PreferredSlot[];
+  dayPage: number;
+  onDayPageChange: (page: number) => void;
+  onDateChange: (iso: string) => void;
+  onTimeChange: (timeRange: SlotTimeRange) => void;
+}) {
+  const [showMonthCalendar, setShowMonthCalendar] = useState(false);
+
+  const takenCombos = useMemo(() => {
+    const combos = new Set<string>();
+    allSlots.forEach((entry, index) => {
+      if (index !== slotIndex && entry.date) {
+        combos.add(`${entry.date}-${entry.timeRange}`);
+      }
+    });
+    return combos;
+  }, [allSlots, slotIndex]);
+
+  const pageDays = useMemo(() => getDayPage(dayPage, DAYS_PER_PAGE), [dayPage]);
+
+  const offPageSelection = useMemo(() => {
+    if (!slot.date || pageDays.some((day) => day.iso === slot.date)) {
+      return null;
+    }
+    return dayOptionFromIso(slot.date);
+  }, [slot.date, pageDays]);
+
+  const displayDays = useMemo(() => {
+    if (!offPageSelection) return pageDays;
+    return [
+      offPageSelection,
+      ...pageDays.filter((day) => day.iso !== offPageSelection.iso),
+    ];
+  }, [offPageSelection, pageDays]);
+
+  const morningTaken =
+    slot.date.length > 0 && takenCombos.has(`${slot.date}-morning`);
+  const afternoonTaken =
+    slot.date.length > 0 && takenCombos.has(`${slot.date}-afternoon`);
+
+  const selectedTimeLabel =
+    TIME_RANGE_OPTIONS.find((option) => option.id === slot.timeRange)?.label ??
+    "";
+
+  return (
+    <div className="mt-3 flex flex-col gap-4">
+      <div>
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Pick a day
+        </span>
+
+        <div className="mt-2 flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
+          <button
+            type="button"
+            disabled={dayPage === 0}
+            onClick={() => onDayPageChange(Math.max(0, dayPage - 1))}
+            aria-label="Show earlier dates"
+            className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              chevron_left
+            </span>
+          </button>
+
+          {displayDays.map((day) => {
+            const selected = slot.date === day.iso;
+            const relativeLabel = day.isToday
+              ? "Today"
+              : day.isTomorrow
+                ? "Tomorrow"
+                : null;
+            return (
+              <button
+                key={day.iso}
+                type="button"
+                onClick={() => onDateChange(day.iso)}
+                className={`flex min-h-[5.5rem] min-w-[4.5rem] shrink-0 flex-col items-center justify-between rounded-2xl border px-2 py-2 text-center transition-all ${
+                  selected
+                    ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 shadow-[0_8px_20px_-12px_rgba(67,123,255,0.65)] ring-2 ring-primary/25"
+                    : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
+                }`}
+              >
+                <span
+                  className={`font-body text-[10px] font-bold uppercase tracking-wide ${
+                    selected ? "text-primary" : "text-on-surface-variant"
+                  }`}
+                >
+                  {day.weekdayShort}
+                </span>
+                <span
+                  className={`font-display text-[22px] font-semibold leading-none ${
+                    selected ? "text-primary" : "text-on-surface"
+                  }`}
+                >
+                  {day.dayNum}
+                </span>
+                <span
+                  className={`font-body text-[10px] font-semibold ${
+                    selected ? "text-primary/80" : "text-on-surface-variant"
+                  }`}
+                >
+                  {day.monthShort}
+                </span>
+                <span className="flex h-4 items-center justify-center">
+                  {selected ? (
+                    <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
+                      check_circle
+                    </span>
+                  ) : relativeLabel ? (
+                    <span
+                      className={`font-body text-[9px] font-bold ${
+                        day.isToday ? "text-primary" : "text-stone-600"
+                      }`}
+                    >
+                      {relativeLabel}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            disabled={dayPage >= MAX_DAY_PAGES - 1}
+            onClick={() =>
+              onDayPageChange(Math.min(MAX_DAY_PAGES - 1, dayPage + 1))
+            }
+            aria-label="Show later dates"
+            className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              chevron_right
+            </span>
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowMonthCalendar((open) => !open)}
+          className="mt-2 inline-flex items-center gap-1 font-body text-[11px] font-semibold text-primary hover:underline"
+        >
+          <span className="material-symbols-outlined text-[14px]">
+            {showMonthCalendar ? "expand_less" : "calendar_month"}
+          </span>
+          {showMonthCalendar ? "Hide calendar" : "Browse full calendar"}
+        </button>
+
+        {showMonthCalendar ? (
+          <BookingMonthCalendar
+            selectedIso={slot.date}
+            minDate={minDate}
+            onSelect={(iso) => {
+              onDateChange(iso);
+              setShowMonthCalendar(false);
+            }}
+          />
+        ) : null}
+      </div>
+
+      <div>
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Pick a time window
+        </span>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {TIME_RANGE_OPTIONS.map((option) => {
+            const checked = slot.timeRange === option.id;
+            const disabled =
+              !slot.date ||
+              takenCombos.has(`${slot.date}-${option.id}`);
+            return (
+              <button
+                type="button"
+                key={option.id}
+                disabled={disabled}
+                onClick={() => onTimeChange(option.id)}
+                className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
+                  disabled
+                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
+                    : checked
+                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                      : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+                }`}
+              >
+                <span
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
+                    checked
+                      ? "bg-primary text-on-primary shadow-sm"
+                      : "bg-stone-100 text-stone-600"
+                  }`}
+                >
+                  <span className="material-symbols-outlined material-symbols-filled text-[20px]">
+                    {option.icon}
+                  </span>
+                </span>
+                <span>
+                  <span
+                    className={`block font-body text-[14px] font-bold ${
+                      checked ? "text-primary" : "text-on-surface"
+                    }`}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    {option.hint}
+                  </span>
+                </span>
+                {checked ? (
+                  <span className="absolute right-2 top-2 material-symbols-outlined material-symbols-filled text-[18px] text-primary">
+                    check_circle
+                  </span>
+                ) : null}
+                {disabled && slot.date ? (
+                  <span className="absolute bottom-2 right-2 font-body text-[9px] font-bold uppercase tracking-wide text-outline">
+                    Used
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {slot.date ? (
+        <div
+          className={`rounded-xl border px-3 py-2.5 ${
+            morningTaken && afternoonTaken
+              ? "border-amber-200 bg-amber-50/80"
+              : "border-primary/25 bg-primary/5"
+          }`}
+        >
+          <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface">
+            <span className="material-symbols-outlined text-[16px] text-primary">
+              event_available
+            </span>
+            {formatPrettyDate(slot.date)}
+            {selectedTimeLabel ? (
+              <>
+                <span className="text-on-surface-variant">·</span>
+                <span className="text-primary">{selectedTimeLabel}</span>
+              </>
+            ) : null}
+          </p>
+          {morningTaken && afternoonTaken ? (
+            <p className="mt-1 font-body text-[11px] text-amber-800">
+              Both time windows are already used in another option — pick a
+              different day.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+          Choose a day above, then pick morning or afternoon.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function ServiceBookingFlow({
@@ -561,6 +1026,29 @@ function ServiceBookingFlow({
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(
     null,
   );
+  const [workingDayPage, setWorkingDayPage] = useState(0);
+
+  const customerAuth = useCustomerAuth();
+  const isAuthenticated = customerAuth.status === "authenticated";
+  const profile = customerAuth.profile;
+  const customerEmailFromAuth =
+    profile?.email ?? customerAuth.user?.email ?? "";
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setCustomer((prev) => ({
+      fullName: profile?.fullName?.trim() || prev.fullName,
+      email: customerEmailFromAuth || prev.email,
+      phone: profile?.phone?.trim() || prev.phone,
+    }));
+  }, [
+    isAuthenticated,
+    profile?.fullName,
+    profile?.phone,
+    customerEmailFromAuth,
+  ]);
+
+  const profileLocked = isAuthenticated;
 
   const minDate = useMemo(() => todayIso(), []);
   const selectedService =
@@ -631,14 +1119,42 @@ function ServiceBookingFlow({
     );
   }
 
-  async function handleSubmit() {
-    if (!canSubmit) return;
+  function handleSlotDateChange(index: number, iso: string) {
+    setPreferredSlots((prev) => {
+      const taken = new Set(
+        prev
+          .filter((_, idx) => idx !== index && _.date)
+          .map((entry) => `${entry.date}-${entry.timeRange}`),
+      );
+      return prev.map((slot, idx) => {
+        if (idx !== index) return slot;
+        let timeRange = slot.timeRange;
+        if (iso && taken.has(`${iso}-${timeRange}`)) {
+          const alt: SlotTimeRange =
+            timeRange === "morning" ? "afternoon" : "morning";
+          if (!taken.has(`${iso}-${alt}`)) timeRange = alt;
+        }
+        return { date: iso, timeRange };
+      });
+    });
+    setSubmitError(null);
+  }
+
+  async function submitInspectionRequest() {
     setSubmitting(true);
     setSubmitError(null);
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      const idToken = await customerAuth.getIdToken();
+      if (idToken) {
+        headers.authorization = `Bearer ${idToken}`;
+      }
+
       const response = await fetch("/api/booking/inspection-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           slug,
           requestType,
@@ -685,6 +1201,35 @@ function ServiceBookingFlow({
     }
   }
 
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    if (!isAuthenticated) {
+      const snapshot = {
+        fullName: customer.fullName.trim(),
+        phone: customer.phone.replace(/\D/g, ""),
+      };
+      customerAuth.openAuth({
+        mode: "signup",
+        businessName,
+        defaults: {
+          fullName: snapshot.fullName,
+          phone: snapshot.phone,
+          email: customer.email,
+        },
+        onAuthenticated: async () => {
+          try {
+            await customerAuth.saveProfile(snapshot);
+          } catch {
+            /* non-fatal */
+          }
+          void submitInspectionRequest();
+        },
+      });
+      return;
+    }
+    await submitInspectionRequest();
+  }
+
   if (submittedRequestId) {
     return (
       <SubmittedConfirmation
@@ -703,8 +1248,8 @@ function ServiceBookingFlow({
   const existingServiceAvailable = services.length > 0;
 
   return (
-    <div className="relative overflow-hidden rounded-[24px] border border-stone-200/90 bg-white/95 p-6 shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)] sm:p-8">
-      <div className="relative space-y-6 text-on-surface">
+    <div className="relative w-full min-w-0 sm:overflow-hidden sm:rounded-[24px] sm:border sm:border-stone-200/90 sm:bg-white/95 sm:p-8 sm:shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)]">
+      <div className="relative space-y-4 text-on-surface sm:space-y-6">
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-[#faf8f5] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-600">
             <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
@@ -712,23 +1257,23 @@ function ServiceBookingFlow({
             </span>
             Inspection visit request
           </div>
-          <h3 className="mt-3 font-display text-headline-sm font-semibold text-on-surface sm:text-headline-md">
+          <h3 className="mt-2 font-display text-[20px] font-semibold leading-snug text-on-surface sm:mt-3 sm:text-headline-md">
             Request a visit with {businessName}
           </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+          <p className="mt-1 font-body text-[14px] leading-snug text-on-surface-variant sm:text-body-md">
             Tell us what you need and pick up to 3 dates that suit you. The
             team will confirm a visit time and an inspector.
           </p>
         </div>
 
         {/* Step 1 — Request type */}
-        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+        <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader step={1} title="What do you need?" active />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
             Choose an existing service or describe a custom job for a quote.
           </p>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:mt-4 sm:grid-cols-2 sm:gap-3">
             <RequestTypeOption
               icon="format_list_bulleted"
               label="Request an existing service"
@@ -820,7 +1365,7 @@ function ServiceBookingFlow({
         </div>
 
         {/* Step 2 — Address */}
-        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+        <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader
             step={2}
             title="Service address"
@@ -871,7 +1416,7 @@ function ServiceBookingFlow({
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
-            <label className="block sm:col-span-2 sm:max-w-[12rem]">
+            <label className="block sm:col-span-2 sm:max-w-[12rem] max-sm:w-full">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
                 Postcode
               </span>
@@ -889,7 +1434,7 @@ function ServiceBookingFlow({
         </div>
 
         {/* Step 3 — Preferred dates */}
-        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+        <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader
             step={3}
             title="Preferred dates & times"
@@ -897,8 +1442,8 @@ function ServiceBookingFlow({
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Pick up to 3 windows that work for you. The owner will confirm one
-            (or propose alternatives).
+            Tap a day and morning or afternoon window — up to 3 options. The
+            owner will confirm one (or propose alternatives).
           </p>
 
           <ul className="mt-4 space-y-3">
@@ -907,7 +1452,7 @@ function ServiceBookingFlow({
                 key={index}
                 className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
                       <span className="material-symbols-outlined text-[14px]">
@@ -930,57 +1475,18 @@ function ServiceBookingFlow({
                   ) : null}
                 </div>
 
-                <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,180px),1fr] sm:items-start">
-                  <label className="block">
-                    <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                      Date
-                    </span>
-                    <input
-                      type="date"
-                      min={minDate}
-                      value={slot.date}
-                      onChange={(event) =>
-                        updateSlot(index, "date", event.target.value)
-                      }
-                      className={BOOKING_INPUT_CLASS}
-                    />
-                  </label>
-                  <div>
-                    <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                      Time range
-                    </span>
-                    <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {TIME_RANGE_OPTIONS.map((option) => {
-                        const checked = slot.timeRange === option.id;
-                        return (
-                          <button
-                            type="button"
-                            key={option.id}
-                            onClick={() =>
-                              updateSlot(index, "timeRange", option.id)
-                            }
-                            className={`flex flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                              checked
-                                ? "border-primary bg-primary/10 ring-1 ring-primary/20"
-                                : "border-stone-200 bg-white hover:border-stone-300"
-                            }`}
-                          >
-                            <span
-                              className={`font-body text-[13px] font-semibold ${
-                                checked ? "text-primary" : "text-on-surface"
-                              }`}
-                            >
-                              {option.label}
-                            </span>
-                            <span className="font-body text-[11px] text-on-surface-variant">
-                              {option.hint}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
+                <PreferredSlotPicker
+                  slot={slot}
+                  slotIndex={index}
+                  minDate={minDate}
+                  allSlots={preferredSlots}
+                  dayPage={workingDayPage}
+                  onDayPageChange={setWorkingDayPage}
+                  onDateChange={(iso) => handleSlotDateChange(index, iso)}
+                  onTimeChange={(timeRange) =>
+                    updateSlot(index, "timeRange", timeRange)
+                  }
+                />
               </li>
             ))}
           </ul>
@@ -998,7 +1504,7 @@ function ServiceBookingFlow({
         </div>
 
         {/* Step 4 — Contact details */}
-        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+        <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader
             step={4}
             title="Your contact details"
@@ -1021,7 +1527,12 @@ function ServiceBookingFlow({
                 onChange={(e) => updateCustomer("fullName", e.target.value)}
                 placeholder="e.g. Alex Thompson"
                 autoComplete="name"
-                className={BOOKING_INPUT_CLASS}
+                readOnly={profileLocked}
+                className={`${BOOKING_INPUT_CLASS} ${
+                  profileLocked
+                    ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
+                    : ""
+                }`}
               />
             </label>
             <label className="block">
@@ -1035,7 +1546,12 @@ function ServiceBookingFlow({
                 onChange={(e) => updateCustomer("phone", e.target.value)}
                 placeholder="0400000000"
                 autoComplete="tel"
-                className={BOOKING_INPUT_CLASS}
+                readOnly={profileLocked}
+                className={`${BOOKING_INPUT_CLASS} ${
+                  profileLocked
+                    ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
+                    : ""
+                }`}
               />
             </label>
             <label className="block">
@@ -1048,10 +1564,29 @@ function ServiceBookingFlow({
                 onChange={(e) => updateCustomer("email", e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
-                className={BOOKING_INPUT_CLASS}
+                readOnly={profileLocked}
+                className={`${BOOKING_INPUT_CLASS} ${
+                  profileLocked
+                    ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
+                    : ""
+                }`}
               />
             </label>
           </div>
+          {profileLocked ? (
+            <p className="mt-2 inline-flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                verified_user
+              </span>
+              From your account.{" "}
+              <a
+                href={accountPath(slug, "profile")}
+                className="font-semibold text-primary hover:underline"
+              >
+                Edit profile
+              </a>
+            </p>
+          ) : null}
         </div>
 
         {submitError ? (
@@ -1063,30 +1598,49 @@ function ServiceBookingFlow({
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-3 border-t border-stone-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <motion.button
-            type="button"
-            whileHover={
-              reducedMotion || !canSubmit ? undefined : { scale: 1.02 }
-            }
-            whileTap={canSubmit ? { scale: 0.98 } : undefined}
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-label-bold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <span className="material-symbols-outlined material-symbols-filled text-[18px]">
-              {submitting ? "progress_activity" : "send"}
-            </span>
-            {submitting ? "Sending request…" : "Submit inspection request"}
-          </motion.button>
+        <div className="flex flex-col gap-3 border-t border-stone-200 pt-4 sm:flex-row sm:items-center sm:justify-between sm:pt-5">
+          <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+            <motion.button
+              type="button"
+              whileHover={
+                reducedMotion || !canSubmit ? undefined : { scale: 1.02 }
+              }
+              whileTap={canSubmit ? { scale: 0.98 } : undefined}
+              disabled={!canSubmit}
+              onClick={handleSubmit}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-[15px] font-semibold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:text-label-bold"
+            >
+              <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                {submitting
+                  ? "progress_activity"
+                  : isAuthenticated
+                    ? "send"
+                    : "lock_open"}
+              </span>
+              {submitting
+                ? "Sending request…"
+                : isAuthenticated
+                  ? "Submit inspection request"
+                  : "Sign in & submit request"}
+            </motion.button>
+            {!isAuthenticated && canSubmit ? (
+              <span className="inline-flex items-center justify-center gap-1 font-body text-[11px] text-on-surface-variant sm:justify-start">
+                <span className="material-symbols-outlined text-[14px] text-primary">
+                  info
+                </span>
+                We&apos;ll ask you to sign in or create an account to confirm
+                this booking.
+              </span>
+            ) : null}
+          </div>
 
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3">
             {phoneHref ? (
               <motion.a
                 href={phoneHref}
                 whileHover={reducedMotion ? undefined : { scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none"
+                className="flex items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] font-semibold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none sm:px-4 sm:text-label-bold"
               >
                 <span className="material-symbols-outlined material-symbols-filled text-[18px] text-stone-600">
                   call
@@ -1099,7 +1653,7 @@ function ServiceBookingFlow({
                 href={emailHref}
                 whileHover={reducedMotion ? undefined : { scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none"
+                className="flex items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] font-semibold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none sm:px-4 sm:text-label-bold"
               >
                 <span className="material-symbols-outlined text-[18px] text-stone-600">
                   mail
@@ -1110,6 +1664,7 @@ function ServiceBookingFlow({
           </div>
         </div>
       </div>
+
     </div>
   );
 }
@@ -1134,14 +1689,14 @@ function RequestTypeOption({
       type="button"
       onClick={disabled ? undefined : onSelect}
       disabled={disabled}
-      className={`flex h-full items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+      className={`flex w-full min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 sm:gap-3 sm:p-4 ${
         selected
           ? "border-primary bg-white shadow-[0_8px_20px_-12px_rgba(67,123,255,0.4)] ring-1 ring-primary/20"
           : "border-stone-200 bg-white hover:border-stone-300"
       }`}
     >
       <span
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-9 sm:w-9 ${
           selected
             ? "bg-primary text-on-primary"
             : "bg-primary/10 text-primary"
@@ -1149,11 +1704,11 @@ function RequestTypeOption({
       >
         <span className="material-symbols-outlined text-[20px]">{icon}</span>
       </span>
-      <span className="flex-1">
-        <span className="block font-body text-[14px] font-semibold text-on-surface">
+      <span className="min-w-0 flex-1">
+        <span className="block font-body text-[13px] font-semibold leading-snug text-on-surface sm:text-[14px]">
           {label}
         </span>
-        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
+        <span className="mt-0.5 block font-body text-[11px] leading-snug text-on-surface-variant sm:text-[12px]">
           {description}
         </span>
       </span>
@@ -1197,9 +1752,9 @@ function SubmittedConfirmation({
       initial={reducedMotion ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="overflow-hidden rounded-[24px] border border-emerald-200 bg-white p-6 shadow-[0_12px_40px_-18px_rgba(16,185,129,0.25)] sm:p-8"
+      className="w-full min-w-0 overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-[0_12px_40px_-18px_rgba(16,185,129,0.25)] sm:rounded-[24px] sm:p-8"
     >
-      <div className="flex items-start gap-4">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:gap-4">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
           <span className="material-symbols-outlined material-symbols-filled text-[24px]">
             check_circle
@@ -1320,8 +1875,8 @@ function BookingServiceListItem({
         selected ? "bg-primary-fixed/25" : "bg-white hover:bg-stone-50/80"
       }`}
     >
-      <div className="flex items-stretch gap-3 p-3 sm:gap-4 sm:p-4">
-        <div className="relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl bg-stone-100 sm:h-20 sm:w-20">
+      <div className="flex items-stretch gap-2.5 p-2.5 sm:gap-4 sm:p-4">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-stone-100 sm:h-20 sm:w-20">
           {service.imageUrl ? (
             <img
               src={service.imageUrl}
@@ -1506,7 +2061,7 @@ function BookingFooter({
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.3 }}
       transition={{ duration: 0.5, ease: "easeOut" }}
-      className="relative mt-14 overflow-hidden rounded-[28px] border border-stone-200 bg-white/90 p-8 shadow-[0_10px_30px_-20px_rgba(31,29,26,0.15)] backdrop-blur-xl sm:p-10"
+      className="relative mt-8 w-full min-w-0 overflow-hidden rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-[0_10px_30px_-20px_rgba(31,29,26,0.15)] backdrop-blur-xl sm:mt-14 sm:rounded-[28px] sm:p-10"
     >
       <div className="grid gap-8 md:grid-cols-3">
         <div>

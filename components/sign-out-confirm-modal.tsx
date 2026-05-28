@@ -1,20 +1,32 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 type Props = {
   open: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   isLoading?: boolean;
+  description?: string;
 };
+
+const DEFAULT_DESCRIPTION =
+  "You will need to sign in again to access the admin portal.";
 
 export function SignOutConfirmModal({
   open,
   onCancel,
   onConfirm,
   isLoading = false,
+  description = DEFAULT_DESCRIPTION,
 }: Props) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
 
@@ -30,10 +42,10 @@ export function SignOutConfirmModal({
     };
   }, [open, onCancel, isLoading]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <button
         type="button"
         aria-label="Close dialog"
@@ -65,7 +77,7 @@ export function SignOutConfirmModal({
             id="sign-out-desc"
             className="mt-2 font-body text-body-md text-on-surface-variant"
           >
-            You will need to sign in again to access the admin portal.
+            {description}
           </p>
         </div>
 
@@ -97,6 +109,7 @@ export function SignOutConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

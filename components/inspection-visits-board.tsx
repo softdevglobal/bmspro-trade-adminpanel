@@ -37,13 +37,17 @@ const STATUS_TONE: Record<InspectionRequestStatus, string> = {
     "bg-sky-50 text-sky-700 border border-sky-200",
 };
 
-const FILTER_TABS: { id: StatusFilter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "pending", label: "Pending" },
-  { id: "owner_proposed", label: "Awaiting customer" },
-  { id: "scheduled", label: "Scheduled" },
-  { id: "completed", label: "Completed" },
-  { id: "cancelled", label: "Cancelled" },
+const FILTER_TABS: { id: StatusFilter; label: string; shortLabel: string }[] = [
+  { id: "all", label: "All", shortLabel: "All" },
+  { id: "pending", label: "Pending", shortLabel: "Pending" },
+  {
+    id: "owner_proposed",
+    label: "Awaiting customer",
+    shortLabel: "Awaiting",
+  },
+  { id: "scheduled", label: "Scheduled", shortLabel: "Scheduled" },
+  { id: "completed", label: "Completed", shortLabel: "Done" },
+  { id: "cancelled", label: "Cancelled", shortLabel: "Cancelled" },
 ];
 
 function todayIso(): string {
@@ -164,22 +168,33 @@ export function InspectionVisitsBoard() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="custom-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1">
+    <div className="w-full min-w-0 max-w-full space-y-4 sm:space-y-5">
+      <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div
+          className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-1 sm:flex-wrap sm:gap-2"
+          role="tablist"
+          aria-label="Filter inspection requests"
+        >
           {FILTER_TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={filter === tab.id}
               onClick={() => setFilter(tab.id)}
-              className={`shrink-0 rounded-full px-4 py-2 font-body text-[13px] font-semibold transition-all ${
+              className={`inline-flex w-full items-center justify-center gap-1.5 rounded-xl px-2 py-2 font-body text-[12px] font-semibold transition-all sm:w-auto sm:rounded-full sm:px-4 sm:py-2 sm:text-[13px] ${
                 filter === tab.id
                   ? "bg-primary text-on-primary shadow-sm"
                   : "border border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:border-primary/50 hover:text-primary"
               }`}
             >
-              {tab.label}
-              <span className="ml-1.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-black/10 px-1.5 text-[11px] font-bold tabular-nums">
+              <span className="truncate sm:hidden">{tab.shortLabel}</span>
+              <span className="hidden truncate sm:inline">{tab.label}</span>
+              <span
+                className={`inline-flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${
+                  filter === tab.id ? "bg-black/15" : "bg-black/10"
+                }`}
+              >
                 {counts[tab.id]}
               </span>
             </button>
@@ -189,7 +204,7 @@ export function InspectionVisitsBoard() {
         <button
           type="button"
           onClick={() => void loadRequests()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low"
+          className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container sm:w-auto"
         >
           <span className="material-symbols-outlined text-[16px]">refresh</span>
           Refresh
@@ -247,7 +262,7 @@ function BoardSkeleton() {
 
 function EmptyState({ filter }: { filter: StatusFilter }) {
   return (
-    <div className="rounded-2xl border border-dashed border-outline-variant/60 bg-surface-container-lowest p-10 text-center">
+    <div className="w-full min-w-0 rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest p-6 text-center sm:rounded-2xl sm:p-10">
       <span className="material-symbols-outlined text-[36px] text-outline-variant">
         event_available
       </span>
@@ -295,9 +310,9 @@ function RequestCard({
     <button
       type="button"
       onClick={onOpen}
-      className="group flex w-full flex-col gap-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md sm:p-5"
+      className="group flex w-full min-w-0 max-w-full flex-col gap-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-3 text-left shadow-sm transition-all hover:border-primary/30 hover:shadow-md sm:p-5 sm:hover:-translate-y-0.5"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -325,7 +340,7 @@ function RequestCard({
           </p>
         </div>
 
-        <div className="text-right">
+        <div className="shrink-0 sm:text-right">
           <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
             Submitted
           </p>
@@ -335,7 +350,7 @@ function RequestCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
         {request.preferredSlots.slice(0, 3).map((slot, idx) => (
           <SlotPill
             key={`${slot.date}-${slot.timeRange}-${idx}`}
@@ -353,7 +368,7 @@ function RequestCard({
           </span>
         ) : null}
         {request.assignedTo ? (
-          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary ring-1 ring-primary/15">
+          <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary ring-1 ring-primary/15 sm:ml-auto">
             <span className="material-symbols-outlined text-[14px]">
               {request.assignedTo.type === "owner" ? "verified_user" : "person"}
             </span>
@@ -376,16 +391,18 @@ function SlotPill({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-body text-[11px] font-semibold ${
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 font-body text-[10px] font-semibold sm:px-2.5 sm:text-[11px] ${
         tone === "customer"
           ? "border border-stone-200 bg-stone-50 text-on-surface"
           : "border border-violet-200 bg-violet-50 text-violet-700"
       }`}
     >
-      <span className="material-symbols-outlined text-[14px] text-primary">
+      <span className="material-symbols-outlined shrink-0 text-[14px] text-primary">
         event
       </span>
-      {formatSlotDate(slot.date)} · {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
+      <span className="truncate">
+        {formatSlotDate(slot.date)} · {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
+      </span>
     </span>
   );
 }
@@ -417,7 +434,7 @@ function RequestDetailDrawer({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-40 overflow-hidden bg-black/40 backdrop-blur-sm"
           onClick={onClose}
         >
           <motion.aside
@@ -427,7 +444,7 @@ function RequestDetailDrawer({
             exit={{ x: "100%" }}
             transition={{ type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-0 top-0 flex h-full w-full max-w-[640px] flex-col bg-surface-container-lowest shadow-2xl"
+            className="absolute right-0 top-0 flex h-full w-full max-w-full flex-col bg-surface-container-lowest shadow-2xl sm:max-w-[640px]"
           >
             <DetailDrawerContent
               key={request.id}
@@ -514,7 +531,7 @@ function DetailDrawerContent({
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-outline-variant/40 px-5 py-4">
+      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant/40 px-4 py-3 sm:px-5 sm:py-4">
         <div className="min-w-0">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Inspection request
@@ -540,7 +557,7 @@ function DetailDrawerContent({
         </button>
       </header>
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+      <div className="min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 sm:space-y-5 sm:px-5 sm:py-5">
         <CustomerSection request={request} />
         <RequestDetailsSection request={request} />
         <SlotsOverview request={request} />
@@ -646,13 +663,13 @@ function DetailDrawerContent({
       </div>
 
       {!isClosed && mode === "review" ? (
-        <footer className="flex flex-wrap gap-2 border-t border-outline-variant/40 bg-surface-container-low px-5 py-4">
+        <footer className="flex shrink-0 flex-col gap-2 border-t border-outline-variant/40 bg-surface-container-low px-4 py-3 sm:flex-row sm:flex-wrap sm:px-5 sm:py-4">
           {request.status !== "scheduled" ? (
             <>
               <button
                 type="button"
                 onClick={() => setMode("accept")}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   event_available
@@ -662,7 +679,7 @@ function DetailDrawerContent({
               <button
                 type="button"
                 onClick={() => setMode("propose")}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   edit_calendar
@@ -676,7 +693,7 @@ function DetailDrawerContent({
               <button
                 type="button"
                 onClick={() => setMode("assign")}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   person_add
@@ -689,7 +706,7 @@ function DetailDrawerContent({
                   void callAction({ action: "complete" })
                 }
                 disabled={submitting}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   task_alt
@@ -702,7 +719,7 @@ function DetailDrawerContent({
             type="button"
             onClick={() => void callAction({ action: "cancel" })}
             disabled={submitting}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto sm:w-auto"
           >
             <span className="material-symbols-outlined text-[18px]">close</span>
             Cancel request

@@ -1082,9 +1082,7 @@ function StaffReviewPanel({
         <ReviewMetaRow
           icon="event_available"
           label="Availability"
-          value={`${workingDayCount(form.availability)} working day${
-            workingDayCount(form.availability) === 1 ? "" : "s"
-          }`}
+          value={formatWorkingDaysLabel(workingDayCount(form.availability))}
         />
       </div>
 
@@ -1182,7 +1180,7 @@ function StaffMembersList({
         </div>
 
         <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-          <label className="relative flex h-10 w-full items-center sm:w-56">
+          <label className="relative flex h-11 w-full items-center sm:h-10 sm:w-56">
             <span className="material-symbols-outlined pointer-events-none absolute left-3 text-[18px] text-outline">
               search
             </span>
@@ -1198,7 +1196,7 @@ function StaffMembersList({
             type="button"
             onClick={onRefresh}
             disabled={isLoading}
-            className="flex h-10 items-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-60 sm:h-10 sm:w-auto sm:text-[13px]"
           >
             <span
               className={`material-symbols-outlined text-[18px] ${
@@ -1212,7 +1210,7 @@ function StaffMembersList({
           <button
             type="button"
             onClick={onSetup}
-            className="flex h-10 items-center gap-2 rounded-lg bg-primary px-4 font-body text-[13px] font-semibold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 font-body text-[14px] font-semibold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90 sm:h-10 sm:w-auto sm:text-[13px]"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
             Setup staff
@@ -1263,7 +1261,7 @@ function StaffMembersList({
           ) : null}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,18.5rem)] sm:justify-items-start">
+        <div className="grid grid-cols-1 justify-items-stretch gap-5 sm:grid-cols-[repeat(auto-fill,20rem)] sm:justify-items-start sm:gap-4">
           {members.map((member) => (
             <StaffMemberCard
               key={member.id}
@@ -1298,8 +1296,8 @@ function StaffMemberCard({
   const isSuspended = member.status === "suspended";
 
   return (
-    <article className="mx-auto flex w-full max-w-[18.5rem] flex-col overflow-hidden rounded-2xl shadow-[0_6px_20px_rgba(0,42,150,0.08)] ring-1 ring-outline-variant/40 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(0,74,198,0.14)] hover:ring-primary/25">
-      <div className="relative h-[10.5rem] w-full overflow-hidden bg-gradient-to-br from-[#00174b] via-primary-container to-primary">
+    <article className="flex w-full max-w-none flex-col overflow-hidden rounded-2xl shadow-[0_6px_20px_rgba(0,42,150,0.08)] ring-1 ring-outline-variant/40 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(0,74,198,0.14)] hover:ring-primary/25 sm:mx-auto sm:max-w-[20rem]">
+      <div className="relative w-full overflow-hidden bg-gradient-to-br from-[#00174b] via-primary-container to-primary">
         <div
           className="pointer-events-none absolute -right-4 -top-2 opacity-[0.12]"
           aria-hidden
@@ -1327,7 +1325,7 @@ function StaffMemberCard({
           {isSuspended ? "Suspended" : "Active"}
         </span>
 
-        <div className="absolute right-2 top-2 z-10 flex gap-0.5">
+        <div className="absolute right-2 top-2 z-10 flex items-center gap-2.5">
           {(
             [
               [
@@ -1344,46 +1342,43 @@ function StaffMemberCard({
               type="button"
               title={label}
               onClick={action}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg backdrop-blur-md transition-colors ${
+              className={`flex h-8 w-8 items-center justify-center transition-opacity hover:opacity-80 ${
                 icon === "delete"
-                  ? "bg-white/10 text-white/90 hover:bg-error hover:text-on-error"
-                  : "bg-white/10 text-white hover:bg-white hover:text-primary-container"
+                  ? "text-white/90 hover:text-rose-200"
+                  : "text-white"
               }`}
             >
-              <span className="material-symbols-outlined text-[17px]">
+              <span className="material-symbols-outlined text-[20px]">
                 {icon}
               </span>
             </button>
           ))}
         </div>
 
-        <div className="absolute inset-x-0 top-8 flex justify-center">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(180deg,rgba(0,23,75,0.02)_0%,transparent_50%,rgba(0,23,75,0.35)_100%)]"
+        />
+
+        <div className="relative z-[1] flex flex-col items-center gap-2 px-4 pb-5 pt-11 text-center sm:gap-1.5 sm:px-3.5 sm:pb-4 sm:pt-10">
           {/* Generated SVG avatars are intentionally remote and lightweight. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={avatarUrlFor(member)}
             alt={`${member.fullName} profile avatar`}
-            className="h-20 w-20 rounded-full border-4 border-white/80 bg-white object-cover shadow-lg"
+            className="h-[5.5rem] w-[5.5rem] shrink-0 rounded-full border-4 border-white/80 bg-white object-cover shadow-lg sm:h-20 sm:w-20"
           />
-        </div>
-
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(0,23,75,0.05)_0%,transparent_45%,rgba(0,23,75,0.8)_100%)]"
-        />
-
-        <div className="absolute inset-x-0 bottom-0 px-3.5 pb-3.5 pt-8 text-center">
-          <h3 className="line-clamp-1 font-display text-[1.125rem] font-semibold leading-snug text-white">
+          <h3 className="max-w-full px-1 font-display text-[1.2rem] font-semibold leading-tight text-white [text-wrap:balance] sm:text-[1.125rem]">
             {member.fullName}
           </h3>
-          <p className="mt-0.5 line-clamp-1 font-body text-[11px] text-white/85">
+          <p className="line-clamp-2 max-w-full px-1 font-body text-[12px] leading-snug text-white/90 sm:text-[11px]">
             {roleLabel}
           </p>
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 bg-gradient-to-b from-primary-fixed/40 via-surface-container-low to-surface-container-low px-3.5 py-3.5">
-        <div className="flex flex-wrap items-center gap-1.5 font-body text-[11px] font-semibold text-on-surface-variant">
+      <div className="flex flex-1 flex-col gap-3.5 bg-gradient-to-b from-primary-fixed/40 via-surface-container-low to-surface-container-low px-4 py-4 sm:gap-3 sm:px-3.5 sm:py-3.5">
+        <div className="flex flex-wrap items-center gap-2 font-body text-[12px] font-semibold text-on-surface-variant sm:gap-1.5 sm:text-[11px]">
           <span className="inline-flex items-center gap-0.5 text-on-surface">
             <span className="material-symbols-outlined text-[13px] text-primary">
               call
@@ -1397,7 +1392,7 @@ function StaffMemberCard({
             <span className="material-symbols-outlined text-[13px] text-primary">
               event_available
             </span>
-            {workingDayCount(member.availability)}
+            {formatWorkingDaysLabel(workingDayCount(member.availability))}
           </span>
         </div>
 
@@ -1430,17 +1425,17 @@ function StaffMemberCard({
 
         <div className="flex items-center justify-between border-t border-primary-fixed/50 pt-2">
           <span className="font-body text-[11px] font-semibold text-on-surface-variant">
-            Added {formatDate(member.createdAt)}
+            Registered {formatDate(member.createdAt)}
           </span>
-          <span className="line-clamp-1 max-w-28 text-right font-body text-[11px] font-bold text-primary">
-            {workingDayCount(member.availability)} working
+          <span className="text-right font-body text-[11px] font-bold text-primary">
+            {formatWorkingDaysLabel(workingDayCount(member.availability))}
           </span>
         </div>
 
         <button
           type="button"
           onClick={onView}
-          className="inline-flex w-full items-center justify-center gap-0.5 py-1 font-body text-[13px] font-bold text-primary transition-colors hover:text-primary/80"
+          className="inline-flex min-h-11 w-full items-center justify-center gap-0.5 py-2 font-body text-[14px] font-bold text-primary transition-colors hover:text-primary/80 sm:min-h-0 sm:py-1 sm:text-[13px]"
         >
           View details
           <span className="material-symbols-outlined text-[16px]">
@@ -1575,7 +1570,10 @@ function StaffDetailDrawer({
               label="Status"
               value={isSuspended ? "Suspended" : "Active"}
             />
-            <DetailRow label="Created" value={formatDate(member.createdAt)} />
+            <DetailRow
+              label="Registered"
+              value={formatDate(member.createdAt)}
+            />
           </DetailSection>
         </div>
 
@@ -1762,6 +1760,10 @@ function availabilityIsValid(
 
 function workingDayCount(availability: DayAvailability[]) {
   return availability.filter((day) => !day.isOff).length;
+}
+
+function formatWorkingDaysLabel(count: number) {
+  return `${count} working day${count === 1 ? "" : "s"}`;
 }
 
 function serviceAreasForStaff(member: StaffMember) {

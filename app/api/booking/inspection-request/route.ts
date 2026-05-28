@@ -1,9 +1,21 @@
-import { adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { createInspectionRequest } from "@/lib/inspection/server";
 import { parseInspectionRequestInput } from "@/lib/inspection/types";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+async function readCustomerUid(request: Request): Promise<string | null> {
+  const header = request.headers.get("authorization") ?? "";
+  const match = header.match(/^Bearer (.+)$/);
+  if (!match) return null;
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
+    return decoded.uid ?? null;
+  } catch {
+    return null;
+  }
+}
 
 async function resolveBusinessIdFromSlug(slug: string): Promise<string | null> {
   const snap = await adminDb
@@ -50,7 +62,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await createInspectionRequest(businessId, parsed.value);
+  const customerId = await readCustomerUid(request);
+
+  const result = await createInspectionRequest(businessId, parsed.value, {
+    customerId,
+  });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }

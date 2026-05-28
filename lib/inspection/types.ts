@@ -86,6 +86,7 @@ export type InspectionRequestDetail = {
   serviceBusinessType: string | null;
   customRequest: { title: string; description: string } | null;
   customer: InspectionCustomer;
+  customerId: string | null;
   address: InspectionAddress;
   preferredSlots: InspectionSlot[];
   ownerProposedSlots: InspectionSlot[];
@@ -99,11 +100,18 @@ export type InspectionRequestDetail = {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Parse YYYY-MM-DD as a local calendar date (avoids UTC day-shift bugs). */
 export function isIsoDate(value: string): boolean {
   if (!ISO_DATE.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00`);
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const parsed = new Date(year, month - 1, day, 12, 0, 0, 0);
   if (Number.isNaN(parsed.getTime())) return false;
-  return parsed.toISOString().slice(0, 10) === value;
+  return (
+    parsed.getFullYear() === year &&
+    parsed.getMonth() === month - 1 &&
+    parsed.getDate() === day
+  );
 }
 
 export function isFutureOrTodayDate(value: string): boolean {
