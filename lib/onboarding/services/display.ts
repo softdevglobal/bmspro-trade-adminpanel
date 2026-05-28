@@ -36,12 +36,7 @@ export type ServiceTemplateDetail = {
   id: string;
   name: string;
   businessType: string;
-  category: string;
-  requiredSkill: string;
-  defaultDurationMin: number;
-  needsReview: boolean;
   isActive: boolean;
-  imageUrl: string | null;
   taskCount: number;
   tasks: ServiceTemplateTaskDetail[];
   createdAt: number | null;
@@ -57,10 +52,9 @@ export type BusinessServiceDetail = {
   businessId: string;
   templateId: string | null;
   name: string;
-  category: string;
+  businessType: string;
   requiredSkill: string;
   defaultDurationMin: number;
-  needsReview: boolean;
   isActive: boolean;
   imageUrl: string | null;
   taskCount: number;

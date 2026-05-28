@@ -28,9 +28,6 @@ export type EmbeddedTaskRecord = {
   id: string;
   title: string;
   description: string;
-  isRequired: boolean;
-  photoRequired: boolean;
-  customerVisible: boolean;
   sortOrder: number;
 };
 
@@ -48,12 +45,7 @@ export type ServiceTemplateDocument = {
   id: string;
   name: string;
   businessType: string;
-  category: string;
-  requiredSkill: string;
-  defaultDurationMin: number;
-  needsReview: boolean;
   isActive: boolean;
-  imageUrl: string | null;
   tasks: EmbeddedTaskRecord[];
   createdAt: Timestamp | FieldValue;
   updatedAt: Timestamp | FieldValue;
@@ -68,10 +60,9 @@ export type ServiceDocument = {
   businessId: string;
   templateId: string | null;
   name: string;
-  category: string;
+  businessType: string;
   requiredSkill: string;
   defaultDurationMin: number;
-  needsReview: boolean;
   isActive: boolean;
   imageUrl: string | null;
   tasks: EmbeddedTaskRecord[];

@@ -149,7 +149,48 @@ export function TenantsTable() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+      <div className="flex flex-col gap-3 sm:hidden">
+        {isLoading ? (
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-4 py-10 text-center font-body text-body-md text-on-surface-variant">
+            <span className="material-symbols-outlined mr-2 animate-spin align-middle text-[18px]">
+              progress_activity
+            </span>
+            Loading tenants...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-4 py-10 text-center">
+            <p className="font-body text-body-md text-on-surface-variant">
+              No tenants
+              {filter !== "all"
+                ? ` with status “${filter === "active" ? "Active" : "Suspended"}”`
+                : ""}{" "}
+              yet.
+            </p>
+            {showEmptyOnboardCta && (
+              <button
+                type="button"
+                onClick={() => setOnboardOpen(true)}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  add
+                </span>
+                Onboard new business
+              </button>
+            )}
+          </div>
+        ) : (
+          filtered.map((tenant) => (
+            <TenantCard
+              key={tenant.id}
+              tenant={tenant}
+              onView={() => setSelectedTenant(tenant)}
+            />
+          ))
+        )}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest sm:block">
         <div className="overflow-x-auto">
           <table className="w-full text-left font-body text-body-md">
             <thead className="border-b border-outline-variant bg-surface-container-low text-[12px] font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -276,6 +317,79 @@ export function TenantsTable() {
         onCreated={() => void load()}
       />
     </div>
+  );
+}
+
+function TenantCard({
+  tenant,
+  onView,
+}: {
+  tenant: TenantDetail;
+  onView: () => void;
+}) {
+  return (
+    <article className="rounded-xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary-fixed text-primary">
+          <span className="material-symbols-outlined material-symbols-filled text-[22px]">
+            {iconForBusinessType(tenant.businessType)}
+          </span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="truncate font-body text-[15px] font-semibold text-on-surface">
+                {tenant.businessName || "—"}
+              </h3>
+              <p className="mt-0.5 truncate font-body text-[12px] text-on-surface-variant">
+                {tenant.businessType} · {tenant.businessEmail}
+              </p>
+            </div>
+            <TenantViewButton tenant={tenant} onClick={onView} />
+          </div>
+          <dl className="mt-3 grid grid-cols-1 gap-2 font-body text-[12px]">
+            <div className="flex justify-between gap-3">
+              <dt className="text-on-surface-variant">Owner</dt>
+              <dd className="truncate text-right font-medium text-on-surface">
+                {ownerLabel(tenant.owner)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-on-surface-variant">Location</dt>
+              <dd className="text-right font-medium text-on-surface">
+                {locationLabel(tenant)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-on-surface-variant">Source</dt>
+              <dd className="text-right font-medium text-on-surface">
+                {tenant.source === "self_signup" ? "Self sign-up" : "Super admin"}
+              </dd>
+            </div>
+            {tenant.createdAt ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-on-surface-variant">Created</dt>
+                <dd className="text-right font-medium text-on-surface">
+                  {new Date(tenant.createdAt).toLocaleDateString()}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-semibold ${STATUS_BADGE[tenant.status]}`}
+            >
+              {STATUS_LABEL[tenant.status]}
+            </span>
+            {tenant.businessPhone ? (
+              <span className="font-body text-[12px] text-on-surface-variant">
+                {tenant.businessPhone}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 

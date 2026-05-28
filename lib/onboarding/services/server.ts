@@ -21,6 +21,8 @@ import {
   type ServiceTemplateTaskDetail,
 } from "@/lib/onboarding/services/display";
 import {
+  SERVICE_TASK_FIELD_DEFAULTS,
+  SERVICE_TEMPLATE_DEFAULTS,
   validateCreateBusinessServiceInput,
   validateServiceTemplateInput,
   validateUpdateBusinessServiceInput,
@@ -140,9 +142,6 @@ function buildEmbeddedTasks(tasks: ServiceTaskInput[]): EmbeddedTaskRecord[] {
     id: randomUUID(),
     title: task.title,
     description: task.description,
-    isRequired: task.isRequired,
-    photoRequired: task.photoRequired,
-    customerVisible: task.customerVisible,
     sortOrder: index,
   }));
 }
@@ -163,9 +162,9 @@ function parseEmbeddedTemplateTasks(
         templateId,
         title: typeof task.title === "string" ? task.title : "",
         description: typeof task.description === "string" ? task.description : "",
-        isRequired: Boolean(task.isRequired),
-        photoRequired: Boolean(task.photoRequired),
-        customerVisible: task.customerVisible !== false,
+        isRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.isRequired),
+        photoRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.photoRequired),
+        customerVisible: Boolean(SERVICE_TASK_FIELD_DEFAULTS.customerVisible),
         sortOrder: typeof task.sortOrder === "number" ? task.sortOrder : index,
       };
     })
@@ -189,9 +188,9 @@ function parseEmbeddedServiceTasks(
         serviceId,
         title: typeof task.title === "string" ? task.title : "",
         description: typeof task.description === "string" ? task.description : "",
-        isRequired: Boolean(task.isRequired),
-        photoRequired: Boolean(task.photoRequired),
-        customerVisible: task.customerVisible !== false,
+        isRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.isRequired),
+        photoRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.photoRequired),
+        customerVisible: Boolean(SERVICE_TASK_FIELD_DEFAULTS.customerVisible),
         sortOrder: typeof task.sortOrder === "number" ? task.sortOrder : index,
       };
     })
@@ -216,9 +215,9 @@ async function loadLegacyTemplateTasks(
         templateId,
         title: data.title ?? "",
         description: data.description ?? "",
-        isRequired: Boolean(data.isRequired),
-        photoRequired: Boolean(data.photoRequired),
-        customerVisible: data.customerVisible !== false,
+        isRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.isRequired),
+        photoRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.photoRequired),
+        customerVisible: Boolean(SERVICE_TASK_FIELD_DEFAULTS.customerVisible),
         sortOrder: typeof data.sortOrder === "number" ? data.sortOrder : 0,
       };
     })
@@ -242,9 +241,9 @@ async function loadLegacyServiceTasks(
         serviceId,
         title: data.title ?? "",
         description: data.description ?? "",
-        isRequired: Boolean(data.isRequired),
-        photoRequired: Boolean(data.photoRequired),
-        customerVisible: data.customerVisible !== false,
+        isRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.isRequired),
+        photoRequired: Boolean(SERVICE_TASK_FIELD_DEFAULTS.photoRequired),
+        customerVisible: Boolean(SERVICE_TASK_FIELD_DEFAULTS.customerVisible),
         sortOrder: typeof data.sortOrder === "number" ? data.sortOrder : 0,
       };
     })
@@ -284,16 +283,7 @@ async function mapTemplateDoc(
     id: doc.id,
     name: data.name ?? "",
     businessType: data.businessType ?? data.category ?? "",
-    category: data.category ?? "",
-    requiredSkill: data.requiredSkill ?? "",
-    defaultDurationMin:
-      typeof data.defaultDurationMin === "number" ? data.defaultDurationMin : 60,
-    needsReview: Boolean(data.needsReview),
     isActive: data.isActive !== false,
-    imageUrl:
-      typeof data.imageUrl === "string" && data.imageUrl.trim()
-        ? data.imageUrl.trim()
-        : null,
     taskCount: tasks.length,
     tasks,
     createdAt: toMillis(data.createdAt),
@@ -314,11 +304,10 @@ async function mapServiceDoc(
     templateId:
       typeof data.templateId === "string" ? data.templateId : null,
     name: data.name ?? "",
-    category: data.category ?? "",
+    businessType: data.businessType ?? data.category ?? "",
     requiredSkill: data.requiredSkill ?? "",
     defaultDurationMin:
       typeof data.defaultDurationMin === "number" ? data.defaultDurationMin : 60,
-    needsReview: Boolean(data.needsReview),
     isActive: data.isActive !== false,
     imageUrl:
       typeof data.imageUrl === "string" && data.imageUrl.trim()
@@ -342,12 +331,7 @@ function buildTemplateDetailFromInput(
     id,
     name: value.name,
     businessType: value.businessType,
-    category: value.category,
-    requiredSkill: value.requiredSkill,
-    defaultDurationMin: value.defaultDurationMin,
-    needsReview: value.needsReview,
     isActive: value.isActive !== false,
-    imageUrl: value.imageUrl ?? null,
     taskCount: tasks.length,
     tasks,
     createdAt: Date.now(),
@@ -368,10 +352,9 @@ function buildServiceDetailFromInput(
     businessId,
     templateId: value.source === "template" ? value.templateId ?? null : null,
     name: value.name,
-    category: value.category,
+    businessType: value.businessType,
     requiredSkill: value.requiredSkill,
     defaultDurationMin: value.defaultDurationMin,
-    needsReview: value.needsReview,
     isActive: value.isActive !== false,
     imageUrl: value.imageUrl ?? null,
     taskCount: tasks.length,
@@ -468,12 +451,7 @@ export async function createServiceTemplate(
       id: templateRef.id,
       name: value.name,
       businessType: value.businessType,
-      category: value.category,
-      requiredSkill: value.requiredSkill,
-      defaultDurationMin: value.defaultDurationMin,
-      needsReview: value.needsReview,
       isActive: value.isActive !== false,
-      imageUrl: value.imageUrl ?? null,
       tasks: buildEmbeddedTasks(value.tasks),
       createdAt: now,
       updatedAt: now,
@@ -509,18 +487,17 @@ export async function updateServiceTemplate(
     }
 
     const value = validated.value;
+    const existingData = existing.data() ?? {};
     const now = FieldValue.serverTimestamp();
 
-    await templateRef.update({
+    // Full document write drops legacy fields (category, requiredSkill, etc.).
+    await templateRef.set({
+      id: templateId,
       name: value.name,
       businessType: value.businessType,
-      category: value.category,
-      requiredSkill: value.requiredSkill,
-      defaultDurationMin: value.defaultDurationMin,
-      needsReview: value.needsReview,
       isActive: value.isActive !== false,
-      imageUrl: value.imageUrl ?? null,
       tasks: buildEmbeddedTasks(value.tasks),
+      createdAt: existingData.createdAt ?? now,
       updatedAt: now,
     });
 
@@ -621,10 +598,9 @@ async function writeBusinessService(
     businessId,
     templateId: value.source === "template" ? value.templateId ?? null : null,
     name: value.name,
-    category: value.category,
+    businessType: value.businessType,
     requiredSkill: value.requiredSkill,
     defaultDurationMin: value.defaultDurationMin,
-    needsReview: value.needsReview,
     isActive: value.isActive !== false,
     imageUrl: value.imageUrl ?? null,
     tasks: buildEmbeddedTasks(value.tasks),
@@ -679,22 +655,18 @@ export async function createBusinessService(
       source: "template",
       templateId: template.id,
       name: value.name || template.name,
-      category: value.category || template.category,
-      requiredSkill: value.requiredSkill || template.requiredSkill,
+      businessType: value.businessType || template.businessType,
+      requiredSkill: value.requiredSkill || template.businessType,
       defaultDurationMin:
-        value.defaultDurationMin || template.defaultDurationMin,
-      needsReview: value.needsReview ?? template.needsReview,
+        value.defaultDurationMin || SERVICE_TEMPLATE_DEFAULTS.defaultDurationMin,
       isActive: value.isActive !== false,
-      imageUrl: value.imageUrl ?? template.imageUrl ?? null,
+      imageUrl: value.imageUrl ?? null,
       tasks:
         value.tasks.length > 0
           ? value.tasks
           : template.tasks.map((task) => ({
               title: task.title,
               description: task.description,
-              isRequired: task.isRequired,
-              photoRequired: task.photoRequired,
-              customerVisible: task.customerVisible,
             })),
     };
 
@@ -728,15 +700,18 @@ export async function updateBusinessService(
     const updates: Record<string, unknown> = { updatedAt: now };
 
     if (value.name !== undefined) updates.name = value.name;
-    if (value.category !== undefined) updates.category = value.category;
+    if (value.businessType !== undefined) {
+      updates.businessType = value.businessType;
+      updates.category = FieldValue.delete();
+    }
     if (value.requiredSkill !== undefined) {
       updates.requiredSkill = value.requiredSkill;
     }
     if (value.defaultDurationMin !== undefined) {
       updates.defaultDurationMin = value.defaultDurationMin;
     }
-    if (value.needsReview !== undefined) updates.needsReview = value.needsReview;
     if (value.isActive !== undefined) updates.isActive = value.isActive;
+    updates.needsReview = FieldValue.delete();
     if (value.imageUrl !== undefined) updates.imageUrl = value.imageUrl;
     if (value.tasks) {
       updates.tasks = buildEmbeddedTasks(value.tasks);

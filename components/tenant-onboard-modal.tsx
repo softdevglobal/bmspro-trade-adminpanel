@@ -1,7 +1,13 @@
 "use client";
 
+import type {
+  BusinessOnboardingFormHandle,
+  OnboardingWizardStep,
+} from "@/components/business-onboarding-form";
 import { SuperAdminOnboardForm } from "@/components/super-admin-onboard-form";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+
+const MAX_STEP = 3;
 
 type Props = {
   open: boolean;
@@ -10,6 +16,11 @@ type Props = {
 };
 
 export function TenantOnboardModal({ open, onClose, onCreated }: Props) {
+  const formRef = useRef<BusinessOnboardingFormHandle>(null);
+  const [step, setStep] = useState<OnboardingWizardStep>(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const progressPercent = Math.round((step / MAX_STEP) * 100);
+
   useEffect(() => {
     if (!open) return;
 
@@ -25,10 +36,17 @@ export function TenantOnboardModal({ open, onClose, onCreated }: Props) {
     };
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (open) {
+      setStep(1);
+      setIsSubmitting(false);
+    }
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden overscroll-contain p-0 sm:items-center sm:p-4">
       <button
         type="button"
         aria-label="Close dialog"
@@ -40,19 +58,25 @@ export function TenantOnboardModal({ open, onClose, onCreated }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="tenant-onboard-title"
-        className="relative flex max-h-[94dvh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-outline-variant bg-background shadow-2xl sm:max-h-[90vh] sm:rounded-2xl"
+        className="relative grid h-[94dvh] max-h-[94dvh] w-full max-w-5xl grid-rows-[auto_1fr_auto] overflow-hidden rounded-t-2xl border border-outline-variant bg-background shadow-2xl sm:h-[min(92dvh,calc(100dvh-2rem))] sm:max-h-[min(92dvh,calc(100dvh-2rem))] sm:rounded-2xl"
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-outline-variant bg-surface/90 px-5 py-4 backdrop-blur-md sm:px-6">
-          <div className="min-w-0">
+        <header className="flex items-start justify-between gap-4 border-b border-outline-variant bg-surface/90 px-5 py-4 backdrop-blur-md sm:px-6">
+          <div className="min-w-0 flex-1">
             <h2
               id="tenant-onboard-title"
-              className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface"
+              className="font-display text-headline-sm font-semibold text-on-surface"
             >
               Onboard a new business
             </h2>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
               Create a tenant directly. The business will be activated immediately.
             </p>
+            <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant sm:max-w-md">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
           </div>
           <button
             type="button"
@@ -64,15 +88,67 @@ export function TenantOnboardModal({ open, onClose, onCreated }: Props) {
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+        <div className="min-h-0 overflow-hidden">
           <SuperAdminOnboardForm
+            ref={formRef}
             compact
+            externalFooter
+            onStepChange={setStep}
+            onSubmittingChange={setIsSubmitting}
             onSuccess={() => {
               onCreated();
               onClose();
             }}
           />
         </div>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-outline-variant bg-background px-5 py-4 shadow-[0_-8px_24px_rgba(0,42,150,0.08)] sm:px-6">
+          <button
+            type="button"
+            onClick={
+              step === 1 ? onClose : () => formRef.current?.goBack()
+            }
+            className="rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+          >
+            {step === 1 ? "Cancel" : "Back"}
+          </button>
+
+          {step < MAX_STEP ? (
+            <button
+              type="button"
+              onClick={() => formRef.current?.goContinue()}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary"
+            >
+              Continue
+              <span className="material-symbols-outlined text-[18px]">
+                arrow_forward
+              </span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              form="tenant-onboard-form"
+              disabled={isSubmitting}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="material-symbols-outlined animate-spin text-[18px]">
+                    progress_activity
+                  </span>
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">
+                    save
+                  </span>
+                  Create Tenant
+                </>
+              )}
+            </button>
+          )}
+        </footer>
       </div>
     </div>
   );

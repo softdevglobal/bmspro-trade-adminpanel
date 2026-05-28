@@ -5,7 +5,17 @@
  * See collections.ts for persisted document shapes and README.md for the save flow.
  */
 
-import { BUSINESS_TYPES, type BusinessType } from "@/lib/onboarding/types";
+import {
+  BUSINESS_TYPES,
+  SERVICE_TEMPLATE_TRADES,
+  type BusinessType,
+  type ServiceTemplateTrade,
+} from "@/lib/onboarding/types";
+
+/** Default scheduling fields for templates when not collected in the UI. */
+export const SERVICE_TEMPLATE_DEFAULTS = {
+  defaultDurationMin: 60,
+} as const;
 
 /** Skills that can be required to perform a service (trade types + extras). */
 export const SERVICE_SKILLS = [
@@ -16,25 +26,35 @@ export const SERVICE_SKILLS = [
 
 export type ServiceSkill = (typeof SERVICE_SKILLS)[number];
 
+/** Defaults for task flags when the admin UI only collects title and description. */
+export const SERVICE_TASK_FIELD_DEFAULTS = {
+  isRequired: true,
+  photoRequired: false,
+  customerVisible: true,
+} as const;
+
 /** Payload shape for a single checklist task when creating or updating. */
 export type ServiceTaskInput = {
   title: string;
   description: string;
-  isRequired: boolean;
-  photoRequired: boolean;
-  customerVisible: boolean;
 };
+
+/** Builds a task payload from wizard title/description fields. */
+export function toServiceTaskInput(task: {
+  title: string;
+  description: string;
+}): ServiceTaskInput {
+  return {
+    title: task.title,
+    description: task.description,
+  };
+}
 
 /** Full payload for creating or updating a super-admin service template. */
 export type ServiceTemplateInput = {
   name: string;
-  businessType: BusinessType;
-  category: string;
-  requiredSkill: string;
-  defaultDurationMin: number;
-  needsReview: boolean;
+  businessType: ServiceTemplateTrade;
   isActive?: boolean;
-  imageUrl?: string | null;
   tasks: ServiceTaskInput[];
 };
 
@@ -43,10 +63,9 @@ export type CreateBusinessServiceInput = {
   source: "template" | "custom";
   templateId?: string | null;
   name: string;
-  category: string;
+  businessType: string;
   requiredSkill: string;
   defaultDurationMin: number;
-  needsReview: boolean;
   isActive?: boolean;
   imageUrl?: string | null;
   tasks: ServiceTaskInput[];
@@ -80,13 +99,7 @@ function parseTask(raw: unknown, index: number): ServiceTaskInput | string {
     return `Task ${index + 1} needs a title (at least 2 characters).`;
   }
 
-  return {
-    title,
-    description,
-    isRequired: Boolean(task.isRequired),
-    photoRequired: Boolean(task.photoRequired),
-    customerVisible: task.customerVisible !== false,
-  };
+  return { title, description };
 }
 
 /** Parses and validates an array of tasks from an API request body. */
@@ -126,59 +139,78 @@ function parseImageUrl(
 
 /**
  * Validates shared service fields used by both templates and business services:
- * name, category, skill, duration, review flag, active flag, and image URL.
+ * name, businessType, skill, duration, active flag, and image URL.
  */
-function validateServiceCoreFields(raw: Record<string, unknown>): {
+function validateServiceCoreFields(
+  raw: Record<string, unknown>,
+  options: { requireSchedulingFields?: boolean } = {},
+): {
   ok: true;
   value: {
     name: string;
-    category: string;
+    businessType: string;
     requiredSkill: string;
     defaultDurationMin: number;
-    needsReview: boolean;
     isActive: boolean;
     imageUrl: string | null;
   };
 } | { ok: false; error: string } {
+  const requireSchedulingFields = options.requireSchedulingFields ?? true;
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
-  const category = typeof raw.category === "string" ? raw.category.trim() : "";
+  const businessTypeRaw =
+    typeof raw.businessType === "string"
+      ? raw.businessType.trim()
+      : typeof raw.category === "string"
+        ? raw.category.trim()
+        : "";
   const requiredSkill =
     typeof raw.requiredSkill === "string" ? raw.requiredSkill.trim() : "";
   const defaultDurationMin = Number(raw.defaultDurationMin);
-  const needsReview = Boolean(raw.needsReview);
   const isActive = raw.isActive !== false;
 
   if (name.length < 2) {
     return { ok: false, error: "Service name must be at least 2 characters." };
   }
-  if (category.length < 2) {
-    return { ok: false, error: "Category must be at least 2 characters." };
-  }
-  if (!requiredSkill) {
-    return { ok: false, error: "Please select a required skill." };
-  }
-  if (
-    Number.isNaN(defaultDurationMin) ||
-    defaultDurationMin < 15 ||
-    defaultDurationMin > 24 * 60
-  ) {
+  if (businessTypeRaw.length < 2) {
     return {
       ok: false,
-      error: "Duration must be between 15 minutes and 24 hours.",
+      error: "Business type must be at least 2 characters.",
     };
+  }
+
+  if (requireSchedulingFields) {
+    if (!requiredSkill) {
+      return { ok: false, error: "Please select a required skill." };
+    }
+    if (
+      Number.isNaN(defaultDurationMin) ||
+      defaultDurationMin < 15 ||
+      defaultDurationMin > 24 * 60
+    ) {
+      return {
+        ok: false,
+        error: "Duration must be between 15 minutes and 24 hours.",
+      };
+    }
   }
 
   const imageUrl = parseImageUrl(raw.imageUrl);
   if (!imageUrl.ok) return imageUrl;
 
+  const resolvedSkill = requireSchedulingFields
+    ? requiredSkill
+    : requiredSkill || businessTypeRaw;
+  const resolvedDuration = requireSchedulingFields
+    ? Math.round(defaultDurationMin)
+    : SERVICE_TEMPLATE_DEFAULTS.defaultDurationMin;
+
   return {
     ok: true,
     value: {
       name,
-      category,
-      requiredSkill,
-      defaultDurationMin: Math.round(defaultDurationMin),
-      needsReview,
+      businessType: businessTypeRaw,
+      requiredSkill: resolvedSkill,
+      defaultDurationMin: resolvedDuration,
       isActive,
       imageUrl: imageUrl.value,
     },
@@ -199,19 +231,15 @@ export function validateServiceTemplateInput(
 
   const businessTypeRaw =
     typeof body.businessType === "string" ? body.businessType.trim() : "";
-  if (!BUSINESS_TYPES.some((type) => type.id === businessTypeRaw)) {
+  if (!SERVICE_TEMPLATE_TRADES.some((type) => type.id === businessTypeRaw)) {
     return { ok: false, error: "Please select a business trade type." };
   }
-  const businessType = businessTypeRaw as BusinessType;
+  const businessType = businessTypeRaw as ServiceTemplateTrade;
 
-  const core = validateServiceCoreFields({
-    ...body,
-    category:
-      typeof body.category === "string" && body.category.trim()
-        ? body.category
-        : businessType,
-  });
-  if (!core.ok) return core;
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (name.length < 2) {
+    return { ok: false, error: "Service name must be at least 2 characters." };
+  }
 
   const tasks = parseTasks(body.tasks);
   if (typeof tasks === "string") return { ok: false, error: tasks };
@@ -219,9 +247,9 @@ export function validateServiceTemplateInput(
   return {
     ok: true,
     value: {
-      ...core.value,
+      name,
       businessType,
-      category: core.value.category || businessType,
+      isActive: body.isActive !== false,
       tasks,
     },
   };
@@ -283,11 +311,20 @@ export function validateUpdateBusinessServiceInput(
     }
     value.name = body.name.trim();
   }
-  if ("category" in body) {
-    if (!isNonEmptyString(body.category) || body.category.trim().length < 2) {
-      return { ok: false, error: "Category must be at least 2 characters." };
+  if ("businessType" in body || "category" in body) {
+    const trade =
+      typeof body.businessType === "string"
+        ? body.businessType.trim()
+        : typeof body.category === "string"
+          ? body.category.trim()
+          : "";
+    if (!trade || trade.length < 2) {
+      return {
+        ok: false,
+        error: "Business type must be at least 2 characters.",
+      };
     }
-    value.category = body.category.trim();
+    value.businessType = trade;
   }
   if ("requiredSkill" in body) {
     if (!isNonEmptyString(body.requiredSkill)) {
@@ -305,7 +342,6 @@ export function validateUpdateBusinessServiceInput(
     }
     value.defaultDurationMin = Math.round(duration);
   }
-  if ("needsReview" in body) value.needsReview = Boolean(body.needsReview);
   if ("isActive" in body) value.isActive = Boolean(body.isActive);
   if ("imageUrl" in body) {
     const imageUrl = parseImageUrl(body.imageUrl);

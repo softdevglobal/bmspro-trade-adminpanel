@@ -11,6 +11,13 @@ export const BUSINESS_TYPES = [
 
 export type BusinessType = (typeof BUSINESS_TYPES)[number]["id"];
 
+/** Trades offered when creating service templates (Electrical excluded). */
+export const SERVICE_TEMPLATE_TRADES = BUSINESS_TYPES.filter(
+  (type) => type.id !== "Electrical"
+);
+
+export type ServiceTemplateTrade = (typeof SERVICE_TEMPLATE_TRADES)[number]["id"];
+
 export const BUSINESS_STRUCTURES = [
   { id: "Pty Ltd", icon: "corporate_fare" },
   { id: "Sole Trader", icon: "person" },

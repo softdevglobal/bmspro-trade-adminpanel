@@ -18,7 +18,7 @@ Tasks are stored **inside** the parent document as a `tasks` array — not in se
 
 ```
 service_templates/{id}
-  ├── name, businessType, category, ...
+  ├── name, businessType, ...
   └── tasks: [{ id, title, description, isRequired, ... }, ...]
 
 services/{id}
@@ -35,10 +35,9 @@ businesses/{id}   (existing onboarding — read businessType only)
   "id": "abc123",
   "businessId": "biz456",
   "name": "Blocked drain clearance",
-  "category": "Plumbing",
+  "businessType": "Plumbing",
   "requiredSkill": "Plumbing",
   "defaultDurationMin": 60,
-  "needsReview": false,
   "isActive": true,
   "imageUrl": null,
   "tasks": [

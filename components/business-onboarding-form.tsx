@@ -24,19 +24,35 @@ import {
 } from "@/lib/onboarding/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 
 type Mode = "self_signup" | "super_admin_create";
-type Step = 1 | 2 | 3;
+export type OnboardingWizardStep = 1 | 2 | 3;
+type Step = OnboardingWizardStep;
+
+export type BusinessOnboardingFormHandle = {
+  goContinue: () => void;
+  goBack: () => void;
+};
 
 type Props = {
   mode: Mode;
   endpoint: string;
   submitLabel?: string;
   compact?: boolean;
+  /** When true with compact, footer is rendered by the parent modal (service-template style). */
+  externalFooter?: boolean;
   onSuccess?: (tenantId: string) => void;
-  onStepChange?: (step: Step) => void;
+  onStepChange?: (step: OnboardingWizardStep) => void;
+  onSubmittingChange?: (isSubmitting: boolean) => void;
   getRequestHeaders?: () => Promise<Record<string, string> | null>;
 };
 
@@ -78,21 +94,118 @@ const INITIAL_STATE: FormState = {
   serviceAreas: [""],
 };
 
-const STEPS = [
+export const ONBOARDING_WIZARD_STEPS = [
   { id: 1 as Step, label: "Business", icon: "storefront" },
   { id: 2 as Step, label: "Account", icon: "person" },
   { id: 3 as Step, label: "Plan", icon: "workspace_premium" },
-];
+] as const;
 
-export function BusinessOnboardingForm({
-  mode,
-  endpoint,
-  submitLabel,
-  compact = false,
-  onSuccess,
-  onStepChange,
-  getRequestHeaders,
-}: Props) {
+const ONBOARDING_MAX_STEP = ONBOARDING_WIZARD_STEPS.length;
+
+/** Step intro — plain text in tenant modal; gradient banner in other compact layouts. */
+function OnboardingStepIntro({
+  step,
+  title,
+  subtitle,
+  compact,
+  externalFooter,
+}: {
+  step: Step;
+  title: string;
+  subtitle: string;
+  compact: boolean;
+  externalFooter: boolean;
+}) {
+  if (compact && externalFooter) {
+    return (
+      <>
+        <p className="font-body text-[12px] font-semibold uppercase tracking-wider text-primary">
+          Step {step} of {ONBOARDING_MAX_STEP}
+        </p>
+        <header>
+          <h3 className="font-display text-headline-sm font-semibold text-on-surface">
+            {title}
+          </h3>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            {subtitle}
+          </p>
+        </header>
+      </>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-[#00174b] via-primary-container to-primary px-3.5 py-3 text-on-primary">
+        <p className="font-body text-[10px] font-bold uppercase tracking-[0.14em] text-white/80">
+          Step {step} · {ONBOARDING_WIZARD_STEPS[step - 1].label}
+        </p>
+        <h3 className="mt-0.5 font-display text-[1.05rem] font-semibold leading-tight text-white">
+          {title}
+        </h3>
+        <p className="mt-1 font-body text-[12px] leading-snug text-white/85">
+          {subtitle}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <header>
+      <h2 className="font-display text-headline-sm font-semibold text-on-surface">
+        {title}
+      </h2>
+      <p className="mt-1 font-body text-body-md text-on-surface-variant">
+        {subtitle}
+      </p>
+    </header>
+  );
+}
+
+/** Scrollable step body in compact modals; plain fragment on full-page onboarding. */
+function OnboardingFormScrollArea({
+  compact,
+  externalFooter,
+  children,
+}: {
+  compact: boolean;
+  externalFooter: boolean;
+  children: React.ReactNode;
+}) {
+  if (!compact) return <>{children}</>;
+
+  if (externalFooter) {
+    return (
+      <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
+        <div className="flex flex-col gap-5">{children}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="flex flex-col gap-5">{children}</div>
+    </div>
+  );
+}
+
+export const BusinessOnboardingForm = forwardRef<
+  BusinessOnboardingFormHandle,
+  Props
+>(function BusinessOnboardingForm(
+  {
+    mode,
+    endpoint,
+    submitLabel,
+    compact = false,
+    externalFooter = false,
+    onSuccess,
+    onStepChange,
+    onSubmittingChange,
+    getRequestHeaders,
+  },
+  ref,
+) {
   const router = useRouter();
   const { login } = useAuth();
   const [step, setStep] = useState<Step>(1);
@@ -117,6 +230,10 @@ export function BusinessOnboardingForm({
   useEffect(() => {
     onStepChange?.(step);
   }, [step, onStepChange]);
+
+  useEffect(() => {
+    onSubmittingChange?.(isSubmitting);
+  }, [isSubmitting, onSubmittingChange]);
 
   const completion = useMemo(() => {
     const stepBase = step === 1 ? 0 : step === 2 ? 33 : 66;
@@ -206,6 +323,11 @@ export function BusinessOnboardingForm({
     if (step > 1) setStep((s) => (s - 1) as Step);
   }
 
+  useImperativeHandle(ref, () => ({
+    goContinue: handleContinue,
+    goBack: handleBack,
+  }));
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
@@ -291,21 +413,41 @@ export function BusinessOnboardingForm({
     }
   }
 
+  const useExternalFooter = compact && externalFooter;
+
   return (
     <div
       className={
-        compact
-          ? "flex flex-col gap-5"
-          : "grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]"
+        compact && !externalFooter
+          ? "flex h-full min-h-0 flex-col"
+          : compact
+            ? "h-full min-h-0"
+            : "grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]"
       }
     >
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
-        {/* Stepper */}
+      <form
+        id={useExternalFooter ? "tenant-onboard-form" : undefined}
+        onSubmit={handleSubmit}
+        className={
+          useExternalFooter
+            ? "h-full min-h-0 overflow-hidden"
+            : compact
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+              : "flex flex-col gap-5"
+        }
+        noValidate
+      >
+        <OnboardingFormScrollArea
+          compact={compact}
+          externalFooter={externalFooter}
+        >
+        {/* Stepper — full-page only; compact modals use header step pills */}
+        {!compact ? (
         <nav
           aria-label="Onboarding progress"
           className="flex items-center justify-center gap-2 sm:gap-4"
         >
-          {STEPS.map((s, index) => {
+          {ONBOARDING_WIZARD_STEPS.map((s, index) => {
             const isComplete = step > s.id;
             const isActive = step === s.id;
             return (
@@ -338,7 +480,7 @@ export function BusinessOnboardingForm({
                     {s.label}
                   </span>
                 </div>
-                {index < STEPS.length - 1 && (
+                {index < ONBOARDING_WIZARD_STEPS.length - 1 && (
                   <div
                     className={`mb-5 h-0.5 w-8 sm:w-16 ${
                       step > s.id ? "bg-primary" : "bg-outline-variant"
@@ -349,6 +491,7 @@ export function BusinessOnboardingForm({
             );
           })}
         </nav>
+        ) : null}
 
         {errorMessage && (
           <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
@@ -370,14 +513,17 @@ export function BusinessOnboardingForm({
         {/* Step 1 — Business */}
         {step === 1 && (
           <div className="flex flex-col gap-5">
-            <header>
-              <h2 className="font-display text-headline-sm font-semibold text-on-surface">
-                Tell us about your trade business
-              </h2>
-              <p className="mt-1 font-body text-body-md text-on-surface-variant">
-                What trade do you specialise in?
-              </p>
-            </header>
+            <OnboardingStepIntro
+              step={1}
+              compact={compact}
+              externalFooter={externalFooter}
+              title={
+                compact && externalFooter
+                  ? "Business details"
+                  : "Tell us about your trade business"
+              }
+              subtitle="What trade do you specialise in?"
+            />
 
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               {BUSINESS_TYPES.map((type) => {
@@ -589,16 +735,19 @@ export function BusinessOnboardingForm({
         {/* Step 2 — Account */}
         {step === 2 && (
           <div className="flex flex-col gap-5">
-            <header>
-              <h2 className="font-display text-headline-sm font-semibold text-on-surface">
-                Create your account
-              </h2>
-              <p className="mt-1 font-body text-body-md text-on-surface-variant">
-                {requirePassword
+            <OnboardingStepIntro
+              step={2}
+              compact={compact}
+              externalFooter={externalFooter}
+              title={
+                compact && externalFooter ? "Account details" : "Create your account"
+              }
+              subtitle={
+                requirePassword
                   ? "Set up login credentials for your admin portal."
-                  : "Enter the business owner contact details."}
-              </p>
-            </header>
+                  : "Enter the business owner contact details."
+              }
+            />
 
             <Field label="Your Full Name" required>
               <input
@@ -696,14 +845,13 @@ export function BusinessOnboardingForm({
         {/* Step 3 — Plan */}
         {step === 3 && (
           <div className="flex flex-col gap-5">
-            <header>
-              <h2 className="font-display text-headline-sm font-semibold text-on-surface">
-                Choose your plan
-              </h2>
-              <p className="mt-1 font-body text-body-md text-on-surface-variant">
-                Select a subscription plan for your trade business.
-              </p>
-            </header>
+            <OnboardingStepIntro
+              step={3}
+              compact={compact}
+              externalFooter={externalFooter}
+              title={compact && externalFooter ? "Plan details" : "Choose your plan"}
+              subtitle="Select a subscription plan for this trade business."
+            />
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {SUBSCRIPTION_PLANS.map((plan) => {
@@ -772,9 +920,21 @@ export function BusinessOnboardingForm({
             </div>
           </div>
         )}
+        </OnboardingFormScrollArea>
 
-        {/* Footer actions */}
-        <div className="flex flex-col-reverse items-stretch justify-between gap-3 border-t border-outline-variant pt-4 sm:flex-row sm:items-center">
+        {!useExternalFooter ? (
+        /* Footer actions — inline when not using modal footer */
+        <div
+          className={
+            compact
+              ? `flex shrink-0 items-center gap-3 border-t border-outline-variant bg-background py-3 shadow-[0_-8px_24px_rgba(0,42,150,0.08)] -mx-5 px-5 sm:-mx-6 sm:px-6 ${
+                  step === 1 && mode !== "self_signup"
+                    ? "justify-end"
+                    : "justify-between"
+                }`
+              : "flex flex-col-reverse items-stretch justify-between gap-3 border-t border-outline-variant pt-4 sm:flex-row sm:items-center"
+          }
+        >
           {step === 1 ? (
             mode === "self_signup" ? (
               <Link
@@ -786,19 +946,29 @@ export function BusinessOnboardingForm({
                 </span>
                 Back to Sign In
               </Link>
-            ) : (
+            ) : compact ? null : (
               <span />
             )
           ) : (
             <button
               type="button"
               onClick={handleBack}
-              className="inline-flex items-center gap-1 font-body text-[13px] font-semibold text-on-surface-variant hover:text-primary"
+              className={
+                compact
+                  ? "rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+                  : "inline-flex items-center gap-1 font-body text-[13px] font-semibold text-on-surface-variant hover:text-primary"
+              }
             >
-              <span className="material-symbols-outlined text-[18px]">
-                arrow_back
-              </span>
-              Back
+              {compact ? (
+                "Back"
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">
+                    arrow_back
+                  </span>
+                  Back
+                </>
+              )}
             </button>
           )}
 
@@ -806,7 +976,11 @@ export function BusinessOnboardingForm({
             <button
               type="button"
               onClick={handleContinue}
-              className="flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-3 font-body text-label-bold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90"
+              className={
+                compact
+                  ? "flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary"
+                  : "flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-3 font-body text-label-bold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90"
+              }
             >
               Continue
               <span className="material-symbols-outlined text-[18px]">
@@ -817,7 +991,11 @@ export function BusinessOnboardingForm({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-3 font-body text-label-bold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+              className={
+                compact
+                  ? "flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
+                  : "flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-3 font-body text-label-bold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+              }
             >
               {isSubmitting ? (
                 <>
@@ -838,9 +1016,16 @@ export function BusinessOnboardingForm({
             </button>
           )}
         </div>
+        ) : null}
 
-        {mode === "self_signup" && step === 3 && (
-          <p className="text-center font-body text-[12px] text-on-surface-variant">
+        {mode === "self_signup" && step === 3 && !useExternalFooter && (
+          <p
+            className={
+              compact
+                ? "shrink-0 text-center font-body text-[11px] text-on-surface-variant -mt-1 pb-1"
+                : "text-center font-body text-[12px] text-on-surface-variant"
+            }
+          >
             By creating an account, you agree to our Terms of Service and Privacy
             Policy.
           </p>
@@ -854,7 +1039,7 @@ export function BusinessOnboardingForm({
       )}
     </div>
   );
-}
+});
 
 function PreviewPanel({
   form,
