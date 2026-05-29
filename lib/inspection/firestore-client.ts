@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 
 /** Caps initial/historical reads for the inspection visits board. */
-export const INSPECTION_LIST_LIMIT = 200;
+export const INSPECTION_LIST_LIMIT = 80;
 
 export function subscribeBusinessInspectionRequests(
   businessId: string,

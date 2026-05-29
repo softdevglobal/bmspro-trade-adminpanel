@@ -13,7 +13,6 @@ import {
   type NotificationAudience,
   type NotificationRecord,
 } from "@/lib/notifications/types";
-import { normalizeEmail } from "@/lib/customer/types";
 import {
   collection,
   deleteDoc,
@@ -26,14 +25,15 @@ import {
   where,
   writeBatch,
   type Firestore,
-  type QueryConstraint,
   type QueryDocumentSnapshot,
   type Unsubscribe,
 } from "firebase/firestore";
 
 const MAX_BATCH = 400;
-/** Caps notification listener reads per audience. */
-export const NOTIFICATION_LIST_LIMIT = 100;
+/** Badge / unread-only listener cap. */
+export const NOTIFICATION_UNREAD_LIMIT = 25;
+/** Full panel listener cap. */
+export const NOTIFICATION_FULL_LIMIT = 50;
 
 const customerDb: Firestore = getFirestore(customerApp);
 
@@ -50,19 +50,17 @@ function mapQueryDocs(
   );
 }
 
-/** Live business notification feed (Firebase real-time channel, no HTTP polling). */
-export function subscribeBusinessNotifications(
+/** Unread notifications only — cheap badge listener. */
+export function subscribeBusinessNotificationsUnread(
   businessId: string,
   onData: (notifications: NotificationRecord[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const constraints: QueryConstraint[] = [
-    where("businessId", "==", businessId),
-    limit(NOTIFICATION_LIST_LIMIT),
-  ];
   const q = query(
     collection(businessDb, BUSINESS_NOTIFICATION_COLLECTION),
-    ...constraints,
+    where("businessId", "==", businessId),
+    where("read", "==", false),
+    limit(NOTIFICATION_UNREAD_LIMIT),
   );
   return onSnapshot(
     q,
@@ -77,71 +75,54 @@ export function subscribeBusinessNotifications(
   );
 }
 
-/**
- * Customer feed: merges notifications keyed by uid and by normalized email
- * (same as the server list API).
- */
-export function subscribeCustomerNotifications(
-  customerId: string,
-  customerEmail: string,
+/** Full feed — only while the notification panel is open. */
+export function subscribeBusinessNotificationsFull(
+  businessId: string,
   onData: (notifications: NotificationRecord[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const email = normalizeEmail(customerEmail);
-  const byId = new Map<string, NotificationRecord>();
-  const byEmail = new Map<string, NotificationRecord>();
-
-  const publish = () => {
-    const merged = new Map<string, NotificationRecord>();
-    for (const record of byId.values()) merged.set(record.id, record);
-    for (const record of byEmail.values()) {
-      if (!merged.has(record.id)) merged.set(record.id, record);
-    }
-    onData(sortNotificationsNewestFirst(Array.from(merged.values())));
-  };
-
-  const qById = query(
-    collection(customerDb, CUSTOMER_NOTIFICATION_COLLECTION),
-    where("customerId", "==", customerId),
-    limit(NOTIFICATION_LIST_LIMIT),
+  const q = query(
+    collection(businessDb, BUSINESS_NOTIFICATION_COLLECTION),
+    where("businessId", "==", businessId),
+    limit(NOTIFICATION_FULL_LIMIT),
   );
-
-  const unsubId = onSnapshot(
-    qById,
+  return onSnapshot(
+    q,
     (snapshot) => {
-      byId.clear();
-      for (const record of mapQueryDocs("customer", snapshot.docs)) {
-        byId.set(record.id, record);
-      }
-      publish();
+      onData(
+        sortNotificationsNewestFirst(
+          mapQueryDocs("business", snapshot.docs),
+        ),
+      );
     },
     (error) => onError?.(error),
   );
+}
 
-  let unsubEmail: Unsubscribe = () => {};
-  if (email) {
-    const qByEmail = query(
-      collection(customerDb, CUSTOMER_NOTIFICATION_COLLECTION),
-      where("customerEmail", "==", email),
-      limit(NOTIFICATION_LIST_LIMIT),
-    );
-    unsubEmail = onSnapshot(
-      qByEmail,
-      (snapshot) => {
-        byEmail.clear();
-        for (const record of mapQueryDocs("customer", snapshot.docs)) {
-          byEmail.set(record.id, record);
-        }
-        publish();
-      },
-      (error) => onError?.(error),
-    );
-  }
+/** Customer feed keyed by uid (one listener). */
+export function subscribeCustomerNotifications(
+  customerId: string,
+  _customerEmail: string,
+  onData: (notifications: NotificationRecord[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const q = query(
+    collection(customerDb, CUSTOMER_NOTIFICATION_COLLECTION),
+    where("customerId", "==", customerId),
+    limit(NOTIFICATION_FULL_LIMIT),
+  );
 
-  return () => {
-    unsubId();
-    unsubEmail();
-  };
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      onData(
+        sortNotificationsNewestFirst(
+          mapQueryDocs("customer", snapshot.docs),
+        ),
+      );
+    },
+    (error) => onError?.(error),
+  );
 }
 
 export async function markNotificationReadClient(

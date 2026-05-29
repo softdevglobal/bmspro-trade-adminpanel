@@ -16,23 +16,52 @@ function isNavItemActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  superAdmin?: boolean;
+  businessOwner?: boolean;
+};
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
   { href: "#", label: "Calendar", icon: "calendar_month" },
-  { href: "/dashboard/bookings", label: "Bookings", icon: "assignment" },
   {
     href: "/dashboard/inspection-visits",
     label: "Inspection visits",
     icon: "event_available",
+    businessOwner: true,
+  },
+  {
+    href: "/dashboard/bookings",
+    label: "Bookings",
+    icon: "assignment",
+    businessOwner: true,
   },
   { href: "#", label: "Messages", icon: "chat" },
-  { href: "/dashboard/team", label: "Team", icon: "groups" },
+  {
+    href: "/dashboard/team",
+    label: "Team",
+    icon: "groups",
+    businessOwner: true,
+  },
   { href: "#", label: "Availability", icon: "schedule" },
-  { href: "#", label: "Customers", icon: "group" },
+  {
+    href: "/dashboard/customers",
+    label: "Customers",
+    icon: "group",
+    businessOwner: true,
+  },
   { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
-  { href: "/dashboard/tenants", label: "Tenants", icon: "domain", superAdmin: true },
+  {
+    href: "/dashboard/tenants",
+    label: "Tenants",
+    icon: "domain",
+    superAdmin: true,
+  },
   { href: "/dashboard/settings", label: "Settings", icon: "settings" },
-] as const;
+];
 
 type SidebarProps = {
   isExpanded: boolean;
@@ -156,9 +185,11 @@ export function Sidebar({
             showLabels ? "px-3" : "items-center px-2"
           }`}
         >
-          {NAV_ITEMS.filter(
-            (item) => !("superAdmin" in item && item.superAdmin) || role === "super_admin"
-          ).map((item) => {
+          {NAV_ITEMS.filter((item) => {
+            if (item.superAdmin && role !== "super_admin") return false;
+            if (item.businessOwner && role !== "business_owner") return false;
+            return true;
+          }).map((item) => {
             const isActive = isNavItemActive(pathname, item.href);
 
             const inner = (

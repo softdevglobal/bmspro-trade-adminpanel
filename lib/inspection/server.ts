@@ -136,7 +136,7 @@ export async function listInspectionRequests(
   const snapshot = await adminDb
     .collection(INSPECTION_COLLECTION)
     .where("businessId", "==", businessId)
-    .limit(200)
+    .limit(80)
     .get();
 
   return sortInspectionRequestsNewestFirst(

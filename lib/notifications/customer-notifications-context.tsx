@@ -9,6 +9,7 @@ import {
 } from "@/lib/notifications/firestore-client";
 import type { NotificationRecord } from "@/lib/notifications/types";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
+import { usePathname } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -18,6 +19,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
+
+function isCustomerBookingRoute(pathname: string | null): boolean {
+  return Boolean(pathname?.startsWith("/booknow"));
+}
 
 export type CustomerNotificationsApi = {
   notifications: NotificationRecord[];
@@ -42,6 +47,7 @@ export function CustomerNotificationsProvider({
 }: {
   children: ReactNode;
 }) {
+  const pathname = usePathname();
   const { status, user } = useCustomerAuth();
   const pageVisible = usePageVisible();
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
@@ -49,7 +55,12 @@ export function CustomerNotificationsProvider({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (status !== "authenticated" || !user?.uid || !user.email) {
+    if (
+      status !== "authenticated" ||
+      !user?.uid ||
+      !user.email ||
+      !isCustomerBookingRoute(pathname)
+    ) {
       setNotifications([]);
       setLoading(false);
       setError(null);
@@ -74,7 +85,7 @@ export function CustomerNotificationsProvider({
     );
 
     return () => unsubscribe();
-  }, [status, user?.uid, user?.email, pageVisible]);
+  }, [status, user?.uid, user?.email, pageVisible, pathname]);
 
   const reload = useCallback(async () => {
     /* Real-time listener keeps state fresh; no HTTP refetch. */

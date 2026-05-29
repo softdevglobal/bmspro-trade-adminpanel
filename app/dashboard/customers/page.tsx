@@ -1,15 +1,16 @@
 import { BusinessOwnerGuard } from "@/components/business-owner-guard";
+import { CustomersBoard } from "@/components/customers-board";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { TeamStaffForm } from "@/components/team-staff-form";
 
-export default function TeamPage() {
+export default function CustomersPage() {
   return (
     <DashboardShell
-      title="Team"
-      subtitle="View staff members and setup new users for your business."
+      title="Customers"
+      subtitle="People who have requested work through your booking page."
+      icon="group"
     >
       <BusinessOwnerGuard>
-        <TeamStaffForm />
+        <CustomersBoard />
       </BusinessOwnerGuard>
     </DashboardShell>
   );

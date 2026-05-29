@@ -455,7 +455,7 @@ function sortNewestFirst(records: NotificationRecord[]): NotificationRecord[] {
   return records.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
-const NOTIFICATION_LIST_LIMIT = 100;
+const NOTIFICATION_LIST_LIMIT = 50;
 
 export async function listBusinessNotifications(
   businessId: string,

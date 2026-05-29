@@ -27,7 +27,6 @@ function relativeTime(timestamp: number): string {
 export function BusinessNotificationBell() {
   const { status, role } = useAuth();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [clearingAll, setClearingAll] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -38,6 +37,8 @@ export function BusinessNotificationBell() {
     notifications,
     loading,
     unread,
+    panelOpen: open,
+    setPanelOpen,
     markAllRead,
     clearOne,
     clearAll,
@@ -50,12 +51,12 @@ export function BusinessNotificationBell() {
         containerRef.current &&
         !containerRef.current.contains(event.target as Node)
       ) {
-        setOpen(false);
+        setPanelOpen(false);
       }
     };
     window.addEventListener("mousedown", onClick);
     return () => window.removeEventListener("mousedown", onClick);
-  }, [open]);
+  }, [open, setPanelOpen]);
 
   if (!authed) {
     return (
@@ -71,7 +72,7 @@ export function BusinessNotificationBell() {
 
   async function handleToggle() {
     const next = !open;
-    setOpen(next);
+    setPanelOpen(next);
     if (next && unread > 0) {
       await markAllRead();
     }
@@ -96,7 +97,7 @@ export function BusinessNotificationBell() {
   }
 
   function openNotification(note: NotificationRecord) {
-    setOpen(false);
+    setPanelOpen(false);
     if (!note.requestId) return;
     router.push(`/dashboard/inspection-visits?request=${note.requestId}`);
     window.dispatchEvent(

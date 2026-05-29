@@ -1,6 +1,11 @@
 import { getApps, getApp, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  type Firestore,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -32,4 +37,15 @@ function resolveFirebaseApp(): FirebaseApp {
 export const firebaseApp: FirebaseApp = resolveFirebaseApp();
 
 export const auth: Auth = getAuth(firebaseApp);
-export const db: Firestore = getFirestore(firebaseApp);
+
+function resolveFirestore(): Firestore {
+  try {
+    return initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache(),
+    });
+  } catch {
+    return getFirestore(firebaseApp);
+  }
+}
+
+export const db: Firestore = resolveFirestore();
