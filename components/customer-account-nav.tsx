@@ -20,7 +20,7 @@ import {
 } from "@/lib/customer/notifications";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -39,7 +39,10 @@ const NAV_ROW_H = "h-9 sm:h-12";
 const NAV_PILL_OUTER =
   "w-full rounded-full border border-stone-200/90 bg-white/95 p-0.5 shadow-[0_8px_28px_-14px_rgba(0,74,198,0.15)] backdrop-blur-sm sm:p-1.5";
 
-const NAV_PILL_INNER = `flex w-full min-w-0 items-center rounded-full bg-stone-100/80 p-0.5 sm:gap-1.5 sm:p-1.5 ${NAV_ROW_H}`;
+const NAV_PILL_INNER = `flex w-full min-w-0 items-stretch rounded-full bg-stone-100/80 p-0.5 sm:gap-1.5 sm:p-1.5 ${NAV_ROW_H}`;
+
+const NAV_TAB_ACTIVE_PILL =
+  "pointer-events-none absolute inset-0 rounded-full bg-white shadow-[0_2px_14px_-4px_rgba(0,74,198,0.35)] ring-1 ring-primary/20";
 
 const PRIMARY_NAV_BTN =
   "relative z-10 flex h-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-to-br from-primary via-primary to-primary-container px-4 font-body font-bold text-on-primary shadow-md shadow-primary/25 ring-2 ring-primary/20 transition-all active:scale-[0.98] sm:min-w-[11.5rem] sm:gap-2.5 sm:px-10 sm:shadow-lg sm:shadow-primary/30 md:min-w-[13rem] md:px-12";
@@ -191,15 +194,16 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
             </span>
           </Link>
 
-          {/* Tabs — share remaining width */}
-          <div className="relative flex min-w-0 flex-1 items-center justify-evenly">
+          {/* Tabs — full-height track so active pill matches Book button */}
+          <div className="relative flex h-full min-w-0 flex-1 items-stretch self-stretch">
             {smallTabs.map((tab) => (
               <Link
                 key={tab.id}
                 href={tab.href}
                 title={tab.label}
                 aria-label={tab.label}
-                className={`relative z-10 flex h-full min-w-0 flex-1 items-center justify-center gap-1 rounded-full px-2 font-body font-semibold transition-colors sm:gap-1.5 sm:px-4 ${
+                aria-current={tab.isActive ? "page" : undefined}
+                className={`relative z-10 flex h-full min-h-full min-w-0 flex-1 items-center justify-center gap-1 rounded-full px-2 py-0 font-body font-semibold transition-colors sm:gap-1.5 sm:px-4 ${
                   tab.isActive
                     ? "text-primary"
                     : "text-on-surface-variant hover:text-on-surface"
@@ -208,13 +212,15 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
                 {tab.isActive ? (
                   <motion.span
                     layoutId="customer-nav-pill"
-                    className="absolute inset-0 rounded-full bg-white shadow-sm ring-1 ring-stone-200/80"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    className={NAV_TAB_ACTIVE_PILL}
+                    transition={{ type: "spring", stiffness: 380, damping: 32 }}
                   />
                 ) : null}
                 <span
                   className={`material-symbols-outlined relative z-10 shrink-0 text-[17px] sm:text-[20px] ${
-                    tab.isActive ? "text-primary" : "text-stone-500"
+                    tab.isActive
+                      ? "text-primary material-symbols-filled"
+                      : "text-stone-500"
                   }`}
                 >
                   {tab.icon}
@@ -227,7 +233,7 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
           </div>
 
           {/* Utilities inside the pill */}
-          <div className="flex shrink-0 items-center gap-1 pr-0.5 sm:gap-1.5 sm:pr-1">
+          <div className="flex shrink-0 items-center gap-1 self-center pr-0.5 sm:gap-1.5 sm:pr-1">
             <Link
               href={accountPath(slug, "notifications")}
               aria-label="Notifications"
@@ -268,6 +274,8 @@ export function CustomerSignOutButton({
 }: {
   className?: string;
 }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const { status, logout } = useCustomerAuth();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -276,8 +284,12 @@ export function CustomerSignOutButton({
 
   async function confirmSignOut() {
     setSigningOut(true);
+    const slug = parseBooknowSlug(pathname);
     try {
       await logout();
+      if (slug) {
+        router.replace(booknowPath(slug));
+      }
     } finally {
       setSigningOut(false);
       setOpen(false);
@@ -311,8 +323,10 @@ export function CustomerSignOutButton({
 /** Full-width guest nav: business left, creative auth CTAs right */
 export function CustomerGuestNav({
   businessName,
+  bookingSlug,
 }: {
   businessName: string;
+  bookingSlug?: string;
 }) {
   const { openAuth } = useCustomerAuth();
 
@@ -343,14 +357,18 @@ export function CustomerGuestNav({
               filled
               label="Join"
               ariaLabel={`Join — create account for ${businessName}`}
-              onClick={() => openAuth({ mode: "signup", businessName })}
+              onClick={() =>
+                openAuth({ mode: "signup", businessName, bookingSlug })
+              }
             />
             <GuestAuthButton
               variant="signin"
               icon="login"
               label="Sign in"
               ariaLabel={`Sign in to ${businessName}`}
-              onClick={() => openAuth({ mode: "signin", businessName })}
+              onClick={() =>
+                openAuth({ mode: "signin", businessName, bookingSlug })
+              }
             />
           </div>
         </div>

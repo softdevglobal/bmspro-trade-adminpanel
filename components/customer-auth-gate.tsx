@@ -5,9 +5,11 @@ import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 
 export function CustomerAuthGate({
   businessName,
+  bookingSlug,
   children,
 }: {
   businessName: string;
+  bookingSlug?: string;
   children: React.ReactNode;
 }) {
   const { status } = useCustomerAuth();
@@ -23,7 +25,13 @@ export function CustomerAuthGate({
   }
 
   if (status === "unauthenticated") {
-    return <CustomerAuthPanel businessName={businessName} variant="page" />;
+    return (
+      <CustomerAuthPanel
+        businessName={businessName}
+        bookingSlug={bookingSlug}
+        variant="page"
+      />
+    );
   }
 
   return <>{children}</>;

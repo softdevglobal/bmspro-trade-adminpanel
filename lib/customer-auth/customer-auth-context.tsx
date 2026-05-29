@@ -32,6 +32,7 @@ export type AuthModalMode = "signin" | "signup";
 export type OpenAuthOptions = {
   mode?: AuthModalMode;
   businessName?: string;
+  bookingSlug?: string;
   defaults?: { fullName?: string; phone?: string; email?: string };
   onAuthenticated?: () => void;
 };
@@ -47,6 +48,7 @@ type CustomerAuthContextValue = {
     password: string;
     fullName: string;
     phone: string;
+    bookingSlug?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
   saveProfile: (input: CustomerProfileInput) => Promise<CustomerProfile>;
@@ -111,6 +113,7 @@ export function CustomerAuthProvider({
   const [modalOptions, setModalOptions] = useState<OpenAuthOptions>({});
   const userRef = useRef<User | null>(null);
   const pendingCallbackRef = useRef<(() => void) | null>(null);
+  const registrationSlugRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     userRef.current = user;
@@ -156,6 +159,7 @@ export function CustomerAuthProvider({
       password: string;
       fullName: string;
       phone: string;
+      bookingSlug?: string;
     }) => {
       const credential = await createUserWithEmailAndPassword(
         customerAuth,
@@ -170,9 +174,12 @@ export function CustomerAuthProvider({
         /* non-fatal */
       }
       try {
+        const slug =
+          params.bookingSlug?.trim() || registrationSlugRef.current?.trim();
         await patchProfile(credential.user, {
           fullName: params.fullName.trim(),
           phone: params.phone.replace(/\D/g, ""),
+          bookingSlug: slug,
         });
       } catch {
         /* profile saved on first PATCH attempt next time */
@@ -207,12 +214,14 @@ export function CustomerAuthProvider({
 
   const openAuth = useCallback((options: OpenAuthOptions = {}) => {
     pendingCallbackRef.current = options.onAuthenticated ?? null;
+    registrationSlugRef.current = options.bookingSlug?.trim();
     setModalOptions(options);
     setModalOpen(true);
   }, []);
 
   const closeAuth = useCallback(() => {
     pendingCallbackRef.current = null;
+    registrationSlugRef.current = undefined;
     setModalOpen(false);
     setModalOptions({});
   }, []);
@@ -264,6 +273,7 @@ export function CustomerAuthProvider({
         open={modalOpen}
         onClose={closeAuth}
         businessName={modalOptions.businessName ?? "BMS Pro Trade"}
+        bookingSlug={modalOptions.bookingSlug}
         defaultMode={modalOptions.mode}
         defaults={modalOptions.defaults}
       />

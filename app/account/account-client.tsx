@@ -1,10 +1,7 @@
 "use client";
 
-import {
-  CustomerTopNav,
-  type CustomerAccountTab,
-} from "@/components/customer-account-nav";
-import { CustomerAuthGate } from "@/components/customer-auth-gate";
+import type { CustomerAccountTab } from "@/components/customer-account-nav";
+import { CustomerTopNav } from "@/components/customer-account-nav";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import {
   buildCustomerNotifications,
@@ -27,9 +24,17 @@ import {
 import Link from "next/link";
 import {
   accountPath,
+  booknowPath,
   parseLegacyAccountTabQuery,
 } from "@/lib/customer/booking-routes";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 const STATUS_TONE: Record<InspectionRequestStatus, string> = {
@@ -49,7 +54,6 @@ const HISTORY_STATUSES: InspectionRequestStatus[] = ["completed", "cancelled"];
 
 export function AccountClient({
   slug,
-  businessName,
   tab,
 }: {
   slug: string;
@@ -61,19 +65,48 @@ export function AccountClient({
       <Suspense fallback={null}>
         <AccountLegacyQueryRedirect slug={slug} />
       </Suspense>
-      <CustomerAuthGate businessName={businessName}>
-        <Suspense fallback={null}>
-          <CustomerTopNav />
-        </Suspense>
-      </CustomerAuthGate>
-
-      <CustomerShellPanel>
-        <CustomerAuthGate businessName={businessName}>
-          <AuthedAccount tab={tab} />
-        </CustomerAuthGate>
-      </CustomerShellPanel>
+      <CustomerAccountAccess slug={slug}>
+        <CustomerTopNav />
+        <CustomerShellPanel>
+          <AuthedAccount tab={tab} slug={slug} />
+        </CustomerShellPanel>
+      </CustomerAccountAccess>
     </CustomerBookingShell>
   );
+}
+
+/** Account routes require sign-in; guests are sent back to the public booking page. */
+function CustomerAccountAccess({
+  slug,
+  children,
+}: {
+  slug: string;
+  children: ReactNode;
+}) {
+  const router = useRouter();
+  const { status } = useCustomerAuth();
+
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.replace(booknowPath(slug));
+    }
+  }, [status, slug, router]);
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-[min(50vh,420px)] items-center justify-center">
+        <span className="material-symbols-outlined animate-spin text-[28px] text-primary">
+          progress_activity
+        </span>
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return null;
+  }
+
+  return <>{children}</>;
 }
 
 /** Redirects old `/account?tab=…` links to path-based URLs. */
@@ -90,8 +123,13 @@ function AccountLegacyQueryRedirect({ slug }: { slug: string }) {
   return null;
 }
 
-function AuthedAccount({ tab }: { tab: CustomerAccountTab }) {
-
+function AuthedAccount({
+  tab,
+  slug,
+}: {
+  tab: CustomerAccountTab;
+  slug: string;
+}) {
   const titles: Record<CustomerAccountTab, string> = {
     profile: "My profile",
     requests: "My requests",
@@ -101,17 +139,19 @@ function AuthedAccount({ tab }: { tab: CustomerAccountTab }) {
 
   return (
     <>
-      <div>
-        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-          Customer area
-        </p>
-        <h1 className="mt-1 font-display text-[22px] font-semibold text-on-surface sm:text-[26px]">
-          {titles[tab]}
-        </h1>
-      </div>
+      {tab !== "profile" ? (
+        <div>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+            Customer area
+          </p>
+          <h1 className="mt-1 font-display text-[22px] font-semibold text-on-surface sm:text-[26px]">
+            {titles[tab]}
+          </h1>
+        </div>
+      ) : null}
 
-      <div className="mt-5">
-        {tab === "profile" ? <ProfileSection /> : null}
+      <div className={tab === "profile" ? "" : "mt-5"}>
+        {tab === "profile" ? <ProfileSection slug={slug} /> : null}
         {tab === "requests" ? (
           <BookingsList scope="active" emptyHint="You have no active requests." />
         ) : null}
@@ -124,13 +164,79 @@ function AuthedAccount({ tab }: { tab: CustomerAccountTab }) {
   );
 }
 
-function ProfileSection() {
+function profileInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toUpperCase();
+}
+
+function formatMemberSince(ms: number | null | undefined): string | null {
+  if (!ms) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      year: "numeric",
+    }).format(new Date(ms));
+  } catch {
+    return null;
+  }
+}
+
+const PROFILE_INPUT_CLASS =
+  "w-full rounded-xl border border-stone-200 bg-white py-3 pl-10 pr-3 font-body text-[15px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 sm:text-[14px]";
+
+const PROFILE_LABEL_CLASS =
+  "block font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant";
+
+function ProfileField({
+  label,
+  icon,
+  children,
+}: {
+  label: string;
+  icon: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className={PROFILE_LABEL_CLASS}>{label}</span>
+      <div className="relative mt-1">
+        <span
+          className="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-stone-400"
+          aria-hidden
+        >
+          {icon}
+        </span>
+        {children}
+      </div>
+    </label>
+  );
+}
+
+function ProfileSection({ slug }: { slug: string }) {
   const { profile, user, saveProfile } = useCustomerAuth();
   const [fullName, setFullName] = useState(profile?.fullName ?? "");
   const [phone, setPhone] = useState(profile?.phone ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const email = user?.email ?? profile?.email ?? "";
+  const displayName = fullName.trim() || "Your profile";
+  const initials = profileInitials(fullName);
+  const memberSince = formatMemberSince(profile?.createdAt);
+
+  const completion = useMemo(() => {
+    let score = 0;
+    if (fullName.trim().length >= 2) score += 1;
+    if (phone.replace(/\D/g, "").length >= 6) score += 1;
+    if (email) score += 1;
+    return Math.round((score / 3) * 100);
+  }, [fullName, phone, email]);
+
+  const registeredName = profile?.registeredBusinessName;
+  const registeredSlug = profile?.registeredBookingSlug ?? slug;
 
   useEffect(() => {
     setFullName(profile?.fullName ?? "");
@@ -156,91 +262,193 @@ function ProfileSection() {
     }
   }
 
-  const inputClass =
-    "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-3 font-body text-[15px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 sm:text-[14px]";
-  const labelClass =
-    "block font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant";
-
   return (
-    <form className="space-y-4" onSubmit={handleSubmit}>
-      <div className="rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 sm:px-5">
-        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          Signed in as
+    <form className="space-y-5" onSubmit={handleSubmit}>
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-2xl border border-stone-200/90 bg-gradient-to-br from-primary/[0.09] via-white to-[#faf8f5] p-4 shadow-sm sm:rounded-3xl sm:p-6">
+        <div
+          className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-primary/12 blur-2xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute -bottom-6 left-1/3 h-24 w-24 rounded-full bg-[#ffd0a8]/30 blur-2xl"
+          aria-hidden
+        />
+
+        <p className="relative font-body text-[11px] font-bold uppercase tracking-wider text-primary/80">
+          Customer area
         </p>
-        <p className="mt-0.5 font-body text-[14px] font-semibold text-on-surface">
-          {user?.email}
-        </p>
-        <p className="mt-1 font-body text-[11px] text-on-surface-variant">
-          One account, used across every business you book on BMS Pro Trade.
-        </p>
+        <div className="relative mt-4 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <div
+              className="flex h-[4.25rem] w-[4.25rem] shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary to-primary/80 font-display text-[22px] font-bold tracking-tight text-on-primary shadow-lg shadow-primary/25 ring-4 ring-white/80 sm:h-[4.75rem] sm:w-[4.75rem] sm:text-[26px]"
+              aria-hidden
+            >
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate font-display text-[22px] font-semibold leading-tight text-on-surface sm:text-[26px]">
+                {displayName}
+              </h1>
+              <p className="mt-0.5 truncate font-body text-[13px] text-on-surface-variant sm:text-[14px]">
+                {email}
+              </p>
+              {memberSince ? (
+                <p className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/70 px-2.5 py-0.5 font-body text-[10px] font-semibold text-on-surface-variant">
+                  <span className="material-symbols-outlined text-[13px] text-primary">
+                    workspace_premium
+                  </span>
+                  Member since {memberSince}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="w-full shrink-0 rounded-2xl border border-white/80 bg-white/75 px-4 py-3 backdrop-blur-sm sm:max-w-[11rem]">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-body text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                Profile complete
+              </p>
+              <p className="font-display text-[18px] font-semibold text-primary">
+                {completion}%
+              </p>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200/90">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-primary to-primary/70 transition-[width] duration-500 ease-out"
+                style={{ width: `${completion}%` }}
+              />
+            </div>
+            <p className="mt-1.5 font-body text-[10px] leading-snug text-on-surface-variant">
+              {completion === 100
+                ? "You are all set to book."
+                : "Add your name and mobile to book faster."}
+            </p>
+          </div>
+        </div>
       </div>
 
-      <label className="block">
-        <span className={labelClass}>Full name</span>
-        <input
-          type="text"
-          value={fullName}
-          onChange={(event) => setFullName(event.target.value)}
-          placeholder="e.g. Alex Thompson"
-          autoComplete="name"
-          className={inputClass}
-        />
-      </label>
-
-      <label className="block">
-        <span className={labelClass}>Mobile number</span>
-        <input
-          type="tel"
-          inputMode="tel"
-          value={phone}
-          onChange={(event) => setPhone(event.target.value)}
-          placeholder="07XXXXXXXX"
-          autoComplete="tel"
-          className={inputClass}
-        />
-      </label>
-
-      <label className="block">
-        <span className={labelClass}>Email</span>
-        <input
-          type="email"
-          value={user?.email ?? ""}
-          readOnly
-          className={`${inputClass} cursor-not-allowed bg-stone-50 text-on-surface-variant`}
-        />
-        <span className="mt-1 inline-flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
-          <span className="material-symbols-outlined text-[14px] text-primary">
-            verified
-          </span>
-          Email is locked to your account.
-        </span>
-      </label>
-
-      {error ? (
-        <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] font-semibold text-rose-700">
-          {error}
-        </p>
-      ) : null}
-      {saved ? (
-        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 font-body text-[12px] font-semibold text-emerald-700">
-          Profile saved.
-        </p>
+      {/* Registered business */}
+      {registeredName ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+              <span className="material-symbols-outlined text-[22px]">storefront</span>
+            </span>
+            <div className="min-w-0">
+              <p className="font-body text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                Registered with
+              </p>
+              <p className="mt-0.5 font-display text-[17px] font-semibold text-on-surface">
+                {registeredName}
+              </p>
+              <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                Your account was created on this business booking page.
+              </p>
+            </div>
+          </div>
+          <Link
+            href={booknowPath(registeredSlug)}
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-[12px] font-bold text-primary shadow-sm transition-colors hover:border-primary/30 hover:bg-primary/5"
+          >
+            <span className="material-symbols-outlined text-[16px]">
+              calendar_add_on
+            </span>
+            Book again
+          </Link>
+        </div>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={saving}
-        className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-bold text-on-primary shadow-sm transition-opacity disabled:opacity-60"
-      >
-        {saving ? (
-          <span className="material-symbols-outlined animate-spin text-[16px]">
-            progress_activity
+      {/* Details card */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+        <div className="flex items-start gap-3 border-b border-stone-100 pb-4">
+          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-on-surface">
+            <span className="material-symbols-outlined text-[20px]">edit_note</span>
           </span>
-        ) : (
-          <span className="material-symbols-outlined text-[16px]">save</span>
-        )}
-        Save changes
-      </button>
+          <div>
+            <h2 className="font-display text-[18px] font-semibold text-on-surface">
+              Your details
+            </h2>
+            <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">
+              Used when you request visits — one account across all businesses.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <ProfileField label="Full name" icon="person">
+            <input
+              type="text"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              placeholder="e.g. Alex Thompson"
+              autoComplete="name"
+              className={PROFILE_INPUT_CLASS}
+            />
+          </ProfileField>
+
+          <ProfileField label="Mobile number" icon="call">
+            <input
+              type="tel"
+              inputMode="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="07XXXXXXXX"
+              autoComplete="tel"
+              className={PROFILE_INPUT_CLASS}
+            />
+          </ProfileField>
+
+          <div className="sm:col-span-2">
+            <ProfileField label="Email" icon="mail">
+              <input
+                type="email"
+                value={email}
+                readOnly
+                className={`${PROFILE_INPUT_CLASS} cursor-not-allowed bg-stone-50/90 text-on-surface-variant`}
+              />
+            </ProfileField>
+            <p className="mt-1.5 inline-flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                verified_user
+              </span>
+              Email is locked to your sign-in — contact support to change it.
+            </p>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 font-body text-[12px] font-semibold text-rose-700">
+            {error}
+          </p>
+        ) : null}
+        {saved ? (
+          <p className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 font-body text-[12px] font-semibold text-emerald-800">
+            <span className="material-symbols-outlined text-[18px]">check_circle</span>
+            Profile saved successfully.
+          </p>
+        ) : null}
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-stone-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-body text-[12px] text-on-surface-variant">
+            Changes apply to your next booking request.
+          </p>
+          <button
+            type="submit"
+            disabled={saving}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 font-body text-[14px] font-bold text-on-primary shadow-md shadow-primary/20 transition-all hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            {saving ? (
+              <span className="material-symbols-outlined animate-spin text-[18px]">
+                progress_activity
+              </span>
+            ) : (
+              <span className="material-symbols-outlined text-[18px]">save</span>
+            )}
+            Save changes
+          </button>
+        </div>
+      </div>
     </form>
   );
 }

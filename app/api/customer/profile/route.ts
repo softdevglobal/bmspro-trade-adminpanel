@@ -16,7 +16,12 @@ export async function GET(request: Request) {
       { status: auth.status },
     );
   }
-  const profile = await getOrCreateCustomerProfile(auth.customer);
+  const url = new URL(request.url);
+  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
+
+  const profile = await getOrCreateCustomerProfile(auth.customer, {
+    bookingSlug,
+  });
   return NextResponse.json({ ok: true, profile });
 }
 

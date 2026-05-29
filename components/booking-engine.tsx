@@ -70,7 +70,10 @@ export function BookingEngine({ business, services }: Props) {
     <CustomerBookingShell
       backdrop={<AnimatedBackdrop reducedMotion={!!reducedMotion} />}
     >
-      <TopBar businessName={business.businessName} />
+      <TopBar
+        businessName={business.businessName}
+        bookingSlug={business.slug}
+      />
 
       {/* Hero split — same card footprint as account panel */}
       <motion.section
@@ -118,7 +121,13 @@ export function BookingEngine({ business, services }: Props) {
  * Top bar
  * ========================================================================== */
 
-function TopBar({ businessName }: { businessName: string }) {
+function TopBar({
+  businessName,
+  bookingSlug,
+}: {
+  businessName: string;
+  bookingSlug: string;
+}) {
   const { status } = useCustomerAuth();
 
   if (status === "loading") {
@@ -137,7 +146,10 @@ function TopBar({ businessName }: { businessName: string }) {
           {status === "authenticated" ? (
             <CustomerAccountNav />
           ) : (
-            <CustomerGuestNav businessName={businessName} />
+            <CustomerGuestNav
+              businessName={businessName}
+              bookingSlug={bookingSlug}
+            />
           )}
         </div>
       </motion.header>
@@ -1211,6 +1223,7 @@ function ServiceBookingFlow({
       customerAuth.openAuth({
         mode: "signup",
         businessName,
+        bookingSlug: slug,
         defaults: {
           fullName: snapshot.fullName,
           phone: snapshot.phone,

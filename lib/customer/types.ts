@@ -1,8 +1,10 @@
 /**
  * Shared types for customer (booking-side) accounts.
  *
- * Customers register once via /booknow auth and can use the same email to
- * book inspections across any business in the platform.
+ * Firestore `customers/{uid}` registration fields (set once on signup):
+ * - registeredBusinessId
+ * - registeredBookingSlug
+ * - registeredBusinessName
  */
 
 export const CUSTOMER_COLLECTION = "customers";
@@ -12,6 +14,9 @@ export type CustomerProfile = {
   email: string;
   fullName: string;
   phone: string;
+  registeredBusinessId: string | null;
+  registeredBookingSlug: string | null;
+  registeredBusinessName: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
@@ -19,6 +24,8 @@ export type CustomerProfile = {
 export type CustomerProfileInput = {
   fullName: string;
   phone: string;
+  /** Booking slug from `/booknow/[slug]` — saved on first signup only. */
+  bookingSlug?: string;
 };
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,6 +55,9 @@ export function validateCustomerProfileInput(
     typeof item.fullName === "string" ? item.fullName.trim() : "";
   const phone =
     typeof item.phone === "string" ? normalizePhone(item.phone) : "";
+  const bookingSlugRaw =
+    typeof item.bookingSlug === "string" ? item.bookingSlug.trim() : "";
+  const bookingSlug = bookingSlugRaw.length > 0 ? bookingSlugRaw : undefined;
 
   if (fullName.length < 2) {
     return { ok: false, error: "Enter your full name." };
@@ -55,5 +65,5 @@ export function validateCustomerProfileInput(
   if (phone.length < 6) {
     return { ok: false, error: "Enter a valid mobile number." };
   }
-  return { ok: true, value: { fullName, phone } };
+  return { ok: true, value: { fullName, phone, bookingSlug } };
 }
