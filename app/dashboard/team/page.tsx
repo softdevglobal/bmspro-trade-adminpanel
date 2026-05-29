@@ -1,3 +1,4 @@
+import { BusinessOwnerGuard } from "@/components/business-owner-guard";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { TeamStaffForm } from "@/components/team-staff-form";
 
@@ -7,7 +8,9 @@ export default function TeamPage() {
       title="Team"
       subtitle="View staff members and setup new users for your business."
     >
-      <TeamStaffForm />
+      <BusinessOwnerGuard>
+        <TeamStaffForm />
+      </BusinessOwnerGuard>
     </DashboardShell>
   );
 }

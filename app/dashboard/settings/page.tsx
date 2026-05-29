@@ -1,4 +1,5 @@
 import { BookingLinkCard } from "@/components/booking-link-card";
+import { BusinessLogoSettings } from "@/components/business-logo-settings";
 import { DashboardShell } from "@/components/dashboard-shell";
 
 const SETTINGS_CARDS = [
@@ -72,6 +73,10 @@ export default function SettingsPage() {
     >
       <div className="mb-8">
         <BookingLinkCard variant="permanent" />
+      </div>
+
+      <div className="mb-8">
+        <BusinessLogoSettings />
       </div>
 
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">

@@ -39,19 +39,17 @@ async function verifySuperAdmin(user: User): Promise<boolean> {
 }
 
 async function resolveAuthRole(
-  user: User
+  user: User,
 ): Promise<{ role: AuthRole; businessId: string | null }> {
-  const isSuperAdmin = await verifySuperAdmin(user);
-  if (isSuperAdmin) {
-    return { role: "super_admin", businessId: null };
-  }
-
+  // Check JWT claims first — avoids a Firestore round-trip for most business owners.
   const tokenResult = await user.getIdTokenResult();
   const businessId =
     typeof tokenResult.claims.businessId === "string"
       ? tokenResult.claims.businessId
       : null;
   const claimRole = tokenResult.claims.role;
+  const superAdminClaim =
+    tokenResult.claims.superAdmin === true || claimRole === "super_admin";
 
   if (
     businessId &&
@@ -60,7 +58,62 @@ async function resolveAuthRole(
     return { role: "business_owner", businessId };
   }
 
+  if (superAdminClaim) {
+    return { role: "super_admin", businessId: null };
+  }
+
+  const isSuperAdmin = await verifySuperAdmin(user);
+  if (isSuperAdmin) {
+    return { role: "super_admin", businessId: null };
+  }
+
   return { role: null, businessId: null };
+}
+
+const AUTH_CACHE_KEY = "bms.auth.session";
+
+type AuthSessionCache = {
+  uid: string;
+  role: AuthRole;
+  businessId: string | null;
+};
+
+function readAuthCache(uid: string): AuthSessionCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(AUTH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AuthSessionCache;
+    if (parsed.uid !== uid || !parsed.role) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthCache(
+  uid: string,
+  role: AuthRole,
+  businessId: string | null,
+): void {
+  if (typeof window === "undefined" || !role) return;
+  try {
+    sessionStorage.setItem(
+      AUTH_CACHE_KEY,
+      JSON.stringify({ uid, role, businessId }),
+    );
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function clearAuthCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(AUTH_CACHE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 function waitForAuthSignedOut(): Promise<void> {
@@ -111,30 +164,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const cached = readAuthCache(firebaseUser.uid);
       setUser(firebaseUser);
-      setStatus("loading");
+      if (cached) {
+        setRole(cached.role);
+        setBusinessId(cached.businessId);
+        setStatus("authenticated");
+      } else {
+        setStatus("loading");
+      }
 
-      try {
-        const resolved = await resolveAuthRole(firebaseUser);
-        if (!resolved.role) {
+      const applyResolved = async () => {
+        try {
+          const resolved = await resolveAuthRole(firebaseUser);
+          if (!resolved.role) {
+            clearAuthCache();
+            await signOut(auth);
+            await waitForAuthSignedOut();
+            setUser(null);
+            setRole(null);
+            setBusinessId(null);
+            setStatus("unauthenticated");
+            return;
+          }
+          writeAuthCache(
+            firebaseUser.uid,
+            resolved.role,
+            resolved.businessId,
+          );
+          setRole(resolved.role);
+          setBusinessId(resolved.businessId);
+          setStatus("authenticated");
+        } catch {
+          clearAuthCache();
           await signOut(auth);
           await waitForAuthSignedOut();
           setUser(null);
           setRole(null);
           setBusinessId(null);
           setStatus("unauthenticated");
-          return;
         }
-        setRole(resolved.role);
-        setBusinessId(resolved.businessId);
-        setStatus("authenticated");
-      } catch {
-        await signOut(auth);
-        await waitForAuthSignedOut();
-        setUser(null);
-        setRole(null);
-        setBusinessId(null);
-        setStatus("unauthenticated");
+      };
+
+      if (cached) {
+        void applyResolved();
+      } else {
+        await applyResolved();
       }
     });
 
@@ -156,6 +231,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("UNAUTHORIZED");
     }
 
+    writeAuthCache(
+      credential.user.uid,
+      resolved.role,
+      resolved.businessId,
+    );
     setUser(credential.user);
     setRole(resolved.role);
     setBusinessId(resolved.businessId);
@@ -164,6 +244,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const logout = useCallback(async () => {
+    clearAuthCache();
     await signOut(auth);
     await waitForAuthSignedOut();
     setUser(null);

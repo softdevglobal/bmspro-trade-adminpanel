@@ -1,4 +1,6 @@
+import { sendStaffWelcomeEmail } from "@/lib/email/account-emails";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
@@ -393,8 +395,23 @@ export async function POST(request: Request) {
       updatedAt: now,
     });
 
+    let welcomeEmailSent = false;
+    try {
+      const business = await getBusinessProfile(auth.businessId);
+      welcomeEmailSent = await sendStaffWelcomeEmail({
+        email: parsed.value.email,
+        fullName: parsed.value.fullName,
+        businessName: business?.businessName?.trim() || "your business",
+        staffType: parsed.value.staffType,
+        temporaryPassword: DEFAULT_STAFF_PASSWORD,
+        logoUrl: business?.logoUrl ?? null,
+      });
+    } catch (emailError) {
+      console.error("[staff] welcome email failed:", emailError);
+    }
+
     return NextResponse.json(
-      { ok: true, staffId: authUid },
+      { ok: true, staffId: authUid, welcomeEmailSent },
       { status: 201 }
     );
   } catch (error: unknown) {
@@ -431,7 +448,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const serviceAreas = await getBusinessServiceAreas(auth.businessId);
+  const summaryOnly =
+    new URL(request.url).searchParams.get("summary") === "1";
+  const serviceAreas = summaryOnly
+    ? []
+    : await getBusinessServiceAreas(auth.businessId);
   const snapshot = await adminDb
     .collection("users")
     .where("businessId", "==", auth.businessId)
@@ -447,7 +468,9 @@ export async function GET(request: Request) {
         phone: sanitizeString(data.phone) || null,
         role: sanitizeString(data.role),
         staffType: staffType(data.staffType, data.skills),
-        availability: availabilityForResponse(data.availability, serviceAreas),
+        availability: summaryOnly
+          ? {}
+          : availabilityForResponse(data.availability, serviceAreas),
         status: staffStatus(data.status),
         createdAt: timestampIso(data.createdAt),
         createdAtMillis: timestampMillis(data.createdAt),
@@ -466,7 +489,11 @@ export async function GET(request: Request) {
       createdAt: member.createdAt,
     }));
 
-  return NextResponse.json({ ok: true, staff, serviceAreas });
+  return NextResponse.json({
+    ok: true,
+    staff,
+    serviceAreas: summaryOnly ? [] : serviceAreas,
+  });
 }
 
 export async function PATCH(request: Request) {

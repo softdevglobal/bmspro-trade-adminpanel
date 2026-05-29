@@ -4,6 +4,23 @@ import type { BookingBusiness, BookingService } from "@/app/booknow/[slug]/page"
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
+import {
+  CUSTOMER_FIXED_NAV_BAR_CLASS,
+  CUSTOMER_FIXED_NAV_INNER_CLASS,
+  CustomerBookingShell,
+  CustomerNavSpacer,
+} from "@/components/customer-booking-shell";
+import {
+  CustomerAccountNav,
+  CustomerGuestNav,
+} from "@/components/customer-account-nav";
+import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
+import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import {
+  SlotDayPicker,
+  todayIso,
+} from "@/components/booking-slot-date-picker";
+import { formatAddress } from "@/lib/inspection/types";
 
 type Props = {
   business: BookingBusiness;
@@ -18,10 +35,7 @@ export type ServiceAddress = {
 };
 
 function formatServiceAddress(address: ServiceAddress): string {
-  return [address.street, address.suburb, address.state, address.postcode]
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join(", ");
+  return formatAddress(address);
 }
 
 function isServiceAddressComplete(address: ServiceAddress): boolean {
@@ -35,7 +49,6 @@ function isServiceAddressComplete(address: ServiceAddress): boolean {
 
 export function BookingEngine({ business, services }: Props) {
   const reducedMotion = useReducedMotion();
-  const [copied, setCopied] = useState(false);
 
   const location = useMemo(() => {
     if (business.state && business.postcode) {
@@ -51,57 +64,44 @@ export function BookingEngine({ business, services }: Props) {
     ? `mailto:${business.businessEmail}`
     : null;
 
-  async function handleShare() {
-    if (typeof window === "undefined") return;
-    const url = window.location.href;
-    const nav = navigator as Navigator & {
-      share?: (data: ShareData) => Promise<void>;
-    };
-    try {
-      if (typeof nav.share === "function") {
-        await nav.share({
-          title: business.businessName,
-          text: `Book ${business.businessName} on BMS Pro Trade`,
-          url,
-        });
-        return;
-      }
-      await nav.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* user cancelled */
-    }
-  }
+  useEffect(() => {
+    rememberBookingSlug(business.slug);
+  }, [business.slug]);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#fbf8f3] text-on-surface">
-      <AnimatedBackdrop reducedMotion={!!reducedMotion} />
+    <CustomerBookingShell
+      backdrop={<AnimatedBackdrop reducedMotion={!!reducedMotion} />}
+    >
+      <TopBar
+        businessName={business.businessName}
+        bookingSlug={business.slug}
+        logoUrl={business.logoUrl}
+      />
 
-      <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-6 sm:px-6 sm:py-10">
-        <TopBar onShare={handleShare} copied={copied} />
-
-        {/* Hero split */}
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="relative mt-8 overflow-hidden rounded-[32px] border border-white/80 bg-white/85 p-6 shadow-[0_24px_60px_-24px_rgba(31,29,26,0.18)] backdrop-blur-xl sm:p-10"
-        >
-          <div className="relative grid gap-10 lg:grid-cols-[1.2fr_1fr] lg:items-center">
+      {/* Hero split — same card footprint as account panel */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        className="relative mt-4 flex min-h-[min(72vh,640px)] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:mt-5 sm:rounded-[24px] sm:p-6"
+      >
+          <div className="relative grid gap-5 lg:grid-cols-[1.2fr_1fr] lg:items-center lg:gap-10">
             <HeroContent
               business={business}
               location={location}
               reducedMotion={!!reducedMotion}
             />
-            <RadarVisualization
-              business={business}
-              reducedMotion={!!reducedMotion}
-            />
+            <div className="hidden lg:block">
+              <RadarVisualization
+                business={business}
+                reducedMotion={!!reducedMotion}
+              />
+            </div>
           </div>
 
-          <div className="relative mt-10">
+          <div className="relative mt-6 border-t border-stone-200/70 pt-6 sm:mt-10 sm:border-t-0 sm:pt-0">
             <ServiceBookingFlow
+              slug={business.slug}
               businessName={business.businessName}
               services={services}
               reducedMotion={!!reducedMotion}
@@ -111,13 +111,12 @@ export function BookingEngine({ business, services }: Props) {
           </div>
         </motion.section>
 
-        <BookingFooter
-          business={business}
-          phoneHref={phoneHref}
-          emailHref={emailHref}
-        />
-      </div>
-    </main>
+      <BookingFooter
+        business={business}
+        phoneHref={phoneHref}
+        emailHref={emailHref}
+      />
+    </CustomerBookingShell>
   );
 }
 
@@ -126,38 +125,42 @@ export function BookingEngine({ business, services }: Props) {
  * ========================================================================== */
 
 function TopBar({
-  onShare,
-  copied,
+  businessName,
+  bookingSlug,
+  logoUrl,
 }: {
-  onShare: () => void;
-  copied: boolean;
+  businessName: string;
+  bookingSlug: string;
+  logoUrl?: string | null;
 }) {
+  const { status } = useCustomerAuth();
+
+  if (status === "loading") {
+    return <CustomerNavSpacer />;
+  }
+
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: "easeOut" }}
-      className="flex items-center justify-between"
-    >
-      <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-white/95 px-3 py-1.5 shadow-sm backdrop-blur">
-        <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
-          bolt
-        </span>
-        <span className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          BMS Pro Trade
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={onShare}
-        className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/80 px-3 py-1.5 font-body text-[12px] font-semibold text-on-surface shadow-sm backdrop-blur transition-all hover:scale-105 hover:bg-white"
+    <>
+      <motion.header
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className={CUSTOMER_FIXED_NAV_BAR_CLASS}
       >
-        <span className="material-symbols-outlined text-[16px]">
-          {copied ? "check" : "ios_share"}
-        </span>
-        {copied ? "Link copied" : "Share"}
-      </button>
-    </motion.header>
+        <div className={CUSTOMER_FIXED_NAV_INNER_CLASS}>
+          {status === "authenticated" ? (
+            <CustomerAccountNav />
+          ) : (
+            <CustomerGuestNav
+              businessName={businessName}
+              bookingSlug={bookingSlug}
+              logoUrl={logoUrl}
+            />
+          )}
+        </div>
+      </motion.header>
+      <CustomerNavSpacer />
+    </>
   );
 }
 
@@ -191,6 +194,17 @@ function HeroContent({
 
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="show">
+      {business.logoUrl ? (
+        <motion.div variants={itemVariants} className="mb-3 sm:mb-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={business.logoUrl}
+            alt={business.businessName}
+            className="h-14 w-14 rounded-2xl border border-stone-200 bg-white object-cover shadow-sm sm:h-16 sm:w-16"
+          />
+        </motion.div>
+      ) : null}
+
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-700 shadow-sm">
           <span className="material-symbols-outlined material-symbols-filled text-[14px] text-amber-700">
@@ -203,7 +217,7 @@ function HeroContent({
 
       <motion.h1
         variants={itemVariants}
-        className="mt-4 font-display text-[34px] font-bold leading-[1.05] tracking-tight text-on-surface sm:text-[48px]"
+        className="mt-3 font-display text-[26px] font-bold leading-[1.08] tracking-tight text-on-surface sm:mt-4 sm:text-[48px]"
       >
         Book{" "}
         <span className="relative inline-block">
@@ -224,7 +238,7 @@ function HeroContent({
 
       <motion.p
         variants={itemVariants}
-        className="mt-3 font-body text-body-lg text-on-surface-variant"
+        className="mt-2 hidden font-body text-body-lg text-on-surface-variant sm:block"
       >
         Local trade pros, online booking, no callbacks. Pick a time and
         we&apos;ll confirm in minutes.
@@ -486,66 +500,666 @@ const EMPTY_ADDRESS: ServiceAddress = {
 };
 
 const BOOKING_INPUT_CLASS =
-  "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10";
+  "mt-1 w-full min-w-0 rounded-xl border border-stone-200 bg-white px-3 py-3 font-body text-[16px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 sm:py-2.5 sm:text-[14px]";
+
+/** One-off visit address — avoid browser "Save address?" prompts. */
+const BOOKING_AUTOCOMPLETE = "off";
+
+const BOOKING_STEP_PANEL_CLASS =
+  "w-full min-w-0 rounded-xl border border-stone-200 bg-[#faf8f5] p-3 sm:rounded-2xl sm:p-5";
+
+const BOOKING_LABEL_CLASS =
+  "font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant";
+
+function normalizeBudgetInput(value: string): string {
+  let cleaned = value.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot !== -1) {
+    cleaned =
+      cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
+  }
+  const [whole, frac = ""] = cleaned.split(".");
+  return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
+}
+
+function BookingRequestExtras({
+  notes,
+  budget,
+  onNotesChange,
+  onBudgetChange,
+}: {
+  notes: string;
+  budget: string;
+  onNotesChange: (value: string) => void;
+  onBudgetChange: (value: string) => void;
+}) {
+  return (
+    <div className="mt-4 rounded-xl border border-stone-200/90 bg-white p-3 shadow-sm sm:p-4">
+      <p className={BOOKING_LABEL_CLASS}>Additional details</p>
+      <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+        Optional — helps the team prepare for your visit or quote.
+      </p>
+
+      <div className="mt-3 grid gap-3">
+        <label className="block">
+          <span className={BOOKING_LABEL_CLASS}>Notes</span>
+          <textarea
+            value={notes}
+            onChange={(event) => onNotesChange(event.target.value)}
+            rows={3}
+            placeholder="Access instructions, urgency, materials, anything else we should know…"
+            autoComplete={BOOKING_AUTOCOMPLETE}
+            className={`${BOOKING_INPUT_CLASS} resize-y`}
+            maxLength={2000}
+          />
+        </label>
+
+        <label className="block">
+          <span className={BOOKING_LABEL_CLASS}>Your budget</span>
+          <div className="relative mt-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 font-body text-[14px] font-semibold text-on-surface">
+              Aus $
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={budget}
+              onChange={(event) =>
+                onBudgetChange(normalizeBudgetInput(event.target.value))
+              }
+              placeholder="e.g. 2500"
+              autoComplete={BOOKING_AUTOCOMPLETE}
+              className={`${BOOKING_INPUT_CLASS} mt-0 pl-[3.65rem] pr-3`}
+              maxLength={12}
+            />
+          </div>
+          <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+            Rough amount you have in mind (optional).
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+type RequestType = "existing_service" | "custom_quote";
+type SlotTimeRange = "morning" | "afternoon";
+
+type PreferredSlot = { date: string; timeRange: SlotTimeRange };
+
+const TIME_RANGE_OPTIONS: {
+  id: SlotTimeRange;
+  label: string;
+  hint: string;
+  icon: string;
+}[] = [
+  { id: "morning", label: "Morning", hint: "8am – 12pm", icon: "wb_twilight" },
+  { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
+];
+
+function formatPrettyDate(iso: string): string {
+  if (!iso) return "";
+  const parsed = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function PreferredSlotPicker({
+  slot,
+  slotIndex,
+  minDate,
+  allSlots,
+  dayPage,
+  onDayPageChange,
+  onDateChange,
+  onTimeChange,
+}: {
+  slot: PreferredSlot;
+  slotIndex: number;
+  minDate: string;
+  allSlots: PreferredSlot[];
+  dayPage: number;
+  onDayPageChange: (page: number) => void;
+  onDateChange: (iso: string) => void;
+  onTimeChange: (timeRange: SlotTimeRange) => void;
+}) {
+  const takenCombos = useMemo(() => {
+    const combos = new Set<string>();
+    allSlots.forEach((entry, index) => {
+      if (index !== slotIndex && entry.date) {
+        combos.add(`${entry.date}-${entry.timeRange}`);
+      }
+    });
+    return combos;
+  }, [allSlots, slotIndex]);
+
+  const morningTaken =
+    slot.date.length > 0 && takenCombos.has(`${slot.date}-morning`);
+  const afternoonTaken =
+    slot.date.length > 0 && takenCombos.has(`${slot.date}-afternoon`);
+
+  const selectedTimeLabel =
+    TIME_RANGE_OPTIONS.find((option) => option.id === slot.timeRange)?.label ??
+    "";
+
+  return (
+    <div className="mt-3 flex flex-col gap-4">
+      <SlotDayPicker
+        selectedIso={slot.date}
+        minDate={minDate}
+        dayPage={dayPage}
+        onDayPageChange={onDayPageChange}
+        onSelect={onDateChange}
+      />
+
+      <div>
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Pick a time window
+        </span>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {TIME_RANGE_OPTIONS.map((option) => {
+            const checked = slot.timeRange === option.id;
+            const disabled =
+              !slot.date ||
+              takenCombos.has(`${slot.date}-${option.id}`);
+            return (
+              <button
+                type="button"
+                key={option.id}
+                disabled={disabled}
+                onClick={() => onTimeChange(option.id)}
+                className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
+                  disabled
+                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
+                    : checked
+                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                      : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+                }`}
+              >
+                <span
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
+                    checked
+                      ? "bg-primary text-on-primary shadow-sm"
+                      : "bg-stone-100 text-stone-600"
+                  }`}
+                >
+                  <span className="material-symbols-outlined material-symbols-filled text-[20px]">
+                    {option.icon}
+                  </span>
+                </span>
+                <span>
+                  <span
+                    className={`block font-body text-[14px] font-bold ${
+                      checked ? "text-primary" : "text-on-surface"
+                    }`}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    {option.hint}
+                  </span>
+                </span>
+                {checked ? (
+                  <span className="absolute right-2 top-[9px] material-symbols-outlined material-symbols-filled text-[18px] leading-none text-primary">
+                    check_circle
+                  </span>
+                ) : null}
+                {disabled && slot.date ? (
+                  <span className="absolute bottom-2 right-2 font-body text-[9px] font-bold uppercase tracking-wide text-outline">
+                    Used
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {slot.date ? (
+        <div
+          className={`rounded-xl border px-3 py-2.5 ${
+            morningTaken && afternoonTaken
+              ? "border-amber-200 bg-amber-50/80"
+              : "border-primary/25 bg-primary/5"
+          }`}
+        >
+          <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface">
+            <span className="material-symbols-outlined text-[16px] text-primary">
+              event_available
+            </span>
+            {formatPrettyDate(slot.date)}
+            {selectedTimeLabel ? (
+              <>
+                <span className="text-on-surface-variant">·</span>
+                <span className="text-primary">{selectedTimeLabel}</span>
+              </>
+            ) : null}
+          </p>
+          {morningTaken && afternoonTaken ? (
+            <p className="mt-1 font-body text-[11px] text-amber-800">
+              Both time windows are already used in another option — pick a
+              different day.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+          Choose a day above, then pick morning or afternoon.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function ServiceBookingFlow({
+  slug,
   businessName,
   services,
   phoneHref,
   emailHref,
   reducedMotion,
 }: {
+  slug: string;
   businessName: string;
   services: BookingService[];
   phoneHref: string | null;
   emailHref: string | null;
   reducedMotion: boolean;
 }) {
+  const [requestType, setRequestType] = useState<RequestType>(
+    services.length > 0 ? "existing_service" : "custom_quote",
+  );
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+    null,
+  );
+  const [customTitle, setCustomTitle] = useState("");
+  const [customDescription, setCustomDescription] = useState("");
+  const [customerNotes, setCustomerNotes] = useState("");
+  const [budgetAud, setBudgetAud] = useState("");
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
-  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([
+    { date: "", timeRange: "morning" },
+  ]);
+  const [customer, setCustomer] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+  });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(
+    null,
+  );
+  const [workingDayPage, setWorkingDayPage] = useState(0);
+
+  const customerAuth = useCustomerAuth();
+  const isAuthenticated = customerAuth.status === "authenticated";
+  const profile = customerAuth.profile;
+  const customerEmailFromAuth =
+    profile?.email ?? customerAuth.user?.email ?? "";
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setCustomer((prev) => ({
+      fullName: profile?.fullName?.trim() || prev.fullName,
+      email: customerEmailFromAuth || prev.email,
+      phone: profile?.phone?.trim() || prev.phone,
+    }));
+  }, [
+    isAuthenticated,
+    profile?.fullName,
+    profile?.phone,
+    customerEmailFromAuth,
+  ]);
+
+  const profileLocked = isAuthenticated;
+
+  const minDate = useMemo(() => todayIso(), []);
+  const selectedService =
+    services.find((service) => service.id === selectedServiceId) ?? null;
 
   const addressComplete = isServiceAddressComplete(address);
-  const selectedService = services.find((s) => s.id === selectedServiceId) ?? null;
-  const canContinue = addressComplete && selectedService !== null;
+
+  const requestStepValid =
+    requestType === "existing_service"
+      ? selectedService !== null
+      : customTitle.trim().length >= 3 &&
+        customDescription.trim().length >= 10;
+
+  const slotsValid =
+    preferredSlots.length > 0 &&
+    preferredSlots.every((slot) => slot.date.trim().length > 0) &&
+    new Set(preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`))
+      .size === preferredSlots.length;
+
+  const customerValid =
+    customer.fullName.trim().length >= 2 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim()) &&
+    customer.phone.replace(/\D/g, "").length > 0;
+
+  const canSubmit =
+    requestStepValid &&
+    addressComplete &&
+    slotsValid &&
+    customerValid &&
+    !submitting &&
+    !submittedRequestId;
 
   function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
-    setSubmitted(false);
+    setSubmitError(null);
   }
 
-  function handleContinue() {
-    if (!canContinue) return;
-    setSubmitted(true);
+  function updateCustomer(
+    field: "fullName" | "email" | "phone",
+    value: string,
+  ) {
+    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    setCustomer((prev) => ({ ...prev, [field]: next }));
+    setSubmitError(null);
   }
+
+  function updateSlot<K extends keyof PreferredSlot>(
+    index: number,
+    key: K,
+    value: PreferredSlot[K],
+  ) {
+    setPreferredSlots((prev) =>
+      prev.map((slot, idx) => (idx === index ? { ...slot, [key]: value } : slot)),
+    );
+    setSubmitError(null);
+  }
+
+  function addSlot() {
+    setPreferredSlots((prev) => {
+      if (prev.length >= 3) return prev;
+      return [...prev, { date: "", timeRange: "morning" }];
+    });
+  }
+
+  function removeSlot(index: number) {
+    setPreferredSlots((prev) =>
+      prev.length === 1 ? prev : prev.filter((_, idx) => idx !== index),
+    );
+  }
+
+  function handleSlotDateChange(index: number, iso: string) {
+    setPreferredSlots((prev) => {
+      const taken = new Set(
+        prev
+          .filter((_, idx) => idx !== index && _.date)
+          .map((entry) => `${entry.date}-${entry.timeRange}`),
+      );
+      return prev.map((slot, idx) => {
+        if (idx !== index) return slot;
+        let timeRange = slot.timeRange;
+        if (iso && taken.has(`${iso}-${timeRange}`)) {
+          const alt: SlotTimeRange =
+            timeRange === "morning" ? "afternoon" : "morning";
+          if (!taken.has(`${iso}-${alt}`)) timeRange = alt;
+        }
+        return { date: iso, timeRange };
+      });
+    });
+    setSubmitError(null);
+  }
+
+  async function submitInspectionRequest() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      const idToken = await customerAuth.getIdToken();
+      if (idToken) {
+        headers.authorization = `Bearer ${idToken}`;
+      }
+
+      const response = await fetch("/api/booking/inspection-request", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          slug,
+          requestType,
+          serviceId:
+            requestType === "existing_service" ? selectedServiceId : null,
+          customRequest:
+            requestType === "custom_quote"
+              ? {
+                  title: customTitle.trim(),
+                  description: customDescription.trim(),
+                }
+              : null,
+          customer: {
+            fullName: customer.fullName.trim(),
+            email: customer.email.trim().toLowerCase(),
+            phone: customer.phone,
+          },
+          address,
+          preferredSlots,
+          customerNotes: customerNotes.trim() || null,
+          budgetAud: budgetAud.trim() || null,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        requestId?: string;
+      };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(
+          payload.error ?? "Could not submit your request. Please try again.",
+        );
+      }
+
+      setSubmittedRequestId(payload.requestId ?? "ok");
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Could not submit your request. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    if (!isAuthenticated) {
+      const snapshot = {
+        fullName: customer.fullName.trim(),
+        phone: customer.phone.replace(/\D/g, ""),
+      };
+      customerAuth.openAuth({
+        mode: "signup",
+        businessName,
+        bookingSlug: slug,
+        defaults: {
+          fullName: snapshot.fullName,
+          phone: snapshot.phone,
+          email: customer.email,
+        },
+        onAuthenticated: async () => {
+          try {
+            await customerAuth.saveProfile(snapshot);
+          } catch {
+            /* non-fatal */
+          }
+          void submitInspectionRequest();
+        },
+      });
+      return;
+    }
+    await submitInspectionRequest();
+  }
+
+  if (submittedRequestId) {
+    return (
+      <SubmittedConfirmation
+        businessName={businessName}
+        requestType={requestType}
+        selectedServiceName={selectedService?.name ?? customTitle}
+        address={address}
+        preferredSlots={preferredSlots}
+        phoneHref={phoneHref}
+        emailHref={emailHref}
+        reducedMotion={reducedMotion}
+      />
+    );
+  }
+
+  const existingServiceAvailable = services.length > 0;
 
   return (
-    <div className="relative overflow-hidden rounded-[24px] border border-stone-200/90 bg-white/95 p-6 shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)] sm:p-8">
-      <div className="relative space-y-6 text-on-surface">
+    <div className="relative w-full min-w-0 sm:overflow-hidden sm:rounded-[24px] sm:border sm:border-stone-200/90 sm:bg-white/95 sm:p-8 sm:shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)]">
+      <div className="relative space-y-4 text-on-surface sm:space-y-6">
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-[#faf8f5] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-600">
             <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
               event_available
             </span>
-            Book online
+            Inspection visit request
           </div>
-          <h3 className="mt-3 font-display text-headline-sm font-semibold text-on-surface sm:text-headline-md">
-            Book a service with {businessName}
+          <h3 className="mt-2 font-display text-[20px] font-semibold leading-snug text-on-surface sm:mt-3 sm:text-headline-md">
+            Request a visit with {businessName}
           </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Browse services below, then add your address to continue booking.
+          <p className="mt-1 font-body text-[14px] leading-snug text-on-surface-variant sm:text-body-md">
+            Tell us what you need and pick up to 3 dates that suit you. The
+            team will confirm a visit time and an inspector.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
+        {/* Step 1 — Request type */}
+        <div className={BOOKING_STEP_PANEL_CLASS}>
+          <BookingStepHeader step={1} title="What do you need?" active />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            Choose an existing service or describe a custom job for a quote.
+          </p>
+
+          <div className="mt-3 grid grid-cols-1 gap-2.5 sm:mt-4 sm:grid-cols-2 sm:gap-3">
+            <RequestTypeOption
+              icon="format_list_bulleted"
+              label="Request an existing service"
+              description="Pick from the services this business offers."
+              selected={requestType === "existing_service"}
+              disabled={!existingServiceAvailable}
+              onSelect={() => {
+                setRequestType("existing_service");
+                setSubmitError(null);
+              }}
+            />
+            <RequestTypeOption
+              icon="request_quote"
+              label="Custom quotation request"
+              description="Describe the work and we'll inspect and quote."
+              selected={requestType === "custom_quote"}
+              onSelect={() => {
+                setRequestType("custom_quote");
+                setSubmitError(null);
+              }}
+            />
+          </div>
+
+          {requestType === "existing_service" ? (
+            existingServiceAvailable ? (
+              <ul className="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+                {services.map((service, index) => (
+                  <li
+                    key={service.id}
+                    className={index > 0 ? "border-t border-stone-200" : ""}
+                  >
+                    <BookingServiceListItem
+                      service={service}
+                      selected={selectedServiceId === service.id}
+                      onSelect={() => {
+                        setSelectedServiceId((current) =>
+                          current === service.id ? null : service.id,
+                        );
+                        setSubmitError(null);
+                      }}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 font-body text-body-md text-on-surface-variant">
+                No published services yet — switch to a custom request below.
+              </p>
+            )
+          ) : (
+            <div className="mt-4 grid gap-3">
+              <label className="block">
+                <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                  Job title
+                </span>
+                <input
+                  type="text"
+                  value={customTitle}
+                  onChange={(event) => {
+                    setCustomTitle(event.target.value);
+                    setSubmitError(null);
+                  }}
+                  placeholder="e.g. Replace kitchen tap and check leak"
+                  className={BOOKING_INPUT_CLASS}
+                  maxLength={120}
+                />
+              </label>
+              <label className="block">
+                <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                  What needs doing?
+                </span>
+                <textarea
+                  value={customDescription}
+                  onChange={(event) => {
+                    setCustomDescription(event.target.value);
+                    setSubmitError(null);
+                  }}
+                  rows={4}
+                  placeholder="Tell us the scope, materials involved, urgency, etc."
+                  className={`${BOOKING_INPUT_CLASS} resize-y`}
+                  maxLength={1500}
+                />
+                <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                  At least 10 characters so the team can size up the visit.
+                </span>
+              </label>
+            </div>
+          )}
+
+          <BookingRequestExtras
+            notes={customerNotes}
+            budget={budgetAud}
+            onNotesChange={(value) => {
+              setCustomerNotes(value);
+              setSubmitError(null);
+            }}
+            onBudgetChange={(value) => {
+              setBudgetAud(value);
+              setSubmitError(null);
+            }}
+          />
+        </div>
+
+        {/* Step 2 — Address */}
+        <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader
-            step={1}
+            step={2}
             title="Service address"
             hint="Required"
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Where should our team carry out this job?
+            Where should the inspector visit?
           </p>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -558,7 +1172,7 @@ function ServiceBookingFlow({
                 value={address.street}
                 onChange={(e) => updateAddress("street", e.target.value)}
                 placeholder="e.g. 12 Main Street"
-                autoComplete="street-address"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
@@ -570,8 +1184,8 @@ function ServiceBookingFlow({
                 type="text"
                 value={address.suburb}
                 onChange={(e) => updateAddress("suburb", e.target.value)}
-                placeholder="e.g. Kandy"
-                autoComplete="address-level2"
+                placeholder="e.g. Surry Hills"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
@@ -584,11 +1198,11 @@ function ServiceBookingFlow({
                 value={address.state}
                 onChange={(e) => updateAddress("state", e.target.value)}
                 placeholder="e.g. NSW"
-                autoComplete="address-level1"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
-            <label className="block sm:col-span-2 sm:max-w-[12rem]">
+            <label className="block sm:col-span-2 sm:max-w-[12rem] max-sm:w-full">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
                 Postcode
               </span>
@@ -598,80 +1212,221 @@ function ServiceBookingFlow({
                 value={address.postcode}
                 onChange={(e) => updateAddress("postcode", e.target.value)}
                 placeholder="e.g. 2000"
-                autoComplete="postal-code"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-stone-200 bg-[#faf8f5] p-4 sm:p-5">
-          <BookingStepHeader step={2} title="Choose a service" active />
+        {/* Step 3 — Preferred dates */}
+        <div className={BOOKING_STEP_PANEL_CLASS}>
+          <BookingStepHeader
+            step={3}
+            title="Preferred dates & times"
+            hint={`${preferredSlots.length} of 3`}
+            active
+          />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            Tap a day and morning or afternoon window — up to 3 options. The
+            owner will confirm one (or propose alternatives).
+          </p>
 
-          {services.length === 0 ? (
-            <p className="mt-4 font-body text-body-md text-on-surface-variant">
-              No services are available to book online yet. Please call or
-              email the business directly.
-            </p>
-          ) : (
-            <ul className="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-              {services.map((service, index) => (
-                <li
-                  key={service.id}
-                  className={index > 0 ? "border-t border-stone-200" : ""}
-                >
-                  <BookingServiceListItem
-                    service={service}
-                    selected={selectedServiceId === service.id}
-                    onSelect={() => {
-                      setSelectedServiceId((current) =>
-                        current === service.id ? null : service.id,
-                      );
-                      setSubmitted(false);
-                    }}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul className="mt-4 space-y-3">
+            {preferredSlots.map((slot, index) => (
+              <li
+                key={index}
+                className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <span className="material-symbols-outlined text-[14px]">
+                        event
+                      </span>
+                    </span>
+                    Option {index + 1}
+                  </span>
+                  {preferredSlots.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => removeSlot(index)}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-stone-100"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        close
+                      </span>
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+
+                <PreferredSlotPicker
+                  slot={slot}
+                  slotIndex={index}
+                  minDate={minDate}
+                  allSlots={preferredSlots}
+                  dayPage={workingDayPage}
+                  onDayPageChange={setWorkingDayPage}
+                  onDateChange={(iso) => handleSlotDateChange(index, iso)}
+                  onTimeChange={(timeRange) =>
+                    updateSlot(index, "timeRange", timeRange)
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+
+          {preferredSlots.length < 3 ? (
+            <button
+              type="button"
+              onClick={addSlot}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              Add another date
+            </button>
+          ) : null}
         </div>
 
-        {submitted && selectedService ? (
-          <div
-            role="status"
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[13px] text-emerald-900"
-          >
-            <p className="font-semibold">Ready for scheduling</p>
-            <p className="mt-1 text-emerald-800/90">
-              <span className="font-semibold">{selectedService.name}</span> at{" "}
-              {formatServiceAddress(address)}. Date &amp; time selection is
-              coming soon — use Call or Email below to confirm now.
+        {/* Step 4 — Contact details */}
+        <div className={BOOKING_STEP_PANEL_CLASS}>
+          <BookingStepHeader
+            step={4}
+            title="Your contact details"
+            hint="Required"
+            active
+          />
+          <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+            We&apos;ll use this to confirm the visit time and reach you on the
+            day.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Full name
+              </span>
+              <input
+                type="text"
+                value={customer.fullName}
+                onChange={(e) => updateCustomer("fullName", e.target.value)}
+                placeholder="e.g. Alex Thompson"
+                autoComplete={BOOKING_AUTOCOMPLETE}
+                readOnly={profileLocked}
+                className={`${BOOKING_INPUT_CLASS} ${
+                  profileLocked
+                    ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
+                    : ""
+                }`}
+              />
+            </label>
+            <label className="block">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Mobile number
+              </span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={customer.phone}
+                onChange={(e) => updateCustomer("phone", e.target.value)}
+                placeholder="0400000000"
+                autoComplete={BOOKING_AUTOCOMPLETE}
+                readOnly={profileLocked}
+                className={`${BOOKING_INPUT_CLASS} ${
+                  profileLocked
+                    ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
+                    : ""
+                }`}
+              />
+            </label>
+            <label className="block">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Email
+              </span>
+              <input
+                type="email"
+                value={customer.email}
+                onChange={(e) => updateCustomer("email", e.target.value)}
+                placeholder="you@example.com"
+                autoComplete={BOOKING_AUTOCOMPLETE}
+                readOnly={profileLocked}
+                className={`${BOOKING_INPUT_CLASS} ${
+                  profileLocked
+                    ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
+                    : ""
+                }`}
+              />
+            </label>
+          </div>
+          {profileLocked ? (
+            <p className="mt-2 inline-flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                verified_user
+              </span>
+              From your account.{" "}
+              <a
+                href={accountPath(slug, "profile")}
+                className="font-semibold text-primary hover:underline"
+              >
+                Edit profile
+              </a>
             </p>
+          ) : null}
+        </div>
+
+        {submitError ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
+          >
+            {submitError}
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-3 border-t border-stone-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <motion.button
-            type="button"
-            whileHover={reducedMotion || !canContinue ? undefined : { scale: 1.02 }}
-            whileTap={canContinue ? { scale: 0.98 } : undefined}
-            disabled={!canContinue}
-            onClick={handleContinue}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-label-bold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <span className="material-symbols-outlined material-symbols-filled text-[18px]">
-              calendar_add_on
-            </span>
-            Continue booking
-          </motion.button>
+        <div className="flex flex-col gap-3 border-t border-stone-200 pt-4 sm:flex-row sm:items-center sm:justify-between sm:pt-5">
+          <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+            <motion.button
+              type="button"
+              whileHover={
+                reducedMotion || !canSubmit ? undefined : { scale: 1.02 }
+              }
+              whileTap={canSubmit ? { scale: 0.98 } : undefined}
+              disabled={!canSubmit}
+              onClick={handleSubmit}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-[15px] font-semibold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:text-label-bold"
+            >
+              <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                {submitting
+                  ? "progress_activity"
+                  : isAuthenticated
+                    ? "send"
+                    : "lock_open"}
+              </span>
+              {submitting
+                ? "Sending request…"
+                : isAuthenticated
+                  ? "Submit inspection request"
+                  : "Sign in & submit request"}
+            </motion.button>
+            {!isAuthenticated && canSubmit ? (
+              <span className="inline-flex items-center justify-center gap-1 font-body text-[11px] text-on-surface-variant sm:justify-start">
+                <span className="material-symbols-outlined text-[14px] text-primary">
+                  info
+                </span>
+                We&apos;ll ask you to sign in or create an account to confirm
+                this booking.
+              </span>
+            ) : null}
+          </div>
 
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-3">
             {phoneHref ? (
               <motion.a
                 href={phoneHref}
                 whileHover={reducedMotion ? undefined : { scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none"
+                className="flex items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] font-semibold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none sm:px-4 sm:text-label-bold"
               >
                 <span className="material-symbols-outlined material-symbols-filled text-[18px] text-stone-600">
                   call
@@ -684,7 +1439,7 @@ function ServiceBookingFlow({
                 href={emailHref}
                 whileHover={reducedMotion ? undefined : { scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none"
+                className="flex items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2.5 font-body text-[14px] font-semibold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50 sm:flex-none sm:px-4 sm:text-label-bold"
               >
                 <span className="material-symbols-outlined text-[18px] text-stone-600">
                   mail
@@ -696,6 +1451,156 @@ function ServiceBookingFlow({
         </div>
       </div>
     </div>
+  );
+}
+
+function RequestTypeOption({
+  icon,
+  label,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: string;
+  label: string;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onSelect}
+      disabled={disabled}
+      className={`flex w-full min-w-0 items-start gap-2.5 rounded-xl border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 sm:gap-3 sm:p-4 ${
+        selected
+          ? "border-primary bg-white shadow-[0_8px_20px_-12px_rgba(67,123,255,0.4)] ring-1 ring-primary/20"
+          : "border-stone-200 bg-white hover:border-stone-300"
+      }`}
+    >
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-9 sm:w-9 ${
+          selected
+            ? "bg-primary text-on-primary"
+            : "bg-primary/10 text-primary"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-body text-[13px] font-semibold leading-snug text-on-surface sm:text-[14px]">
+          {label}
+        </span>
+        <span className="mt-0.5 block font-body text-[11px] leading-snug text-on-surface-variant sm:text-[12px]">
+          {description}
+        </span>
+      </span>
+      <span
+        aria-hidden
+        className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+          selected
+            ? "border-primary bg-primary text-on-primary"
+            : "border-stone-300 bg-white text-transparent"
+        }`}
+      >
+        {selected ? (
+          <span className="material-symbols-outlined text-[14px]">check</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+function SubmittedConfirmation({
+  businessName,
+  requestType,
+  selectedServiceName,
+  address,
+  preferredSlots,
+  phoneHref,
+  emailHref,
+  reducedMotion,
+}: {
+  businessName: string;
+  requestType: RequestType;
+  selectedServiceName: string;
+  address: ServiceAddress;
+  preferredSlots: PreferredSlot[];
+  phoneHref: string | null;
+  emailHref: string | null;
+  reducedMotion: boolean;
+}) {
+  return (
+    <motion.div
+      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      className="w-full min-w-0 overflow-hidden rounded-2xl border border-emerald-200 bg-white p-4 shadow-[0_12px_40px_-18px_rgba(16,185,129,0.25)] sm:rounded-[24px] sm:p-8"
+    >
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+          <span className="material-symbols-outlined material-symbols-filled text-[24px]">
+            check_circle
+          </span>
+        </span>
+        <div className="flex-1">
+          <h3 className="font-display text-headline-sm font-semibold text-on-surface">
+            Request sent to {businessName}
+          </h3>
+          <p className="mt-1 font-body text-body-md text-on-surface-variant">
+            Thanks — the team will review your{" "}
+            {requestType === "existing_service"
+              ? "service request"
+              : "custom quote request"}
+            {selectedServiceName ? ` for ${selectedServiceName}` : ""} and
+            confirm an inspection time at {formatServiceAddress(address)}.
+          </p>
+
+          <div className="mt-4 rounded-xl border border-stone-200 bg-[#faf8f5] p-4">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Your preferred windows
+            </p>
+            <ul className="mt-2 space-y-1.5 font-body text-[13px] text-on-surface">
+              {preferredSlots.map((slot, index) => (
+                <li key={index} className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[16px] text-primary">
+                    event_available
+                  </span>
+                  {formatPrettyDate(slot.date)} · {slot.timeRange}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            {phoneHref ? (
+              <a
+                href={phoneHref}
+                className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50"
+              >
+                <span className="material-symbols-outlined text-[18px] text-stone-600">
+                  call
+                </span>
+                Call now
+              </a>
+            ) : null}
+            {emailHref ? (
+              <a
+                href={emailHref}
+                className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 font-body text-label-bold text-on-surface shadow-sm transition-colors hover:border-stone-300 hover:bg-stone-50"
+              >
+                <span className="material-symbols-outlined text-[18px] text-stone-600">
+                  mail
+                </span>
+                Email
+              </a>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -755,8 +1660,8 @@ function BookingServiceListItem({
         selected ? "bg-primary-fixed/25" : "bg-white hover:bg-stone-50/80"
       }`}
     >
-      <div className="flex items-stretch gap-3 p-3 sm:gap-4 sm:p-4">
-        <div className="relative h-[4.5rem] w-[4.5rem] shrink-0 overflow-hidden rounded-xl bg-stone-100 sm:h-20 sm:w-20">
+      <div className="flex items-stretch gap-2.5 p-2.5 sm:gap-4 sm:p-4">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-stone-100 sm:h-20 sm:w-20">
           {service.imageUrl ? (
             <img
               src={service.imageUrl}
@@ -941,7 +1846,7 @@ function BookingFooter({
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.3 }}
       transition={{ duration: 0.5, ease: "easeOut" }}
-      className="relative mt-14 overflow-hidden rounded-[28px] border border-stone-200 bg-white/90 p-8 shadow-[0_10px_30px_-20px_rgba(31,29,26,0.15)] backdrop-blur-xl sm:p-10"
+      className="relative mt-8 w-full min-w-0 overflow-hidden rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-[0_10px_30px_-20px_rgba(31,29,26,0.15)] backdrop-blur-xl sm:mt-14 sm:rounded-[28px] sm:p-10"
     >
       <div className="grid gap-8 md:grid-cols-3">
         <div>

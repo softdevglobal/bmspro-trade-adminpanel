@@ -2,22 +2,66 @@
 
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const NAV_ITEMS = [
+/** Today is /dashboard only — not parent of other /dashboard/* routes. */
+function isNavItemActive(pathname: string, href: string): boolean {
+  if (href === "#") return false;
+  if (href === "/dashboard") {
+    return pathname === "/dashboard";
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+type NavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  superAdmin?: boolean;
+  businessOwner?: boolean;
+};
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
   { href: "#", label: "Calendar", icon: "calendar_month" },
-  { href: "/dashboard/bookings", label: "Bookings", icon: "assignment" },
+  {
+    href: "/dashboard/inspection-visits",
+    label: "Inspection visits",
+    icon: "event_available",
+    businessOwner: true,
+  },
+  {
+    href: "/dashboard/bookings",
+    label: "Bookings",
+    icon: "assignment",
+    businessOwner: true,
+  },
   { href: "#", label: "Messages", icon: "chat" },
-  { href: "/dashboard/team", label: "Team", icon: "groups" },
+  {
+    href: "/dashboard/team",
+    label: "Team",
+    icon: "groups",
+    businessOwner: true,
+  },
   { href: "#", label: "Availability", icon: "schedule" },
-  { href: "#", label: "Customers", icon: "group" },
+  {
+    href: "/dashboard/customers",
+    label: "Customers",
+    icon: "group",
+    businessOwner: true,
+  },
   { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
-  { href: "/dashboard/tenants", label: "Tenants", icon: "domain", superAdmin: true },
+  {
+    href: "/dashboard/tenants",
+    label: "Tenants",
+    icon: "domain",
+    superAdmin: true,
+  },
   { href: "/dashboard/settings", label: "Settings", icon: "settings" },
-] as const;
+];
 
 type SidebarProps = {
   isExpanded: boolean;
@@ -34,6 +78,10 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout, role } = useAuth();
+  const business = useBusinessProfile();
+  const brandName = business?.businessName?.trim() || "BMS Pro Trade";
+  const brandLogo =
+    role === "business_owner" ? (business?.logoUrl ?? null) : null;
 
   const roleLabel =
     role === "super_admin"
@@ -99,14 +147,23 @@ export function Sidebar({
           }`}
         >
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary">
-              <span className="material-symbols-outlined material-symbols-filled text-[24px]">
-                architecture
-              </span>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
+              {brandLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="material-symbols-outlined material-symbols-filled text-[24px]">
+                  architecture
+                </span>
+              )}
             </div>
             {showLabels && (
               <span className="truncate font-display text-[15px] font-bold text-inverse-primary">
-                BMS Pro Trade
+                {brandName}
               </span>
             )}
           </div>
@@ -128,13 +185,12 @@ export function Sidebar({
             showLabels ? "px-3" : "items-center px-2"
           }`}
         >
-          {NAV_ITEMS.filter(
-            (item) => !("superAdmin" in item && item.superAdmin) || role === "super_admin"
-          ).map((item) => {
-            const isActive =
-              item.href !== "#" &&
-              (pathname === item.href ||
-                pathname.startsWith(`${item.href}/`));
+          {NAV_ITEMS.filter((item) => {
+            if (item.superAdmin && role !== "super_admin") return false;
+            if (item.businessOwner && role !== "business_owner") return false;
+            return true;
+          }).map((item) => {
+            const isActive = isNavItemActive(pathname, item.href);
 
             const inner = (
               <>
@@ -234,15 +290,24 @@ export function Sidebar({
             className={`flex items-center gap-3 ${showLabels ? "px-1 pb-2" : "pb-4"}`}
           >
             <div
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-outline-variant bg-primary-container font-body text-[14px] font-bold text-on-primary"
-              title={user?.email ?? "Admin"}
+              className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant bg-primary-container font-body text-[14px] font-bold text-on-primary"
+              title={brandLogo ? brandName : (user?.email ?? "Admin")}
             >
-              {(user?.email?.[0] ?? "A").toUpperCase()}
+              {brandLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                (user?.email?.[0] ?? "A").toUpperCase()
+              )}
             </div>
             {showLabels && (
               <div className="min-w-0 flex-1">
                 <p className="truncate font-body text-[13px] font-semibold text-inverse-on-surface">
-                  {roleLabel}
+                  {brandLogo ? brandName : roleLabel}
                 </p>
                 <p className="truncate font-body text-[11px] text-outline-variant">
                   {user?.email ?? ""}

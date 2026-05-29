@@ -1,6 +1,11 @@
 import { getApps, getApp, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  type Firestore,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,8 +17,35 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-export const firebaseApp: FirebaseApp =
-  getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+/**
+ * Resolve the Firebase app idempotently. Wrapped in try/catch because under
+ * Next.js Fast Refresh the module can be re-evaluated while Firebase's internal
+ * app registry is mid-reset, which can make a bare `getApp()` throw even when
+ * `getApps()` reported an existing app.
+ */
+function resolveFirebaseApp(): FirebaseApp {
+  if (getApps().length > 0) {
+    try {
+      return getApp();
+    } catch {
+      return initializeApp(firebaseConfig);
+    }
+  }
+  return initializeApp(firebaseConfig);
+}
+
+export const firebaseApp: FirebaseApp = resolveFirebaseApp();
 
 export const auth: Auth = getAuth(firebaseApp);
-export const db: Firestore = getFirestore(firebaseApp);
+
+function resolveFirestore(): Firestore {
+  try {
+    return initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache(),
+    });
+  } catch {
+    return getFirestore(firebaseApp);
+  }
+}
+
+export const db: Firestore = resolveFirestore();

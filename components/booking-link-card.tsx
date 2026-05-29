@@ -1,9 +1,8 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { db } from "@/lib/firebase/client";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { AnimatePresence, motion } from "framer-motion";
-import { doc, onSnapshot } from "firebase/firestore";
 import {
   useCallback,
   useEffect,
@@ -61,39 +60,22 @@ export function BookingLinkCard({
   autoHideSeconds = 30,
 }: Props) {
   const { role, businessId } = useAuth();
-  const [data, setData] = useState<BusinessSummary | null>(null);
+  const profile = useBusinessProfile();
   const [copied, setCopied] = useState(false);
+
+  const data: BusinessSummary | null =
+    role === "business_owner" && profile
+      ? {
+          businessName: profile.businessName ?? "",
+          bookingSlug: profile.bookingSlug,
+          bookingPath: profile.bookingPath,
+        }
+      : null;
 
   // Ephemeral-mode state: derived from localStorage + a session-only "dismissed" flag.
   const seenInStorage = useSeenInStorage(businessId);
   const [dismissed, setDismissed] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(autoHideSeconds);
-
-  useEffect(() => {
-    if (role !== "business_owner" || !businessId) return;
-
-    const ref = doc(db, "businesses", businessId);
-    const unsubscribe = onSnapshot(ref, (snap) => {
-      const d = snap.data();
-      if (!d) {
-        setData(null);
-        return;
-      }
-      const slug = typeof d.bookingSlug === "string" ? d.bookingSlug : null;
-      setData({
-        businessName: typeof d.businessName === "string" ? d.businessName : "",
-        bookingSlug: slug,
-        bookingPath:
-          typeof d.bookingPath === "string"
-            ? d.bookingPath
-            : slug
-              ? `/booknow/${slug}`
-              : null,
-      });
-    });
-
-    return () => unsubscribe();
-  }, [role, businessId]);
 
   const dismissEphemeral = useCallback(() => {
     if (variant !== "ephemeral") return;

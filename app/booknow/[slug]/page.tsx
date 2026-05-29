@@ -18,6 +18,7 @@ export type BookingBusiness = {
   state: string | null;
   postcode: string | null;
   serviceAreas: string[];
+  logoUrl: string | null;
   isActive: boolean;
 };
 
@@ -48,6 +49,7 @@ async function loadBusinessBySlug(
         : null,
     state: typeof data.state === "string" ? data.state : null,
     postcode: typeof data.postcode === "string" ? data.postcode : null,
+    logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
     serviceAreas: Array.isArray(data.serviceAreas)
       ? (data.serviceAreas as unknown[])
           .map((v) => (typeof v === "string" ? v.trim() : ""))
