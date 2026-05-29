@@ -20,6 +20,7 @@ import {
   SlotDayPicker,
   todayIso,
 } from "@/components/booking-slot-date-picker";
+import { formatAddress } from "@/lib/inspection/types";
 
 type Props = {
   business: BookingBusiness;
@@ -34,10 +35,7 @@ export type ServiceAddress = {
 };
 
 function formatServiceAddress(address: ServiceAddress): string {
-  return [address.street, address.suburb, address.state, address.postcode]
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join(", ");
+  return formatAddress(address);
 }
 
 function isServiceAddressComplete(address: ServiceAddress): boolean {

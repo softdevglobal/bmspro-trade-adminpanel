@@ -322,9 +322,24 @@ export function formatSlotDate(date: string): string {
 }
 
 export function formatAddress(address: InspectionAddress): string {
-  return [address.street, address.suburb, address.state, address.postcode]
-    .filter((part) => part.trim().length > 0)
-    .join(", ");
+  const postcode = address.postcode.trim();
+  const parts = [address.street, address.suburb, address.state]
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && part !== postcode);
+
+  if (postcode) {
+    const joined = parts.join(", ");
+    const alreadyIncluded =
+      parts.some((part) => part === postcode) ||
+      new RegExp(`\\b${escapeRegExp(postcode)}\\b`).test(joined);
+    if (!alreadyIncluded) parts.push(postcode);
+  }
+
+  return parts.join(", ");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
