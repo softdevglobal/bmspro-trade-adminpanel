@@ -291,6 +291,15 @@ function RequestCard({
       })
     : "—";
 
+  const showScheduledOnly =
+    Boolean(request.scheduledSlot) &&
+    (request.status === "scheduled" || request.status === "completed");
+
+  const visitWindow = formatVisitWindow(
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  );
+
   return (
     <button
       type="button"
@@ -336,22 +345,35 @@ function RequestCard({
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
-        {request.preferredSlots.slice(0, 3).map((slot, idx) => (
-          <SlotPill
-            key={`${slot.date}-${slot.timeRange}-${idx}`}
-            slot={slot}
-            tone="customer"
-          />
-        ))}
-        {request.scheduledSlot ? (
+        {showScheduledOnly && request.scheduledSlot ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
             <span className="material-symbols-outlined text-[14px]">
               event_available
             </span>
-            Scheduled · {formatSlotDate(request.scheduledSlot.date)} ·{" "}
+            {formatSlotDate(request.scheduledSlot.date)} ·{" "}
             {TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange]}
+            {visitWindow ? ` · ${visitWindow}` : null}
           </span>
-        ) : null}
+        ) : (
+          <>
+            {request.preferredSlots.slice(0, 3).map((slot, idx) => (
+              <SlotPill
+                key={`${slot.date}-${slot.timeRange}-${idx}`}
+                slot={slot}
+                tone="customer"
+              />
+            ))}
+            {request.scheduledSlot ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                <span className="material-symbols-outlined text-[14px]">
+                  event_available
+                </span>
+                Scheduled · {formatSlotDate(request.scheduledSlot.date)} ·{" "}
+                {TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange]}
+              </span>
+            ) : null}
+          </>
+        )}
         {request.assignedTo ? (
           <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary ring-1 ring-primary/15 sm:ml-auto">
             <span className="material-symbols-outlined text-[14px]">
