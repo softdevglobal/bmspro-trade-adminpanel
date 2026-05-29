@@ -321,9 +321,11 @@ export function CustomerSignOutButton({
 export function CustomerGuestNav({
   businessName,
   bookingSlug,
+  logoUrl,
 }: {
   businessName: string;
   bookingSlug?: string;
+  logoUrl?: string | null;
 }) {
   const { openAuth } = useCustomerAuth();
 
@@ -332,11 +334,20 @@ export function CustomerGuestNav({
       <div className={NAV_PILL_OUTER}>
         <div className={`${NAV_PILL_INNER} h-12 justify-between gap-1.5 sm:h-14 sm:gap-3`}>
           <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-0.5 sm:gap-2.5 sm:pl-1">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary ring-1 ring-primary/15 sm:h-9 sm:w-9">
-              <span className="material-symbols-outlined text-[20px] sm:text-[20px]">
-                storefront
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoUrl}
+                alt={businessName}
+                className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-primary/15"
+              />
+            ) : (
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/12 text-primary ring-1 ring-primary/15 sm:h-9 sm:w-9">
+                <span className="material-symbols-outlined text-[20px] sm:text-[20px]">
+                  storefront
+                </span>
               </span>
-            </span>
+            )}
             <div className="min-w-0 text-left">
               <p className="hidden truncate font-body text-[10px] font-bold uppercase tracking-wider text-primary/75 sm:block sm:text-[11px]">
                 Booking with

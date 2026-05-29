@@ -12,6 +12,7 @@ import {
   type TenantSource,
   type TenantStatus,
 } from "@/lib/onboarding/types";
+import { sendOwnerWelcomeEmail } from "@/lib/email/account-emails";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 /**
@@ -170,6 +171,22 @@ async function createTenantWithOwnerAccount(
     });
     await batch.commit();
 
+    const planName =
+      SUBSCRIPTION_PLANS.find((p) => p.id === value.selectedPlanId)?.name ??
+      null;
+    await sendOwnerWelcomeEmail({
+      email: value.accountEmail,
+      ownerName: value.ownerFullName || null,
+      businessName: value.businessName,
+      bookingSlug,
+      planName,
+      logoUrl: value.logoUrl ?? null,
+      temporaryPassword:
+        options.source === "super_admin_create"
+          ? options.password
+          : null,
+    });
+
     return { ok: true, tenantId, uid };
   } catch (error: unknown) {
     if (uid) {
@@ -226,6 +243,7 @@ function businessDocument(
     businessEmail: value.accountEmail,
     mainSuburb: `${value.state}, ${value.postcode}`,
     serviceAreas: value.serviceAreas,
+    logoUrl: value.logoUrl ?? null,
     bookingSlug: options.bookingSlug,
     bookingPath: `/booknow/${options.bookingSlug}`,
     ownerUid: options.ownerUid ?? null,
@@ -252,6 +270,31 @@ function businessDocument(
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/** Reads a small profile (name + logo) for the current owner's business. */
+export async function getBusinessProfile(
+  businessId: string,
+): Promise<{ businessName: string | null; logoUrl: string | null } | null> {
+  const snap = await adminDb.collection("businesses").doc(businessId).get();
+  if (!snap.exists) return null;
+  const data = snap.data() ?? {};
+  return {
+    businessName:
+      typeof data.businessName === "string" ? data.businessName : null,
+    logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+  };
+}
+
+/** Updates (or clears) the logo on a business document. */
+export async function updateBusinessLogo(
+  businessId: string,
+  logoUrl: string | null,
+): Promise<void> {
+  await adminDb.collection("businesses").doc(businessId).update({
+    logoUrl: logoUrl,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
 }
 
 export async function registerSelfSignupTenant(

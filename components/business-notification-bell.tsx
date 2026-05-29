@@ -24,7 +24,7 @@ function relativeTime(timestamp: number): string {
 }
 
 export function BusinessNotificationBell() {
-  const { user, status } = useAuth();
+  const { user, status, role } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
@@ -33,7 +33,10 @@ export function BusinessNotificationBell() {
   const [clearingAll, setClearingAll] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const authed = status === "authenticated" && !!user;
+  // Only business owners have a business notification feed; super admins and
+  // other roles would just hit a 403 on /api/notifications.
+  const authed =
+    status === "authenticated" && !!user && role === "business_owner";
 
   const token = useCallback(async () => {
     if (!user) return null;

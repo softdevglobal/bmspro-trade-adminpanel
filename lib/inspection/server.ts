@@ -21,6 +21,7 @@ import {
   notifyBusinessOfCustomerAcceptance,
   notifyBusinessOfNewRequest,
   notifyCustomerOfAssignment,
+  notifyCustomerOfNewRequest,
   notifyCustomerOfStatusChange,
 } from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
@@ -32,7 +33,11 @@ type ServiceLookup = {
 
 async function loadBusinessSummary(
   businessId: string,
-): Promise<{ businessName: string | null; bookingSlug: string | null }> {
+): Promise<{
+  businessName: string | null;
+  bookingSlug: string | null;
+  logoUrl: string | null;
+}> {
   try {
     const snap = await adminDb.collection("businesses").doc(businessId).get();
     const data = snap.exists ? snap.data() ?? {} : {};
@@ -41,9 +46,10 @@ async function loadBusinessSummary(
         typeof data.businessName === "string" ? data.businessName : null,
       bookingSlug:
         typeof data.bookingSlug === "string" ? data.bookingSlug : null,
+      logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
     };
   } catch {
-    return { businessName: null, bookingSlug: null };
+    return { businessName: null, bookingSlug: null, logoUrl: null };
   }
 }
 
@@ -247,6 +253,7 @@ export async function createInspectionRequest(
   const request = mapInspectionDoc(ref.id, snap.data() ?? {});
   const summary = await loadBusinessSummary(businessId);
   await notifyBusinessOfNewRequest(request, summary);
+  await notifyCustomerOfNewRequest(request, summary);
   return { ok: true, request };
 }
 

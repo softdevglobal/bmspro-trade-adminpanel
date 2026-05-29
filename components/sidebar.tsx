@@ -2,6 +2,7 @@
 
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -48,6 +49,10 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout, role } = useAuth();
+  const business = useBusinessProfile();
+  const brandName = business?.businessName?.trim() || "BMS Pro Trade";
+  const brandLogo =
+    role === "business_owner" ? (business?.logoUrl ?? null) : null;
 
   const roleLabel =
     role === "super_admin"
@@ -113,14 +118,23 @@ export function Sidebar({
           }`}
         >
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary">
-              <span className="material-symbols-outlined material-symbols-filled text-[24px]">
-                architecture
-              </span>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
+              {brandLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="material-symbols-outlined material-symbols-filled text-[24px]">
+                  architecture
+                </span>
+              )}
             </div>
             {showLabels && (
               <span className="truncate font-display text-[15px] font-bold text-inverse-primary">
-                BMS Pro Trade
+                {brandName}
               </span>
             )}
           </div>
@@ -245,15 +259,24 @@ export function Sidebar({
             className={`flex items-center gap-3 ${showLabels ? "px-1 pb-2" : "pb-4"}`}
           >
             <div
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-outline-variant bg-primary-container font-body text-[14px] font-bold text-on-primary"
-              title={user?.email ?? "Admin"}
+              className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-outline-variant bg-primary-container font-body text-[14px] font-bold text-on-primary"
+              title={brandLogo ? brandName : (user?.email ?? "Admin")}
             >
-              {(user?.email?.[0] ?? "A").toUpperCase()}
+              {brandLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                (user?.email?.[0] ?? "A").toUpperCase()
+              )}
             </div>
             {showLabels && (
               <div className="min-w-0 flex-1">
                 <p className="truncate font-body text-[13px] font-semibold text-inverse-on-surface">
-                  {roleLabel}
+                  {brandLogo ? brandName : roleLabel}
                 </p>
                 <p className="truncate font-body text-[11px] text-outline-variant">
                   {user?.email ?? ""}

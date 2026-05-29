@@ -1,4 +1,6 @@
+import { sendStaffWelcomeEmail } from "@/lib/email/account-emails";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
@@ -393,8 +395,23 @@ export async function POST(request: Request) {
       updatedAt: now,
     });
 
+    let welcomeEmailSent = false;
+    try {
+      const business = await getBusinessProfile(auth.businessId);
+      welcomeEmailSent = await sendStaffWelcomeEmail({
+        email: parsed.value.email,
+        fullName: parsed.value.fullName,
+        businessName: business?.businessName?.trim() || "your business",
+        staffType: parsed.value.staffType,
+        temporaryPassword: DEFAULT_STAFF_PASSWORD,
+        logoUrl: business?.logoUrl ?? null,
+      });
+    } catch (emailError) {
+      console.error("[staff] welcome email failed:", emailError);
+    }
+
     return NextResponse.json(
-      { ok: true, staffId: authUid },
+      { ok: true, staffId: authUid, welcomeEmailSent },
       { status: 201 }
     );
   } catch (error: unknown) {

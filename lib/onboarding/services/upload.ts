@@ -86,3 +86,53 @@ export async function uploadServiceImage(
     return { ok: false, error: "Could not upload image." };
   }
 }
+
+/**
+ * Uploads a business logo to Firebase Storage and returns a public URL.
+ * `businessId` is used in the path for existing businesses; during public
+ * onboarding (no account yet) logos go under a shared `onboarding` prefix.
+ */
+export async function uploadBusinessLogo(
+  file: Buffer,
+  contentType: string,
+  options: { businessId?: string | null },
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  if (!ALLOWED_TYPES.has(contentType)) {
+    return {
+      ok: false,
+      error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF.",
+    };
+  }
+  if (file.length > MAX_BYTES) {
+    return { ok: false, error: "Logo must be 5 MB or smaller." };
+  }
+
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const bucket = getStorage().bucket(bucketName);
+  const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+  const prefix = options.businessId
+    ? `business-logos/${options.businessId}`
+    : "business-logos/onboarding";
+  const path = `${prefix}/${Date.now()}-${randomUUID()}.${ext}`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType,
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, imageUrl };
+  } catch (error) {
+    console.error("uploadBusinessLogo failed:", error);
+    return { ok: false, error: "Could not upload logo." };
+  }
+}

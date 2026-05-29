@@ -110,6 +110,8 @@ export type OnboardingPayload = {
   confirmPassword?: string;
   selectedPlanId: PlanId;
   serviceAreas: string[];
+  /** Optional public HTTPS URL of the uploaded business logo. */
+  logoUrl?: string | null;
 };
 
 export const MAX_SERVICE_AREAS = 20;
@@ -289,6 +291,10 @@ export function validateOnboardingPayload(
     accountEmail: (payload.accountEmail ?? "").trim().toLowerCase(),
     selectedPlanId: payload.selectedPlanId as PlanId,
     serviceAreas: normaliseServiceAreas(payload.serviceAreas),
+    logoUrl:
+      typeof payload.logoUrl === "string" && payload.logoUrl.trim()
+        ? payload.logoUrl.trim()
+        : null,
   };
 
   if (options.requirePassword) {

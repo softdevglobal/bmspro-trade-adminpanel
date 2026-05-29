@@ -3,6 +3,7 @@
 import { BusinessNotificationBell } from "@/components/business-notification-bell";
 import { Sidebar } from "@/components/sidebar";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useCallback, useEffect, useState } from "react";
 
 const PAGE_ICONS: Record<string, string> = {
@@ -68,7 +69,7 @@ export function DashboardShell({
   icon?: string;
   children: React.ReactNode;
 }) {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [isExpanded, setIsExpanded] = useState(true);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -112,6 +113,10 @@ export function DashboardShell({
   }, []);
 
   const email = user?.email ?? "Admin";
+  const business = useBusinessProfile();
+  const brandName = business?.businessName?.trim() || "BMS Pro Trade";
+  const brandLogo =
+    role === "business_owner" ? (business?.logoUrl ?? null) : null;
 
   const mainOffsetClass = isExpanded
     ? "lg:ml-[240px]"
@@ -127,9 +132,10 @@ export function DashboardShell({
       />
 
       <div
-        className={`flex min-h-dvh min-w-0 flex-col overflow-x-hidden transition-[margin] duration-300 ease-in-out ml-0 ${mainOffsetClass}`}
+        className={`flex min-h-dvh min-w-0 flex-col transition-[margin] duration-300 ease-in-out ml-0 ${mainOffsetClass}`}
       >
-        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b border-outline-variant bg-surface/80 px-3 backdrop-blur-md sm:h-16 sm:px-gutter">
+        {/* Fixed on mobile (sticky breaks inside overflow-hidden parents); sticky on desktop */}
+        <header className="fixed inset-x-0 top-0 z-40 flex h-14 shrink-0 items-center justify-between border-b border-outline-variant bg-surface px-3 shadow-sm backdrop-blur-md sm:h-16 sm:px-gutter lg:relative lg:sticky lg:inset-x-auto lg:top-0 lg:z-30 lg:shadow-none">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -140,9 +146,19 @@ export function DashboardShell({
               <span className="material-symbols-outlined text-[24px]">menu</span>
             </button>
 
-            <h1 className="truncate font-display text-headline-sm text-headline-sm font-bold text-primary">
-              BMS Pro Trade
-            </h1>
+            <div className="flex min-w-0 items-center gap-2">
+              {brandLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-8 w-8 shrink-0 rounded-lg object-cover ring-1 ring-outline-variant"
+                />
+              ) : null}
+              <h1 className="truncate font-display text-headline-sm text-headline-sm font-bold text-primary">
+                {brandName}
+              </h1>
+            </div>
 
             <div className="hidden items-center gap-2 rounded-full border border-outline-variant bg-surface-container-low px-4 py-1.5 md:flex">
               <span className="material-symbols-outlined text-[20px] text-outline">
@@ -165,15 +181,24 @@ export function DashboardShell({
               Add Booking
             </button>
             <div
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-container font-body text-[14px] font-bold text-on-primary"
-              title={email}
+              className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-container font-body text-[14px] font-bold text-on-primary ring-1 ring-outline-variant"
+              title={brandLogo ? brandName : email}
             >
-              {email[0]?.toUpperCase() ?? "A"}
+              {brandLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brandLogo}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                (email[0] ?? "A").toUpperCase()
+              )}
             </div>
           </div>
         </header>
 
-        <main className="mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden px-3 py-4 sm:max-w-container-max sm:p-gutter">
+        <main className="mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden px-3 pb-4 pt-[calc(3.5rem+1rem)] sm:max-w-container-max sm:pb-gutter sm:pt-[calc(4rem+1rem)] sm:px-gutter lg:px-3 lg:py-4 lg:pt-4">
           <DashboardPageHeader
             title={title}
             subtitle={subtitle}

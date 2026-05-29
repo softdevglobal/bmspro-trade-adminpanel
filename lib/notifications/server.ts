@@ -21,11 +21,25 @@ import {
 } from "@/lib/inspection/types";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
-  renderCustomerEmail,
+  renderEmail,
   type EmailDetailRow,
+  type EmailTone,
 } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { FieldValue } from "firebase-admin/firestore";
+
+/** Eyebrow + tone shown in the customer email for each notification type. */
+const EMAIL_PRESENTATION: Record<
+  NotificationType,
+  { eyebrow: string; tone: EmailTone }
+> = {
+  request_created: { eyebrow: "Inspection request", tone: "brand" },
+  request_scheduled: { eyebrow: "Visit confirmed", tone: "success" },
+  request_proposed: { eyebrow: "New times proposed", tone: "warning" },
+  request_assigned: { eyebrow: "Inspector assigned", tone: "success" },
+  request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },
+  request_completed: { eyebrow: "Visit completed", tone: "success" },
+};
 
 const MAX_BATCH = 400;
 
@@ -38,6 +52,8 @@ type CreateNotificationInput = {
   requestId: string;
   bookingSlug?: string | null;
   businessName?: string | null;
+  /** Optional business logo URL shown in customer emails. */
+  logoUrl?: string | null;
   status: InspectionRequestStatus;
   type: NotificationType;
   title: string;
@@ -46,6 +62,8 @@ type CreateNotificationInput = {
   emailDetails?: EmailDetailRow[];
   /** Optional highlighted callout (e.g. the confirmed arrival window). */
   emailHighlight?: string | null;
+  /** Optional small label above the highlight callout. */
+  emailHighlightLabel?: string | null;
 };
 
 function mapNotificationDoc(
@@ -134,16 +152,25 @@ async function sendCustomerNotificationEmail(
   if (!input.customerEmail) return;
   try {
     const ctaUrl = customerRequestUrl(input.bookingSlug);
-    const html = renderCustomerEmail({
+    const presentation = EMAIL_PRESENTATION[input.type];
+    const html = renderEmail({
+      eyebrow: presentation?.eyebrow ?? "Inspection request",
+      tone: presentation?.tone ?? "brand",
       title: input.title,
+      greetingName: firstName(input.customerName),
       body: input.body,
       details: input.emailDetails,
       highlight: input.emailHighlight ?? null,
+      highlightLabel: input.emailHighlightLabel ?? null,
       ctaUrl,
       ctaLabel: "View my request",
+      footnote:
+        "You're receiving this because you booked through BMS Pro Trade.",
       businessName: input.businessName,
+      logoUrl: input.logoUrl ?? null,
     });
     await sendEmail({
+      sender: "request",
       to: input.customerEmail,
       toName: input.customerName ?? null,
       subject: input.title,
@@ -152,6 +179,13 @@ async function sendCustomerNotificationEmail(
   } catch {
     /* email is best-effort */
   }
+}
+
+/** Returns the first word of a full name, or null. */
+function firstName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return trimmed.split(/\s+/)[0];
 }
 
 function requestHeadline(request: InspectionRequestDetail): string {
@@ -168,10 +202,64 @@ function slotLabel(slot: InspectionSlot): string {
   return `${formatSlotDate(slot.date)} · ${TIME_RANGE_SHORT_LABELS[slot.timeRange]}`;
 }
 
+/** Confirm to the customer that their inspection request was received. */
+export async function notifyCustomerOfNewRequest(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const business = context.businessName?.trim() || "the business";
+  const headline = requestHeadline(request);
+  const email = request.customer.email?.trim();
+  if (!email) return;
+
+  const emailDetails: EmailDetailRow[] = [{ label: "Service", value: headline }];
+  const address = request.address?.trim();
+  if (address) {
+    emailDetails.push({ label: "Address", value: address });
+  }
+  request.preferredSlots.forEach((slot, index) => {
+    emailDetails.push({
+      label:
+        request.preferredSlots.length === 1
+          ? "Preferred time"
+          : `Preferred time ${index + 1}`,
+      value: slotLabel(slot),
+    });
+  });
+
+  const preferredSummary =
+    request.preferredSlots.length > 0
+      ? request.preferredSlots.map((slot) => slotLabel(slot)).join(" · ")
+      : null;
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: email,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      requestId: request.id,
+      status: "pending",
+      type: "request_created",
+      title: `We received your request — ${business}`,
+      body: `Thanks for submitting your inspection request with ${business}. Your request is pending review.\n\nWe'll email you when they confirm a visit time or suggest other options. You can also check status anytime from your account.`,
+      emailDetails,
+      emailHighlight: preferredSummary,
+      emailHighlightLabel: preferredSummary ? "Your preferred times" : null,
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
 /** Notify the business owner that a customer submitted a new request. */
 export async function notifyBusinessOfNewRequest(
   request: InspectionRequestDetail,
-  context: { bookingSlug?: string | null; businessName?: string | null } = {},
+  context: CustomerNotifyContext = {},
 ): Promise<void> {
   const headline = requestHeadline(request);
   const who = request.customer.fullName?.trim() || "A customer";
@@ -198,6 +286,7 @@ export async function notifyBusinessOfNewRequest(
 type CustomerNotifyContext = {
   bookingSlug?: string | null;
   businessName?: string | null;
+  logoUrl?: string | null;
 };
 
 /**
@@ -217,6 +306,7 @@ export async function notifyCustomerOfStatusChange(
   let body = "";
   let emailDetails: EmailDetailRow[] | undefined;
   let emailHighlight: string | null = null;
+  let emailHighlightLabel: string | null = null;
 
   switch (nextStatus) {
     case "scheduled": {
@@ -241,8 +331,11 @@ export async function notifyCustomerOfStatusChange(
           },
         ];
         emailHighlight = visitWindow
-          ? `Arrival window: ${visitWindow}`
-          : "Exact arrival time to be confirmed by the business";
+          ? visitWindow
+          : "To be confirmed by the business";
+        emailHighlightLabel = visitWindow
+          ? "Arrival window"
+          : "Arrival time";
       }
       break;
     }
@@ -294,12 +387,14 @@ export async function notifyCustomerOfStatusChange(
       requestId: request.id,
       bookingSlug: context.bookingSlug ?? null,
       businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
       status: nextStatus,
       type,
       title,
       body,
       emailDetails,
       emailHighlight,
+      emailHighlightLabel,
     });
   } catch {
     /* notifications are best-effort */
@@ -341,12 +436,14 @@ export async function notifyCustomerOfAssignment(
       requestId: request.id,
       bookingSlug: context.bookingSlug ?? null,
       businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
       status: request.status,
       type: "request_assigned",
       title: `${business} assigned an inspector`,
       body: `${request.assignedTo.name} will visit for ${requestHeadline(request)}.`,
       emailDetails,
-      emailHighlight: visitWindow ? `Arrival window: ${visitWindow}` : null,
+      emailHighlight: visitWindow ? visitWindow : null,
+      emailHighlightLabel: visitWindow ? "Arrival window" : null,
     });
   } catch {
     /* best-effort */

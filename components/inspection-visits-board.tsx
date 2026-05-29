@@ -1888,6 +1888,7 @@ function ProposeSlotOption({
           onSelect={selectDate}
           disabled={disabled}
           blockedCombos={blockedCombos}
+          dayStripLayout="fit"
         />
       </div>
 

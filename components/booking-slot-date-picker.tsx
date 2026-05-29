@@ -2,11 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-/** Fewer days per swipe page on narrow screens. */
-function useSlotDaysPerPage(): number {
+export const SLOT_DAYS_PER_PAGE_MOBILE = 4;
+export const SLOT_DAYS_PER_PAGE_MOBILE_SCROLL = 5;
+
+export type SlotDayStripLayout = "scroll" | "fit";
+
+/** Days per page depends on layout: customer booking scroll strip vs admin drawer fit. */
+function useSlotDaysPerPage(layout: SlotDayStripLayout): number {
   const read = () => {
     if (typeof window === "undefined") return SLOT_DAYS_PER_PAGE;
-    if (window.innerWidth < 640) return 5;
+    if (window.innerWidth < 640) {
+      return layout === "fit"
+        ? SLOT_DAYS_PER_PAGE_MOBILE
+        : SLOT_DAYS_PER_PAGE_MOBILE_SCROLL;
+    }
     return SLOT_DAYS_PER_PAGE;
   };
   const [count, setCount] = useState(read);
@@ -14,7 +23,7 @@ function useSlotDaysPerPage(): number {
     const onResize = () => setCount(read());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [layout]);
   return count;
 }
 
@@ -289,6 +298,8 @@ export function SlotDayPicker({
   disabled = false,
   label = "Pick a day",
   blockedCombos,
+  /** Customer booking: horizontal scroll strip. Admin propose dates: fit row, no scroll. */
+  dayStripLayout = "scroll",
 }: {
   selectedIso: string;
   minDate: string;
@@ -298,9 +309,11 @@ export function SlotDayPicker({
   disabled?: boolean;
   label?: string;
   blockedCombos?: Set<string>;
+  dayStripLayout?: SlotDayStripLayout;
 }) {
   const [showMonthCalendar, setShowMonthCalendar] = useState(false);
-  const daysPerPage = useSlotDaysPerPage();
+  const daysPerPage = useSlotDaysPerPage(dayStripLayout);
+  const fitStrip = dayStripLayout === "fit";
 
   const pageDays = useMemo(
     () => getSlotDayPage(dayPage, daysPerPage),
@@ -328,92 +341,112 @@ export function SlotDayPicker({
     if (targetPage !== dayPage) onDayPageChange(targetPage);
   }, [selectedIso, pageDays, daysPerPage, minDate, dayPage, onDayPageChange]);
 
+  const dayButtons = displayDays.map((day) => {
+    const selected = selectedIso === day.iso;
+    const dayBlocked =
+      blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
+    const relativeLabel = day.isToday
+      ? "Today"
+      : day.isTomorrow
+        ? "Tomorrow"
+        : null;
+    return (
+      <button
+        key={day.iso}
+        type="button"
+        disabled={disabled || dayBlocked}
+        title={
+          dayBlocked
+            ? "Customer already offered both morning and afternoon on this day"
+            : undefined
+        }
+        onClick={() => onSelect(day.iso)}
+        className={`flex min-h-[5.5rem] flex-col items-center justify-between rounded-2xl border py-2 text-center transition-all disabled:cursor-not-allowed ${
+          fitStrip
+            ? "min-w-0 flex-1 px-1.5 sm:px-2"
+            : "min-w-[4.5rem] shrink-0 px-2"
+        } ${
+          dayBlocked
+            ? "border-stone-100 bg-stone-50 opacity-40"
+            : selected
+              ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 shadow-[0_8px_20px_-12px_rgba(67,123,255,0.65)] ring-2 ring-primary/25"
+              : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
+        }`}
+      >
+        <span
+          className={`font-body text-[10px] font-bold uppercase tracking-wide ${
+            selected ? "text-primary" : "text-on-surface-variant"
+          }`}
+        >
+          {day.weekdayShort}
+        </span>
+        <span
+          className={`font-display font-semibold leading-none ${
+            fitStrip ? "text-[18px] sm:text-[22px]" : "text-[22px]"
+          } ${selected ? "text-primary" : "text-on-surface"}`}
+        >
+          {day.dayNum}
+        </span>
+        <span
+          className={`font-body text-[10px] font-semibold ${
+            selected ? "text-primary/80" : "text-on-surface-variant"
+          }`}
+        >
+          {day.monthShort}
+        </span>
+        <span className="flex h-4 items-center justify-center">
+          {selected ? (
+            <span className="material-symbols-outlined material-symbols-filled translate-y-px text-[14px] leading-none text-primary">
+              check_circle
+            </span>
+          ) : relativeLabel ? (
+            <span
+              className={`font-body text-[9px] font-bold ${
+                day.isToday ? "text-primary" : "text-stone-600"
+              }`}
+            >
+              {relativeLabel}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    );
+  });
+
   return (
     <div>
       <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
         {label}
       </span>
 
-      <div className="mt-2 flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
+      <div
+        className={
+          fitStrip
+            ? "mt-2 flex w-full items-stretch gap-1.5"
+            : "mt-2 flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]"
+        }
+      >
         <button
           type="button"
           disabled={disabled || dayPage === 0}
           onClick={() => onDayPageChange(Math.max(0, dayPage - 1))}
           aria-label="Show earlier dates"
-          className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          className={`inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
+            fitStrip ? "self-stretch" : "self-center"
+          }`}
         >
           <span className="material-symbols-outlined text-[20px]">
             chevron_left
           </span>
         </button>
 
-        {displayDays.map((day) => {
-          const selected = selectedIso === day.iso;
-          const dayBlocked =
-            blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
-          const relativeLabel = day.isToday
-            ? "Today"
-            : day.isTomorrow
-              ? "Tomorrow"
-              : null;
-          return (
-            <button
-              key={day.iso}
-              type="button"
-              disabled={disabled || dayBlocked}
-              title={
-                dayBlocked
-                  ? "Customer already offered both morning and afternoon on this day"
-                  : undefined
-              }
-              onClick={() => onSelect(day.iso)}
-              className={`flex min-h-[5.5rem] min-w-[4.5rem] shrink-0 flex-col items-center justify-between rounded-2xl border px-2 py-2 text-center transition-all disabled:cursor-not-allowed ${
-                dayBlocked
-                  ? "border-stone-100 bg-stone-50 opacity-40"
-                  : selected
-                    ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 shadow-[0_8px_20px_-12px_rgba(67,123,255,0.65)] ring-2 ring-primary/25"
-                    : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
-              }`}
-            >
-              <span
-                className={`font-body text-[10px] font-bold uppercase tracking-wide ${
-                  selected ? "text-primary" : "text-on-surface-variant"
-                }`}
-              >
-                {day.weekdayShort}
-              </span>
-              <span
-                className={`font-display text-[22px] font-semibold leading-none ${
-                  selected ? "text-primary" : "text-on-surface"
-                }`}
-              >
-                {day.dayNum}
-              </span>
-              <span
-                className={`font-body text-[10px] font-semibold ${
-                  selected ? "text-primary/80" : "text-on-surface-variant"
-                }`}
-              >
-                {day.monthShort}
-              </span>
-              <span className="flex h-4 items-center justify-center">
-                {selected ? (
-                  <span className="material-symbols-outlined material-symbols-filled translate-y-px text-[14px] leading-none text-primary">
-                    check_circle
-                  </span>
-                ) : relativeLabel ? (
-                  <span
-                    className={`font-body text-[9px] font-bold ${
-                      day.isToday ? "text-primary" : "text-stone-600"
-                    }`}
-                  >
-                    {relativeLabel}
-                  </span>
-                ) : null}
-              </span>
-            </button>
-          );
-        })}
+        {fitStrip ? (
+          <div className="flex min-w-0 flex-1 items-stretch gap-1">
+            {dayButtons}
+          </div>
+        ) : (
+          dayButtons
+        )}
 
         <button
           type="button"
@@ -422,7 +455,9 @@ export function SlotDayPicker({
             onDayPageChange(Math.min(SLOT_MAX_DAY_PAGES - 1, dayPage + 1))
           }
           aria-label="Show later dates"
-          className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          className={`inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
+            fitStrip ? "self-stretch" : "self-center"
+          }`}
         >
           <span className="material-symbols-outlined text-[20px]">
             chevron_right

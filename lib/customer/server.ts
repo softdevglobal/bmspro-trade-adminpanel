@@ -8,6 +8,7 @@ import {
   type CustomerProfile,
   type CustomerProfileInput,
 } from "@/lib/customer/types";
+import { sendCustomerWelcomeEmail } from "@/lib/email/account-emails";
 import { FieldValue } from "firebase-admin/firestore";
 
 export type AuthedCustomer = {
@@ -77,6 +78,7 @@ async function resolveBusinessByBookingSlug(slug: string): Promise<{
   id: string;
   bookingSlug: string;
   businessName: string;
+  logoUrl: string | null;
 } | null> {
   const normalized = slug.trim();
   if (!normalized) return null;
@@ -95,6 +97,7 @@ async function resolveBusinessByBookingSlug(slug: string): Promise<{
     bookingSlug: normalized,
     businessName:
       typeof data.businessName === "string" ? data.businessName.trim() : "",
+    logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
   };
 }
 
@@ -172,6 +175,10 @@ export async function updateCustomerProfile(
 ): Promise<CustomerProfile> {
   const ref = adminDb.collection(CUSTOMER_COLLECTION).doc(customer.uid);
   const snap = await ref.get();
+  const existing = snap.data() ?? {};
+  const shouldSendWelcome =
+    existing.welcomeEmailSent !== true && input.fullName.trim().length >= 2;
+
   const now = FieldValue.serverTimestamp();
   if (!snap.exists) {
     await ref.set({
@@ -194,5 +201,30 @@ export async function updateCustomerProfile(
   await attachRegistrationBusinessIfEmpty(customer.uid, input.bookingSlug);
 
   const refreshed = await ref.get();
-  return mapCustomerDoc(refreshed.id, refreshed.data() ?? {});
+  const profile = mapCustomerDoc(refreshed.id, refreshed.data() ?? {});
+
+  if (shouldSendWelcome) {
+    try {
+      const welcomeSlug =
+        profile.registeredBookingSlug ?? input.bookingSlug ?? null;
+      const welcomeBusiness = welcomeSlug
+        ? await resolveBusinessByBookingSlug(welcomeSlug)
+        : null;
+      await sendCustomerWelcomeEmail({
+        email: customer.email,
+        fullName: profile.fullName,
+        businessName: profile.registeredBusinessName,
+        bookingSlug: welcomeSlug,
+        logoUrl: welcomeBusiness?.logoUrl ?? null,
+      });
+      await ref.update({
+        welcomeEmailSent: true,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch {
+      /* email is best-effort */
+    }
+  }
+
+  return profile;
 }

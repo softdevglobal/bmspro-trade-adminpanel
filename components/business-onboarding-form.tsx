@@ -73,6 +73,7 @@ type FormState = {
   confirmPassword: string;
   selectedPlanId: PlanId | undefined;
   serviceAreas: string[];
+  logoUrl: string | null;
 };
 
 const INITIAL_STATE: FormState = {
@@ -92,6 +93,7 @@ const INITIAL_STATE: FormState = {
   confirmPassword: "",
   selectedPlanId: undefined,
   serviceAreas: [""],
+  logoUrl: null,
 };
 
 export const ONBOARDING_WIZARD_STEPS = [
@@ -293,6 +295,42 @@ export const BusinessOnboardingForm = forwardRef<
       const next = current.serviceAreas.filter((_, i) => i !== index);
       return { ...current, serviceAreas: next };
     });
+  }
+
+  const [logoUploading, setLogoUploading] = useState(false);
+
+  async function handleLogoFile(file: File) {
+    setErrorMessage(null);
+    setLogoUploading(true);
+    try {
+      const headers: Record<string, string> = {};
+      if (getRequestHeaders) {
+        const extra = await getRequestHeaders();
+        if (extra) Object.assign(headers, extra);
+      }
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch("/api/uploads/business-logo", {
+        method: "POST",
+        headers,
+        body,
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        imageUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok || !payload.imageUrl) {
+        throw new Error(payload.error ?? "Could not upload logo.");
+      }
+      update("logoUrl", payload.imageUrl);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Could not upload logo.",
+      );
+    } finally {
+      setLogoUploading(false);
+    }
   }
 
   function validateCurrentStep(): string | null {
@@ -569,6 +607,112 @@ export const BusinessOnboardingForm = forwardRef<
                 className={INPUT_CLASS}
               />
             </Field>
+
+            <div className="flex flex-col gap-2">
+              <span className="flex items-center gap-1.5 font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                <span className="material-symbols-outlined text-[16px] text-primary">
+                  imagesmode
+                </span>
+                Business Logo
+                <span className="font-normal text-outline">(optional)</span>
+              </span>
+              <div
+                className={`flex items-center gap-4 rounded-2xl border bg-gradient-to-br from-surface-container-lowest to-surface-container-low p-4 transition-colors ${
+                  form.logoUrl
+                    ? "border-primary/30"
+                    : "border-dashed border-outline-variant"
+                }`}
+              >
+                <label
+                  className={`group relative flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-2 bg-surface-container shadow-sm transition-all ${
+                    form.logoUrl
+                      ? "border-white ring-1 ring-primary/20"
+                      : "border-dashed border-outline-variant hover:border-primary/50 hover:bg-primary-fixed/20"
+                  } ${logoUploading ? "pointer-events-none" : ""}`}
+                >
+                  {form.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={form.logoUrl}
+                      alt="Business logo"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex flex-col items-center text-outline transition-colors group-hover:text-primary">
+                      <span className="material-symbols-outlined text-[26px]">
+                        add_photo_alternate
+                      </span>
+                    </span>
+                  )}
+                  {logoUploading ? (
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
+                      <span className="material-symbols-outlined animate-spin text-[24px]">
+                        progress_activity
+                      </span>
+                    </span>
+                  ) : null}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="sr-only"
+                    disabled={logoUploading}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void handleLogoFile(file);
+                    }}
+                  />
+                </label>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[13px] font-semibold text-on-surface">
+                    {form.logoUrl ? "Logo added" : "Add your logo"}
+                  </p>
+                  <p className="mt-0.5 font-body text-[12px] leading-snug text-on-surface-variant">
+                    Shown on your booking page, dashboard, and customer emails.
+                    PNG, JPG, WebP or GIF · up to 5 MB.
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <label
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 font-body text-[12px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 ${
+                        logoUploading ? "pointer-events-none opacity-60" : ""
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {logoUploading ? "progress_activity" : "upload"}
+                      </span>
+                      {logoUploading
+                        ? "Uploading…"
+                        : form.logoUrl
+                          ? "Replace"
+                          : "Upload logo"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        className="sr-only"
+                        disabled={logoUploading}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) void handleLogoFile(file);
+                        }}
+                      />
+                    </label>
+                    {form.logoUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => update("logoUrl", null)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-outline-variant px-2.5 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:border-error/40 hover:text-error"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">
+                          delete
+                        </span>
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <Field label="ABN" optional>
@@ -1066,10 +1210,19 @@ function PreviewPanel({
         </p>
 
         <div className="relative z-10 mb-6 flex flex-col items-center">
-          <div className="mb-3 flex h-20 w-20 items-center justify-center rounded-2xl border-4 border-white bg-surface-container text-primary shadow-sm">
-            <span className="material-symbols-outlined material-symbols-filled text-[36px]">
-              {iconForBusinessType(form.businessType)}
-            </span>
+          <div className="mb-3 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-4 border-white bg-surface-container text-primary shadow-sm">
+            {form.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={form.logoUrl}
+                alt={form.businessName || "Business logo"}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="material-symbols-outlined material-symbols-filled text-[36px]">
+                {iconForBusinessType(form.businessType)}
+              </span>
+            )}
           </div>
           <h3 className="text-center font-display text-headline-sm font-semibold text-on-surface">
             {form.businessName || "Your Business Name"}

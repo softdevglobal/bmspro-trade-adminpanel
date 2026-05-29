@@ -77,6 +77,7 @@ export function BookingEngine({ business, services }: Props) {
       <TopBar
         businessName={business.businessName}
         bookingSlug={business.slug}
+        logoUrl={business.logoUrl}
       />
 
       {/* Hero split — same card footprint as account panel */}
@@ -128,9 +129,11 @@ export function BookingEngine({ business, services }: Props) {
 function TopBar({
   businessName,
   bookingSlug,
+  logoUrl,
 }: {
   businessName: string;
   bookingSlug: string;
+  logoUrl?: string | null;
 }) {
   const { status } = useCustomerAuth();
 
@@ -153,6 +156,7 @@ function TopBar({
             <CustomerGuestNav
               businessName={businessName}
               bookingSlug={bookingSlug}
+              logoUrl={logoUrl}
             />
           )}
         </div>
@@ -192,6 +196,17 @@ function HeroContent({
 
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="show">
+      {business.logoUrl ? (
+        <motion.div variants={itemVariants} className="mb-3 sm:mb-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={business.logoUrl}
+            alt={business.businessName}
+            className="h-14 w-14 rounded-2xl border border-stone-200 bg-white object-cover shadow-sm sm:h-16 sm:w-16"
+          />
+        </motion.div>
+      ) : null}
+
       <motion.div variants={itemVariants} className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-700 shadow-sm">
           <span className="material-symbols-outlined material-symbols-filled text-[14px] text-amber-700">

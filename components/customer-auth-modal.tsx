@@ -33,6 +33,10 @@ const FIELD_INPUT =
 const FIELD_INPUT_COMPACT =
   "h-10 w-full rounded-lg border border-outline-variant bg-surface-container-low font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all";
 
+/** Full-width email in the booking modal — room for longer addresses. */
+const FIELD_INPUT_EMAIL_MODAL =
+  "h-11 w-full rounded-lg border border-outline-variant bg-surface-container-low font-body text-[15px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all";
+
 type Mode = "signin" | "signup";
 
 function AuthMessage({
@@ -455,6 +459,7 @@ function SignInForm({
 
   const compact = layout === "modal";
   const inputClass = compact ? FIELD_INPUT_COMPACT : FIELD_INPUT;
+  const emailInputClass = compact ? FIELD_INPUT_EMAIL_MODAL : FIELD_INPUT;
   const gap = compact ? "gap-3" : "gap-4";
 
   return (
@@ -471,7 +476,7 @@ function SignInForm({
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="you@email.com"
-          className={`${inputClass} pl-12 pr-3`}
+          className={`${emailInputClass} pl-12 pr-3`}
         />
       </AuthField>
 
@@ -570,8 +575,9 @@ function SignUpForm({
 
   const compact = layout === "modal";
   const inputClass = compact ? FIELD_INPUT_COMPACT : FIELD_INPUT;
+  const emailInputClass = compact ? FIELD_INPUT_EMAIL_MODAL : FIELD_INPUT;
   const gap = compact ? "gap-3" : "gap-4";
-  const contactGrid = compact ? "grid grid-cols-2 gap-3" : "grid gap-4 sm:grid-cols-2";
+  const contactGrid = "grid gap-4 sm:grid-cols-2";
 
   return (
     <form className={`flex flex-col ${gap}`} onSubmit={handleSubmit} noValidate>
@@ -590,33 +596,63 @@ function SignUpForm({
         />
       </AuthField>
 
-      <div className={contactGrid}>
-        <AuthField label="Mobile" icon="call" htmlFor="customer-signup-phone">
-          <input
-            id="customer-signup-phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            required
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            placeholder="07XXXXXXXX"
-            className={`${inputClass} pl-12 pr-3`}
-          />
-        </AuthField>
-        <AuthField label="Email" icon="mail" htmlFor="customer-signup-email">
-          <input
-            id="customer-signup-email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@email.com"
-            className={`${inputClass} pl-12 pr-3`}
-          />
-        </AuthField>
-      </div>
+      {compact ? (
+        <>
+          <AuthField label="Mobile" icon="call" htmlFor="customer-signup-phone">
+            <input
+              id="customer-signup-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              required
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="07XXXXXXXX"
+              className={`${inputClass} pl-12 pr-3`}
+            />
+          </AuthField>
+          <AuthField label="Email" icon="mail" htmlFor="customer-signup-email">
+            <input
+              id="customer-signup-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@email.com"
+              className={`${emailInputClass} pl-12 pr-3`}
+            />
+          </AuthField>
+        </>
+      ) : (
+        <div className={contactGrid}>
+          <AuthField label="Mobile" icon="call" htmlFor="customer-signup-phone">
+            <input
+              id="customer-signup-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              required
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="07XXXXXXXX"
+              className={`${inputClass} pl-12 pr-3`}
+            />
+          </AuthField>
+          <AuthField label="Email" icon="mail" htmlFor="customer-signup-email">
+            <input
+              id="customer-signup-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@email.com"
+              className={`${emailInputClass} pl-12 pr-3`}
+            />
+          </AuthField>
+        </div>
+      )}
 
       <AuthField label="Password" icon="lock" htmlFor="customer-signup-password">
         <input

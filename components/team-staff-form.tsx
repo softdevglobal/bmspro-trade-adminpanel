@@ -73,6 +73,7 @@ export function TeamStaffForm() {
   const [error, setError] = useState<string | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
   const [successMode, setSuccessMode] = useState<SetupMode>("create");
+  const [welcomeEmailSent, setWelcomeEmailSent] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [isLoadingStaff, setIsLoadingStaff] = useState(false);
@@ -307,6 +308,7 @@ export function TeamStaffForm() {
       const data = (await response.json()) as {
         ok?: boolean;
         error?: string;
+        welcomeEmailSent?: boolean;
       };
 
       if (!response.ok || !data.ok) {
@@ -321,6 +323,7 @@ export function TeamStaffForm() {
       setSetupMode("create");
       setEditTarget(null);
       setSuccessMode(savedMode);
+      setWelcomeEmailSent(Boolean(data.welcomeEmailSent));
       setSuccessName(savedName);
     } catch (saveError) {
       setError(
@@ -522,8 +525,12 @@ export function TeamStaffForm() {
         <SuccessModal
           name={successName}
           mode={successMode}
+          welcomeEmailSent={welcomeEmailSent}
           onAddAnother={addAnotherStaffMember}
-          onClose={() => setSuccessName(null)}
+          onClose={() => {
+            setSuccessName(null);
+            setWelcomeEmailSent(false);
+          }}
         />
       )}
     </>
@@ -1906,11 +1913,13 @@ function formatDate(value: string | null) {
 function SuccessModal({
   name,
   mode,
+  welcomeEmailSent,
   onAddAnother,
   onClose,
 }: {
   name: string;
   mode: SetupMode;
+  welcomeEmailSent?: boolean;
   onAddAnother: () => void;
   onClose: () => void;
 }) {
@@ -1931,11 +1940,19 @@ function SuccessModal({
         <h2 className="mb-2 font-display text-display-md text-display-md text-on-surface">
           {mode === "edit" ? "Staff Updated" : "Staff Added"}
         </h2>
-        <p className="mb-8 font-body text-body-lg text-on-surface-variant">
+        <p className="mb-4 font-body text-body-lg text-on-surface-variant">
           You have successfully {mode === "edit" ? "updated" : "added"}{" "}
           <span className="font-bold text-on-surface">{name}</span>
           {mode === "edit" ? "." : " to your team."}
         </p>
+        {mode === "create" && welcomeEmailSent ? (
+          <p className="mb-8 flex items-center justify-center gap-1.5 font-body text-[13px] text-primary">
+            <span className="material-symbols-outlined text-[18px]">mail</span>
+            A welcome email with sign-in details was sent to their inbox.
+          </p>
+        ) : (
+          <div className="mb-8" />
+        )}
         {mode === "create" ? (
           <button
             type="button"
