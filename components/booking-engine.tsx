@@ -485,8 +485,85 @@ const EMPTY_ADDRESS: ServiceAddress = {
 const BOOKING_INPUT_CLASS =
   "mt-1 w-full min-w-0 rounded-xl border border-stone-200 bg-white px-3 py-3 font-body text-[16px] text-on-surface shadow-sm placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 sm:py-2.5 sm:text-[14px]";
 
+/** One-off visit address — avoid browser "Save address?" prompts. */
+const BOOKING_AUTOCOMPLETE = "off";
+
 const BOOKING_STEP_PANEL_CLASS =
   "w-full min-w-0 rounded-xl border border-stone-200 bg-[#faf8f5] p-3 sm:rounded-2xl sm:p-5";
+
+const BOOKING_LABEL_CLASS =
+  "font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant";
+
+function normalizeBudgetInput(value: string): string {
+  let cleaned = value.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot !== -1) {
+    cleaned =
+      cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
+  }
+  const [whole, frac = ""] = cleaned.split(".");
+  return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
+}
+
+function BookingRequestExtras({
+  notes,
+  budget,
+  onNotesChange,
+  onBudgetChange,
+}: {
+  notes: string;
+  budget: string;
+  onNotesChange: (value: string) => void;
+  onBudgetChange: (value: string) => void;
+}) {
+  return (
+    <div className="mt-4 rounded-xl border border-stone-200/90 bg-white p-3 shadow-sm sm:p-4">
+      <p className={BOOKING_LABEL_CLASS}>Additional details</p>
+      <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+        Optional — helps the team prepare for your visit or quote.
+      </p>
+
+      <div className="mt-3 grid gap-3">
+        <label className="block">
+          <span className={BOOKING_LABEL_CLASS}>Notes</span>
+          <textarea
+            value={notes}
+            onChange={(event) => onNotesChange(event.target.value)}
+            rows={3}
+            placeholder="Access instructions, urgency, materials, anything else we should know…"
+            autoComplete={BOOKING_AUTOCOMPLETE}
+            className={`${BOOKING_INPUT_CLASS} resize-y`}
+            maxLength={2000}
+          />
+        </label>
+
+        <label className="block">
+          <span className={BOOKING_LABEL_CLASS}>Your budget</span>
+          <div className="relative mt-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 font-body text-[14px] font-semibold text-on-surface">
+              Aus $
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={budget}
+              onChange={(event) =>
+                onBudgetChange(normalizeBudgetInput(event.target.value))
+              }
+              placeholder="e.g. 2500"
+              autoComplete={BOOKING_AUTOCOMPLETE}
+              className={`${BOOKING_INPUT_CLASS} mt-0 pl-[3.65rem] pr-3`}
+              maxLength={12}
+            />
+          </div>
+          <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+            Rough amount you have in mind (optional).
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+}
 
 type RequestType = "existing_service" | "custom_quote";
 type SlotTimeRange = "morning" | "afternoon";
@@ -1023,6 +1100,8 @@ function ServiceBookingFlow({
   );
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
+  const [customerNotes, setCustomerNotes] = useState("");
+  const [budgetAud, setBudgetAud] = useState("");
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
   const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([
     { date: "", timeRange: "morning" },
@@ -1186,6 +1265,8 @@ function ServiceBookingFlow({
           },
           address,
           preferredSlots,
+          customerNotes: customerNotes.trim() || null,
+          budgetAud: budgetAud.trim() || null,
         }),
       });
 
@@ -1261,7 +1342,11 @@ function ServiceBookingFlow({
   const existingServiceAvailable = services.length > 0;
 
   return (
-    <div className="relative w-full min-w-0 sm:overflow-hidden sm:rounded-[24px] sm:border sm:border-stone-200/90 sm:bg-white/95 sm:p-8 sm:shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)]">
+    <form
+      autoComplete={BOOKING_AUTOCOMPLETE}
+      onSubmit={(event) => event.preventDefault()}
+      className="relative w-full min-w-0 sm:overflow-hidden sm:rounded-[24px] sm:border sm:border-stone-200/90 sm:bg-white/95 sm:p-8 sm:shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)]"
+    >
       <div className="relative space-y-4 text-on-surface sm:space-y-6">
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-[#faf8f5] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-600">
@@ -1375,6 +1460,19 @@ function ServiceBookingFlow({
               </label>
             </div>
           )}
+
+          <BookingRequestExtras
+            notes={customerNotes}
+            budget={budgetAud}
+            onNotesChange={(value) => {
+              setCustomerNotes(value);
+              setSubmitError(null);
+            }}
+            onBudgetChange={(value) => {
+              setBudgetAud(value);
+              setSubmitError(null);
+            }}
+          />
         </div>
 
         {/* Step 2 — Address */}
@@ -1399,7 +1497,7 @@ function ServiceBookingFlow({
                 value={address.street}
                 onChange={(e) => updateAddress("street", e.target.value)}
                 placeholder="e.g. 12 Main Street"
-                autoComplete="street-address"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
@@ -1412,7 +1510,7 @@ function ServiceBookingFlow({
                 value={address.suburb}
                 onChange={(e) => updateAddress("suburb", e.target.value)}
                 placeholder="e.g. Surry Hills"
-                autoComplete="address-level2"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
@@ -1425,7 +1523,7 @@ function ServiceBookingFlow({
                 value={address.state}
                 onChange={(e) => updateAddress("state", e.target.value)}
                 placeholder="e.g. NSW"
-                autoComplete="address-level1"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
@@ -1439,7 +1537,7 @@ function ServiceBookingFlow({
                 value={address.postcode}
                 onChange={(e) => updateAddress("postcode", e.target.value)}
                 placeholder="e.g. 2000"
-                autoComplete="postal-code"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 className={BOOKING_INPUT_CLASS}
               />
             </label>
@@ -1539,7 +1637,7 @@ function ServiceBookingFlow({
                 value={customer.fullName}
                 onChange={(e) => updateCustomer("fullName", e.target.value)}
                 placeholder="e.g. Alex Thompson"
-                autoComplete="name"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 readOnly={profileLocked}
                 className={`${BOOKING_INPUT_CLASS} ${
                   profileLocked
@@ -1558,7 +1656,7 @@ function ServiceBookingFlow({
                 value={customer.phone}
                 onChange={(e) => updateCustomer("phone", e.target.value)}
                 placeholder="0400000000"
-                autoComplete="tel"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 readOnly={profileLocked}
                 className={`${BOOKING_INPUT_CLASS} ${
                   profileLocked
@@ -1576,7 +1674,7 @@ function ServiceBookingFlow({
                 value={customer.email}
                 onChange={(e) => updateCustomer("email", e.target.value)}
                 placeholder="you@example.com"
-                autoComplete="email"
+                autoComplete={BOOKING_AUTOCOMPLETE}
                 readOnly={profileLocked}
                 className={`${BOOKING_INPUT_CLASS} ${
                   profileLocked
@@ -1677,8 +1775,7 @@ function ServiceBookingFlow({
           </div>
         </div>
       </div>
-
-    </div>
+    </form>
   );
 }
 

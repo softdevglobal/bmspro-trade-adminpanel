@@ -125,6 +125,14 @@ function mapBookingDoc(
     })(),
     assignedTo: parseAssignment(data.assignedTo),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
+    customerNotes:
+      typeof data.customerNotes === "string" && data.customerNotes.trim()
+        ? data.customerNotes.trim()
+        : null,
+    budgetAud:
+      typeof data.budgetAud === "number" && Number.isFinite(data.budgetAud)
+        ? data.budgetAud
+        : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };

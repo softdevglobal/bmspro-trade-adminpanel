@@ -3,6 +3,7 @@
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   formatAddress,
+  formatBudgetAud,
   formatSlotDate,
   STATUS_LABELS,
   TIME_RANGE_LABELS,
@@ -14,13 +15,23 @@ import {
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import { AnimatePresence, motion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type StaffSummary = {
   id: string;
   fullName: string;
   email: string;
+  staffType: string;
 };
+
+function staffAvatarUrl(member: {
+  id: string;
+  fullName: string;
+  email: string;
+}): string {
+  const seed = encodeURIComponent(member.id || member.email || member.fullName);
+  return `https://api.dicebear.com/9.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
 
 type StatusFilter = "all" | InspectionRequestStatus;
 
@@ -100,7 +111,13 @@ export function InspectionVisitsBoard() {
       });
       const data = (await response.json()) as {
         ok?: boolean;
-        staff?: { id: string; fullName: string; email: string; status?: string }[];
+        staff?: {
+          id: string;
+          fullName: string;
+          email: string;
+          staffType?: string;
+          status?: string;
+        }[];
       };
       if (!response.ok || !data.ok) return;
       setStaff(
@@ -110,6 +127,7 @@ export function InspectionVisitsBoard() {
             id: member.id,
             fullName: member.fullName,
             email: member.email,
+            staffType: member.staffType?.trim() || "Team member",
           })),
       );
     } catch {
@@ -411,7 +429,7 @@ function SlotPill({
  * Detail drawer + actions
  * ========================================================================== */
 
-type DrawerMode = "review" | "accept" | "propose" | "assign";
+type DrawerMode = "review" | "accept" | "propose" | "assign" | "cancel";
 
 function RequestDetailDrawer({
   request,
@@ -439,12 +457,14 @@ function RequestDetailDrawer({
         >
           <motion.aside
             key="drawer"
+            role="dialog"
+            aria-modal="true"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="absolute right-0 top-0 flex h-full w-full max-w-full flex-col bg-surface-container-lowest shadow-2xl sm:max-w-[640px]"
+            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
             <DetailDrawerContent
               key={request.id}
@@ -457,6 +477,52 @@ function RequestDetailDrawer({
         </motion.div>
       ) : null}
     </AnimatePresence>
+  );
+}
+
+function CompactRequestSummary({
+  request,
+  onShowFullDetails,
+}: {
+  request: InspectionRequestDetail;
+  onShowFullDetails: () => void;
+}) {
+  const headline =
+    request.requestType === "existing_service"
+      ? request.serviceName ?? "Existing service"
+      : request.customRequest?.title ?? "Custom quotation request";
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-low">
+      <div className="space-y-1 px-3 py-3 sm:px-4">
+        <p className="font-body text-[13px] font-semibold text-on-surface">
+          {headline}
+        </p>
+        <p className="font-body text-[12px] text-on-surface-variant">
+          {request.customer.fullName}
+          {request.customer.phone ? ` · ${request.customer.phone}` : ""}
+        </p>
+        {request.scheduledSlot ? (
+          <p className="flex items-start gap-1.5 pt-1 font-body text-[12px] font-semibold leading-snug text-emerald-800">
+            <span className="material-symbols-outlined shrink-0 text-[16px]">
+              event_available
+            </span>
+            <span className="min-w-0">
+              {formatSlotDate(request.scheduledSlot.date)} ·{" "}
+              {TIME_RANGE_LABELS[request.scheduledSlot.timeRange]}
+            </span>
+          </p>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onShowFullDetails}
+        className="flex w-full items-center justify-center gap-1.5 border-t border-outline-variant/40 bg-white/70 px-3 py-2.5 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary/5"
+      >
+        View full request details
+        <span className="material-symbols-outlined text-[18px]">unfold_more</span>
+      </button>
+    </section>
   );
 }
 
@@ -475,6 +541,9 @@ function DetailDrawerContent({
   const [mode, setMode] = useState<DrawerMode>("review");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const actionPanelRef = useRef<HTMLDivElement>(null);
+  const inActionMode = mode !== "review";
 
   // Accept-form state
   const [acceptedSlot, setAcceptedSlot] = useState<InspectionSlot | null>(null);
@@ -485,6 +554,8 @@ function DetailDrawerContent({
     { date: "", timeRange: "morning" },
   ]);
   const [proposeNote, setProposeNote] = useState("");
+
+  const [cancelNote, setCancelNote] = useState("");
 
   // Assign-form state
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
@@ -515,8 +586,21 @@ function DetailDrawerContent({
       if (!response.ok || !data.ok || !data.request) {
         throw new Error(data.error ?? "Could not update the request.");
       }
-      onUpdated(data.request);
-      setMode("review");
+      const next = data.request;
+      onUpdated(next);
+      if (
+        next.status === "scheduled" &&
+        !next.assignedTo &&
+        (body.action === "accept" || body.action === "assign")
+      ) {
+        if (body.action === "accept") {
+          setMode("assign");
+        } else {
+          setMode("review");
+        }
+      } else {
+        setMode("review");
+      }
     } catch (error) {
       setActionError(
         error instanceof Error ? error.message : "Something went wrong.",
@@ -528,6 +612,25 @@ function DetailDrawerContent({
 
   const isClosed =
     request.status === "cancelled" || request.status === "completed";
+
+  useEffect(() => {
+    if (mode === "review") return;
+    const panel = actionPanelRef.current;
+    const scroller = scrollRef.current;
+    if (!panel || !scroller) return;
+    const frame = requestAnimationFrame(() => {
+      scroller.scrollTo({
+        top: Math.max(0, panel.offsetTop - 12),
+        behavior: "smooth",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode, request.id, request.status]);
+
+  function openAction(nextMode: Exclude<DrawerMode, "review">) {
+    setActionError(null);
+    setMode(nextMode);
+  }
 
   return (
     <>
@@ -557,21 +660,36 @@ function DetailDrawerContent({
         </button>
       </header>
 
-      <div className="min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 sm:space-y-5 sm:px-5 sm:py-5">
-        <CustomerSection request={request} />
-        <RequestDetailsSection request={request} />
-        <SlotsOverview request={request} />
-        {request.assignedTo ? <AssignmentSummary request={request} /> : null}
-        {request.ownerNote ? (
-          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-4 py-3">
-            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-              Owner note
-            </p>
-            <p className="mt-1 font-body text-body-md text-on-surface">
-              {request.ownerNote}
-            </p>
-          </div>
-        ) : null}
+      <div
+        ref={scrollRef}
+        className="min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 sm:space-y-5 sm:px-5 sm:py-5"
+      >
+        {inActionMode ? (
+          <CompactRequestSummary
+            request={request}
+            onShowFullDetails={() => setMode("review")}
+          />
+        ) : (
+          <>
+            <CustomerSection request={request} />
+            <RequestDetailsSection request={request} />
+            <CustomerExtrasSection request={request} />
+            <SlotsOverview request={request} />
+            {request.assignedTo ? <AssignmentSummary request={request} /> : null}
+            {request.ownerNote ? (
+              <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-4 py-3">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  {request.status === "cancelled"
+                    ? "Cancellation note"
+                    : "Owner note"}
+                </p>
+                <p className="mt-1 font-body text-body-md text-on-surface">
+                  {request.ownerNote}
+                </p>
+              </div>
+            ) : null}
+          </>
+        )}
 
         {actionError ? (
           <div
@@ -582,6 +700,7 @@ function DetailDrawerContent({
           </div>
         ) : null}
 
+        <div ref={actionPanelRef} className="space-y-4">
         {mode === "accept" ? (
           <AcceptForm
             slots={request.preferredSlots}
@@ -660,6 +779,22 @@ function DetailDrawerContent({
             }}
           />
         ) : null}
+
+        {mode === "cancel" ? (
+          <CancelForm
+            note={cancelNote}
+            disabled={submitting}
+            onNoteChange={setCancelNote}
+            onCancel={() => setMode("review")}
+            onSubmit={() => {
+              void callAction({
+                action: "cancel",
+                note: cancelNote.trim() || undefined,
+              });
+            }}
+          />
+        ) : null}
+        </div>
       </div>
 
       {!isClosed && mode === "review" ? (
@@ -668,7 +803,7 @@ function DetailDrawerContent({
             <>
               <button
                 type="button"
-                onClick={() => setMode("accept")}
+                onClick={() => openAction("accept")}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -678,7 +813,7 @@ function DetailDrawerContent({
               </button>
               <button
                 type="button"
-                onClick={() => setMode("propose")}
+                onClick={() => openAction("propose")}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -692,7 +827,7 @@ function DetailDrawerContent({
             <>
               <button
                 type="button"
-                onClick={() => setMode("assign")}
+                onClick={() => openAction("assign")}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 sm:w-auto"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -717,7 +852,7 @@ function DetailDrawerContent({
           ) : null}
           <button
             type="button"
-            onClick={() => void callAction({ action: "cancel" })}
+            onClick={() => openAction("cancel")}
             disabled={submitting}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto sm:w-auto"
           >
@@ -820,57 +955,131 @@ function RequestDetailsSection({
   );
 }
 
+function slotTimeIcon(timeRange: InspectionTimeRange): string {
+  return timeRange === "morning" ? "wb_twilight" : "wb_sunny";
+}
+
+function InspectionSlotsList({
+  slots,
+  variant = "customer",
+}: {
+  slots: InspectionSlot[];
+  variant?: "customer" | "proposed" | "scheduled";
+}) {
+  if (slots.length === 0) return null;
+
+  const cardClass =
+    variant === "proposed"
+      ? "border-violet-200/90 bg-violet-50/70"
+      : variant === "scheduled"
+        ? "border-emerald-200/90 bg-emerald-50/70"
+        : "border-outline-variant/50 bg-surface-container-lowest";
+
+  const timeClass =
+    variant === "proposed"
+      ? "text-violet-900"
+      : variant === "scheduled"
+        ? "text-emerald-900"
+        : "text-on-surface-variant";
+
+  return (
+    <ul className="mt-2 space-y-2">
+      {slots.map((slot, index) => (
+        <li
+          key={`${slot.date}-${slot.timeRange}-${index}`}
+          className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 shadow-sm ${cardClass}`}
+        >
+          {slots.length > 1 ? (
+            <span
+              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 font-body text-[11px] font-bold text-primary"
+              aria-hidden
+            >
+              {index + 1}
+            </span>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold leading-snug text-on-surface">
+              <span className="material-symbols-outlined text-[17px] text-primary">
+                event
+              </span>
+              {formatSlotDate(slot.date)}
+            </p>
+            <p
+              className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
+            >
+              <span className="material-symbols-outlined text-[16px] text-primary/85">
+                {slotTimeIcon(slot.timeRange)}
+              </span>
+              {TIME_RANGE_LABELS[slot.timeRange]}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CustomerExtrasSection({
+  request,
+}: {
+  request: InspectionRequestDetail;
+}) {
+  const budgetLabel = formatBudgetAud(request.budgetAud);
+  if (!request.customerNotes && !budgetLabel) return null;
+
+  return (
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+      <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+        Customer notes &amp; budget
+      </p>
+      {request.customerNotes ? (
+        <p className="mt-2 whitespace-pre-line font-body text-[13px] leading-relaxed text-on-surface">
+          {request.customerNotes}
+        </p>
+      ) : null}
+      {budgetLabel ? (
+        <p
+          className={`font-display text-[16px] font-semibold text-primary ${
+            request.customerNotes ? "mt-2" : "mt-1"
+          }`}
+        >
+          {budgetLabel}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function SlotsOverview({ request }: { request: InspectionRequestDetail }) {
   return (
     <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
         Customer&apos;s preferred dates
       </p>
-      <ul className="mt-2 space-y-1.5">
-        {request.preferredSlots.map((slot, idx) => (
-          <li
-            key={`${slot.date}-${slot.timeRange}-${idx}`}
-            className="flex items-center gap-2 font-body text-[13px] text-on-surface"
-          >
-            <span className="material-symbols-outlined text-[16px] text-primary">
-              event
-            </span>
-            {formatSlotDate(slot.date)} · {TIME_RANGE_LABELS[slot.timeRange]}
-          </li>
-        ))}
-      </ul>
+      <InspectionSlotsList slots={request.preferredSlots} variant="customer" />
 
       {request.ownerProposedSlots.length > 0 ? (
         <>
           <p className="mt-4 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Your proposed dates
           </p>
-          <ul className="mt-2 space-y-1.5">
-            {request.ownerProposedSlots.map((slot, idx) => (
-              <li
-                key={`${slot.date}-${slot.timeRange}-${idx}`}
-                className="flex items-center gap-2 font-body text-[13px] text-violet-700"
-              >
-                <span className="material-symbols-outlined text-[16px]">
-                  edit_calendar
-                </span>
-                {formatSlotDate(slot.date)} · {TIME_RANGE_LABELS[slot.timeRange]}
-              </li>
-            ))}
-          </ul>
+          <InspectionSlotsList
+            slots={request.ownerProposedSlots}
+            variant="proposed"
+          />
         </>
       ) : null}
 
       {request.scheduledSlot ? (
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+        <>
+          <p className="mt-4 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
             Scheduled visit
           </p>
-          <p className="mt-1 font-body text-[13px] font-semibold text-emerald-800">
-            {formatSlotDate(request.scheduledSlot.date)} ·{" "}
-            {TIME_RANGE_LABELS[request.scheduledSlot.timeRange]}
-          </p>
-        </div>
+          <InspectionSlotsList
+            slots={[request.scheduledSlot]}
+            variant="scheduled"
+          />
+        </>
       ) : null}
     </section>
   );
@@ -903,6 +1112,52 @@ function AssignmentSummary({
 /* ==========================================================================
  * Action forms
  * ========================================================================== */
+
+function CancelForm({
+  note,
+  disabled,
+  onNoteChange,
+  onCancel,
+  onSubmit,
+}: {
+  note: string;
+  disabled: boolean;
+  onNoteChange: (note: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="rounded-xl border border-rose-200 bg-rose-50/50 p-4">
+      <p className="font-display text-[14px] font-semibold text-on-surface">
+        Cancel this request
+      </p>
+      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+        The customer will see this visit as cancelled. Add an optional note
+        explaining why (shown in their notifications and request history).
+      </p>
+      <label className="mt-3 block">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Note for customer (optional)
+        </span>
+        <textarea
+          value={note}
+          onChange={(event) => onNoteChange(event.target.value)}
+          rows={3}
+          maxLength={500}
+          placeholder="e.g. We’re fully booked this week — please submit new dates or call us."
+          className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-200/80"
+        />
+      </label>
+      <FormActions
+        confirmLabel="Cancel request"
+        confirmIcon="event_busy"
+        disabled={disabled}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
+    </section>
+  );
+}
 
 function AcceptForm({
   slots,
@@ -943,18 +1198,25 @@ function AcceptForm({
                 type="button"
                 onClick={() => onChange(slot)}
                 disabled={disabled}
-                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
                   checked
                     ? "border-primary bg-white ring-1 ring-primary/30"
                     : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
                 }`}
               >
-                <span className="flex items-center gap-2 font-body text-[13px] font-semibold text-on-surface">
-                  <span className="material-symbols-outlined text-[16px] text-primary">
-                    event
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 font-body text-[13px] font-semibold text-on-surface">
+                    <span className="material-symbols-outlined text-[16px] text-primary">
+                      event
+                    </span>
+                    {formatSlotDate(slot.date)}
                   </span>
-                  {formatSlotDate(slot.date)} ·{" "}
-                  {TIME_RANGE_LABELS[slot.timeRange]}
+                  <span className="mt-1 flex items-center gap-1.5 font-body text-[12px] text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[15px] text-primary/80">
+                      {slotTimeIcon(slot.timeRange)}
+                    </span>
+                    {TIME_RANGE_LABELS[slot.timeRange]}
+                  </span>
                 </span>
                 <span
                   className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${
@@ -1141,6 +1403,70 @@ function ProposeForm({
   );
 }
 
+function StaffMemberPicker({
+  staff,
+  value,
+  disabled,
+  onChange,
+}: {
+  staff: StaffSummary[];
+  value: string;
+  disabled: boolean;
+  onChange: (staffId: string) => void;
+}) {
+  return (
+    <ul className="max-h-[min(16rem,42vh)] space-y-2 overflow-y-auto pr-0.5">
+      {staff.map((member) => {
+        const selected = value === member.id;
+        return (
+          <li key={member.id}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(member.id)}
+              className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                selected
+                  ? "border-primary bg-white ring-1 ring-primary/30"
+                  : "border-outline-variant/60 bg-white hover:border-primary/40 hover:bg-primary/[0.03]"
+              }`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={staffAvatarUrl(member)}
+                alt=""
+                className="h-11 w-11 shrink-0 rounded-full border-2 border-white bg-surface-container-low object-cover shadow-sm ring-1 ring-outline-variant/30"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-body text-[13px] font-semibold text-on-surface">
+                  {member.fullName}
+                </span>
+                <span className="mt-0.5 block truncate font-body text-[11px] text-on-surface-variant">
+                  {member.staffType}
+                  {member.email ? ` · ${member.email}` : ""}
+                </span>
+              </span>
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                  selected
+                    ? "border-primary bg-primary text-on-primary"
+                    : "border-stone-300 bg-white text-transparent"
+                }`}
+                aria-hidden
+              >
+                {selected ? (
+                  <span className="material-symbols-outlined text-[14px]">
+                    check
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function AssignForm({
   staff,
   assignTo,
@@ -1160,6 +1486,13 @@ function AssignForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const { user } = useAuth();
+  const ownerAvatar = staffAvatarUrl({
+    id: user?.uid ?? "owner",
+    fullName: user?.displayName ?? "Business owner",
+    email: user?.email ?? "",
+  });
+
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">
@@ -1174,24 +1507,37 @@ function AssignForm({
         <button
           type="button"
           onClick={() => onAssignToChange("owner")}
-          className={`flex items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+          className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
             assignTo === "owner"
               ? "border-primary bg-white ring-1 ring-primary/30"
               : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
           }`}
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <span className="material-symbols-outlined text-[20px]">
-              verified_user
-            </span>
-          </span>
-          <span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={ownerAvatar}
+            alt=""
+            className="h-11 w-11 shrink-0 rounded-full border-2 border-white bg-surface-container-low object-cover shadow-sm ring-1 ring-outline-variant/30"
+          />
+          <span className="min-w-0 flex-1">
             <span className="block font-body text-[13px] font-semibold text-on-surface">
               Assign to me
             </span>
-            <span className="block font-body text-[11px] text-on-surface-variant">
-              You&apos;ll handle the inspection yourself.
+            <span className="block truncate font-body text-[11px] text-on-surface-variant">
+              {user?.displayName ?? user?.email ?? "Business owner"}
             </span>
+          </span>
+          <span
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 ${
+              assignTo === "owner"
+                ? "border-primary bg-primary text-on-primary"
+                : "border-stone-300 bg-transparent"
+            }`}
+            aria-hidden
+          >
+            {assignTo === "owner" ? (
+              <span className="material-symbols-outlined text-[14px]">check</span>
+            ) : null}
           </span>
         </button>
         <button
@@ -1221,24 +1567,23 @@ function AssignForm({
 
       {assignTo === "staff" ? (
         <div className="mt-3">
+          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+            Choose a team member
+          </p>
           {staff.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
+            <p className="mt-2 rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
               No active staff members yet. Add team members from the Team
               page.
             </p>
           ) : (
-            <select
-              value={staffId}
-              onChange={(event) => onStaffIdChange(event.target.value)}
-              className="w-full rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
-            >
-              <option value="">Select a staff member…</option>
-              {staff.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.fullName} {member.email ? `· ${member.email}` : ""}
-                </option>
-              ))}
-            </select>
+            <div className="mt-2">
+              <StaffMemberPicker
+                staff={staff}
+                value={staffId}
+                disabled={disabled}
+                onChange={onStaffIdChange}
+              />
+            </div>
           )}
         </div>
       ) : null}

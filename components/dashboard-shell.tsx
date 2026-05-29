@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessNotificationBell } from "@/components/business-notification-bell";
 import { Sidebar } from "@/components/sidebar";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useState } from "react";
@@ -156,13 +157,7 @@ export function DashboardShell({
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low"
-              aria-label="Notifications"
-            >
-              <span className="material-symbols-outlined">notifications</span>
-            </button>
+            <BusinessNotificationBell />
             <button
               type="button"
               className="hidden rounded-lg bg-primary px-5 py-2 font-body text-label-bold text-label-bold text-on-primary transition-all hover:bg-primary/90 sm:inline-flex"

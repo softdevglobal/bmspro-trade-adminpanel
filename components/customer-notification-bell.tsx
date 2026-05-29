@@ -1,14 +1,11 @@
 "use client";
 
-import type { CustomerBooking } from "@/app/api/customer/bookings/route";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
-  buildCustomerNotifications,
-  countUnread,
-  readLastSeenAt,
-  writeLastSeenAt,
-  type CustomerNotification,
-} from "@/lib/customer/notifications";
+  NOTIFICATION_STATUS_ICON,
+  NOTIFICATION_STATUS_TONE,
+} from "@/lib/notifications/types";
 import {
   accountPath,
   parseBooknowSlug,
@@ -16,23 +13,7 @@ import {
 } from "@/lib/customer/booking-routes";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-const STATUS_TONE: Record<CustomerNotification["status"], string> = {
-  pending: "text-amber-700",
-  owner_proposed: "text-violet-700",
-  scheduled: "text-emerald-700",
-  cancelled: "text-stone-600",
-  completed: "text-primary",
-};
-
-const STATUS_ICON: Record<CustomerNotification["status"], string> = {
-  pending: "schedule",
-  owner_proposed: "edit_calendar",
-  scheduled: "event_available",
-  cancelled: "event_busy",
-  completed: "check_circle",
-};
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function relativeTime(timestamp: number): string {
   if (!timestamp) return "";
@@ -50,50 +31,26 @@ function relativeTime(timestamp: number): string {
 
 export function CustomerNotificationBell() {
   const pathname = usePathname();
-  const { status, getIdToken } = useCustomerAuth();
+  const { status } = useCustomerAuth();
+  const {
+    notifications,
+    loading,
+    unread,
+    reload,
+    markAllRead,
+    clearOne,
+    clearAll,
+  } = useCustomerNotifications();
+
   const notificationsHref = useMemo(() => {
     const slug = parseBooknowSlug(pathname) ?? recallBookingSlug();
     return slug
       ? accountPath(slug, "notifications")
       : "/account?tab=notifications";
   }, [pathname]);
+
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<CustomerNotification[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [lastSeen, setLastSeen] = useState<number>(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const load = useCallback(async () => {
-    if (status !== "authenticated") return;
-    setLoading(true);
-    try {
-      const idToken = await getIdToken();
-      if (!idToken) return;
-      const response = await fetch("/api/customer/bookings", {
-        headers: { authorization: `Bearer ${idToken}` },
-      });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        bookings?: CustomerBooking[];
-      };
-      if (!response.ok || !payload.ok) return;
-      setNotifications(buildCustomerNotifications(payload.bookings ?? []));
-    } finally {
-      setLoading(false);
-    }
-  }, [status, getIdToken]);
-
-  useEffect(() => {
-    setLastSeen(readLastSeenAt());
-  }, []);
-
-  useEffect(() => {
-    if (status === "authenticated") {
-      void load();
-    } else {
-      setNotifications([]);
-    }
-  }, [status, load]);
 
   useEffect(() => {
     if (!open) return;
@@ -111,17 +68,12 @@ export function CustomerNotificationBell() {
 
   if (status !== "authenticated") return null;
 
-  const unread = countUnread(notifications, lastSeen);
-
-  function handleOpen() {
+  function handleToggle() {
     setOpen((prev) => {
       const next = !prev;
       if (next) {
-        void load();
-      } else {
-        const top = notifications[0]?.timestamp ?? Date.now();
-        writeLastSeenAt(top);
-        setLastSeen(top);
+        void reload();
+        void markAllRead();
       }
       return next;
     });
@@ -131,7 +83,7 @@ export function CustomerNotificationBell() {
     <div className="relative" ref={containerRef}>
       <button
         type="button"
-        onClick={handleOpen}
+        onClick={handleToggle}
         aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
         className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-white/95 shadow-sm backdrop-blur transition-all hover:scale-105 hover:bg-white"
       >
@@ -151,16 +103,30 @@ export function CustomerNotificationBell() {
             <p className="font-body text-[13px] font-bold text-on-surface">
               Notifications
             </p>
-            <Link
-              href={notificationsHref}
-              onClick={() => setOpen(false)}
-              className="font-body text-[11px] font-semibold text-primary hover:underline"
-            >
-              View all
-            </Link>
+            <div className="flex items-center gap-1.5">
+              {notifications.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void clearAll()}
+                  className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600"
+                >
+                  <span className="material-symbols-outlined text-[14px]">
+                    clear_all
+                  </span>
+                  Clear all
+                </button>
+              ) : null}
+              <Link
+                href={notificationsHref}
+                onClick={() => setOpen(false)}
+                className="font-body text-[11px] font-semibold text-primary hover:underline"
+              >
+                View all
+              </Link>
+            </div>
           </div>
           <div className="max-h-[60vh] overflow-y-auto">
-            {loading ? (
+            {loading && notifications.length === 0 ? (
               <div className="flex justify-center py-6">
                 <span className="material-symbols-outlined animate-spin text-[20px] text-primary">
                   progress_activity
@@ -177,39 +143,41 @@ export function CustomerNotificationBell() {
               </div>
             ) : (
               <ul>
-                {notifications.slice(0, 8).map((note) => {
-                  const isUnread = note.timestamp > lastSeen;
-                  return (
-                    <li
-                      key={note.id}
-                      className={`flex gap-2 border-b border-stone-100 px-3 py-2.5 last:border-b-0 ${
-                        isUnread ? "bg-primary/5" : ""
-                      }`}
+                {notifications.slice(0, 10).map((note) => (
+                  <li
+                    key={note.id}
+                    className={`group flex gap-2 border-b border-stone-100 px-3 py-2.5 last:border-b-0 ${
+                      note.read ? "" : "bg-primary/5"
+                    }`}
+                  >
+                    <span
+                      className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
                     >
-                      <span
-                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] ${
-                          STATUS_TONE[note.status]
-                        }`}
-                      >
-                        {STATUS_ICON[note.status]}
+                      {NOTIFICATION_STATUS_ICON[note.status]}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 font-body text-[13px] font-semibold text-on-surface">
+                        {note.title}
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 font-body text-[11px] text-on-surface-variant">
+                        {note.body}
+                      </p>
+                      <p className="mt-1 font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
+                        {relativeTime(note.createdAt)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void clearOne(note.id)}
+                      aria-label="Clear notification"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">
+                        close
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 font-body text-[13px] font-semibold text-on-surface">
-                          {note.title}
-                        </p>
-                        <p className="mt-0.5 line-clamp-2 font-body text-[11px] text-on-surface-variant">
-                          {note.body}
-                        </p>
-                        <p className="mt-1 font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
-                          {relativeTime(note.timestamp)}
-                        </p>
-                      </div>
-                      {isUnread ? (
-                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
-                      ) : null}
-                    </li>
-                  );
-                })}
+                    </button>
+                  </li>
+                ))}
               </ul>
             )}
           </div>

@@ -3,20 +3,21 @@
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
-  buildCustomerNotifications,
-  countUnread,
-  readLastSeenAt,
-  writeLastSeenAt,
-  type CustomerNotification,
-} from "@/lib/customer/notifications";
+  NOTIFICATION_STATUS_ICON,
+  NOTIFICATION_STATUS_TONE,
+} from "@/lib/notifications/types";
 import {
   STATUS_LABELS,
-  TIME_RANGE_SHORT_LABELS,
+  TIME_RANGE_LABELS,
+  formatBudgetAud,
   formatSlotDate,
   type InspectionRequestStatus,
+  type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import type { CustomerBooking } from "@/app/api/customer/bookings/route";
+import type { InspectionSlot } from "@/lib/inspection/types";
 import {
   CustomerBookingShell,
   CustomerShellPanel,
@@ -51,6 +52,40 @@ const ACTIVE_STATUSES: InspectionRequestStatus[] = [
   "scheduled",
 ];
 const HISTORY_STATUSES: InspectionRequestStatus[] = ["completed", "cancelled"];
+
+const STATUS_ICON: Record<InspectionRequestStatus, string> = {
+  pending: "hourglass_top",
+  owner_proposed: "swap_horiz",
+  scheduled: "event_available",
+  cancelled: "cancel",
+  completed: "check_circle",
+};
+
+function formatFullAddress(booking: CustomerBooking): string {
+  const { street, suburb, state, postcode } = booking.address;
+  return [street, suburb, state, postcode].filter(Boolean).join(", ");
+}
+
+function formatCreatedAt(ms: number | null): string | null {
+  if (!ms) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(ms));
+  } catch {
+    return null;
+  }
+}
+
+function slotTimeIcon(timeRange: InspectionTimeRange): string {
+  return timeRange === "morning" ? "wb_twilight" : "wb_sunny";
+}
+
+function requestTypeLabel(booking: CustomerBooking): string {
+  if (booking.requestType === "custom_quote") return "Custom quote";
+  return "Existing service";
+}
 
 export function AccountClient({
   slug,
@@ -541,19 +576,22 @@ function BookingsList({
 
   if (filtered.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-stone-200 bg-white p-6 text-center">
-        <span className="material-symbols-outlined text-[28px] text-on-surface-variant">
-          event_busy
+      <div className="rounded-2xl border border-dashed border-stone-200/90 bg-gradient-to-br from-white to-[#faf8f5] p-8 text-center">
+        <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <span className="material-symbols-outlined text-[30px]">inbox</span>
         </span>
-        <p className="mt-2 font-body text-[14px] font-semibold text-on-surface">
+        <p className="mt-3 font-display text-[17px] font-semibold text-on-surface">
           {emptyHint}
+        </p>
+        <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+          New requests will show up here with full visit details.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {filtered.map((booking) => (
         <BookingCard key={booking.id} booking={booking} />
       ))}
@@ -561,115 +599,307 @@ function BookingsList({
   );
 }
 
+function BookingDetailRow({
+  icon,
+  label,
+  value,
+  children,
+}: {
+  icon: string;
+  label: string;
+  value?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex gap-3">
+      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-primary ring-1 ring-stone-200/80">
+        <span className="material-symbols-outlined text-[18px]">{icon}</span>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="font-body text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+          {label}
+        </p>
+        {children ?? (
+          <p className="mt-0.5 font-body text-[13px] leading-snug text-on-surface">
+            {value}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BookingSlotsList({
+  slots,
+  variant = "default",
+}: {
+  slots: InspectionSlot[];
+  variant?: "default" | "proposed" | "confirmed";
+}) {
+  if (slots.length === 0) {
+    return (
+      <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">—</p>
+    );
+  }
+
+  const cardClass =
+    variant === "proposed"
+      ? "border-violet-200/90 bg-violet-50/70"
+      : variant === "confirmed"
+        ? "border-emerald-200/90 bg-emerald-50/60"
+        : "border-stone-200/80 bg-white";
+
+  const timeClass =
+    variant === "proposed"
+      ? "text-violet-900"
+      : variant === "confirmed"
+        ? "text-emerald-900"
+        : "text-on-surface-variant";
+
+  return (
+    <ul className="mt-1.5 space-y-2">
+      {slots.map((slot, index) => (
+        <li
+          key={`${slot.date}-${slot.timeRange}-${index}`}
+          className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 shadow-sm ${cardClass}`}
+        >
+          {slots.length > 1 ? (
+            <span
+              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 font-body text-[11px] font-bold text-primary"
+              aria-hidden
+            >
+              {index + 1}
+            </span>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold leading-snug text-on-surface">
+              <span className="material-symbols-outlined text-[17px] text-primary">
+                event
+              </span>
+              {formatSlotDate(slot.date)}
+            </p>
+            <p
+              className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
+            >
+              <span className="material-symbols-outlined text-[16px] text-primary/85">
+                {slotTimeIcon(slot.timeRange)}
+              </span>
+              {TIME_RANGE_LABELS[slot.timeRange]}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function BookingCard({ booking }: { booking: CustomerBooking }) {
-  const slot =
-    booking.scheduledSlot ??
-    booking.preferredSlots[0] ??
-    booking.ownerProposedSlots[0] ??
-    null;
-  const slotLabel = slot
-    ? `${formatSlotDate(slot.date)} · ${TIME_RANGE_SHORT_LABELS[slot.timeRange]}`
-    : "Awaiting schedule";
+  const [expanded, setExpanded] = useState(false);
 
   const headline =
     booking.serviceName ??
     booking.customRequest?.title ??
     (booking.requestType === "custom_quote" ? "Custom request" : "Service request");
 
+  const serviceIcon =
+    booking.requestType === "custom_quote" ? "request_quote" : "home_repair_service";
+  const fullAddress = formatFullAddress(booking);
+  const submittedAt = formatCreatedAt(booking.createdAt);
+  const locationShort = [booking.address.suburb, booking.address.state]
+    .filter(Boolean)
+    .join(", ");
+
   return (
-    <article className="rounded-2xl border border-stone-200 bg-white p-3 shadow-sm sm:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {booking.businessName ?? "Business"}
-          </p>
-          <p className="mt-0.5 line-clamp-2 font-display text-[15px] font-semibold text-on-surface">
-            {headline}
-          </p>
-        </div>
-        <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-body text-[11px] font-bold uppercase tracking-wider ${
-            STATUS_TONE[booking.status]
-          }`}
-        >
-          {STATUS_LABELS[booking.status]}
-        </span>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 font-body text-[12px] text-on-surface">
-        <span className="inline-flex items-center gap-1">
-          <span className="material-symbols-outlined text-[16px] text-primary">
-            event
+    <article className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-[0_8px_28px_-18px_rgba(0,74,198,0.12)] ring-1 ring-stone-100">
+      <div className="border-l-4 border-l-primary bg-gradient-to-r from-primary/[0.06] via-white to-white p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+            <span className="material-symbols-outlined text-[22px]">{serviceIcon}</span>
           </span>
-          {slotLabel}
-        </span>
-        {booking.address.suburb || booking.address.state ? (
-          <span className="inline-flex items-center gap-1 text-on-surface-variant">
-            <span className="material-symbols-outlined text-[16px]">place</span>
-            {[booking.address.suburb, booking.address.state]
-              .filter(Boolean)
-              .join(", ")}
-          </span>
-        ) : null}
-        {booking.bookingSlug ? (
-          <Link
-            href={`/booknow/${booking.bookingSlug}`}
-            className="ml-auto inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+          <div className="min-w-0 flex-1">
+            <p className="font-body text-[10px] font-bold uppercase tracking-wider text-primary/80">
+              {booking.businessName ?? "Business"}
+            </p>
+            <p className="mt-0.5 font-display text-[17px] font-semibold leading-snug text-on-surface sm:text-[18px]">
+              {headline}
+            </p>
+            {booking.serviceBusinessType ? (
+              <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                {booking.serviceBusinessType}
+              </p>
+            ) : null}
+          </div>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wider ${
+              STATUS_TONE[booking.status]
+            }`}
           >
-            Visit business
             <span className="material-symbols-outlined text-[14px]">
-              arrow_forward
+              {STATUS_ICON[booking.status]}
             </span>
-          </Link>
+            <span className="hidden sm:inline">{STATUS_LABELS[booking.status]}</span>
+            <span className="sm:hidden">
+              {STATUS_LABELS[booking.status].split(" ")[0]}
+            </span>
+          </span>
+        </div>
+
+        {locationShort ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white/80 px-2.5 py-1 font-body text-[12px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[16px] text-primary/80">
+                place
+              </span>
+              {locationShort}
+            </span>
+          </div>
+        ) : null}
+
+        {booking.status === "owner_proposed" &&
+        booking.ownerProposedSlots.length > 0 &&
+        !expanded ? (
+          <p className="mt-2.5 inline-flex items-center gap-1 font-body text-[12px] font-semibold text-violet-700">
+            <span className="material-symbols-outlined text-[16px]">info</span>
+            New times proposed — expand for details
+          </p>
         ) : null}
       </div>
 
-      {booking.ownerProposedSlots.length > 0 &&
-      booking.status === "owner_proposed" ? (
-        <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2">
-          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-violet-800">
-            Business proposed alternative times
-          </p>
-          <ul className="mt-1 space-y-0.5 font-body text-[12px] text-violet-900">
-            {booking.ownerProposedSlots.map((entry, index) => (
-              <li key={`${entry.date}-${entry.timeRange}-${index}`}>
-                {formatSlotDate(entry.date)} ·{" "}
-                {TIME_RANGE_SHORT_LABELS[entry.timeRange]}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <button
+        type="button"
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-center gap-1.5 border-t border-stone-200/80 bg-[#faf8f5] py-2.5 font-body text-[12px] font-bold text-primary transition-colors hover:bg-primary/5"
+      >
+        {expanded ? "Hide details" : "View all details"}
+        <span
+          className={`material-symbols-outlined text-[20px] transition-transform duration-200 ${
+            expanded ? "rotate-180" : ""
+          }`}
+          aria-hidden
+        >
+          expand_more
+        </span>
+      </button>
 
-      {booking.ownerNote ? (
-        <p className="mt-2 font-body text-[12px] italic text-on-surface-variant">
-          “{booking.ownerNote}”
-        </p>
+      {expanded ? (
+        <div className="space-y-3 border-t border-stone-200/80 bg-[#faf8f5] px-4 py-4 sm:px-5">
+          <BookingDetailRow
+            icon="category"
+            label="Request type"
+            value={requestTypeLabel(booking)}
+          />
+
+          {booking.customRequest?.description ? (
+            <BookingDetailRow icon="description" label="Job description">
+              <p className="mt-0.5 whitespace-pre-wrap font-body text-[13px] leading-relaxed text-on-surface">
+                {booking.customRequest.description}
+              </p>
+            </BookingDetailRow>
+          ) : null}
+
+          {booking.customerNotes ? (
+            <BookingDetailRow icon="sticky_note_2" label="Your notes">
+              <p className="mt-0.5 whitespace-pre-wrap font-body text-[13px] leading-relaxed text-on-surface">
+                {booking.customerNotes}
+              </p>
+            </BookingDetailRow>
+          ) : null}
+
+          {formatBudgetAud(booking.budgetAud) ? (
+            <BookingDetailRow
+              icon="payments"
+              label="Your budget"
+              value={formatBudgetAud(booking.budgetAud) ?? undefined}
+            />
+          ) : null}
+
+          <BookingDetailRow
+            icon="place"
+            label="Visit address"
+            value={fullAddress || "—"}
+          />
+
+          <BookingDetailRow icon="calendar_month" label="Your preferred times">
+            <BookingSlotsList slots={booking.preferredSlots} />
+          </BookingDetailRow>
+
+          {booking.scheduledSlot ? (
+            <BookingDetailRow icon="event_available" label="Confirmed visit">
+              <BookingSlotsList
+                slots={[booking.scheduledSlot]}
+                variant="confirmed"
+              />
+            </BookingDetailRow>
+          ) : null}
+
+          {booking.ownerProposedSlots.length > 0 ? (
+            <BookingDetailRow icon="swap_horiz" label="Business proposed times">
+              <BookingSlotsList
+                slots={booking.ownerProposedSlots}
+                variant="proposed"
+              />
+            </BookingDetailRow>
+          ) : null}
+
+          {booking.assignedTo ? (
+            <BookingDetailRow
+              icon="engineering"
+              label="Assigned to"
+              value={booking.assignedTo.name}
+            />
+          ) : null}
+
+          {booking.ownerNote ? (
+            <BookingDetailRow icon="chat" label="Message from business">
+              <p className="mt-0.5 font-body text-[13px] italic leading-relaxed text-on-surface">
+                “{booking.ownerNote}”
+              </p>
+            </BookingDetailRow>
+          ) : null}
+
+          {submittedAt ? (
+            <BookingDetailRow
+              icon="schedule"
+              label="Submitted"
+              value={submittedAt}
+            />
+          ) : null}
+
+          {booking.bookingSlug ? (
+            <div className="pt-1">
+              <Link
+                href={booknowPath(booking.bookingSlug)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/25 bg-white py-2.5 font-body text-[13px] font-bold text-primary shadow-sm transition-colors hover:bg-primary/5 sm:w-auto sm:px-5"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  storefront
+                </span>
+                Visit {booking.businessName ?? "business"}
+                <span className="material-symbols-outlined text-[16px]">
+                  arrow_forward
+                </span>
+              </Link>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </article>
   );
 }
 
 function NotificationsSection() {
-  const { bookings, loading, error, reload } = useBookings();
-  const [lastSeen, setLastSeen] = useState(0);
-
-  useEffect(() => {
-    setLastSeen(readLastSeenAt());
-  }, []);
-
-  const notifications: CustomerNotification[] = useMemo(
-    () => buildCustomerNotifications(bookings),
-    [bookings],
-  );
+  const { notifications, loading, error, unread, reload, markAllRead, clearOne, clearAll } =
+    useCustomerNotifications();
 
   useEffect(() => {
     if (notifications.length === 0) return;
-    const top = notifications[0]?.timestamp ?? Date.now();
-    writeLastSeenAt(top);
-  }, [notifications]);
+    void markAllRead();
+    // Run once per fresh load of notifications.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications.length]);
 
-  if (loading) {
+  if (loading && notifications.length === 0) {
     return (
       <div className="flex min-h-[160px] items-center justify-center">
         <span className="material-symbols-outlined animate-spin text-[24px] text-primary">
@@ -687,7 +917,7 @@ function NotificationsSection() {
         </p>
         <button
           type="button"
-          onClick={reload}
+          onClick={() => void reload()}
           className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 font-body text-[12px] font-bold text-rose-700"
         >
           <span className="material-symbols-outlined text-[14px]">refresh</span>
@@ -713,23 +943,37 @@ function NotificationsSection() {
     );
   }
 
-  const unread = countUnread(notifications, lastSeen);
-
   return (
     <div className="space-y-3">
-      {unread > 0 ? (
-        <p className="rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 font-body text-[12px] font-semibold text-primary">
-          {unread} new {unread === 1 ? "update" : "updates"} since last visit
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-body text-[12px] text-on-surface-variant">
+          {unread > 0
+            ? `${unread} unread ${unread === 1 ? "update" : "updates"}`
+            : `${notifications.length} ${notifications.length === 1 ? "update" : "updates"}`}
         </p>
-      ) : null}
+        <button
+          type="button"
+          onClick={() => void clearAll()}
+          className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:border-rose-200 hover:text-rose-600"
+        >
+          <span className="material-symbols-outlined text-[15px]">clear_all</span>
+          Clear all
+        </button>
+      </div>
       <ul className="space-y-2">
         {notifications.map((note) => (
           <li
             key={note.id}
-            className="flex gap-3 rounded-2xl border border-stone-200 bg-white p-3 sm:p-4"
+            className={`group flex gap-3 rounded-2xl border p-3 sm:p-4 ${
+              note.read
+                ? "border-stone-200 bg-white"
+                : "border-primary/30 bg-primary/[0.04]"
+            }`}
           >
-            <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] text-primary">
-              {STATUS_ICON_BY_STATUS[note.status]}
+            <span
+              className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+            >
+              {NOTIFICATION_STATUS_ICON[note.status]}
             </span>
             <div className="min-w-0 flex-1">
               <p className="font-body text-[13px] font-bold text-on-surface">
@@ -739,22 +983,22 @@ function NotificationsSection() {
                 {note.body}
               </p>
               <p className="mt-1 font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
-                {note.timestamp
-                  ? new Date(note.timestamp).toLocaleString()
+                {note.createdAt
+                  ? new Date(note.createdAt).toLocaleString()
                   : ""}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => void clearOne(note.id)}
+              aria-label="Clear notification"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
           </li>
         ))}
       </ul>
     </div>
   );
 }
-
-const STATUS_ICON_BY_STATUS: Record<InspectionRequestStatus, string> = {
-  pending: "schedule",
-  owner_proposed: "edit_calendar",
-  scheduled: "event_available",
-  cancelled: "event_busy",
-  completed: "check_circle",
-};

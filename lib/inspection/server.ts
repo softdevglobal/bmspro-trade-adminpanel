@@ -16,12 +16,34 @@ import {
   type InspectionRequestStatus,
   type InspectionSlot,
 } from "@/lib/inspection/types";
+import {
+  notifyBusinessOfNewRequest,
+  notifyCustomerOfAssignment,
+  notifyCustomerOfStatusChange,
+} from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
 
 type ServiceLookup = {
   name: string;
   businessType: string;
 };
+
+async function loadBusinessSummary(
+  businessId: string,
+): Promise<{ businessName: string | null; bookingSlug: string | null }> {
+  try {
+    const snap = await adminDb.collection("businesses").doc(businessId).get();
+    const data = snap.exists ? snap.data() ?? {} : {};
+    return {
+      businessName:
+        typeof data.businessName === "string" ? data.businessName : null,
+      bookingSlug:
+        typeof data.bookingSlug === "string" ? data.bookingSlug : null,
+    };
+  } catch {
+    return { businessName: null, bookingSlug: null };
+  }
+}
 
 async function lookupService(
   businessId: string,
@@ -151,6 +173,14 @@ function mapInspectionDoc(
     })(),
     assignedTo: parseAssignment(data.assignedTo),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
+    customerNotes:
+      typeof data.customerNotes === "string" && data.customerNotes.trim()
+        ? data.customerNotes.trim()
+        : null,
+    budgetAud:
+      typeof data.budgetAud === "number" && Number.isFinite(data.budgetAud)
+        ? data.budgetAud
+        : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
@@ -197,12 +227,16 @@ export async function createInspectionRequest(
     scheduledSlot: null,
     assignedTo: null,
     ownerNote: null,
+    customerNotes: input.customerNotes,
+    budgetAud: input.budgetAud,
     createdAt: now,
     updatedAt: now,
   });
 
   const snap = await ref.get();
-  return { ok: true, request: mapInspectionDoc(ref.id, snap.data() ?? {}) };
+  const request = mapInspectionDoc(ref.id, snap.data() ?? {});
+  await notifyBusinessOfNewRequest(request);
+  return { ok: true, request };
 }
 
 /** Lists inspection requests for a business, newest first. */
@@ -295,5 +329,14 @@ export async function applyOwnerAction(
 
   await ref.update(updates);
   const after = await ref.get();
-  return { ok: true, request: mapInspectionDoc(ref.id, after.data() ?? {}) };
+  const request = mapInspectionDoc(ref.id, after.data() ?? {});
+
+  const summary = await loadBusinessSummary(businessId);
+  if (action.type === "assign") {
+    await notifyCustomerOfAssignment(request, summary);
+  } else {
+    await notifyCustomerOfStatusChange(request, request.status, summary);
+  }
+
+  return { ok: true, request };
 }

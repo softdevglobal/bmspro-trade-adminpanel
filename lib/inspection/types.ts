@@ -73,6 +73,10 @@ export type InspectionRequestInput = {
   customer: InspectionCustomer;
   address: InspectionAddress;
   preferredSlots: InspectionSlot[];
+  /** Optional extra context from the customer (step 1). */
+  customerNotes: string | null;
+  /** Optional budget in Australian dollars. */
+  budgetAud: number | null;
 };
 
 /** Detail returned by the API and rendered in the admin UI. */
@@ -93,6 +97,8 @@ export type InspectionRequestDetail = {
   scheduledSlot: InspectionSlot | null;
   assignedTo: InspectionAssignment | null;
   ownerNote: string | null;
+  customerNotes: string | null;
+  budgetAud: number | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
@@ -242,6 +248,16 @@ export function parseInspectionRequestInput(raw: unknown):
     };
   }
 
+  const customerNotes = trimString(input.customerNotes);
+  if (customerNotes.length > 2000) {
+    return { ok: false, error: "Notes must be 2000 characters or fewer." };
+  }
+
+  const budgetParsed = parseBudgetAudInput(input.budgetAud);
+  if (!budgetParsed.ok) {
+    return { ok: false, error: budgetParsed.error };
+  }
+
   return {
     ok: true,
     value: {
@@ -251,8 +267,44 @@ export function parseInspectionRequestInput(raw: unknown):
       customer: { fullName, email, phone },
       address,
       preferredSlots,
+      customerNotes: customerNotes || null,
+      budgetAud: budgetParsed.value,
     },
   };
+}
+
+/** Parses optional budget from form/API (AUD). Empty is allowed. */
+export function parseBudgetAudInput(
+  raw: unknown,
+):
+  | { ok: true; value: number | null }
+  | { ok: false; error: string } {
+  if (raw === null || raw === undefined) {
+    return { ok: true, value: null };
+  }
+  const trimmed = typeof raw === "string" ? raw.trim() : String(raw).trim();
+  if (!trimmed) return { ok: true, value: null };
+
+  const cleaned = trimmed.replace(/[^\d.]/g, "");
+  const num = Number(cleaned);
+  if (!Number.isFinite(num) || num <= 0) {
+    return { ok: false, error: "Enter a valid budget amount." };
+  }
+  if (num > 99_999_999) {
+    return { ok: false, error: "Budget amount is too large." };
+  }
+  return { ok: true, value: Math.round(num * 100) / 100 };
+}
+
+/** Display budget as `Aus $12,500` (booking + admin UI). */
+export function formatBudgetAud(amount: number | null | undefined): string | null {
+  if (amount === null || amount === undefined || !Number.isFinite(amount)) {
+    return null;
+  }
+  const formatted = new Intl.NumberFormat("en-AU", {
+    maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
+  }).format(amount);
+  return `Aus $${formatted}`;
 }
 
 export function formatSlotDate(date: string): string {

@@ -13,11 +13,7 @@ import {
   parseAccountTabFromPathname,
   parseBooknowSlug,
 } from "@/lib/customer/booking-routes";
-import {
-  buildCustomerNotifications,
-  countUnread,
-  readLastSeenAt,
-} from "@/lib/customer/notifications";
+import type { NotificationRecord } from "@/lib/notifications/types";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -145,16 +141,17 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
     try {
       const idToken = await getIdToken();
       if (!idToken) return;
-      const response = await fetch("/api/customer/bookings", {
+      const response = await fetch("/api/customer/notifications", {
         headers: { authorization: `Bearer ${idToken}` },
       });
       const payload = (await response.json()) as {
         ok?: boolean;
-        bookings?: Parameters<typeof buildCustomerNotifications>[0];
+        notifications?: NotificationRecord[];
       };
       if (!response.ok || !payload.ok) return;
-      const notes = buildCustomerNotifications(payload.bookings ?? []);
-      setUnread(countUnread(notes, readLastSeenAt()));
+      setUnread(
+        (payload.notifications ?? []).filter((note) => !note.read).length,
+      );
     } catch {
       setUnread(0);
     }
