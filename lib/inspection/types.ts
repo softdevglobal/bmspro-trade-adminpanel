@@ -95,6 +95,9 @@ export type InspectionRequestDetail = {
   preferredSlots: InspectionSlot[];
   ownerProposedSlots: InspectionSlot[];
   scheduledSlot: InspectionSlot | null;
+  /** Specific visit window the owner sets when confirming, e.g. 10:00–11:00. */
+  scheduledStartTime: string | null; // "HH:MM" 24h
+  scheduledEndTime: string | null; // "HH:MM" 24h
   assignedTo: InspectionAssignment | null;
   ownerNote: string | null;
   customerNotes: string | null;
@@ -322,4 +325,39 @@ export function formatAddress(address: InspectionAddress): string {
   return [address.street, address.suburb, address.state, address.postcode]
     .filter((part) => part.trim().length > 0)
     .join(", ");
+}
+
+const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** Validates an `HH:MM` (24h) clock time string. */
+export function isClockTime(value: unknown): value is string {
+  return typeof value === "string" && CLOCK_TIME.test(value.trim());
+}
+
+/** Formats `HH:MM` (24h) as a friendly `10:00 AM`. Returns null if invalid. */
+export function formatClockTime(value: string | null | undefined): string | null {
+  if (!isClockTime(value)) return null;
+  const [hourStr, minuteStr] = value.trim().split(":");
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  const minutePart = minute === 0 ? "" : `:${minuteStr}`;
+  return `${hour12}${minutePart} ${period}`;
+}
+
+/**
+ * Formats a visit window from two `HH:MM` values into `10:00 AM – 11:00 AM`.
+ * Returns null when no usable window is available.
+ */
+export function formatVisitWindow(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): string | null {
+  const startLabel = formatClockTime(start);
+  const endLabel = formatClockTime(end);
+  if (startLabel && endLabel) return `${startLabel} – ${endLabel}`;
+  if (startLabel) return `From ${startLabel}`;
+  if (endLabel) return `Until ${endLabel}`;
+  return null;
 }

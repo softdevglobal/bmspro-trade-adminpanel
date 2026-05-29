@@ -6,6 +6,7 @@ import {
   NOTIFICATION_STATUS_TONE,
   type NotificationRecord,
 } from "@/lib/notifications/types";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 function relativeTime(timestamp: number): string {
@@ -24,6 +25,7 @@ function relativeTime(timestamp: number): string {
 
 export function BusinessNotificationBell() {
   const { user, status } = useAuth();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -150,6 +152,18 @@ export function BusinessNotificationBell() {
     }
   }
 
+  function openNotification(note: NotificationRecord) {
+    setOpen(false);
+    if (!note.requestId) return;
+    router.push(`/dashboard/inspection-visits?request=${note.requestId}`);
+    // If already on the inspection-visits page, the board listens for this.
+    window.dispatchEvent(
+      new CustomEvent("bmspt:open-inspection-request", {
+        detail: note.requestId,
+      }),
+    );
+  }
+
   return (
     <div className="relative" ref={containerRef}>
       <button
@@ -167,7 +181,7 @@ export function BusinessNotificationBell() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-2 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-outline-variant bg-surface shadow-[0_24px_60px_-24px_rgba(25,27,35,0.45)]">
+        <div className="absolute right-0 top-full z-50 mt-2 w-[27rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-outline-variant bg-surface shadow-[0_24px_60px_-24px_rgba(25,27,35,0.45)]">
           <div className="flex items-center justify-between border-b border-outline-variant/60 px-4 py-3">
             <div>
               <p className="font-body text-[14px] font-bold text-on-surface">
@@ -192,7 +206,7 @@ export function BusinessNotificationBell() {
             ) : null}
           </div>
 
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[72vh] overflow-y-auto">
             {loading && notifications.length === 0 ? (
               <div className="flex justify-center py-8">
                 <span className="material-symbols-outlined animate-spin text-[20px] text-primary">
@@ -216,32 +230,38 @@ export function BusinessNotificationBell() {
                 {notifications.map((note) => (
                   <li
                     key={note.id}
-                    className={`group flex gap-3 border-b border-outline-variant/40 px-4 py-3 last:border-b-0 ${
+                    className={`group flex items-stretch gap-1 border-b border-outline-variant/40 last:border-b-0 ${
                       note.read ? "" : "bg-primary/[0.04]"
                     }`}
                   >
-                    <span
-                      className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                    <button
+                      type="button"
+                      onClick={() => openNotification(note)}
+                      className="flex min-w-0 flex-1 gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-container-low"
                     >
-                      {NOTIFICATION_STATUS_ICON[note.status]}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-body text-[13px] font-bold text-on-surface">
-                        {note.title}
-                      </p>
-                      <p className="mt-0.5 font-body text-[12px] leading-snug text-on-surface-variant">
-                        {note.body}
-                      </p>
-                      <p className="mt-1 font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
-                        {relativeTime(note.createdAt)}
-                      </p>
-                    </div>
+                      <span
+                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                      >
+                        {NOTIFICATION_STATUS_ICON[note.status]}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-body text-[13px] font-bold text-on-surface">
+                          {note.title}
+                        </span>
+                        <span className="mt-0.5 block font-body text-[12px] leading-snug text-on-surface-variant">
+                          {note.body}
+                        </span>
+                        <span className="mt-1 block font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
+                          {relativeTime(note.createdAt)}
+                        </span>
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => void clearOne(note.id)}
                       disabled={busyId === note.id}
                       aria-label="Clear notification"
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-rose-600 disabled:opacity-60"
+                      className="my-2 mr-2 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-rose-600 disabled:opacity-60"
                     >
                       <span className="material-symbols-outlined text-[16px]">
                         {busyId === note.id ? "progress_activity" : "close"}

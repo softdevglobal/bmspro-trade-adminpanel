@@ -5,6 +5,7 @@ import {
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   REQUEST_STATUSES,
+  isClockTime,
   isRequestType,
   isTimeRange,
   type InspectionAddress,
@@ -123,6 +124,12 @@ function mapBookingDoc(
       const slots = parseSlots([data.scheduledSlot]);
       return slots[0] ?? null;
     })(),
+    scheduledStartTime: isClockTime(data.scheduledStartTime)
+      ? data.scheduledStartTime
+      : null,
+    scheduledEndTime: isClockTime(data.scheduledEndTime)
+      ? data.scheduledEndTime
+      : null,
     assignedTo: parseAssignment(data.assignedTo),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
     customerNotes:

@@ -1,8 +1,18 @@
 import type { InspectionRequestStatus } from "@/lib/inspection/types";
 
-export const NOTIFICATION_COLLECTION = "notifications";
+/** Business owners and customers each get their own collection. */
+export const BUSINESS_NOTIFICATION_COLLECTION = "business_notifications";
+export const CUSTOMER_NOTIFICATION_COLLECTION = "customer_notifications";
 
 export type NotificationAudience = "business" | "customer";
+
+export function notificationCollectionFor(
+  audience: NotificationAudience,
+): string {
+  return audience === "business"
+    ? BUSINESS_NOTIFICATION_COLLECTION
+    : CUSTOMER_NOTIFICATION_COLLECTION;
+}
 
 /**
  * Discrete event that produced a notification. Used to pick an icon/tone on
@@ -26,6 +36,7 @@ export type NotificationRecord = {
   requestId: string;
   bookingSlug: string | null;
   businessName: string | null;
+  customerName: string | null;
   status: InspectionRequestStatus;
   type: NotificationType;
   title: string;

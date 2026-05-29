@@ -3,7 +3,9 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
-  NOTIFICATION_COLLECTION,
+  BUSINESS_NOTIFICATION_COLLECTION,
+  CUSTOMER_NOTIFICATION_COLLECTION,
+  notificationCollectionFor,
   type NotificationAudience,
   type NotificationRecord,
   type NotificationType,
@@ -24,6 +26,7 @@ type CreateNotificationInput = {
   businessId: string | null;
   customerId?: string | null;
   customerEmail?: string | null;
+  customerName?: string | null;
   requestId: string;
   bookingSlug?: string | null;
   businessName?: string | null;
@@ -35,11 +38,12 @@ type CreateNotificationInput = {
 
 function mapNotificationDoc(
   id: string,
+  audience: NotificationAudience,
   data: Record<string, unknown>,
 ): NotificationRecord {
   return {
     id,
-    audience: data.audience === "customer" ? "customer" : "business",
+    audience,
     businessId: typeof data.businessId === "string" ? data.businessId : null,
     customerId: typeof data.customerId === "string" ? data.customerId : null,
     customerEmail:
@@ -49,6 +53,8 @@ function mapNotificationDoc(
       typeof data.bookingSlug === "string" ? data.bookingSlug : null,
     businessName:
       typeof data.businessName === "string" ? data.businessName : null,
+    customerName:
+      typeof data.customerName === "string" ? data.customerName : null,
     status: (typeof data.status === "string"
       ? data.status
       : "pending") as InspectionRequestStatus,
@@ -62,24 +68,39 @@ function mapNotificationDoc(
   };
 }
 
+/** Drops null/undefined/empty values so stored docs have no blank fields. */
+function withoutEmpty(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value === null || value === undefined || value === "") continue;
+    result[key] = value;
+  }
+  return result;
+}
+
 async function createNotification(input: CreateNotificationInput): Promise<void> {
-  const ref = adminDb.collection(NOTIFICATION_COLLECTION).doc();
-  await ref.set({
-    id: ref.id,
-    audience: input.audience,
-    businessId: input.businessId ?? null,
-    customerId: input.customerId ?? null,
-    customerEmail: input.customerEmail ?? null,
-    requestId: input.requestId,
-    bookingSlug: input.bookingSlug ?? null,
-    businessName: input.businessName ?? null,
-    status: input.status,
-    type: input.type,
-    title: input.title,
-    body: input.body,
-    read: false,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  const collection = notificationCollectionFor(input.audience);
+  const ref = adminDb.collection(collection).doc();
+  await ref.set(
+    withoutEmpty({
+      id: ref.id,
+      businessId: input.businessId,
+      customerId: input.customerId,
+      customerEmail: input.customerEmail,
+      customerName: input.customerName,
+      requestId: input.requestId,
+      bookingSlug: input.bookingSlug,
+      businessName: input.businessName,
+      status: input.status,
+      type: input.type,
+      title: input.title,
+      body: input.body,
+      read: false,
+      createdAt: FieldValue.serverTimestamp(),
+    }),
+  );
 }
 
 function requestHeadline(request: InspectionRequestDetail): string {
@@ -99,6 +120,7 @@ function slotLabel(slot: InspectionSlot): string {
 /** Notify the business owner that a customer submitted a new request. */
 export async function notifyBusinessOfNewRequest(
   request: InspectionRequestDetail,
+  context: { bookingSlug?: string | null; businessName?: string | null } = {},
 ): Promise<void> {
   const headline = requestHeadline(request);
   const who = request.customer.fullName?.trim() || "A customer";
@@ -106,6 +128,11 @@ export async function notifyBusinessOfNewRequest(
     await createNotification({
       audience: "business",
       businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
       requestId: request.id,
       status: "pending",
       type: "request_created",
@@ -219,6 +246,38 @@ export async function notifyCustomerOfAssignment(
   }
 }
 
+/**
+ * Notify the business owner that the customer accepted one of the proposed
+ * times. The owner still needs to set a specific visit window.
+ */
+export async function notifyBusinessOfCustomerAcceptance(
+  request: InspectionRequestDetail,
+  context: { bookingSlug?: string | null; businessName?: string | null } = {},
+): Promise<void> {
+  const who = request.customer.fullName?.trim() || "The customer";
+  const when = request.scheduledSlot ? slotLabel(request.scheduledSlot) : "";
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      requestId: request.id,
+      status: request.status,
+      type: "request_scheduled",
+      title: "Customer accepted a proposed time",
+      body: when
+        ? `${who} picked ${when}. Set the exact visit time window.`
+        : `${who} accepted one of your proposed times. Set the exact visit time window.`,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 function sortNewestFirst(records: NotificationRecord[]): NotificationRecord[] {
   return records.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
@@ -227,12 +286,13 @@ export async function listBusinessNotifications(
   businessId: string,
 ): Promise<NotificationRecord[]> {
   const snapshot = await adminDb
-    .collection(NOTIFICATION_COLLECTION)
-    .where("audience", "==", "business")
+    .collection(BUSINESS_NOTIFICATION_COLLECTION)
     .where("businessId", "==", businessId)
     .get();
   return sortNewestFirst(
-    snapshot.docs.map((doc) => mapNotificationDoc(doc.id, doc.data() ?? {})),
+    snapshot.docs.map((doc) =>
+      mapNotificationDoc(doc.id, "business", doc.data() ?? {}),
+    ),
   );
 }
 
@@ -242,14 +302,12 @@ export async function listCustomerNotifications(
 ): Promise<NotificationRecord[]> {
   const [byId, byEmail] = await Promise.all([
     adminDb
-      .collection(NOTIFICATION_COLLECTION)
-      .where("audience", "==", "customer")
+      .collection(CUSTOMER_NOTIFICATION_COLLECTION)
       .where("customerId", "==", customerId)
       .get(),
     customerEmail
       ? adminDb
-          .collection(NOTIFICATION_COLLECTION)
-          .where("audience", "==", "customer")
+          .collection(CUSTOMER_NOTIFICATION_COLLECTION)
           .where("customerEmail", "==", customerEmail)
           .get()
       : Promise.resolve(null),
@@ -265,7 +323,7 @@ export async function listCustomerNotifications(
 
   return sortNewestFirst(
     Array.from(docs.entries()).map(([id, data]) =>
-      mapNotificationDoc(id, data),
+      mapNotificationDoc(id, "customer", data),
     ),
   );
 }
@@ -279,9 +337,8 @@ function ownsNotification(
   guard: OwnerGuard,
 ): boolean {
   if (guard.audience === "business") {
-    return data.audience === "business" && data.businessId === guard.businessId;
+    return data.businessId === guard.businessId;
   }
-  if (data.audience !== "customer") return false;
   return (
     data.customerId === guard.customerId ||
     (typeof data.customerEmail === "string" &&
@@ -294,7 +351,7 @@ export async function markNotificationRead(
   id: string,
   guard: OwnerGuard,
 ): Promise<boolean> {
-  const ref = adminDb.collection(NOTIFICATION_COLLECTION).doc(id);
+  const ref = adminDb.collection(notificationCollectionFor(guard.audience)).doc(id);
   const snap = await ref.get();
   if (!snap.exists) return false;
   if (!ownsNotification(snap.data() ?? {}, guard)) return false;
@@ -305,6 +362,7 @@ export async function markNotificationRead(
 export async function markAllNotificationsRead(
   guard: OwnerGuard,
 ): Promise<void> {
+  const collection = notificationCollectionFor(guard.audience);
   const records =
     guard.audience === "business"
       ? await listBusinessNotifications(guard.businessId)
@@ -314,10 +372,9 @@ export async function markAllNotificationsRead(
   for (let i = 0; i < unread.length; i += MAX_BATCH) {
     const batch = adminDb.batch();
     for (const record of unread.slice(i, i + MAX_BATCH)) {
-      batch.update(
-        adminDb.collection(NOTIFICATION_COLLECTION).doc(record.id),
-        { read: true },
-      );
+      batch.update(adminDb.collection(collection).doc(record.id), {
+        read: true,
+      });
     }
     await batch.commit();
   }
@@ -327,7 +384,7 @@ export async function deleteNotification(
   id: string,
   guard: OwnerGuard,
 ): Promise<boolean> {
-  const ref = adminDb.collection(NOTIFICATION_COLLECTION).doc(id);
+  const ref = adminDb.collection(notificationCollectionFor(guard.audience)).doc(id);
   const snap = await ref.get();
   if (!snap.exists) return false;
   if (!ownsNotification(snap.data() ?? {}, guard)) return false;
@@ -338,6 +395,7 @@ export async function deleteNotification(
 export async function deleteAllNotifications(
   guard: OwnerGuard,
 ): Promise<void> {
+  const collection = notificationCollectionFor(guard.audience);
   const records =
     guard.audience === "business"
       ? await listBusinessNotifications(guard.businessId)
@@ -346,7 +404,7 @@ export async function deleteAllNotifications(
   for (let i = 0; i < records.length; i += MAX_BATCH) {
     const batch = adminDb.batch();
     for (const record of records.slice(i, i + MAX_BATCH)) {
-      batch.delete(adminDb.collection(NOTIFICATION_COLLECTION).doc(record.id));
+      batch.delete(adminDb.collection(collection).doc(record.id));
     }
     await batch.commit();
   }

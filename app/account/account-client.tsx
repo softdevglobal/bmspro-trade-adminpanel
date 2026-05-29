@@ -13,11 +13,12 @@ import {
   TIME_RANGE_LABELS,
   formatBudgetAud,
   formatSlotDate,
+  formatVisitWindow,
   type InspectionRequestStatus,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import type { CustomerBooking } from "@/app/api/customer/bookings/route";
-import type { InspectionSlot } from "@/lib/inspection/types";
+import type { InspectionSlot, InspectionAssignment } from "@/lib/inspection/types";
 import {
   CustomerBookingShell,
   CustomerShellPanel,
@@ -593,7 +594,7 @@ function BookingsList({
   return (
     <div className="space-y-4">
       {filtered.map((booking) => (
-        <BookingCard key={booking.id} booking={booking} />
+        <BookingCard key={booking.id} booking={booking} onChanged={reload} />
       ))}
     </div>
   );
@@ -693,8 +694,225 @@ function BookingSlotsList({
   );
 }
 
-function BookingCard({ booking }: { booking: CustomerBooking }) {
+function ProposedSlotPicker({
+  slots,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  slots: InspectionSlot[];
+  selected: InspectionSlot | null;
+  disabled: boolean;
+  onSelect: (slot: InspectionSlot) => void;
+}) {
+  return (
+    <ul className="mt-1.5 space-y-2">
+      {slots.map((slot, index) => {
+        const checked =
+          selected?.date === slot.date && selected.timeRange === slot.timeRange;
+        return (
+          <li key={`${slot.date}-${slot.timeRange}-${index}`}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onSelect(slot)}
+              className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left shadow-sm transition-colors ${
+                checked
+                  ? "border-emerald-400 bg-emerald-50 ring-1 ring-emerald-300"
+                  : "border-violet-200/90 bg-violet-50/70 hover:border-emerald-300"
+              }`}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 font-body text-[13px] font-semibold leading-snug text-on-surface">
+                  <span className="material-symbols-outlined text-[17px] text-primary">
+                    event
+                  </span>
+                  {formatSlotDate(slot.date)}
+                </span>
+                <span className="mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug text-violet-900">
+                  <span className="material-symbols-outlined text-[16px] text-primary/85">
+                    {slotTimeIcon(slot.timeRange)}
+                  </span>
+                  {TIME_RANGE_LABELS[slot.timeRange]}
+                </span>
+              </span>
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+                  checked
+                    ? "border-emerald-500 bg-emerald-500 text-white"
+                    : "border-stone-300 bg-white text-transparent"
+                }`}
+              >
+                {checked ? (
+                  <span className="material-symbols-outlined text-[14px]">
+                    check
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function inspectorAvatarUrl(assigned: InspectionAssignment): string {
+  const seed = encodeURIComponent(
+    assigned.uid || assigned.email || assigned.name,
+  );
+  return `https://api.dicebear.com/9.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
+function ConfirmedVisitHighlight({
+  slot,
+  assignedTo,
+  startTime,
+  endTime,
+}: {
+  slot: InspectionSlot;
+  assignedTo: InspectionAssignment | null;
+  startTime: string | null;
+  endTime: string | null;
+}) {
+  const visitWindow = formatVisitWindow(startTime, endTime);
+  return (
+    <section className="overflow-hidden rounded-2xl border-2 border-emerald-300/90 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.35)] ring-1 ring-emerald-200/80">
+      <div className="border-b border-emerald-200/70 bg-emerald-600/10 px-4 py-2.5">
+        <p className="inline-flex items-center gap-2 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+          <span className="material-symbols-outlined material-symbols-filled text-[18px] text-emerald-600">
+            event_available
+          </span>
+          Your visit is confirmed
+        </p>
+      </div>
+
+      <div className="space-y-4 px-4 py-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200">
+            <span className="material-symbols-outlined material-symbols-filled text-[22px]">
+              calendar_month
+            </span>
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-[17px] font-semibold leading-snug text-emerald-950">
+              {formatSlotDate(slot.date)}
+            </p>
+            <p className="mt-1 flex items-center gap-1.5 font-body text-[13px] font-semibold text-emerald-800">
+              <span className="material-symbols-outlined text-[17px]">
+                {slotTimeIcon(slot.timeRange)}
+              </span>
+              {TIME_RANGE_LABELS[slot.timeRange]}
+            </p>
+            {visitWindow ? (
+              <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600/10 px-2.5 py-1 font-body text-[13px] font-bold text-emerald-900 ring-1 ring-emerald-200/80">
+                <span className="material-symbols-outlined text-[17px] text-emerald-700">
+                  schedule
+                </span>
+                Arrival window: {visitWindow}
+              </p>
+            ) : (
+              <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-emerald-300 bg-white/70 px-2.5 py-1 font-body text-[12px] font-semibold text-emerald-800/90">
+                <span className="material-symbols-outlined text-[16px]">
+                  hourglass_top
+                </span>
+                Exact time to be confirmed by the business
+              </p>
+            )}
+          </div>
+        </div>
+
+        {assignedTo ? (
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-200/80 bg-white/90 px-3 py-3 shadow-sm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={inspectorAvatarUrl(assignedTo)}
+              alt=""
+              className="h-12 w-12 shrink-0 rounded-full border-2 border-white object-cover shadow-sm ring-2 ring-emerald-100"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="font-body text-[10px] font-bold uppercase tracking-wider text-emerald-700/90">
+                Who will visit
+              </p>
+              <p className="mt-0.5 font-body text-[15px] font-bold text-on-surface">
+                {assignedTo.name}
+              </p>
+              <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                {assignedTo.type === "owner"
+                  ? "Business owner"
+                  : "Assigned inspector"}
+                {assignedTo.email ? ` · ${assignedTo.email}` : ""}
+              </p>
+            </div>
+            <span className="material-symbols-outlined shrink-0 text-[22px] text-emerald-600/80">
+              engineering
+            </span>
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed border-emerald-200 bg-white/60 px-3 py-2.5 font-body text-[12px] text-emerald-800/80">
+            <span className="material-symbols-outlined mr-1 align-middle text-[16px]">
+              info
+            </span>
+            An inspector will be assigned before your visit.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BookingCard({
+  booking,
+  onChanged,
+}: {
+  booking: CustomerBooking;
+  onChanged: () => void;
+}) {
+  const { getIdToken } = useCustomerAuth();
   const [expanded, setExpanded] = useState(false);
+  const [selectedProposed, setSelectedProposed] = useState<InspectionSlot | null>(
+    null,
+  );
+  const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+
+  async function acceptProposed() {
+    if (!selectedProposed) {
+      setAcceptError("Choose one of the proposed times first.");
+      return;
+    }
+    setAccepting(true);
+    setAcceptError(null);
+    try {
+      const idToken = await getIdToken();
+      const response = await fetch(`/api/customer/bookings/${booking.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "accept_proposed",
+          slot: selectedProposed,
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not accept this time.");
+      }
+      setSelectedProposed(null);
+      onChanged();
+    } catch (err) {
+      setAcceptError(
+        err instanceof Error ? err.message : "Could not accept this time.",
+      );
+    } finally {
+      setAccepting(false);
+    }
+  }
 
   const headline =
     booking.serviceName ??
@@ -755,6 +973,21 @@ function BookingCard({ booking }: { booking: CustomerBooking }) {
           </div>
         ) : null}
 
+        {booking.scheduledSlot && !expanded ? (
+          <div className="mt-3 rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-3 py-2.5">
+            <p className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-body text-[12px] font-semibold text-emerald-900">
+              <span className="material-symbols-outlined text-[16px] text-emerald-600">
+                event_available
+              </span>
+              Visit confirmed · {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+              {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
+            </p>
+            <p className="mt-1 font-body text-[11px] text-emerald-800/85">
+              Open details for your arrival time
+            </p>
+          </div>
+        ) : null}
+
         {booking.status === "owner_proposed" &&
         booking.ownerProposedSlots.length > 0 &&
         !expanded ? (
@@ -784,6 +1017,15 @@ function BookingCard({ booking }: { booking: CustomerBooking }) {
 
       {expanded ? (
         <div className="space-y-3 border-t border-stone-200/80 bg-[#faf8f5] px-4 py-4 sm:px-5">
+          {booking.scheduledSlot ? (
+            <ConfirmedVisitHighlight
+              slot={booking.scheduledSlot}
+              assignedTo={booking.assignedTo}
+              startTime={booking.scheduledStartTime}
+              endTime={booking.scheduledEndTime}
+            />
+          ) : null}
+
           <BookingDetailRow
             icon="category"
             label="Request type"
@@ -824,30 +1066,47 @@ function BookingCard({ booking }: { booking: CustomerBooking }) {
             <BookingSlotsList slots={booking.preferredSlots} />
           </BookingDetailRow>
 
-          {booking.scheduledSlot ? (
-            <BookingDetailRow icon="event_available" label="Confirmed visit">
-              <BookingSlotsList
-                slots={[booking.scheduledSlot]}
-                variant="confirmed"
-              />
-            </BookingDetailRow>
-          ) : null}
-
           {booking.ownerProposedSlots.length > 0 ? (
-            <BookingDetailRow icon="swap_horiz" label="Business proposed times">
-              <BookingSlotsList
-                slots={booking.ownerProposedSlots}
-                variant="proposed"
-              />
-            </BookingDetailRow>
-          ) : null}
-
-          {booking.assignedTo ? (
-            <BookingDetailRow
-              icon="engineering"
-              label="Assigned to"
-              value={booking.assignedTo.name}
-            />
+            booking.status === "owner_proposed" ? (
+              <BookingDetailRow
+                icon="swap_horiz"
+                label="Business proposed times — pick one"
+              >
+                <ProposedSlotPicker
+                  slots={booking.ownerProposedSlots}
+                  disabled={accepting}
+                  selected={selectedProposed}
+                  onSelect={setSelectedProposed}
+                />
+                {acceptError ? (
+                  <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
+                    {acceptError}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={accepting || !selectedProposed}
+                  onClick={() => void acceptProposed()}
+                  className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    {accepting ? "progress_activity" : "event_available"}
+                  </span>
+                  {accepting ? "Confirming…" : "Accept this time"}
+                </button>
+                <p className="mt-2 font-body text-[11px] text-on-surface-variant">
+                  The business will confirm the exact arrival time after you
+                  accept.
+                </p>
+              </BookingDetailRow>
+            ) : (
+              <BookingDetailRow icon="swap_horiz" label="Business proposed times">
+                <BookingSlotsList
+                  slots={booking.ownerProposedSlots}
+                  variant="proposed"
+                />
+              </BookingDetailRow>
+            )
           ) : null}
 
           {booking.ownerNote ? (

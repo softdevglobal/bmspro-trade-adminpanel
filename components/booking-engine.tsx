@@ -16,6 +16,10 @@ import {
 } from "@/components/customer-account-nav";
 import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import {
+  SlotDayPicker,
+  todayIso,
+} from "@/components/booking-slot-date-picker";
 
 type Props = {
   business: BookingBusiness;
@@ -580,29 +584,6 @@ const TIME_RANGE_OPTIONS: {
   { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
 ];
 
-const DAYS_PER_PAGE = 8;
-const MAX_DAY_PAGES = 8;
-
-type DayOption = {
-  iso: string;
-  weekdayShort: string;
-  dayNum: number;
-  monthShort: string;
-  isToday: boolean;
-  isTomorrow: boolean;
-};
-
-function formatLocalDateInput(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function todayIso(): string {
-  return formatLocalDateInput(new Date());
-}
-
 function formatPrettyDate(iso: string): string {
   if (!iso) return "";
   const parsed = new Date(`${iso}T12:00:00`);
@@ -613,196 +594,6 @@ function formatPrettyDate(iso: string): string {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function atLocalNoon(date: Date): Date {
-  const next = new Date(date);
-  next.setHours(12, 0, 0, 0);
-  return next;
-}
-
-function firstBookableDay(from = new Date()): Date {
-  return atLocalNoon(from);
-}
-
-function buildDayOption(date: Date): DayOption {
-  const iso = formatLocalDateInput(date);
-  const today = todayIso();
-  const tomorrowDate = atLocalNoon(new Date());
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = formatLocalDateInput(tomorrowDate);
-
-  return {
-    iso,
-    weekdayShort: date.toLocaleDateString(undefined, { weekday: "short" }),
-    dayNum: date.getDate(),
-    monthShort: date.toLocaleDateString(undefined, { month: "short" }),
-    isToday: iso === today,
-    isTomorrow: iso === tomorrow,
-  };
-}
-
-function getDayPage(pageIndex: number, pageSize: number): DayOption[] {
-  let cursor = firstBookableDay();
-  const toSkip = pageIndex * pageSize;
-
-  for (let i = 0; i < toSkip; i += 1) {
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  const options: DayOption[] = [];
-  for (let i = 0; i < pageSize; i += 1) {
-    options.push(buildDayOption(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return options;
-}
-
-function dayOptionFromIso(iso: string): DayOption | null {
-  if (!iso) return null;
-  const parsed = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return buildDayOption(parsed);
-}
-
-function isBeforeMinDate(iso: string, minDate: string): boolean {
-  return iso < minDate;
-}
-
-function monthStartMondayOffset(year: number, month: number): number {
-  const first = new Date(year, month, 1);
-  return (first.getDay() + 6) % 7;
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-function BookingMonthCalendar({
-  selectedIso,
-  minDate,
-  onSelect,
-}: {
-  selectedIso: string;
-  minDate: string;
-  onSelect: (iso: string) => void;
-}) {
-  const initialView = selectedIso
-    ? new Date(`${selectedIso}T12:00:00`)
-    : atLocalNoon(new Date());
-  const [viewYear, setViewYear] = useState(initialView.getFullYear());
-  const [viewMonth, setViewMonth] = useState(initialView.getMonth());
-
-  const today = todayIso();
-  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(
-    undefined,
-    { month: "long", year: "numeric" },
-  );
-
-  const minView = useMemo(() => {
-    const parsed = new Date(`${minDate}T12:00:00`);
-    return { year: parsed.getFullYear(), month: parsed.getMonth() };
-  }, [minDate]);
-
-  const canGoPrev =
-    viewYear > minView.year ||
-    (viewYear === minView.year && viewMonth > minView.month);
-
-  function shiftMonth(delta: number) {
-    const next = new Date(viewYear, viewMonth + delta, 1);
-    setViewYear(next.getFullYear());
-    setViewMonth(next.getMonth());
-  }
-
-  const gridCells = useMemo(() => {
-    const offset = monthStartMondayOffset(viewYear, viewMonth);
-    const totalDays = daysInMonth(viewYear, viewMonth);
-    const cells: Array<{ iso: string; dayNum: number } | null> = [];
-
-    for (let i = 0; i < offset; i += 1) cells.push(null);
-    for (let day = 1; day <= totalDays; day += 1) {
-      const date = new Date(viewYear, viewMonth, day, 12, 0, 0, 0);
-      cells.push({ iso: formatLocalDateInput(date), dayNum: day });
-    }
-    return cells;
-  }, [viewYear, viewMonth]);
-
-  const weekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
-
-  return (
-    <div className="mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-2 shadow-sm">
-      <div className="flex items-center justify-between gap-1">
-        <button
-          type="button"
-          disabled={!canGoPrev}
-          onClick={() => shiftMonth(-1)}
-          aria-label="Previous month"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
-        >
-          <span className="material-symbols-outlined text-[16px]">
-            chevron_left
-          </span>
-        </button>
-        <p className="truncate font-body text-[12px] font-bold text-on-surface">
-          {monthLabel}
-        </p>
-        <button
-          type="button"
-          onClick={() => shiftMonth(1)}
-          aria-label="Next month"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary"
-        >
-          <span className="material-symbols-outlined text-[16px]">
-            chevron_right
-          </span>
-        </button>
-      </div>
-
-      <div className="mt-1.5 grid grid-cols-7 gap-px">
-        {weekdayLabels.map((label, index) => (
-          <span
-            key={`${label}-${index}`}
-            className="flex h-5 items-center justify-center font-body text-[9px] font-bold text-on-surface-variant"
-          >
-            {label}
-          </span>
-        ))}
-        {gridCells.map((cell, index) => {
-          if (!cell) {
-            return (
-              <span key={`empty-${index}`} className="h-7" aria-hidden />
-            );
-          }
-
-          const past = isBeforeMinDate(cell.iso, minDate);
-          const disabled = past;
-          const selected = selectedIso === cell.iso;
-          const isToday = cell.iso === today;
-
-          return (
-            <button
-              key={cell.iso}
-              type="button"
-              disabled={disabled}
-              onClick={() => onSelect(cell.iso)}
-              className={`flex h-7 w-full items-center justify-center rounded-md font-body text-[11px] font-semibold leading-none transition-colors ${
-                disabled
-                  ? "cursor-not-allowed text-stone-300"
-                  : selected
-                    ? "bg-primary text-on-primary"
-                    : isToday
-                      ? "bg-primary/12 text-primary ring-1 ring-primary/25"
-                      : "text-on-surface hover:bg-stone-100"
-              }`}
-            >
-              {cell.dayNum}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function PreferredSlotPicker({
@@ -824,8 +615,6 @@ function PreferredSlotPicker({
   onDateChange: (iso: string) => void;
   onTimeChange: (timeRange: SlotTimeRange) => void;
 }) {
-  const [showMonthCalendar, setShowMonthCalendar] = useState(false);
-
   const takenCombos = useMemo(() => {
     const combos = new Set<string>();
     allSlots.forEach((entry, index) => {
@@ -835,23 +624,6 @@ function PreferredSlotPicker({
     });
     return combos;
   }, [allSlots, slotIndex]);
-
-  const pageDays = useMemo(() => getDayPage(dayPage, DAYS_PER_PAGE), [dayPage]);
-
-  const offPageSelection = useMemo(() => {
-    if (!slot.date || pageDays.some((day) => day.iso === slot.date)) {
-      return null;
-    }
-    return dayOptionFromIso(slot.date);
-  }, [slot.date, pageDays]);
-
-  const displayDays = useMemo(() => {
-    if (!offPageSelection) return pageDays;
-    return [
-      offPageSelection,
-      ...pageDays.filter((day) => day.iso !== offPageSelection.iso),
-    ];
-  }, [offPageSelection, pageDays]);
 
   const morningTaken =
     slot.date.length > 0 && takenCombos.has(`${slot.date}-morning`);
@@ -864,119 +636,13 @@ function PreferredSlotPicker({
 
   return (
     <div className="mt-3 flex flex-col gap-4">
-      <div>
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Pick a day
-        </span>
-
-        <div className="mt-2 flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
-          <button
-            type="button"
-            disabled={dayPage === 0}
-            onClick={() => onDayPageChange(Math.max(0, dayPage - 1))}
-            aria-label="Show earlier dates"
-            className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              chevron_left
-            </span>
-          </button>
-
-          {displayDays.map((day) => {
-            const selected = slot.date === day.iso;
-            const relativeLabel = day.isToday
-              ? "Today"
-              : day.isTomorrow
-                ? "Tomorrow"
-                : null;
-            return (
-              <button
-                key={day.iso}
-                type="button"
-                onClick={() => onDateChange(day.iso)}
-                className={`flex min-h-[5.5rem] min-w-[4.5rem] shrink-0 flex-col items-center justify-between rounded-2xl border px-2 py-2 text-center transition-all ${
-                  selected
-                    ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 shadow-[0_8px_20px_-12px_rgba(67,123,255,0.65)] ring-2 ring-primary/25"
-                    : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
-                }`}
-              >
-                <span
-                  className={`font-body text-[10px] font-bold uppercase tracking-wide ${
-                    selected ? "text-primary" : "text-on-surface-variant"
-                  }`}
-                >
-                  {day.weekdayShort}
-                </span>
-                <span
-                  className={`font-display text-[22px] font-semibold leading-none ${
-                    selected ? "text-primary" : "text-on-surface"
-                  }`}
-                >
-                  {day.dayNum}
-                </span>
-                <span
-                  className={`font-body text-[10px] font-semibold ${
-                    selected ? "text-primary/80" : "text-on-surface-variant"
-                  }`}
-                >
-                  {day.monthShort}
-                </span>
-                <span className="flex h-4 items-center justify-center">
-                  {selected ? (
-                    <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
-                      check_circle
-                    </span>
-                  ) : relativeLabel ? (
-                    <span
-                      className={`font-body text-[9px] font-bold ${
-                        day.isToday ? "text-primary" : "text-stone-600"
-                      }`}
-                    >
-                      {relativeLabel}
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-
-          <button
-            type="button"
-            disabled={dayPage >= MAX_DAY_PAGES - 1}
-            onClick={() =>
-              onDayPageChange(Math.min(MAX_DAY_PAGES - 1, dayPage + 1))
-            }
-            aria-label="Show later dates"
-            className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              chevron_right
-            </span>
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setShowMonthCalendar((open) => !open)}
-          className="mt-2 inline-flex items-center gap-1 font-body text-[11px] font-semibold text-primary hover:underline"
-        >
-          <span className="material-symbols-outlined text-[14px]">
-            {showMonthCalendar ? "expand_less" : "calendar_month"}
-          </span>
-          {showMonthCalendar ? "Hide calendar" : "Browse full calendar"}
-        </button>
-
-        {showMonthCalendar ? (
-          <BookingMonthCalendar
-            selectedIso={slot.date}
-            minDate={minDate}
-            onSelect={(iso) => {
-              onDateChange(iso);
-              setShowMonthCalendar(false);
-            }}
-          />
-        ) : null}
-      </div>
+      <SlotDayPicker
+        selectedIso={slot.date}
+        minDate={minDate}
+        dayPage={dayPage}
+        onDayPageChange={onDayPageChange}
+        onSelect={onDateChange}
+      />
 
       <div>
         <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -1342,11 +1008,7 @@ function ServiceBookingFlow({
   const existingServiceAvailable = services.length > 0;
 
   return (
-    <form
-      autoComplete={BOOKING_AUTOCOMPLETE}
-      onSubmit={(event) => event.preventDefault()}
-      className="relative w-full min-w-0 sm:overflow-hidden sm:rounded-[24px] sm:border sm:border-stone-200/90 sm:bg-white/95 sm:p-8 sm:shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)]"
-    >
+    <div className="relative w-full min-w-0 sm:overflow-hidden sm:rounded-[24px] sm:border sm:border-stone-200/90 sm:bg-white/95 sm:p-8 sm:shadow-[0_12px_40px_-18px_rgba(31,29,26,0.14)]">
       <div className="relative space-y-4 text-on-surface sm:space-y-6">
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-[#faf8f5] px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-stone-600">
@@ -1775,7 +1437,7 @@ function ServiceBookingFlow({
           </div>
         </div>
       </div>
-    </form>
+    </div>
   );
 }
 

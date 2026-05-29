@@ -6,6 +6,7 @@ import { toMillis } from "@/lib/onboarding/services/display";
 import {
   INSPECTION_COLLECTION,
   REQUEST_STATUSES,
+  isClockTime,
   isRequestType,
   isTimeRange,
   type InspectionAddress,
@@ -17,6 +18,7 @@ import {
   type InspectionSlot,
 } from "@/lib/inspection/types";
 import {
+  notifyBusinessOfCustomerAcceptance,
   notifyBusinessOfNewRequest,
   notifyCustomerOfAssignment,
   notifyCustomerOfStatusChange,
@@ -171,6 +173,12 @@ function mapInspectionDoc(
       const slots = parseSlots([data.scheduledSlot]);
       return slots[0] ?? null;
     })(),
+    scheduledStartTime: isClockTime(data.scheduledStartTime)
+      ? data.scheduledStartTime
+      : null,
+    scheduledEndTime: isClockTime(data.scheduledEndTime)
+      ? data.scheduledEndTime
+      : null,
     assignedTo: parseAssignment(data.assignedTo),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
     customerNotes:
@@ -225,6 +233,8 @@ export async function createInspectionRequest(
     preferredSlots: input.preferredSlots,
     ownerProposedSlots: [],
     scheduledSlot: null,
+    scheduledStartTime: null,
+    scheduledEndTime: null,
     assignedTo: null,
     ownerNote: null,
     customerNotes: input.customerNotes,
@@ -235,7 +245,8 @@ export async function createInspectionRequest(
 
   const snap = await ref.get();
   const request = mapInspectionDoc(ref.id, snap.data() ?? {});
-  await notifyBusinessOfNewRequest(request);
+  const summary = await loadBusinessSummary(businessId);
+  await notifyBusinessOfNewRequest(request, summary);
   return { ok: true, request };
 }
 
@@ -265,7 +276,14 @@ export async function getInspectionRequest(
 }
 
 type OwnerAction =
-  | { type: "accept"; slot: InspectionSlot; note?: string }
+  | {
+      type: "accept";
+      slot: InspectionSlot;
+      startTime: string;
+      endTime: string;
+      note?: string;
+    }
+  | { type: "set_time"; startTime: string; endTime: string }
   | { type: "propose"; slots: InspectionSlot[]; note?: string }
   | { type: "assign"; assignment: InspectionAssignment }
   | { type: "cancel"; note?: string }
@@ -296,8 +314,20 @@ export async function applyOwnerAction(
   if (action.type === "accept") {
     updates.status = "scheduled" satisfies InspectionRequestStatus;
     updates.scheduledSlot = action.slot;
+    updates.scheduledStartTime = action.startTime;
+    updates.scheduledEndTime = action.endTime;
     updates.ownerProposedSlots = [];
     if (typeof action.note === "string") updates.ownerNote = action.note;
+  } else if (action.type === "set_time") {
+    if (current.status !== "scheduled" || !current.scheduledSlot) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Confirm a visit date before setting the time window.",
+      };
+    }
+    updates.scheduledStartTime = action.startTime;
+    updates.scheduledEndTime = action.endTime;
   } else if (action.type === "propose") {
     if (action.slots.length === 0) {
       return {
@@ -309,6 +339,8 @@ export async function applyOwnerAction(
     updates.status = "owner_proposed" satisfies InspectionRequestStatus;
     updates.ownerProposedSlots = action.slots.slice(0, 3);
     updates.scheduledSlot = null;
+    updates.scheduledStartTime = null;
+    updates.scheduledEndTime = null;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "assign") {
     if (current.status !== "scheduled") {
@@ -321,6 +353,8 @@ export async function applyOwnerAction(
     updates.assignedTo = action.assignment;
   } else if (action.type === "cancel") {
     updates.status = "cancelled" satisfies InspectionRequestStatus;
+    updates.scheduledStartTime = null;
+    updates.scheduledEndTime = null;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "complete") {
     updates.status = "completed" satisfies InspectionRequestStatus;
@@ -337,6 +371,71 @@ export async function applyOwnerAction(
   } else {
     await notifyCustomerOfStatusChange(request, request.status, summary);
   }
+
+  return { ok: true, request };
+}
+
+/**
+ * Customer accepts one of the owner-proposed slots. The visit is scheduled on
+ * that date/time-range, but the owner still needs to set the exact time window.
+ */
+export async function customerAcceptProposedSlot(
+  id: string,
+  identity: { customerId: string; customerEmail: string },
+  slot: InspectionSlot,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+  const current = mapInspectionDoc(snap.id, snap.data() ?? {});
+
+  const ownsById =
+    !!current.customerId && current.customerId === identity.customerId;
+  const ownsByEmail =
+    !!identity.customerEmail &&
+    current.customer.email.toLowerCase() ===
+      identity.customerEmail.toLowerCase();
+  if (!ownsById && !ownsByEmail) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (current.status !== "owner_proposed") {
+    return {
+      ok: false,
+      status: 400,
+      error: "There are no proposed times to accept right now.",
+    };
+  }
+
+  const matched = current.ownerProposedSlots.find(
+    (option) => option.date === slot.date && option.timeRange === slot.timeRange,
+  );
+  if (!matched) {
+    return {
+      ok: false,
+      status: 400,
+      error: "That time is no longer offered. Please pick another option.",
+    };
+  }
+
+  await ref.update({
+    status: "scheduled" satisfies InspectionRequestStatus,
+    scheduledSlot: matched,
+    scheduledStartTime: null,
+    scheduledEndTime: null,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const after = await ref.get();
+  const request = mapInspectionDoc(ref.id, after.data() ?? {});
+
+  const summary = await loadBusinessSummary(request.businessId);
+  await notifyBusinessOfCustomerAcceptance(request, summary);
 
   return { ok: true, request };
 }

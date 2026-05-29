@@ -1,10 +1,19 @@
 "use client";
 
+import {
+  SlotDayPicker,
+  buildBlockedComboSet,
+  slotComboKey,
+  todayIso,
+} from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   formatAddress,
   formatBudgetAud,
+  formatClockTime,
   formatSlotDate,
+  formatVisitWindow,
+  isClockTime,
   STATUS_LABELS,
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
@@ -61,11 +70,6 @@ const FILTER_TABS: { id: StatusFilter; label: string; shortLabel: string }[] = [
   { id: "cancelled", label: "Cancelled", shortLabel: "Cancelled" },
 ];
 
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 export function InspectionVisitsBoard() {
   const { user, status: authStatus } = useAuth();
   const [requests, setRequests] = useState<InspectionRequestDetail[]>([]);
@@ -74,6 +78,7 @@ export function InspectionVisitsBoard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
 
   const loadRequests = useCallback(async () => {
     if (!user) return;
@@ -169,6 +174,28 @@ export function InspectionVisitsBoard() {
     }
     return map;
   }, [requests]);
+
+  // Open a specific request when arriving from a notification (URL ?request=
+  // on first load, or a custom event when already on this page).
+  useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("request");
+    if (fromUrl) setPendingOpenId(fromUrl);
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (detail) setPendingOpenId(detail);
+    };
+    window.addEventListener("bmspt:open-inspection-request", handler);
+    return () =>
+      window.removeEventListener("bmspt:open-inspection-request", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingOpenId) return;
+    if (requests.some((req) => req.id === pendingOpenId)) {
+      setSelectedId(pendingOpenId);
+      setPendingOpenId(null);
+    }
+  }, [pendingOpenId, requests]);
 
   const selected = useMemo(
     () => requests.find((req) => req.id === selectedId) ?? null,
@@ -429,7 +456,13 @@ function SlotPill({
  * Detail drawer + actions
  * ========================================================================== */
 
-type DrawerMode = "review" | "accept" | "propose" | "assign" | "cancel";
+type DrawerMode =
+  | "review"
+  | "accept"
+  | "set_time"
+  | "propose"
+  | "assign"
+  | "cancel";
 
 function RequestDetailDrawer({
   request,
@@ -480,6 +513,134 @@ function RequestDetailDrawer({
   );
 }
 
+function DrawerFooterAction({
+  icon,
+  label,
+  onClick,
+  disabled,
+  variant = "secondary",
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: "primary" | "secondary" | "success" | "danger";
+}) {
+  const styles = {
+    primary:
+      "border-transparent bg-primary text-on-primary shadow-sm hover:opacity-95",
+    success:
+      "border-emerald-600/30 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700",
+    secondary:
+      "border-outline-variant/60 bg-white text-on-surface hover:bg-surface-container",
+    danger:
+      "border-rose-200/80 bg-white text-rose-700 hover:bg-rose-50",
+  }[variant];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-body text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${styles}`}
+    >
+      <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      {label}
+    </button>
+  );
+}
+
+function DrawerReviewFooter({
+  request,
+  submitting,
+  onAccept,
+  onPropose,
+  onSetTime,
+  onAssign,
+  onComplete,
+  onCancel,
+}: {
+  request: InspectionRequestDetail;
+  submitting: boolean;
+  onAccept: () => void;
+  onPropose: () => void;
+  onSetTime: () => void;
+  onAssign: () => void;
+  onComplete: () => void;
+  onCancel: () => void;
+}) {
+  const hasVisitWindow =
+    !!request.scheduledStartTime || !!request.scheduledEndTime;
+
+  return (
+    <div className="border-t border-outline-variant/40 pt-4">
+      {request.status === "scheduled" ? (
+        <div className="space-y-3">
+          {hasVisitWindow ? (
+            <>
+              <DrawerFooterAction
+                icon={request.assignedTo ? "swap_horiz" : "person_add"}
+                label={request.assignedTo ? "Reassign inspector" : "Assign inspector"}
+                variant="primary"
+                onClick={onAssign}
+                disabled={submitting}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <DrawerFooterAction
+                  icon="schedule"
+                  label="Edit time"
+                  onClick={onSetTime}
+                  disabled={submitting}
+                />
+                <DrawerFooterAction
+                  icon="task_alt"
+                  label="Mark done"
+                  onClick={onComplete}
+                  disabled={submitting}
+                />
+              </div>
+            </>
+          ) : (
+            <DrawerFooterAction
+              icon={request.assignedTo ? "swap_horiz" : "person_add"}
+              label={request.assignedTo ? "Reassign inspector" : "Assign inspector"}
+              variant="primary"
+              onClick={onAssign}
+              disabled={submitting}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <DrawerFooterAction
+            icon="event_available"
+            label="Accept a date"
+            variant="primary"
+            onClick={onAccept}
+            disabled={submitting}
+          />
+          <DrawerFooterAction
+            icon="edit_calendar"
+            label="Propose new dates"
+            onClick={onPropose}
+            disabled={submitting}
+          />
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={submitting}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="material-symbols-outlined text-[17px]">close</span>
+        Cancel request
+      </button>
+    </div>
+  );
+}
+
 function CompactRequestSummary({
   request,
   onShowFullDetails,
@@ -510,6 +671,15 @@ function CompactRequestSummary({
             <span className="min-w-0">
               {formatSlotDate(request.scheduledSlot.date)} ·{" "}
               {TIME_RANGE_LABELS[request.scheduledSlot.timeRange]}
+              {formatVisitWindow(
+                request.scheduledStartTime,
+                request.scheduledEndTime,
+              )
+                ? ` · ${formatVisitWindow(
+                    request.scheduledStartTime,
+                    request.scheduledEndTime,
+                  )}`
+                : ""}
             </span>
           </p>
         ) : null}
@@ -548,6 +718,8 @@ function DetailDrawerContent({
   // Accept-form state
   const [acceptedSlot, setAcceptedSlot] = useState<InspectionSlot | null>(null);
   const [acceptNote, setAcceptNote] = useState("");
+  const [acceptStartTime, setAcceptStartTime] = useState("10:00");
+  const [acceptEndTime, setAcceptEndTime] = useState("11:00");
 
   // Propose-form state
   const [proposedSlots, setProposedSlots] = useState<InspectionSlot[]>([
@@ -560,6 +732,53 @@ function DetailDrawerContent({
   // Assign-form state
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
   const [staffId, setStaffId] = useState<string>("");
+
+  const hasVisitWindow =
+    !!request.scheduledStartTime || !!request.scheduledEndTime;
+  const needsInlineVisitTime =
+    request.status === "scheduled" &&
+    !!request.scheduledSlot &&
+    !hasVisitWindow &&
+    mode === "review";
+
+  useEffect(() => {
+    const slot = request.scheduledSlot;
+    if (!slot) return;
+    if (request.scheduledStartTime) {
+      setAcceptStartTime(request.scheduledStartTime);
+    } else {
+      const defaults = DEFAULT_VISIT_WINDOW[slot.timeRange];
+      setAcceptStartTime(defaults.start);
+    }
+    if (request.scheduledEndTime) {
+      setAcceptEndTime(request.scheduledEndTime);
+    } else {
+      const defaults = DEFAULT_VISIT_WINDOW[slot.timeRange];
+      setAcceptEndTime(defaults.end);
+    }
+  }, [
+    request.id,
+    request.scheduledSlot?.date,
+    request.scheduledSlot?.timeRange,
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  ]);
+
+  function submitSetVisitTime() {
+    if (!acceptStartTime || !acceptEndTime) {
+      setActionError("Set a start and end time for the visit.");
+      return;
+    }
+    if (acceptStartTime >= acceptEndTime) {
+      setActionError("The end time must be after the start time.");
+      return;
+    }
+    void callAction({
+      action: "set_time",
+      startTime: acceptStartTime,
+      endTime: acceptEndTime,
+    });
+  }
 
   async function callAction(body: Record<string, unknown>) {
     if (!user) return;
@@ -629,6 +848,10 @@ function DetailDrawerContent({
 
   function openAction(nextMode: Exclude<DrawerMode, "review">) {
     setActionError(null);
+    if (nextMode === "set_time") {
+      if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
+      if (request.scheduledEndTime) setAcceptEndTime(request.scheduledEndTime);
+    }
     setMode(nextMode);
   }
 
@@ -674,7 +897,21 @@ function DetailDrawerContent({
             <CustomerSection request={request} />
             <RequestDetailsSection request={request} />
             <CustomerExtrasSection request={request} />
-            <SlotsOverview request={request} />
+            <SlotsOverview
+              request={request}
+              inlineVisitTime={
+                needsInlineVisitTime
+                  ? {
+                      startTime: acceptStartTime,
+                      endTime: acceptEndTime,
+                      disabled: submitting,
+                      onStartTimeChange: setAcceptStartTime,
+                      onEndTimeChange: setAcceptEndTime,
+                      onSave: submitSetVisitTime,
+                    }
+                  : undefined
+              }
+            />
             {request.assignedTo ? <AssignmentSummary request={request} /> : null}
             {request.ownerNote ? (
               <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-4 py-3">
@@ -706,8 +943,12 @@ function DetailDrawerContent({
             slots={request.preferredSlots}
             value={acceptedSlot}
             note={acceptNote}
+            startTime={acceptStartTime}
+            endTime={acceptEndTime}
             onChange={setAcceptedSlot}
             onNoteChange={setAcceptNote}
+            onStartTimeChange={setAcceptStartTime}
+            onEndTimeChange={setAcceptEndTime}
             disabled={submitting}
             onCancel={() => setMode("review")}
             onSubmit={() => {
@@ -717,18 +958,42 @@ function DetailDrawerContent({
                 );
                 return;
               }
+              if (!acceptStartTime || !acceptEndTime) {
+                setActionError("Set a start and end time for the visit.");
+                return;
+              }
+              if (acceptStartTime >= acceptEndTime) {
+                setActionError("The end time must be after the start time.");
+                return;
+              }
               void callAction({
                 action: "accept",
                 slot: acceptedSlot,
+                startTime: acceptStartTime,
+                endTime: acceptEndTime,
                 note: acceptNote || undefined,
               });
             }}
           />
         ) : null}
 
+        {mode === "set_time" ? (
+          <SetTimeForm
+            slot={request.scheduledSlot}
+            startTime={acceptStartTime}
+            endTime={acceptEndTime}
+            disabled={submitting}
+            onStartTimeChange={setAcceptStartTime}
+            onEndTimeChange={setAcceptEndTime}
+            onCancel={() => setMode("review")}
+            onSubmit={submitSetVisitTime}
+          />
+        ) : null}
+
         {mode === "propose" ? (
           <ProposeForm
             slots={proposedSlots}
+            customerPreferredSlots={request.preferredSlots}
             note={proposeNote}
             disabled={submitting}
             onChange={setProposedSlots}
@@ -741,6 +1006,19 @@ function DetailDrawerContent({
               if (validSlots.length === 0) {
                 setActionError(
                   "Add at least one proposed date and time range.",
+                );
+                return;
+              }
+              const repeatsCustomer = validSlots.some((slot) =>
+                request.preferredSlots.some(
+                  (preferred) =>
+                    preferred.date === slot.date &&
+                    preferred.timeRange === slot.timeRange,
+                ),
+              );
+              if (repeatsCustomer) {
+                setActionError(
+                  "Each option must be different from the customer's original times.",
                 );
                 return;
               }
@@ -795,72 +1073,20 @@ function DetailDrawerContent({
           />
         ) : null}
         </div>
-      </div>
 
-      {!isClosed && mode === "review" ? (
-        <footer className="flex shrink-0 flex-col gap-2 border-t border-outline-variant/40 bg-surface-container-low px-4 py-3 sm:flex-row sm:flex-wrap sm:px-5 sm:py-4">
-          {request.status !== "scheduled" ? (
-            <>
-              <button
-                type="button"
-                onClick={() => openAction("accept")}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 sm:w-auto"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  event_available
-                </span>
-                Accept a date
-              </button>
-              <button
-                type="button"
-                onClick={() => openAction("propose")}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container sm:w-auto"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  edit_calendar
-                </span>
-                Propose new dates
-              </button>
-            </>
-          ) : null}
-          {request.status === "scheduled" ? (
-            <>
-              <button
-                type="button"
-                onClick={() => openAction("assign")}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 sm:w-auto"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  person_add
-                </span>
-                {request.assignedTo ? "Reassign" : "Assign inspector"}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  void callAction({ action: "complete" })
-                }
-                disabled={submitting}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  task_alt
-                </span>
-                Mark inspection done
-              </button>
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => openAction("cancel")}
-            disabled={submitting}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60 sm:ml-auto sm:w-auto"
-          >
-            <span className="material-symbols-outlined text-[18px]">close</span>
-            Cancel request
-          </button>
-        </footer>
-      ) : null}
+        {!isClosed && mode === "review" ? (
+          <DrawerReviewFooter
+            request={request}
+            submitting={submitting}
+            onAccept={() => openAction("accept")}
+            onPropose={() => openAction("propose")}
+            onSetTime={() => openAction("set_time")}
+            onAssign={() => openAction("assign")}
+            onComplete={() => void callAction({ action: "complete" })}
+            onCancel={() => openAction("cancel")}
+          />
+        ) : null}
+      </div>
     </>
   );
 }
@@ -962,9 +1188,11 @@ function slotTimeIcon(timeRange: InspectionTimeRange): string {
 function InspectionSlotsList({
   slots,
   variant = "customer",
+  timeWindow = null,
 }: {
   slots: InspectionSlot[];
   variant?: "customer" | "proposed" | "scheduled";
+  timeWindow?: string | null;
 }) {
   if (slots.length === 0) return null;
 
@@ -1012,6 +1240,21 @@ function InspectionSlotsList({
               </span>
               {TIME_RANGE_LABELS[slot.timeRange]}
             </p>
+            {variant === "scheduled" && timeWindow ? (
+              <p className="mt-1 flex items-center gap-1.5 font-body text-[12px] font-semibold leading-snug text-emerald-900">
+                <span className="material-symbols-outlined text-[16px] text-emerald-700">
+                  schedule
+                </span>
+                {timeWindow}
+              </p>
+            ) : variant === "scheduled" && !timeWindow ? (
+              <p className="mt-1 flex items-center gap-1.5 font-body text-[12px] font-medium leading-snug text-amber-800/90">
+                <span className="material-symbols-outlined text-[16px] text-amber-700">
+                  schedule
+                </span>
+                Exact time to be added below
+              </p>
+            ) : null}
           </div>
         </li>
       ))}
@@ -1050,7 +1293,22 @@ function CustomerExtrasSection({
   );
 }
 
-function SlotsOverview({ request }: { request: InspectionRequestDetail }) {
+type InlineVisitTimeControl = {
+  startTime: string;
+  endTime: string;
+  disabled: boolean;
+  onStartTimeChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
+  onSave: () => void;
+};
+
+function SlotsOverview({
+  request,
+  inlineVisitTime,
+}: {
+  request: InspectionRequestDetail;
+  inlineVisitTime?: InlineVisitTimeControl;
+}) {
   return (
     <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
@@ -1071,17 +1329,91 @@ function SlotsOverview({ request }: { request: InspectionRequestDetail }) {
       ) : null}
 
       {request.scheduledSlot ? (
-        <>
-          <p className="mt-4 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-            Scheduled visit
-          </p>
-          <InspectionSlotsList
-            slots={[request.scheduledSlot]}
-            variant="scheduled"
-          />
-        </>
+        <ScheduledVisitSection
+          request={request}
+          inlineVisitTime={inlineVisitTime}
+        />
       ) : null}
     </section>
+  );
+}
+
+function ScheduledVisitSection({
+  request,
+  inlineVisitTime,
+}: {
+  request: InspectionRequestDetail;
+  inlineVisitTime?: InlineVisitTimeControl;
+}) {
+  const slot = request.scheduledSlot;
+  if (!slot) return null;
+
+  const visitWindow = formatVisitWindow(
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  );
+  const customerAccepted =
+    request.status === "scheduled" && request.ownerProposedSlots.length > 0;
+
+  return (
+    <>
+      <p className="mt-4 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+        Scheduled visit
+      </p>
+      <InspectionSlotsList
+        slots={[slot]}
+        variant="scheduled"
+        timeWindow={visitWindow}
+      />
+      {inlineVisitTime ? (
+        <div className="mt-3 rounded-xl border border-amber-200/90 bg-amber-50/90 p-4 shadow-sm">
+          <p className="flex items-start gap-2 font-body text-[13px] font-semibold leading-snug text-amber-950">
+            <span className="material-symbols-outlined shrink-0 text-[20px] text-amber-700">
+              schedule
+            </span>
+            {customerAccepted
+              ? "Customer accepted this date — add the visit time"
+              : "Add the exact visit time"}
+          </p>
+          <p className="mt-1 pl-7 font-body text-[12px] leading-relaxed text-amber-900/90">
+            Pick a time within{" "}
+            {TIME_RANGE_SHORT_LABELS[slot.timeRange].toLowerCase()} so the
+            customer knows when you will arrive.
+          </p>
+          <label className="mt-3 block pl-7">
+            <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-amber-900/80">
+              Visit time range
+            </span>
+            <div className="mt-1.5">
+              <VisitTimeRangeFields
+                startTime={inlineVisitTime.startTime}
+                endTime={inlineVisitTime.endTime}
+                timeRange={slot.timeRange}
+                disabled={inlineVisitTime.disabled}
+                onStartTimeChange={inlineVisitTime.onStartTimeChange}
+                onEndTimeChange={inlineVisitTime.onEndTimeChange}
+              />
+            </div>
+          </label>
+          <button
+            type="button"
+            disabled={inlineVisitTime.disabled}
+            onClick={inlineVisitTime.onSave}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              schedule
+            </span>
+            Save visit time
+          </button>
+        </div>
+      ) : !visitWindow ? (
+        <p className="mt-2 flex items-center gap-1.5 font-body text-[12px] font-medium text-amber-800">
+          <span className="material-symbols-outlined text-[16px]">info</span>
+          Time window not set yet
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -1106,6 +1438,129 @@ function AssignmentSummary({
           : assigned.email ?? "Staff member"}
       </p>
     </section>
+  );
+}
+
+/* ==========================================================================
+ * Visit time range (two dropdowns, no native time picker)
+ * ========================================================================== */
+
+const VISIT_TIME_STEP_MINUTES = 30;
+
+function minutesFromMidnight(clock: string): number {
+  if (!isClockTime(clock)) return 0;
+  const [h, m] = clock.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** 15-minute options within morning (8–12) or afternoon (12–17). */
+function visitTimeOptions(
+  timeRange: InspectionTimeRange | null,
+): { value: string; label: string }[] {
+  const startHour = timeRange === "afternoon" ? 12 : 8;
+  const endHour = timeRange === "afternoon" ? 17 : 12;
+  const options: { value: string; label: string }[] = [];
+  for (let hour = startHour; hour <= endHour; hour++) {
+    for (let minute = 0; minute < 60; minute += VISIT_TIME_STEP_MINUTES) {
+      if (hour === endHour && minute > 0) continue;
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      const label = formatClockTime(value);
+      if (label) options.push({ value, label });
+    }
+  }
+  return options;
+}
+
+const DEFAULT_VISIT_WINDOW: Record<
+  InspectionTimeRange,
+  { start: string; end: string }
+> = {
+  morning: { start: "10:00", end: "11:00" },
+  afternoon: { start: "13:00", end: "14:00" },
+};
+
+function VisitTimeRangeFields({
+  startTime,
+  endTime,
+  timeRange,
+  disabled,
+  onStartTimeChange,
+  onEndTimeChange,
+}: {
+  startTime: string;
+  endTime: string;
+  timeRange: InspectionTimeRange | null;
+  disabled: boolean;
+  onStartTimeChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
+}) {
+  const options = useMemo(() => visitTimeOptions(timeRange), [timeRange]);
+  const startValid = isClockTime(startTime);
+  const endValid = isClockTime(endTime);
+
+  const endOptions = useMemo(() => {
+    if (!startValid) return options;
+    const minEnd = minutesFromMidnight(startTime) + VISIT_TIME_STEP_MINUTES;
+    return options.filter((opt) => minutesFromMidnight(opt.value) >= minEnd);
+  }, [options, startTime, startValid]);
+
+  useEffect(() => {
+    if (!timeRange) return;
+    const opts = visitTimeOptions(timeRange);
+    if (!opts.some((o) => o.value === startTime)) {
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
+      onStartTimeChange(defaults.start);
+      onEndTimeChange(defaults.end);
+    }
+  }, [timeRange, startTime, onStartTimeChange, onEndTimeChange]);
+
+  useEffect(() => {
+    if (!startValid || !endValid) return;
+    if (minutesFromMidnight(startTime) >= minutesFromMidnight(endTime)) {
+      const next = endOptions[0]?.value;
+      if (next) onEndTimeChange(next);
+    }
+  }, [startTime, endTime, startValid, endValid, endOptions, onEndTimeChange]);
+
+  const selectClass =
+    "w-full appearance-none rounded-lg border border-outline-variant/60 bg-white bg-[length:0.875rem] bg-[right_1.1rem_center] bg-no-repeat py-2 pl-2.5 pr-9 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60";
+  const chevronBg =
+    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='%236b7280'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E\")";
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={startTime}
+        disabled={disabled}
+        aria-label="Visit start time"
+        onChange={(event) => onStartTimeChange(event.target.value)}
+        className={selectClass}
+        style={{ backgroundImage: chevronBg }}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <span className="shrink-0 font-body text-[13px] text-on-surface-variant">
+        –
+      </span>
+      <select
+        value={endTime}
+        disabled={disabled || endOptions.length === 0}
+        aria-label="Visit end time"
+        onChange={(event) => onEndTimeChange(event.target.value)}
+        className={selectClass}
+        style={{ backgroundImage: chevronBg }}
+      >
+        {endOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -1159,33 +1614,97 @@ function CancelForm({
   );
 }
 
-function AcceptForm({
-  slots,
-  value,
-  note,
+function SetTimeForm({
+  slot,
+  startTime,
+  endTime,
   disabled,
-  onChange,
-  onNoteChange,
+  onStartTimeChange,
+  onEndTimeChange,
   onCancel,
   onSubmit,
 }: {
-  slots: InspectionSlot[];
-  value: InspectionSlot | null;
-  note: string;
+  slot: InspectionSlot | null;
+  startTime: string;
+  endTime: string;
   disabled: boolean;
-  onChange: (slot: InspectionSlot | null) => void;
-  onNoteChange: (note: string) => void;
+  onStartTimeChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
 }) {
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">
+        Set visit time range
+      </p>
+      {slot ? (
+        <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+          {formatSlotDate(slot.date)} · {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
+        </p>
+      ) : null}
+      <label className="mt-3 block">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Time range
+        </span>
+        <div className="mt-1">
+          <VisitTimeRangeFields
+            startTime={startTime}
+            endTime={endTime}
+            timeRange={slot?.timeRange ?? null}
+            disabled={disabled}
+            onStartTimeChange={onStartTimeChange}
+            onEndTimeChange={onEndTimeChange}
+          />
+        </div>
+      </label>
+      <FormActions
+        confirmLabel="Save visit time"
+        confirmIcon="schedule"
+        disabled={disabled}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
+    </section>
+  );
+}
+
+function AcceptForm({
+  slots,
+  value,
+  note,
+  startTime,
+  endTime,
+  disabled,
+  onChange,
+  onNoteChange,
+  onStartTimeChange,
+  onEndTimeChange,
+  onCancel,
+  onSubmit,
+}: {
+  slots: InspectionSlot[];
+  value: InspectionSlot | null;
+  note: string;
+  startTime: string;
+  endTime: string;
+  disabled: boolean;
+  onChange: (slot: InspectionSlot | null) => void;
+  onNoteChange: (note: string) => void;
+  onStartTimeChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const selectedRange = value?.timeRange ?? null;
+
+  return (
+    <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+      <p className="font-display text-[14px] font-semibold text-on-surface">
         Accept one of the customer&apos;s dates
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Pick the option that works best — the customer will see this as
-        confirmed.
+        Pick the option that works best, then set the visit time range.
       </p>
       <ul className="mt-3 space-y-2">
         {slots.map((slot, idx) => {
@@ -1236,6 +1755,25 @@ function AcceptForm({
           );
         })}
       </ul>
+
+      {value ? (
+        <label className="mt-3 block">
+          <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+            Time range
+          </span>
+          <div className="mt-1">
+            <VisitTimeRangeFields
+              startTime={startTime}
+              endTime={endTime}
+              timeRange={selectedRange}
+              disabled={disabled}
+              onStartTimeChange={onStartTimeChange}
+              onEndTimeChange={onEndTimeChange}
+            />
+          </div>
+        </label>
+      ) : null}
+
       <label className="mt-3 block">
         <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
           Note for customer (optional)
@@ -1260,8 +1798,165 @@ function AcceptForm({
   );
 }
 
+const PROPOSE_TIME_OPTIONS: {
+  id: InspectionTimeRange;
+  label: string;
+  hint: string;
+  icon: string;
+}[] = [
+  { id: "morning", label: "Morning", hint: "8am – 12pm", icon: "wb_twilight" },
+  { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
+];
+
+function ProposeSlotOption({
+  slot,
+  index,
+  minDate,
+  disabled,
+  canRemove,
+  customerPreferredSlots,
+  allSlots,
+  onUpdate,
+  onRemove,
+}: {
+  slot: InspectionSlot;
+  index: number;
+  minDate: string;
+  disabled: boolean;
+  canRemove: boolean;
+  customerPreferredSlots: InspectionSlot[];
+  allSlots: InspectionSlot[];
+  onUpdate: <K extends keyof InspectionSlot>(
+    key: K,
+    value: InspectionSlot[K],
+  ) => void;
+  onRemove: () => void;
+}) {
+  const [dayPage, setDayPage] = useState(0);
+
+  const customerBlocked = useMemo(
+    () => buildBlockedComboSet(customerPreferredSlots),
+    [customerPreferredSlots],
+  );
+
+  const blockedCombos = useMemo(() => {
+    const set = new Set(customerBlocked);
+    allSlots.forEach((entry, idx) => {
+      if (idx !== index && entry.date) {
+        set.add(slotComboKey(entry.date, entry.timeRange));
+      }
+    });
+    return set;
+  }, [customerBlocked, allSlots, index]);
+
+  function selectDate(iso: string) {
+    onUpdate("date", iso);
+    if (blockedCombos.has(slotComboKey(iso, slot.timeRange))) {
+      for (const range of TIME_RANGES) {
+        if (!blockedCombos.has(slotComboKey(iso, range))) {
+          onUpdate("timeRange", range);
+          return;
+        }
+      }
+    }
+  }
+
+  return (
+    <li className="rounded-lg border border-outline-variant/60 bg-white p-3">
+      <div className="flex items-center justify-between">
+        <span className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
+          Option {index + 1}
+        </span>
+        {canRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={disabled}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container-low disabled:opacity-50"
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-3">
+        <SlotDayPicker
+          selectedIso={slot.date}
+          minDate={minDate}
+          dayPage={dayPage}
+          onDayPageChange={setDayPage}
+          onSelect={selectDate}
+          disabled={disabled}
+          blockedCombos={blockedCombos}
+        />
+      </div>
+
+      <div className="mt-4">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Time window
+        </span>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {PROPOSE_TIME_OPTIONS.map((option) => {
+            const checked = slot.timeRange === option.id;
+            const comboBlocked =
+              !!slot.date &&
+              blockedCombos.has(slotComboKey(slot.date, option.id));
+            const customerPick =
+              !!slot.date &&
+              customerBlocked.has(slotComboKey(slot.date, option.id));
+            const timeDisabled = !slot.date || comboBlocked;
+            return (
+              <button
+                type="button"
+                key={option.id}
+                disabled={disabled || timeDisabled}
+                title={
+                  customerPick
+                    ? "Customer already chose this time"
+                    : comboBlocked
+                      ? "Already used in another option"
+                      : undefined
+                }
+                onClick={() => onUpdate("timeRange", option.id)}
+                className={`relative flex min-h-[4.5rem] flex-col justify-between rounded-2xl border px-3 py-2.5 text-left transition-all ${
+                  timeDisabled || disabled
+                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
+                    : checked
+                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                      : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+                }`}
+              >
+                <span
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
+                    checked
+                      ? "bg-primary text-on-primary shadow-sm"
+                      : "bg-stone-100 text-stone-600"
+                  }`}
+                >
+                  <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                    {option.icon}
+                  </span>
+                </span>
+                <span>
+                  <span className="block font-body text-[12px] font-bold text-on-surface">
+                    {option.label}
+                  </span>
+                  <span className="font-body text-[10px] text-on-surface-variant">
+                    {customerPick ? "Customer's pick" : option.hint}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function ProposeForm({
   slots,
+  customerPreferredSlots,
   note,
   disabled,
   onChange,
@@ -1270,6 +1965,7 @@ function ProposeForm({
   onSubmit,
 }: {
   slots: InspectionSlot[];
+  customerPreferredSlots: InspectionSlot[];
   note: string;
   disabled: boolean;
   onChange: (slots: InspectionSlot[]) => void;
@@ -1307,63 +2003,24 @@ function ProposeForm({
         Propose new dates
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Add up to 3 alternatives. The customer will see them as your
-        suggestions.
+        Add up to 3 alternatives. Times the customer already chose cannot be
+        selected again.
       </p>
 
-      <ul className="mt-3 space-y-2">
+      <ul className="mt-3 space-y-3">
         {slots.map((slot, index) => (
-          <li
+          <ProposeSlotOption
             key={index}
-            className="rounded-lg border border-outline-variant/60 bg-white p-3"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
-                Option {index + 1}
-              </span>
-              {slots.length > 1 ? (
-                <button
-                  type="button"
-                  onClick={() => removeSlot(index)}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container-low"
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-[160px,1fr]">
-              <input
-                type="date"
-                min={minDate}
-                value={slot.date}
-                onChange={(event) =>
-                  updateSlot(index, "date", event.target.value)
-                }
-                className="rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                {TIME_RANGES.map((range) => {
-                  const checked = slot.timeRange === range;
-                  return (
-                    <button
-                      type="button"
-                      key={range}
-                      onClick={() =>
-                        updateSlot(index, "timeRange", range as InspectionTimeRange)
-                      }
-                      className={`rounded-lg border px-2 py-2 font-body text-[12px] font-semibold transition-colors ${
-                        checked
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-outline-variant/60 bg-surface-container-lowest text-on-surface hover:border-primary/40"
-                      }`}
-                    >
-                      {TIME_RANGE_SHORT_LABELS[range]}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </li>
+            slot={slot}
+            index={index}
+            minDate={minDate}
+            disabled={disabled}
+            canRemove={slots.length > 1}
+            customerPreferredSlots={customerPreferredSlots}
+            allSlots={slots}
+            onUpdate={(key, value) => updateSlot(index, key, value)}
+            onRemove={() => removeSlot(index)}
+          />
         ))}
       </ul>
 

@@ -1,6 +1,7 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { applyOwnerAction } from "@/lib/inspection/server";
 import {
+  isClockTime,
   isFutureOrTodayDate,
   isTimeRange,
   type InspectionAssignment,
@@ -56,6 +57,25 @@ function parseSlot(raw: unknown): InspectionSlot | null {
   if (!isFutureOrTodayDate(date)) return null;
   if (!isTimeRange(timeRange)) return null;
   return { date, timeRange };
+}
+
+/** Validates a visit time window. `endTime` must be after `startTime`. */
+function parseWindow(
+  payload: Record<string, unknown>,
+):
+  | { ok: true; startTime: string; endTime: string }
+  | { ok: false; error: string } {
+  const startTime =
+    typeof payload.startTime === "string" ? payload.startTime.trim() : "";
+  const endTime =
+    typeof payload.endTime === "string" ? payload.endTime.trim() : "";
+  if (!isClockTime(startTime) || !isClockTime(endTime)) {
+    return { ok: false, error: "Enter a start and end time for the visit." };
+  }
+  if (startTime >= endTime) {
+    return { ok: false, error: "The end time must be after the start time." };
+  }
+  return { ok: true, startTime, endTime };
 }
 
 function dedupeSlots(slots: InspectionSlot[]): InspectionSlot[] {
@@ -154,10 +174,41 @@ export async function PATCH(
         { status: 400 },
       );
     }
+    const window = parseWindow(payload);
+    if (!window.ok) {
+      return NextResponse.json(
+        { ok: false, error: window.error },
+        { status: 400 },
+      );
+    }
     const result = await applyOwnerAction(id, auth.businessId, {
       type: "accept",
       slot,
+      startTime: window.startTime,
+      endTime: window.endTime,
       note,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  if (action === "set_time") {
+    const window = parseWindow(payload);
+    if (!window.ok) {
+      return NextResponse.json(
+        { ok: false, error: window.error },
+        { status: 400 },
+      );
+    }
+    const result = await applyOwnerAction(id, auth.businessId, {
+      type: "set_time",
+      startTime: window.startTime,
+      endTime: window.endTime,
     });
     if (!result.ok) {
       return NextResponse.json(

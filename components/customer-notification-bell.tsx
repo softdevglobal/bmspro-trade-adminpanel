@@ -12,7 +12,7 @@ import {
   recallBookingSlug,
 } from "@/lib/customer/booking-routes";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 function relativeTime(timestamp: number): string {
@@ -31,6 +31,7 @@ function relativeTime(timestamp: number): string {
 
 export function CustomerNotificationBell() {
   const pathname = usePathname();
+  const router = useRouter();
   const { status } = useCustomerAuth();
   const {
     notifications,
@@ -42,12 +43,21 @@ export function CustomerNotificationBell() {
     clearAll,
   } = useCustomerNotifications();
 
-  const notificationsHref = useMemo(() => {
-    const slug = parseBooknowSlug(pathname) ?? recallBookingSlug();
-    return slug
-      ? accountPath(slug, "notifications")
-      : "/account?tab=notifications";
-  }, [pathname]);
+  const fallbackSlug = useMemo(
+    () => parseBooknowSlug(pathname) ?? recallBookingSlug(),
+    [pathname],
+  );
+  const notificationsHref = fallbackSlug
+    ? accountPath(fallbackSlug, "notifications")
+    : "/account?tab=notifications";
+
+  function openNotification(slug: string | null) {
+    setOpen(false);
+    const target = slug ?? fallbackSlug;
+    if (target) {
+      router.push(accountPath(target, "requests"));
+    }
+  }
 
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -146,31 +156,37 @@ export function CustomerNotificationBell() {
                 {notifications.slice(0, 10).map((note) => (
                   <li
                     key={note.id}
-                    className={`group flex gap-2 border-b border-stone-100 px-3 py-2.5 last:border-b-0 ${
+                    className={`group flex items-stretch gap-1 border-b border-stone-100 last:border-b-0 ${
                       note.read ? "" : "bg-primary/5"
                     }`}
                   >
-                    <span
-                      className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                    <button
+                      type="button"
+                      onClick={() => openNotification(note.bookingSlug)}
+                      className="flex min-w-0 flex-1 gap-2 px-3 py-2.5 text-left transition-colors hover:bg-stone-50"
                     >
-                      {NOTIFICATION_STATUS_ICON[note.status]}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="line-clamp-2 font-body text-[13px] font-semibold text-on-surface">
-                        {note.title}
-                      </p>
-                      <p className="mt-0.5 line-clamp-2 font-body text-[11px] text-on-surface-variant">
-                        {note.body}
-                      </p>
-                      <p className="mt-1 font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
-                        {relativeTime(note.createdAt)}
-                      </p>
-                    </div>
+                      <span
+                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                      >
+                        {NOTIFICATION_STATUS_ICON[note.status]}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-2 block font-body text-[13px] font-semibold text-on-surface">
+                          {note.title}
+                        </span>
+                        <span className="mt-0.5 line-clamp-2 block font-body text-[11px] text-on-surface-variant">
+                          {note.body}
+                        </span>
+                        <span className="mt-1 block font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
+                          {relativeTime(note.createdAt)}
+                        </span>
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => void clearOne(note.id)}
                       aria-label="Clear notification"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600"
+                      className="my-2 mr-1.5 flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-full text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600"
                     >
                       <span className="material-symbols-outlined text-[15px]">
                         close
