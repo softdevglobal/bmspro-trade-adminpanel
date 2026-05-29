@@ -448,7 +448,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const serviceAreas = await getBusinessServiceAreas(auth.businessId);
+  const summaryOnly =
+    new URL(request.url).searchParams.get("summary") === "1";
+  const serviceAreas = summaryOnly
+    ? []
+    : await getBusinessServiceAreas(auth.businessId);
   const snapshot = await adminDb
     .collection("users")
     .where("businessId", "==", auth.businessId)
@@ -464,7 +468,9 @@ export async function GET(request: Request) {
         phone: sanitizeString(data.phone) || null,
         role: sanitizeString(data.role),
         staffType: staffType(data.staffType, data.skills),
-        availability: availabilityForResponse(data.availability, serviceAreas),
+        availability: summaryOnly
+          ? {}
+          : availabilityForResponse(data.availability, serviceAreas),
         status: staffStatus(data.status),
         createdAt: timestampIso(data.createdAt),
         createdAtMillis: timestampMillis(data.createdAt),
@@ -483,7 +489,11 @@ export async function GET(request: Request) {
       createdAt: member.createdAt,
     }));
 
-  return NextResponse.json({ ok: true, staff, serviceAreas });
+  return NextResponse.json({
+    ok: true,
+    staff,
+    serviceAreas: summaryOnly ? [] : serviceAreas,
+  });
 }
 
 export async function PATCH(request: Request) {

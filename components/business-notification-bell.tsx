@@ -1,13 +1,14 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessNotifications } from "@/lib/notifications/use-business-notifications";
 import {
   NOTIFICATION_STATUS_ICON,
   NOTIFICATION_STATUS_TONE,
   type NotificationRecord,
 } from "@/lib/notifications/types";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 function relativeTime(timestamp: number): string {
   if (!timestamp) return "";
@@ -24,56 +25,23 @@ function relativeTime(timestamp: number): string {
 }
 
 export function BusinessNotificationBell() {
-  const { user, status, role } = useAuth();
+  const { status, role } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
-  const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [clearingAll, setClearingAll] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Only business owners have a business notification feed; super admins and
-  // other roles would just hit a 403 on /api/notifications.
-  const authed =
-    status === "authenticated" && !!user && role === "business_owner";
+  const authed = status === "authenticated" && role === "business_owner";
 
-  const token = useCallback(async () => {
-    if (!user) return null;
-    return user.getIdToken();
-  }, [user]);
-
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const idToken = await user.getIdToken();
-      const response = await fetch("/api/notifications", {
-        headers: { authorization: `Bearer ${idToken}` },
-      });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        notifications?: NotificationRecord[];
-      };
-      if (response.ok && payload.ok) {
-        setNotifications(payload.notifications ?? []);
-      }
-    } catch {
-      /* non-fatal */
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!authed) {
-      setNotifications([]);
-      return;
-    }
-    void load();
-    const interval = setInterval(() => void load(), 60_000);
-    return () => clearInterval(interval);
-  }, [authed, load]);
+  const {
+    notifications,
+    loading,
+    unread,
+    markAllRead,
+    clearOne,
+    clearAll,
+  } = useBusinessNotifications();
 
   useEffect(() => {
     if (!open) return;
@@ -101,55 +69,27 @@ export function BusinessNotificationBell() {
     );
   }
 
-  const unread = notifications.filter((note) => !note.read).length;
-
   async function handleToggle() {
     const next = !open;
     setOpen(next);
-    if (next) {
-      await load();
-      if (unread > 0) {
-        const idToken = await token();
-        if (idToken) {
-          void fetch("/api/notifications", {
-            method: "PATCH",
-            headers: { authorization: `Bearer ${idToken}` },
-          });
-        }
-        setNotifications((current) =>
-          current.map((note) => ({ ...note, read: true })),
-        );
-      }
+    if (next && unread > 0) {
+      await markAllRead();
     }
   }
 
-  async function clearOne(id: string) {
+  async function clearOneWithBusy(id: string) {
     setBusyId(id);
     try {
-      const idToken = await token();
-      if (!idToken) return;
-      const response = await fetch(`/api/notifications/${id}`, {
-        method: "DELETE",
-        headers: { authorization: `Bearer ${idToken}` },
-      });
-      if (response.ok) {
-        setNotifications((current) => current.filter((note) => note.id !== id));
-      }
+      await clearOne(id);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function clearAll() {
+  async function clearAllWithBusy() {
     setClearingAll(true);
     try {
-      const idToken = await token();
-      if (!idToken) return;
-      const response = await fetch("/api/notifications", {
-        method: "DELETE",
-        headers: { authorization: `Bearer ${idToken}` },
-      });
-      if (response.ok) setNotifications([]);
+      await clearAll();
     } finally {
       setClearingAll(false);
     }
@@ -159,7 +99,6 @@ export function BusinessNotificationBell() {
     setOpen(false);
     if (!note.requestId) return;
     router.push(`/dashboard/inspection-visits?request=${note.requestId}`);
-    // If already on the inspection-visits page, the board listens for this.
     window.dispatchEvent(
       new CustomEvent("bmspt:open-inspection-request", {
         detail: note.requestId,
@@ -197,7 +136,7 @@ export function BusinessNotificationBell() {
             {notifications.length > 0 ? (
               <button
                 type="button"
-                onClick={() => void clearAll()}
+                onClick={() => void clearAllWithBusy()}
                 disabled={clearingAll}
                 className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-rose-600 disabled:opacity-60"
               >
@@ -261,7 +200,7 @@ export function BusinessNotificationBell() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void clearOne(note.id)}
+                      onClick={() => void clearOneWithBusy(note.id)}
                       disabled={busyId === note.id}
                       aria-label="Clear notification"
                       className="my-2 mr-2 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-rose-600 disabled:opacity-60"

@@ -2,6 +2,7 @@
 
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const STEPS = ["Details", "Role & areas", "Review"] as const;
@@ -318,6 +319,7 @@ export function TeamStaffForm() {
       const savedName = form.fullName.trim();
       const savedMode = setupMode;
       await loadStaffMembers();
+      notifyStaffChanged();
       setSetupOpen(false);
       resetFormState();
       setSetupMode("create");
@@ -364,6 +366,7 @@ export function TeamStaffForm() {
 
       setDeleteTarget(null);
       await loadStaffMembers();
+      notifyStaffChanged();
     } catch (deleteError) {
       setStaffListError(
         deleteError instanceof Error
@@ -415,6 +418,7 @@ export function TeamStaffForm() {
       );
       setStatusTarget(null);
       void loadStaffMembers();
+      notifyStaffChanged();
     } catch (statusError) {
       setStaffListError(
         statusError instanceof Error

@@ -7,6 +7,8 @@ import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
+import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import {
   formatAddress,
   formatBudgetAud,
@@ -72,108 +74,46 @@ const FILTER_TABS: { id: StatusFilter; label: string; shortLabel: string }[] = [
 
 export function InspectionVisitsBoard() {
   const { user, status: authStatus } = useAuth();
-  const [requests, setRequests] = useState<InspectionRequestDetail[]>([]);
-  const [staff, setStaff] = useState<StaffSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const {
+    requests,
+    loading: requestsLoading,
+    error: requestsError,
+  } = useInspectionRequests();
+  const { staff, reload: reloadStaff } = useBusinessStaffSummary();
+  const [requestsLocal, setRequestsLocal] = useState<InspectionRequestDetail[]>(
+    [],
+  );
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
 
-  const loadRequests = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch("/api/inspection-requests", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = (await response.json()) as {
-        ok?: boolean;
-        error?: string;
-        requests?: InspectionRequestDetail[];
-      };
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error ?? "Could not load requests.");
-      }
-      setRequests(data.requests ?? []);
-    } catch (error) {
-      setLoadError(
-        error instanceof Error ? error.message : "Could not load requests.",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user]);
-
-  const loadStaff = useCallback(async () => {
-    if (!user) return;
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch("/api/team/staff", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = (await response.json()) as {
-        ok?: boolean;
-        staff?: {
-          id: string;
-          fullName: string;
-          email: string;
-          staffType?: string;
-          status?: string;
-        }[];
-      };
-      if (!response.ok || !data.ok) return;
-      setStaff(
-        (data.staff ?? [])
-          .filter((member) => member.status !== "suspended")
-          .map((member) => ({
-            id: member.id,
-            fullName: member.fullName,
-            email: member.email,
-            staffType: member.staffType?.trim() || "Team member",
-          })),
-      );
-    } catch {
-      /* non-fatal */
-    }
-  }, [user]);
-
   useEffect(() => {
-    if (authStatus !== "authenticated") return;
-    let cancelled = false;
-    // Defer to a microtask so initial setState happens outside the effect body.
-    void Promise.resolve().then(async () => {
-      if (cancelled) return;
-      await loadRequests();
-      if (cancelled) return;
-      await loadStaff();
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [authStatus, loadRequests, loadStaff]);
+    setRequestsLocal(requests);
+  }, [requests]);
+
+  const isLoading = requestsLoading;
+  const loadError = requestsError;
+  const boardRequests = requestsLocal;
 
   const filtered = useMemo(() => {
-    if (filter === "all") return requests;
-    return requests.filter((req) => req.status === filter);
-  }, [requests, filter]);
+    if (filter === "all") return boardRequests;
+    return boardRequests.filter((req) => req.status === filter);
+  }, [boardRequests, filter]);
 
   const counts = useMemo(() => {
     const map: Record<StatusFilter, number> = {
-      all: requests.length,
+      all: boardRequests.length,
       pending: 0,
       owner_proposed: 0,
       scheduled: 0,
       cancelled: 0,
       completed: 0,
     };
-    for (const req of requests) {
+    for (const req of boardRequests) {
       map[req.status] += 1;
     }
     return map;
-  }, [requests]);
+  }, [boardRequests]);
 
   // Open a specific request when arriving from a notification (URL ?request=
   // on first load, or a custom event when already on this page).
@@ -191,19 +131,19 @@ export function InspectionVisitsBoard() {
 
   useEffect(() => {
     if (!pendingOpenId) return;
-    if (requests.some((req) => req.id === pendingOpenId)) {
+    if (boardRequests.some((req) => req.id === pendingOpenId)) {
       setSelectedId(pendingOpenId);
       setPendingOpenId(null);
     }
-  }, [pendingOpenId, requests]);
+  }, [pendingOpenId, boardRequests]);
 
   const selected = useMemo(
-    () => requests.find((req) => req.id === selectedId) ?? null,
-    [requests, selectedId],
+    () => boardRequests.find((req) => req.id === selectedId) ?? null,
+    [boardRequests, selectedId],
   );
 
   function handleUpdated(next: InspectionRequestDetail) {
-    setRequests((prev) =>
+    setRequestsLocal((prev) =>
       prev.map((req) => (req.id === next.id ? next : req)),
     );
   }
@@ -248,7 +188,7 @@ export function InspectionVisitsBoard() {
 
         <button
           type="button"
-          onClick={() => void loadRequests()}
+          onClick={() => void reloadStaff()}
           className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container sm:w-auto"
         >
           <span className="material-symbols-outlined text-[16px]">refresh</span>

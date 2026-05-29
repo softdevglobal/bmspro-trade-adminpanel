@@ -3,11 +3,14 @@
 import { useAuth } from "@/lib/auth/auth-context";
 import { db } from "@/lib/firebase/client";
 import { doc, onSnapshot } from "firebase/firestore";
+import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { useEffect, useState } from "react";
 
 export type BusinessProfileLite = {
   businessName: string | null;
   logoUrl: string | null;
+  bookingSlug: string | null;
+  bookingPath: string | null;
 };
 
 /**
@@ -17,6 +20,7 @@ export type BusinessProfileLite = {
  */
 export function useBusinessProfile(): BusinessProfileLite | null {
   const { role, businessId } = useAuth();
+  const pageVisible = usePageVisible();
   const [profile, setProfile] = useState<BusinessProfileLite | null>(null);
 
   useEffect(() => {
@@ -24,6 +28,7 @@ export function useBusinessProfile(): BusinessProfileLite | null {
       setProfile(null);
       return;
     }
+    if (!pageVisible) return;
     const ref = doc(db, "businesses", businessId);
     const unsubscribe = onSnapshot(ref, (snap) => {
       const data = snap.data();
@@ -31,14 +36,23 @@ export function useBusinessProfile(): BusinessProfileLite | null {
         setProfile(null);
         return;
       }
+      const slug =
+        typeof data.bookingSlug === "string" ? data.bookingSlug : null;
       setProfile({
         businessName:
           typeof data.businessName === "string" ? data.businessName : null,
         logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+        bookingSlug: slug,
+        bookingPath:
+          typeof data.bookingPath === "string"
+            ? data.bookingPath
+            : slug
+              ? `/booknow/${slug}`
+              : null,
       });
     });
     return () => unsubscribe();
-  }, [role, businessId]);
+  }, [role, businessId, pageVisible]);
 
   return profile;
 }

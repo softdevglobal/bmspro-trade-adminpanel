@@ -6,6 +6,7 @@ import {
   CustomerNavSpacer,
 } from "@/components/customer-booking-shell";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
   accountPath,
   booknowPath,
@@ -13,12 +14,11 @@ import {
   parseAccountTabFromPathname,
   parseBooknowSlug,
 } from "@/lib/customer/booking-routes";
-import type { NotificationRecord } from "@/lib/notifications/types";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
 export type CustomerAccountTab =
   | "profile"
@@ -98,8 +98,8 @@ function GuestAuthButton({
 
 function CustomerAccountNavInner({ className }: { className?: string }) {
   const pathname = usePathname();
-  const { status, getIdToken } = useCustomerAuth();
-  const [unread, setUnread] = useState(0);
+  const { status } = useCustomerAuth();
+  const { unread } = useCustomerNotifications();
 
   const slug = parseBooknowSlug(pathname);
   const onAccount = isBooknowAccountPath(pathname);
@@ -132,34 +132,6 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
       },
     ];
   }, [slug, onAccount, activeTab]);
-
-  const loadUnread = useCallback(async () => {
-    if (status !== "authenticated") {
-      setUnread(0);
-      return;
-    }
-    try {
-      const idToken = await getIdToken();
-      if (!idToken) return;
-      const response = await fetch("/api/customer/notifications", {
-        headers: { authorization: `Bearer ${idToken}` },
-      });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        notifications?: NotificationRecord[];
-      };
-      if (!response.ok || !payload.ok) return;
-      setUnread(
-        (payload.notifications ?? []).filter((note) => !note.read).length,
-      );
-    } catch {
-      setUnread(0);
-    }
-  }, [status, getIdToken]);
-
-  useEffect(() => {
-    void loadUnread();
-  }, [loadUnread]);
 
   if (status !== "authenticated" || !slug) return null;
 

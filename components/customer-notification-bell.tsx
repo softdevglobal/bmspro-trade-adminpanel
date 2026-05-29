@@ -37,7 +37,6 @@ export function CustomerNotificationBell() {
     notifications,
     loading,
     unread,
-    reload,
     markAllRead,
     clearOne,
     clearAll,
@@ -82,7 +81,6 @@ export function CustomerNotificationBell() {
     setOpen((prev) => {
       const next = !prev;
       if (next) {
-        void reload();
         void markAllRead();
       }
       return next;

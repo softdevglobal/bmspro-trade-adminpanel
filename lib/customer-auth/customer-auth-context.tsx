@@ -62,6 +62,50 @@ const CustomerAuthContext = createContext<CustomerAuthContextValue | null>(
   null,
 );
 
+const PROFILE_CACHE_KEY = "bms.customer.profile";
+const PROFILE_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type ProfileCache = {
+  uid: string;
+  profile: CustomerProfile;
+  cachedAt: number;
+};
+
+function readProfileCache(uid: string): CustomerProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ProfileCache;
+    if (parsed.uid !== uid) return null;
+    if (Date.now() - parsed.cachedAt > PROFILE_CACHE_TTL_MS) return null;
+    return parsed.profile;
+  } catch {
+    return null;
+  }
+}
+
+function writeProfileCache(uid: string, profile: CustomerProfile): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(
+      PROFILE_CACHE_KEY,
+      JSON.stringify({ uid, profile, cachedAt: Date.now() } satisfies ProfileCache),
+    );
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function clearProfileCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function fetchProfile(user: User): Promise<CustomerProfile | null> {
   const idToken = await user.getIdToken();
   const response = await fetch("/api/customer/profile", {
@@ -122,15 +166,33 @@ export function CustomerAuthProvider({
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(customerAuth, async (next) => {
       if (!next) {
+        clearProfileCache();
         setUser(null);
         setProfile(null);
         setStatus("unauthenticated");
         return;
       }
+
+      const cachedProfile = readProfileCache(next.uid);
       setUser(next);
+      if (cachedProfile) {
+        setProfile(cachedProfile);
+        setStatus("authenticated");
+        void fetchProfile(next)
+          .then((loaded) => {
+            if (loaded) {
+              setProfile(loaded);
+              writeProfileCache(next.uid, loaded);
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+
       setStatus("loading");
       try {
         const loaded = await fetchProfile(next);
+        if (loaded) writeProfileCache(next.uid, loaded);
         setProfile(loaded);
         setStatus("authenticated");
       } catch {
@@ -145,6 +207,7 @@ export function CustomerAuthProvider({
     const current = userRef.current;
     if (!current) return null;
     const next = await fetchProfile(current);
+    if (next) writeProfileCache(current.uid, next);
     setProfile(next);
     return next;
   }, []);
@@ -189,6 +252,7 @@ export function CustomerAuthProvider({
   );
 
   const logout = useCallback(async () => {
+    clearProfileCache();
     await signOut(customerAuth);
   }, []);
 
@@ -198,6 +262,7 @@ export function CustomerAuthProvider({
       throw new Error("Sign in to update your profile.");
     }
     const next = await patchProfile(current, input);
+    writeProfileCache(current.uid, next);
     setProfile(next);
     return next;
   }, []);

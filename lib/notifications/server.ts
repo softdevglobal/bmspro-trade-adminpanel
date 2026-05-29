@@ -1,7 +1,7 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
-import { toMillis } from "@/lib/onboarding/services/display";
+import { mapNotificationDoc as mapNotificationRecord } from "@/lib/notifications/map-notification-doc";
 import {
   BUSINESS_NOTIFICATION_COLLECTION,
   CUSTOMER_NOTIFICATION_COLLECTION,
@@ -14,6 +14,7 @@ import {
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
   formatSlotDate,
+  formatAddress,
   formatVisitWindow,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
@@ -65,38 +66,6 @@ type CreateNotificationInput = {
   /** Optional small label above the highlight callout. */
   emailHighlightLabel?: string | null;
 };
-
-function mapNotificationDoc(
-  id: string,
-  audience: NotificationAudience,
-  data: Record<string, unknown>,
-): NotificationRecord {
-  return {
-    id,
-    audience,
-    businessId: typeof data.businessId === "string" ? data.businessId : null,
-    customerId: typeof data.customerId === "string" ? data.customerId : null,
-    customerEmail:
-      typeof data.customerEmail === "string" ? data.customerEmail : null,
-    requestId: typeof data.requestId === "string" ? data.requestId : "",
-    bookingSlug:
-      typeof data.bookingSlug === "string" ? data.bookingSlug : null,
-    businessName:
-      typeof data.businessName === "string" ? data.businessName : null,
-    customerName:
-      typeof data.customerName === "string" ? data.customerName : null,
-    status: (typeof data.status === "string"
-      ? data.status
-      : "pending") as InspectionRequestStatus,
-    type: (typeof data.type === "string"
-      ? data.type
-      : "request_created") as NotificationType,
-    title: typeof data.title === "string" ? data.title : "",
-    body: typeof data.body === "string" ? data.body : "",
-    read: data.read === true,
-    createdAt: toMillis(data.createdAt) ?? 0,
-  };
-}
 
 /** Drops null/undefined/empty values so stored docs have no blank fields. */
 function withoutEmpty(
@@ -213,7 +182,7 @@ export async function notifyCustomerOfNewRequest(
   if (!email) return;
 
   const emailDetails: EmailDetailRow[] = [{ label: "Service", value: headline }];
-  const address = request.address?.trim();
+  const address = formatAddress(request.address).trim();
   if (address) {
     emailDetails.push({ label: "Address", value: address });
   }
@@ -486,16 +455,19 @@ function sortNewestFirst(records: NotificationRecord[]): NotificationRecord[] {
   return records.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
+const NOTIFICATION_LIST_LIMIT = 100;
+
 export async function listBusinessNotifications(
   businessId: string,
 ): Promise<NotificationRecord[]> {
   const snapshot = await adminDb
     .collection(BUSINESS_NOTIFICATION_COLLECTION)
     .where("businessId", "==", businessId)
+    .limit(NOTIFICATION_LIST_LIMIT)
     .get();
   return sortNewestFirst(
     snapshot.docs.map((doc) =>
-      mapNotificationDoc(doc.id, "business", doc.data() ?? {}),
+      mapNotificationRecord(doc.id, "business", doc.data() ?? {}),
     ),
   );
 }
@@ -508,11 +480,13 @@ export async function listCustomerNotifications(
     adminDb
       .collection(CUSTOMER_NOTIFICATION_COLLECTION)
       .where("customerId", "==", customerId)
+      .limit(NOTIFICATION_LIST_LIMIT)
       .get(),
     customerEmail
       ? adminDb
           .collection(CUSTOMER_NOTIFICATION_COLLECTION)
           .where("customerEmail", "==", customerEmail)
+          .limit(NOTIFICATION_LIST_LIMIT)
           .get()
       : Promise.resolve(null),
   ]);
@@ -527,7 +501,7 @@ export async function listCustomerNotifications(
 
   return sortNewestFirst(
     Array.from(docs.entries()).map(([id, data]) =>
-      mapNotificationDoc(id, "customer", data),
+      mapNotificationRecord(id, "customer", data),
     ),
   );
 }
@@ -563,22 +537,64 @@ export async function markNotificationRead(
   return true;
 }
 
+async function collectUnreadNotificationIds(
+  guard: OwnerGuard,
+): Promise<string[]> {
+  const collection = notificationCollectionFor(guard.audience);
+  const unreadIds: string[] = [];
+
+  if (guard.audience === "business") {
+    const snap = await adminDb
+      .collection(collection)
+      .where("businessId", "==", guard.businessId)
+      .where("read", "==", false)
+      .get();
+    for (const doc of snap.docs) unreadIds.push(doc.id);
+    return unreadIds;
+  }
+
+  const [byId, byEmail] = await Promise.all([
+    adminDb
+      .collection(collection)
+      .where("customerId", "==", guard.customerId)
+      .where("read", "==", false)
+      .get(),
+    guard.customerEmail
+      ? adminDb
+          .collection(collection)
+          .where("customerEmail", "==", guard.customerEmail)
+          .where("read", "==", false)
+          .get()
+      : Promise.resolve(null),
+  ]);
+
+  const seen = new Set<string>();
+  for (const doc of byId.docs) {
+    if (!seen.has(doc.id)) {
+      seen.add(doc.id);
+      unreadIds.push(doc.id);
+    }
+  }
+  if (byEmail) {
+    for (const doc of byEmail.docs) {
+      if (!seen.has(doc.id)) {
+        seen.add(doc.id);
+        unreadIds.push(doc.id);
+      }
+    }
+  }
+  return unreadIds;
+}
+
 export async function markAllNotificationsRead(
   guard: OwnerGuard,
 ): Promise<void> {
   const collection = notificationCollectionFor(guard.audience);
-  const records =
-    guard.audience === "business"
-      ? await listBusinessNotifications(guard.businessId)
-      : await listCustomerNotifications(guard.customerId, guard.customerEmail);
-
-  const unread = records.filter((record) => !record.read);
-  for (let i = 0; i < unread.length; i += MAX_BATCH) {
+  const unreadIds = await collectUnreadNotificationIds(guard);
+  for (let i = 0; i < unreadIds.length; i += MAX_BATCH) {
     const batch = adminDb.batch();
-    for (const record of unread.slice(i, i + MAX_BATCH)) {
-      batch.update(adminDb.collection(collection).doc(record.id), {
-        read: true,
-      });
+    for (const id of unreadIds.slice(i, i + MAX_BATCH)) {
+      batch.update(adminDb.collection(collection).doc(id), { read: true });
     }
     await batch.commit();
   }
@@ -596,19 +612,25 @@ export async function deleteNotification(
   return true;
 }
 
-export async function deleteAllNotifications(
+async function collectOwnedNotificationIds(
   guard: OwnerGuard,
-): Promise<void> {
-  const collection = notificationCollectionFor(guard.audience);
+): Promise<string[]> {
   const records =
     guard.audience === "business"
       ? await listBusinessNotifications(guard.businessId)
       : await listCustomerNotifications(guard.customerId, guard.customerEmail);
+  return records.map((record) => record.id);
+}
 
-  for (let i = 0; i < records.length; i += MAX_BATCH) {
+export async function deleteAllNotifications(
+  guard: OwnerGuard,
+): Promise<void> {
+  const collection = notificationCollectionFor(guard.audience);
+  const ids = await collectOwnedNotificationIds(guard);
+  for (let i = 0; i < ids.length; i += MAX_BATCH) {
     const batch = adminDb.batch();
-    for (const record of records.slice(i, i + MAX_BATCH)) {
-      batch.delete(adminDb.collection(collection).doc(record.id));
+    for (const id of ids.slice(i, i + MAX_BATCH)) {
+      batch.delete(adminDb.collection(collection).doc(id));
     }
     await batch.commit();
   }

@@ -2,6 +2,7 @@
 
 import { AuthProvider } from "@/lib/auth/auth-context";
 import { CustomerAuthProvider } from "@/lib/customer-auth/customer-auth-context";
+import { CustomerNotificationsProvider } from "@/lib/notifications/customer-notifications-context";
 import { useEffect } from "react";
 
 const CHUNK_RELOAD_KEY = "bms.chunk-reload";
@@ -42,8 +43,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <CustomerAuthProvider>
-        <ChunkLoadRecovery />
-        {children}
+        <CustomerNotificationsProvider>
+          <ChunkLoadRecovery />
+          {children}
+        </CustomerNotificationsProvider>
       </CustomerAuthProvider>
     </AuthProvider>
   );

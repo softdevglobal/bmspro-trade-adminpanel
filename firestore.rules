@@ -63,6 +63,61 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    function ownsBusinessNotification() {
+      return isBusinessOwner()
+        && resource.data.businessId == request.auth.token.businessId;
+    }
+
+    function notificationReadOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+    }
+
+    match /business_notifications/{notificationId} {
+      allow read: if isSuperAdmin() || ownsBusinessNotification();
+      allow update: if isSuperAdmin()
+        || (ownsBusinessNotification() && notificationReadOnlyUpdate());
+      allow delete: if isSuperAdmin() || ownsBusinessNotification();
+      allow create: if false;
+    }
+
+    function ownsCustomerNotification() {
+      return isSignedIn()
+        && (
+          resource.data.customerId == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && resource.data.customerEmail == request.auth.token.email
+          )
+        );
+    }
+
+    match /customer_notifications/{notificationId} {
+      allow read: if isSuperAdmin() || ownsCustomerNotification();
+      allow update: if isSuperAdmin()
+        || (ownsCustomerNotification() && notificationReadOnlyUpdate());
+      allow delete: if isSuperAdmin() || ownsCustomerNotification();
+      allow create: if false;
+    }
+
+    function ownsCustomerInspection() {
+      return isSignedIn()
+        && (
+          resource.data.customerId == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && resource.data.customer.email == request.auth.token.email
+          )
+        );
+    }
+
+    match /inspection_requests/{requestId} {
+      allow read: if isSuperAdmin()
+        || (isBusinessOwner()
+            && resource.data.businessId == request.auth.token.businessId)
+        || ownsCustomerInspection();
+      allow create, update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();

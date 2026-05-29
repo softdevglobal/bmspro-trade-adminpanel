@@ -1,9 +1,5 @@
-import { adminDb } from "@/lib/firebase/admin";
-import { authenticateCustomerRequest } from "@/lib/customer/server";
+import { toMillis } from "@/lib/onboarding/services/display";
 import {
-  INSPECTION_COLLECTION,
-  type InspectionRequestDetail,
-  type InspectionRequestStatus,
   REQUEST_STATUSES,
   isClockTime,
   isRequestType,
@@ -11,17 +7,10 @@ import {
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
+  type InspectionRequestDetail,
+  type InspectionRequestStatus,
   type InspectionSlot,
 } from "@/lib/inspection/types";
-import { toMillis } from "@/lib/onboarding/services/display";
-import { NextResponse } from "next/server";
-
-export const runtime = "nodejs";
-
-export type CustomerBooking = InspectionRequestDetail & {
-  businessName: string | null;
-  bookingSlug: string | null;
-};
 
 function parseAddress(raw: unknown): InspectionAddress {
   if (!raw || typeof raw !== "object") {
@@ -80,7 +69,8 @@ function parseStatus(raw: unknown): InspectionRequestStatus {
     : "pending";
 }
 
-function mapBookingDoc(
+/** Maps a Firestore inspection_requests document for API and client listeners. */
+export function mapInspectionDoc(
   id: string,
   data: Record<string, unknown>,
 ): InspectionRequestDetail {
@@ -88,17 +78,20 @@ function mapBookingDoc(
     ? data.requestType
     : "existing_service";
 
-  const customRequestRaw = data.customRequest as Record<string, unknown> | null;
+  const customRequestRaw = data.customRequest;
   const customRequest =
     customRequestRaw && typeof customRequestRaw === "object"
       ? {
           title:
-            typeof customRequestRaw.title === "string"
-              ? customRequestRaw.title
+            typeof (customRequestRaw as Record<string, unknown>).title ===
+            "string"
+              ? ((customRequestRaw as Record<string, unknown>).title as string)
               : "",
           description:
-            typeof customRequestRaw.description === "string"
-              ? customRequestRaw.description
+            typeof (customRequestRaw as Record<string, unknown>).description ===
+            "string"
+              ? ((customRequestRaw as Record<string, unknown>)
+                  .description as string)
               : "",
         }
       : null;
@@ -145,85 +138,8 @@ function mapBookingDoc(
   };
 }
 
-async function loadBusinessSummaries(
-  ids: string[],
-): Promise<Map<string, { businessName: string | null; bookingSlug: string | null }>> {
-  if (ids.length === 0) return new Map();
-  const unique = Array.from(new Set(ids));
-  const result = new Map<
-    string,
-    { businessName: string | null; bookingSlug: string | null }
-  >();
-
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
-    const refs = chunk.map((id) => adminDb.collection("businesses").doc(id));
-    const snaps = await adminDb.getAll(...refs);
-    for (const snap of snaps) {
-      if (!snap.exists) {
-        result.set(snap.id, { businessName: null, bookingSlug: null });
-        continue;
-      }
-      const data = snap.data() ?? {};
-      result.set(snap.id, {
-        businessName:
-          typeof data.businessName === "string" ? data.businessName : null,
-        bookingSlug:
-          typeof data.bookingSlug === "string" ? data.bookingSlug : null,
-      });
-    }
-  }
-
-  return result;
-}
-
-export async function GET(request: Request) {
-  const auth = await authenticateCustomerRequest(request);
-  if (!auth.ok) {
-    return NextResponse.json(
-      { ok: false, error: auth.error },
-      { status: auth.status },
-    );
-  }
-
-  const byCustomerId = await adminDb
-    .collection(INSPECTION_COLLECTION)
-    .where("customerId", "==", auth.customer.uid)
-    .limit(100)
-    .get();
-
-  const byEmail = await adminDb
-    .collection(INSPECTION_COLLECTION)
-    .where("customer.email", "==", auth.customer.email)
-    .limit(100)
-    .get();
-
-  const docs = new Map<string, FirebaseFirestore.DocumentData>();
-  for (const doc of byCustomerId.docs) {
-    docs.set(doc.id, doc.data());
-  }
-  for (const doc of byEmail.docs) {
-    if (!docs.has(doc.id)) docs.set(doc.id, doc.data());
-  }
-
-  const requests = Array.from(docs.entries()).map(([id, data]) =>
-    mapBookingDoc(id, data),
-  );
-
-  const businessLookup = await loadBusinessSummaries(
-    requests.map((req) => req.businessId).filter((id): id is string => !!id),
-  );
-
-  const enriched: CustomerBooking[] = requests
-    .map((req) => {
-      const summary = businessLookup.get(req.businessId);
-      return {
-        ...req,
-        businessName: summary?.businessName ?? null,
-        bookingSlug: summary?.bookingSlug ?? null,
-      } satisfies CustomerBooking;
-    })
-    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-
-  return NextResponse.json({ ok: true, bookings: enriched });
+export function sortInspectionRequestsNewestFirst(
+  records: InspectionRequestDetail[],
+): InspectionRequestDetail[] {
+  return [...records].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
