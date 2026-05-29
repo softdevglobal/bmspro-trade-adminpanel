@@ -84,7 +84,7 @@ export function BookingEngine({ business, services }: Props) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="relative mt-2 flex min-h-[min(72vh,640px)] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:mt-3 sm:rounded-[24px] sm:p-6"
+        className="relative mt-4 flex min-h-[min(72vh,640px)] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:mt-5 sm:rounded-[24px] sm:p-6"
       >
           <div className="relative grid gap-5 lg:grid-cols-[1.2fr_1fr] lg:items-center lg:gap-10">
             <HeroContent
@@ -692,7 +692,7 @@ function PreferredSlotPicker({
                   </span>
                 </span>
                 {checked ? (
-                  <span className="absolute right-2 top-2 material-symbols-outlined material-symbols-filled text-[18px] text-primary">
+                  <span className="absolute right-2 top-[9px] material-symbols-outlined material-symbols-filled text-[18px] leading-none text-primary">
                     check_circle
                   </span>
                 ) : null}

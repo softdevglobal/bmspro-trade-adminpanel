@@ -2,9 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const SLOT_DAY_CARD_WIDTH = "4.85rem";
-
-/** Fewer days per row on narrow screens so "Today" / "Tomorrow" fit. */
+/** Fewer days per swipe page on narrow screens. */
 function useSlotDaysPerPage(): number {
   const read = () => {
     if (typeof window === "undefined") return SLOT_DAYS_PER_PAGE;
@@ -316,15 +314,13 @@ export function SlotDayPicker({
     return dayOptionFromIso(selectedIso);
   }, [selectedIso, pageDays]);
 
-  const isCompactStrip = daysPerPage < SLOT_DAYS_PER_PAGE;
-
   const displayDays = useMemo(() => {
-    if (isCompactStrip || !offPageSelection) return pageDays;
+    if (!offPageSelection) return pageDays;
     return [
       offPageSelection,
       ...pageDays.filter((day) => day.iso !== offPageSelection.iso),
     ].slice(0, daysPerPage);
-  }, [isCompactStrip, offPageSelection, pageDays, daysPerPage]);
+  }, [offPageSelection, pageDays, daysPerPage]);
 
   useEffect(() => {
     if (!selectedIso || pageDays.some((day) => day.iso === selectedIso)) return;
@@ -338,109 +334,86 @@ export function SlotDayPicker({
         {label}
       </span>
 
-      <div className="mt-2 flex items-center gap-0.5">
+      <div className="mt-2 flex max-w-full items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
         <button
           type="button"
           disabled={disabled || dayPage === 0}
           onClick={() => onDayPageChange(Math.max(0, dayPage - 1))}
           aria-label="Show earlier dates"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
         >
-          <span className="material-symbols-outlined text-[16px]">
+          <span className="material-symbols-outlined text-[20px]">
             chevron_left
           </span>
         </button>
 
-        <div
-          className={
-            isCompactStrip
-              ? "flex min-w-0 flex-1 gap-1.5 overflow-x-auto overflow-y-visible py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              : "grid min-w-0 flex-1 grid-cols-8 gap-1 overflow-visible"
-          }
-        >
-          {displayDays.map((day) => {
-            const selected = selectedIso === day.iso;
-            const dayBlocked =
-              blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
-            const isRelative = day.isToday || day.isTomorrow;
-            const relativeWord = day.isToday
-              ? "Today"
-              : day.isTomorrow
-                ? "Tomorrow"
-                : null;
-            return (
-              <button
-                key={day.iso}
-                type="button"
-                disabled={disabled || dayBlocked}
-                title={
-                  dayBlocked
-                    ? "Customer already offered both morning and afternoon on this day"
-                    : undefined
-                }
-                onClick={() => onSelect(day.iso)}
-                style={
-                  isCompactStrip
-                    ? { width: SLOT_DAY_CARD_WIDTH, flexShrink: 0 }
-                    : undefined
-                }
-                className={`flex min-h-[5.25rem] flex-col items-center rounded-xl border px-1 pb-2 pt-1.5 text-center transition-all disabled:cursor-not-allowed ${
-                  isCompactStrip ? "shrink-0 overflow-visible" : "min-w-0"
-                } ${
-                  dayBlocked
-                    ? "border-stone-100 bg-stone-50 opacity-40"
-                    : selected
-                      ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 ring-2 ring-primary/25"
-                      : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
+        {displayDays.map((day) => {
+          const selected = selectedIso === day.iso;
+          const dayBlocked =
+            blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
+          const relativeLabel = day.isToday
+            ? "Today"
+            : day.isTomorrow
+              ? "Tomorrow"
+              : null;
+          return (
+            <button
+              key={day.iso}
+              type="button"
+              disabled={disabled || dayBlocked}
+              title={
+                dayBlocked
+                  ? "Customer already offered both morning and afternoon on this day"
+                  : undefined
+              }
+              onClick={() => onSelect(day.iso)}
+              className={`flex min-h-[5.5rem] min-w-[4.5rem] shrink-0 flex-col items-center justify-between rounded-2xl border px-2 py-2 text-center transition-all disabled:cursor-not-allowed ${
+                dayBlocked
+                  ? "border-stone-100 bg-stone-50 opacity-40"
+                  : selected
+                    ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 shadow-[0_8px_20px_-12px_rgba(67,123,255,0.65)] ring-2 ring-primary/25"
+                    : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
+              }`}
+            >
+              <span
+                className={`font-body text-[10px] font-bold uppercase tracking-wide ${
+                  selected ? "text-primary" : "text-on-surface-variant"
                 }`}
               >
-                <div className="flex flex-col items-center gap-0.5">
+                {day.weekdayShort}
+              </span>
+              <span
+                className={`font-display text-[22px] font-semibold leading-none ${
+                  selected ? "text-primary" : "text-on-surface"
+                }`}
+              >
+                {day.dayNum}
+              </span>
+              <span
+                className={`font-body text-[10px] font-semibold ${
+                  selected ? "text-primary/80" : "text-on-surface-variant"
+                }`}
+              >
+                {day.monthShort}
+              </span>
+              <span className="flex h-4 items-center justify-center">
+                {selected ? (
+                  <span className="material-symbols-outlined material-symbols-filled translate-y-px text-[14px] leading-none text-primary">
+                    check_circle
+                  </span>
+                ) : relativeLabel ? (
                   <span
-                    className={`font-body text-[9px] font-bold uppercase tracking-wide ${
-                      selected ? "text-primary" : "text-on-surface-variant"
+                    className={`font-body text-[9px] font-bold ${
+                      day.isToday ? "text-primary" : "text-stone-600"
                     }`}
                   >
-                    {day.weekdayShort}
+                    {relativeLabel}
                   </span>
-                  <span
-                    className={`flex h-[14px] w-full items-center justify-center whitespace-nowrap px-0.5 font-body text-[9px] font-bold leading-none ${
-                      isRelative
-                        ? selected
-                          ? "text-primary"
-                          : day.isToday
-                            ? "text-primary"
-                            : "text-stone-600"
-                        : "text-transparent"
-                    }`}
-                  >
-                    {relativeWord || "\u00a0"}
-                  </span>
-                  <span
-                    className={`font-display text-[18px] font-semibold leading-none ${
-                      selected ? "text-primary" : "text-on-surface"
-                    }`}
-                  >
-                    {day.dayNum}
-                  </span>
-                  <span
-                    className={`font-body text-[9px] font-semibold leading-none ${
-                      selected ? "text-primary/80" : "text-on-surface-variant"
-                    }`}
-                  >
-                    {day.monthShort}
-                  </span>
-                </div>
-                <span className="mt-2 flex h-[18px] w-full shrink-0 items-center justify-center">
-                  {selected ? (
-                    <span className="material-symbols-outlined material-symbols-filled text-[16px] leading-none text-primary">
-                      check_circle
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
 
         <button
           type="button"
@@ -449,9 +422,9 @@ export function SlotDayPicker({
             onDayPageChange(Math.min(SLOT_MAX_DAY_PAGES - 1, dayPage + 1))
           }
           aria-label="Show later dates"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          className="inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center self-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
         >
-          <span className="material-symbols-outlined text-[16px]">
+          <span className="material-symbols-outlined text-[20px]">
             chevron_right
           </span>
         </button>
