@@ -12,7 +12,7 @@ export const CUSTOMER_FIXED_NAV_INNER_CLASS =
 /** Reserves space below the fixed floating pill nav. */
 export function CustomerNavSpacer() {
   return (
-    <div className="h-[3.5rem] shrink-0 sm:h-[4.75rem]" aria-hidden />
+    <div className="h-[3rem] shrink-0 sm:h-[4.25rem]" aria-hidden />
   );
 }
 
@@ -44,7 +44,7 @@ export function CustomerShellPanel({
 }) {
   return (
     <section
-      className={`mt-4 flex min-h-[min(72vh,640px)] w-full flex-col rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:rounded-[24px] sm:p-6 ${className ?? ""}`}
+      className={`mt-2 flex min-h-[min(72vh,640px)] w-full flex-col rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:mt-3 sm:rounded-[24px] sm:p-6 ${className ?? ""}`}
     >
       {children}
     </section>
