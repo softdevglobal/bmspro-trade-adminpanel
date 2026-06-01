@@ -27,6 +27,10 @@ import {
   type EmailTone,
 } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/zeptomail";
+import {
+  resolveBusinessOwnerUid,
+  sendOwnerMobilePush,
+} from "@/lib/notifications/push";
 import { FieldValue } from "firebase-admin/firestore";
 
 /** Eyebrow + tone shown in the customer email for each notification type. */
@@ -232,6 +236,8 @@ export async function notifyBusinessOfNewRequest(
 ): Promise<void> {
   const headline = requestHeadline(request);
   const who = request.customer.fullName?.trim() || "A customer";
+  const title = "New inspection request";
+  const body = `${who} requested ${headline}.`;
   try {
     await createNotification({
       audience: "business",
@@ -244,9 +250,22 @@ export async function notifyBusinessOfNewRequest(
       requestId: request.id,
       status: "pending",
       type: "request_created",
-      title: "New inspection request",
-      body: `${who} requested ${headline}.`,
+      title,
+      body,
     });
+
+    const ownerUid = await resolveBusinessOwnerUid(request.businessId);
+    if (ownerUid) {
+      await sendOwnerMobilePush({
+        ownerUid,
+        title,
+        body,
+        data: {
+          type: "request_created",
+          requestId: request.id,
+        },
+      });
+    }
   } catch {
     /* notifications are best-effort */
   }

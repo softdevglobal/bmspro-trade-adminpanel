@@ -1,5 +1,9 @@
 import { adminAuth } from "@/lib/firebase/admin";
-import { listInspectionRequests } from "@/lib/inspection/server";
+import {
+  createInspectionRequest,
+  listInspectionRequests,
+} from "@/lib/inspection/server";
+import { parseInspectionRequestInput } from "@/lib/inspection/types";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -53,4 +57,39 @@ export async function GET(request: Request) {
 
   const requests = await listInspectionRequests(auth.businessId);
   return NextResponse.json({ ok: true, requests });
+}
+
+/** Owner-authenticated create (mobile app / dashboard walk-in). */
+export async function POST(request: Request) {
+  const auth = await requireBusinessOwner(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+
+  const parsed = parseInspectionRequestInput(body);
+  if (!parsed.ok) {
+    return NextResponse.json(parsed, { status: 400 });
+  }
+
+  const result = await createInspectionRequest(auth.businessId, parsed.value, {
+    customerId: null,
+  });
+  if (!result.ok) {
+    return NextResponse.json(result, { status: 400 });
+  }
+
+  return NextResponse.json({ ok: true, request: result.request });
 }
