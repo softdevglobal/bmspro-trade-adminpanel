@@ -655,6 +655,7 @@ function PreferredSlotPicker({
         dayPage={dayPage}
         onDayPageChange={onDayPageChange}
         onSelect={onDateChange}
+        dayStripLayout="fit"
       />
 
       <div>

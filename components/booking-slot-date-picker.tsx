@@ -2,20 +2,29 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export const SLOT_DAYS_PER_PAGE_MOBILE = 4;
-export const SLOT_DAYS_PER_PAGE_MOBILE_SCROLL = 5;
+export const SLOT_DAYS_PER_PAGE_MOBILE = 3;
+/** @deprecated Use SLOT_DAYS_PER_PAGE_MOBILE — mobile always shows 3 days with arrows. */
+export const SLOT_DAYS_PER_PAGE_MOBILE_SCROLL = SLOT_DAYS_PER_PAGE_MOBILE;
 
 export type SlotDayStripLayout = "scroll" | "fit";
+
+function useIsMobileViewport(breakpoint = 640): boolean {
+  const read = () =>
+    typeof window !== "undefined" && window.innerWidth < breakpoint;
+  const [mobile, setMobile] = useState(read);
+  useEffect(() => {
+    const onResize = () => setMobile(read());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [breakpoint]);
+  return mobile;
+}
 
 /** Days per page depends on layout: customer booking scroll strip vs admin drawer fit. */
 function useSlotDaysPerPage(layout: SlotDayStripLayout): number {
   const read = () => {
     if (typeof window === "undefined") return SLOT_DAYS_PER_PAGE;
-    if (window.innerWidth < 640) {
-      return layout === "fit"
-        ? SLOT_DAYS_PER_PAGE_MOBILE
-        : SLOT_DAYS_PER_PAGE_MOBILE_SCROLL;
-    }
+    if (window.innerWidth < 640) return SLOT_DAYS_PER_PAGE_MOBILE;
     return SLOT_DAYS_PER_PAGE;
   };
   const [count, setCount] = useState(read);
@@ -312,8 +321,9 @@ export function SlotDayPicker({
   dayStripLayout?: SlotDayStripLayout;
 }) {
   const [showMonthCalendar, setShowMonthCalendar] = useState(false);
+  const isMobile = useIsMobileViewport();
   const daysPerPage = useSlotDaysPerPage(dayStripLayout);
-  const fitStrip = dayStripLayout === "fit";
+  const fitStrip = dayStripLayout === "fit" || isMobile;
 
   const pageDays = useMemo(
     () => getSlotDayPage(dayPage, daysPerPage),
