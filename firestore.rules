@@ -40,6 +40,19 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    function isBusinessStaff() {
+      return isSignedIn()
+        && request.auth.token.businessId is string
+        && request.auth.token.role == 'staff';
+    }
+
+    function ownsStaffInspection() {
+      return isBusinessStaff()
+        && resource.data.businessId == request.auth.token.businessId
+        && resource.data.assignedTo is map
+        && resource.data.assignedTo.uid == request.auth.uid;
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
       allow create, update, delete: if false;
@@ -114,6 +127,7 @@ service cloud.firestore {
       allow read: if isSuperAdmin()
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
+        || ownsStaffInspection()
         || ownsCustomerInspection();
       allow create, update, delete: if false;
     }
