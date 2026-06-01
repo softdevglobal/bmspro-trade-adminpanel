@@ -315,6 +315,7 @@ Written by `lib/onboarding/server.ts` (owners) and `app/api/team/staff/route.ts`
 | `isActive` | `boolean` | Mirrors `status === "active"` |
 | `createdByUid` | `string` | **→ `users/{uid}`** (creating owner) |
 | `createdByEmail` | `string \| null` | Email of creating owner |
+| `canget_qutaion` | `boolean` | Whether staff can receive/handle quotation requests (default `false`) |
 
 ---
 

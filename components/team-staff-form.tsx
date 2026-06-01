@@ -31,6 +31,7 @@ type StaffFormState = {
   email: string;
   staffType: string;
   availability: DayAvailability[];
+  canget_qutaion: boolean;
 };
 
 type StaffStatus = "active" | "suspended";
@@ -42,6 +43,7 @@ type StaffMember = {
   phone: string | null;
   staffType: string;
   availability: DayAvailability[];
+  canget_qutaion: boolean;
   status: StaffStatus;
   createdAt: string | null;
 };
@@ -63,6 +65,7 @@ function emptyForm(): StaffFormState {
     email: "",
     staffType: "",
     availability: defaultAvailability(),
+    canget_qutaion: false,
   };
 }
 
@@ -123,6 +126,11 @@ export function TeamStaffForm() {
     setError(null);
   }
 
+  function updateCanGetQuotation(value: boolean) {
+    setForm((current) => ({ ...current, canget_qutaion: value }));
+    setError(null);
+  }
+
   function toggleOffDay(day: WeekDayId) {
     setForm((current) => {
       return {
@@ -179,6 +187,7 @@ export function TeamStaffForm() {
       email: member.email,
       staffType: member.staffType,
       availability: normalizeAvailability(member.availability, serviceAreas),
+      canget_qutaion: member.canget_qutaion,
     });
     setCurrentStep(1);
     setError(null);
@@ -223,7 +232,12 @@ export function TeamStaffForm() {
         throw new Error(data.error || "Could not load staff members.");
       }
 
-      setStaffMembers(data.staff ?? []);
+      setStaffMembers(
+        (data.staff ?? []).map((member) => ({
+          ...member,
+          canget_qutaion: member.canget_qutaion === true,
+        })),
+      );
       setServiceAreas(data.serviceAreas ?? []);
     } catch (loadError) {
       setStaffListError(
@@ -304,6 +318,7 @@ export function TeamStaffForm() {
           email: form.email.trim(),
           staffType: form.staffType.trim(),
           availability: form.availability,
+          canget_qutaion: form.canget_qutaion,
         }),
       });
       const data = (await response.json()) as {
@@ -480,6 +495,7 @@ export function TeamStaffForm() {
               showDetailsErrors={showDetailsErrors}
               onUpdateField={updateField}
               onStaffTypeChange={updateStaffType}
+              onCanGetQuotationChange={updateCanGetQuotation}
               onToggleOffDay={toggleOffDay}
               onToggleServiceArea={toggleDayServiceArea}
             />
@@ -548,6 +564,7 @@ function StaffSetupStepContent({
   showDetailsErrors,
   onUpdateField,
   onStaffTypeChange,
+  onCanGetQuotationChange,
   onToggleOffDay,
   onToggleServiceArea,
 }: {
@@ -557,6 +574,7 @@ function StaffSetupStepContent({
   showDetailsErrors: boolean;
   onUpdateField: (field: "fullName" | "phone" | "email", value: string) => void;
   onStaffTypeChange: (staffType: string) => void;
+  onCanGetQuotationChange: (value: boolean) => void;
   onToggleOffDay: (day: WeekDayId) => void;
   onToggleServiceArea: (day: WeekDayId, area: string) => void;
 }) {
@@ -605,6 +623,42 @@ function StaffSetupStepContent({
                 error={showDetailsErrors ? fieldErrors.email : undefined}
                 required
               />
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3">
+            <div className="min-w-0">
+              <p className="font-body text-[13px] font-semibold leading-snug text-on-surface">
+                Can get quotation
+              </p>
+              <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
+                Allow this staff member to receive and handle quotation requests.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              <span
+                className={`font-body text-[11px] font-bold uppercase tracking-wide ${
+                  form.canget_qutaion ? "text-primary" : "text-outline"
+                }`}
+              >
+                {form.canget_qutaion ? "Yes" : "No"}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.canget_qutaion}
+                aria-label="Can get quotation"
+                onClick={() => onCanGetQuotationChange(!form.canget_qutaion)}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
+                  form.canget_qutaion ? "bg-primary" : "bg-outline-variant/80"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all duration-200 ${
+                    form.canget_qutaion ? "left-[22px]" : "left-0.5"
+                  }`}
+                />
+              </button>
             </div>
           </div>
         </StaffWizardSection>
@@ -1095,6 +1149,11 @@ function StaffReviewPanel({
           label="Availability"
           value={formatWorkingDaysLabel(workingDayCount(form.availability))}
         />
+        <ReviewMetaRow
+          icon="request_quote"
+          label="Can get quotation"
+          value={form.canget_qutaion ? "Yes" : "No"}
+        />
       </div>
 
       {detailed ? (
@@ -1557,6 +1616,10 @@ function StaffDetailDrawer({
             <DetailRow
               label="Working days"
               value={`${workingDayCount(member.availability)} of 7`}
+            />
+            <DetailRow
+              label="Can get quotation"
+              value={member.canget_qutaion ? "Yes" : "No"}
             />
           </DetailSection>
 
