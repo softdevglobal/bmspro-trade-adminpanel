@@ -53,6 +53,12 @@ const NAV_ITEMS: NavItem[] = [
     icon: "group",
     businessOwner: true,
   },
+  {
+    href: "/dashboard/items",
+    label: "Item list",
+    icon: "inventory_2",
+    businessOwner: true,
+  },
   { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
   {
     href: "/dashboard/tenants",

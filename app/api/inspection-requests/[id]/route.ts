@@ -1,5 +1,5 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { applyOwnerAction, applyStaffStart } from "@/lib/inspection/server";
+import { applyOwnerAction, applyAssignedEndVisit, applyStaffStart } from "@/lib/inspection/server";
 import {
   isClockTime,
   isFutureOrTodayDate,
@@ -125,7 +125,7 @@ async function resolveOwnerAssignment(
   };
 }
 
-async function requireAssignedStaff(request: Request, requestId: string) {
+async function requireAssignedInspector(request: Request, requestId: string) {
   const authHeader = request.headers.get("authorization") ?? "";
   const match = authHeader.match(/^Bearer (.+)$/);
   if (!match) {
@@ -141,11 +141,14 @@ async function requireAssignedStaff(request: Request, requestId: string) {
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
-    if (!businessId || role !== "staff") {
+    if (
+      !businessId ||
+      (role !== "staff" && role !== "owner" && role !== "admin")
+    ) {
       return {
         ok: false as const,
         status: 403,
-        error: "Staff access required.",
+        error: "You do not have permission to start this visit.",
       };
     }
 
@@ -222,18 +225,41 @@ export async function PATCH(
   const action = typeof payload.action === "string" ? payload.action : "";
 
   if (action === "start") {
-    const staffAuth = await requireAssignedStaff(request, id);
-    if (!staffAuth.ok) {
+    const inspectorAuth = await requireAssignedInspector(request, id);
+    if (!inspectorAuth.ok) {
       return NextResponse.json(
-        { ok: false, error: staffAuth.error },
-        { status: staffAuth.status },
+        { ok: false, error: inspectorAuth.error },
+        { status: inspectorAuth.status },
       );
     }
 
     const result = await applyStaffStart(
       id,
-      staffAuth.businessId,
-      staffAuth.uid,
+      inspectorAuth.businessId,
+      inspectorAuth.uid,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  if (action === "end_visit") {
+    const inspectorAuth = await requireAssignedInspector(request, id);
+    if (!inspectorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: inspectorAuth.error },
+        { status: inspectorAuth.status },
+      );
+    }
+
+    const result = await applyAssignedEndVisit(
+      id,
+      inspectorAuth.businessId,
+      inspectorAuth.uid,
     );
     if (!result.ok) {
       return NextResponse.json(
