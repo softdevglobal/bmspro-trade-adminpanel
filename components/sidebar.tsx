@@ -148,18 +148,12 @@ export function Sidebar({
         >
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
-              {brandLogo ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={brandLogo}
-                  alt={brandName}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <span className="material-symbols-outlined material-symbols-filled text-[24px]">
-                  architecture
-                </span>
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/bms_pro_blue.jpeg"
+                alt={brandName}
+                className="h-full w-full object-cover"
+              />
             </div>
             {showLabels && (
               <span className="truncate font-display text-[15px] font-bold text-inverse-primary">
@@ -256,7 +250,7 @@ export function Sidebar({
             </span>
             {showLabels && (
               <span className="font-body text-[13px] font-medium">
-                Collapse
+                Collapse 
               </span>
             )}
           </button>

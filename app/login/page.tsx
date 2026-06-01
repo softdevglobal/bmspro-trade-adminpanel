@@ -35,10 +35,13 @@ export default function LoginPage() {
 
         <div className="relative">
           <div className="mb-10 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-container text-on-primary shadow-lg shadow-primary/30">
-              <span className="material-symbols-outlined material-symbols-filled text-[24px]">
-                architecture
-              </span>
+            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary shadow-lg shadow-primary/30">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/bms_pro_blue.jpeg"
+                alt="BMS Pro Trade"
+                className="h-full w-full object-cover"
+              />
             </div>
             <span className="font-display text-[22px] font-bold tracking-tight text-inverse-primary">
               BMS Pro Trade
@@ -85,10 +88,13 @@ export default function LoginPage() {
         <div className="flex min-h-dvh flex-1 flex-col items-center justify-center px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-10 lg:min-h-0 lg:px-gutter lg:py-10">
           <div className="mx-auto w-full max-w-[420px]">
             <div className="mb-6 flex items-center justify-center gap-3 lg:hidden">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary">
-                <span className="material-symbols-outlined material-symbols-filled text-[22px]">
-                  architecture
-                </span>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/bms_pro_blue.jpeg"
+                  alt="BMS Pro Trade"
+                  className="h-full w-full object-cover"
+                />
               </div>
               <span className="font-display text-headline-sm text-headline-sm font-bold text-primary">
                 BMS Pro Trade
