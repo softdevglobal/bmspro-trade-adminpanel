@@ -26,7 +26,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
-  { href: "#", label: "Calendar", icon: "calendar_month" },
+  { href: "/dashboard/calendar", label: "Calendar", icon: "calendar_month" },
   {
     href: "/dashboard/inspection-visits",
     label: "Inspection visits",

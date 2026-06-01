@@ -72,7 +72,7 @@ export default function DashboardPage() {
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {[
               { label: "Add booking", icon: "add", href: "#" },
-              { label: "Open calendar", icon: "calendar_month", href: "#" },
+              { label: "Open calendar", icon: "calendar_month", href: "/dashboard/calendar" },
               { label: "View queue", icon: "list_alt", href: "#" },
               { label: "Team partners", icon: "handshake", href: "#" },
               { label: "Settings", icon: "settings", href: "/dashboard/settings" },
