@@ -1,9 +1,13 @@
 import "server-only";
 
-import { formatAddress } from "@/lib/inspection/types";
+import {
+  formatAddress,
+  formatInspectionVisitReference,
+} from "@/lib/inspection/types";
 import {
   PDFDocument,
   PDFFont,
+  PDFImage,
   PDFPage,
   StandardFonts,
   rgb,
@@ -34,6 +38,33 @@ function formatDate(value: number | null): string {
   });
 }
 
+const LOGO_BOX = 44;
+
+async function embedLogoFromUrl(
+  doc: PDFDocument,
+  logoUrl: string,
+): Promise<PDFImage | null> {
+  try {
+    const res = await fetch(logoUrl.trim());
+    if (!res.ok) return null;
+    const bytes = await res.arrayBuffer();
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (contentType.includes("png")) {
+      return doc.embedPng(bytes);
+    }
+    if (contentType.includes("jpeg") || contentType.includes("jpg")) {
+      return doc.embedJpg(bytes);
+    }
+    try {
+      return await doc.embedPng(bytes);
+    } catch {
+      return await doc.embedJpg(bytes);
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** Truncates text to fit within maxWidth for the given font/size. */
 function fitText(
   text: string,
@@ -58,7 +89,7 @@ function fitText(
  */
 export async function generateQuotationPdf(
   quotation: QuotationDetail,
-  options: { businessName?: string | null } = {},
+  options: { businessName?: string | null; logoUrl?: string | null } = {},
 ): Promise<Buffer> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -68,6 +99,11 @@ export async function generateQuotationPdf(
   let y = PAGE_HEIGHT;
 
   const brandName = options.businessName?.trim() || "BMS Pro Trade";
+  const logoUrl =
+    options.logoUrl && /^https?:\/\//.test(options.logoUrl.trim())
+      ? options.logoUrl.trim()
+      : null;
+  const logoImage = logoUrl ? await embedLogoFromUrl(doc, logoUrl) : null;
 
   const ensureSpace = (needed: number) => {
     if (y - needed < MARGIN) {
@@ -100,16 +136,27 @@ export async function generateQuotationPdf(
     height: headerHeight,
     color: BRAND,
   });
-  drawText(brandName, MARGIN, PAGE_HEIGHT - 44, {
+
+  const brandTextX = logoImage ? MARGIN + LOGO_BOX + 12 : MARGIN;
+  if (logoImage) {
+    page.drawImage(logoImage, {
+      x: MARGIN,
+      y: PAGE_HEIGHT - headerHeight + (headerHeight - LOGO_BOX) / 2,
+      width: LOGO_BOX,
+      height: LOGO_BOX,
+    });
+  }
+
+  drawText(brandName, brandTextX, PAGE_HEIGHT - 44, {
     size: 20,
     bold: true,
     color: rgb(1, 1, 1),
   });
-  drawText("QUOTATION", MARGIN, PAGE_HEIGHT - 68, {
+  drawText("QUOTATION", brandTextX, PAGE_HEIGHT - 68, {
     size: 12,
     color: rgb(0.82, 0.88, 1),
   });
-  const refText = `Ref: ${quotation.id.slice(0, 8).toUpperCase()}`;
+  const refText = `Ref: ${formatInspectionVisitReference(quotation.inspectionRequestId)}`;
   drawText(
     refText,
     PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(refText, 10),

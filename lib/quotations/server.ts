@@ -6,6 +6,7 @@ import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
   formatAddress,
+  formatInspectionVisitReference,
   formatSlotDate,
   formatVisitWindow,
   type InspectionAddress,
@@ -271,6 +272,35 @@ function parseAdditions(raw: unknown): QuotationAddition[] {
   return additions;
 }
 
+type QuotationBusinessBranding = {
+  businessName: string | null;
+  bookingSlug: string | null;
+  logoUrl: string | null;
+};
+
+async function loadQuotationBusinessBranding(
+  businessId: string,
+): Promise<QuotationBusinessBranding> {
+  try {
+    const businessSnap = await adminDb.collection("businesses").doc(businessId).get();
+    const businessData = businessSnap.data() ?? {};
+    return {
+      businessName:
+        typeof businessData.businessName === "string"
+          ? businessData.businessName
+          : null,
+      bookingSlug:
+        typeof businessData.bookingSlug === "string"
+          ? businessData.bookingSlug
+          : null,
+      logoUrl:
+        typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
+    };
+  } catch {
+    return { businessName: null, bookingSlug: null, logoUrl: null };
+  }
+}
+
 export async function createQuotationForInspection(
   businessId: string,
   createdBy: string,
@@ -361,6 +391,8 @@ export async function createQuotationForInspection(
   const saved = await ref.get();
   let quotation = mapQuotationDoc(ref.id, saved.data() ?? {});
 
+  const businessBranding = await loadQuotationBusinessBranding(businessId);
+
   // Generate a branded PDF, upload to storage, and persist its URL.
   let pdfBytes: Buffer | null = null;
   try {
@@ -369,10 +401,8 @@ export async function createQuotationForInspection(
       "@/lib/onboarding/services/upload"
     );
     pdfBytes = await generateQuotationPdf(quotation, {
-      businessName:
-        typeof requestData.businessName === "string"
-          ? requestData.businessName
-          : null,
+      businessName: businessBranding.businessName,
+      logoUrl: businessBranding.logoUrl,
     });
     const uploaded = await uploadQuotationPdf(pdfBytes, {
       businessId,
@@ -456,7 +486,12 @@ export async function createQuotationForInspection(
     /* catalog auto-save is best-effort */
   }
 
-  await sendQuotationCreatedEmail(requestData, quotation, pdfBytes);
+  await sendQuotationCreatedEmail(
+    requestData,
+    quotation,
+    pdfBytes,
+    businessBranding,
+  );
 
   return { ok: true, quotation };
 }
@@ -484,6 +519,7 @@ async function sendQuotationCreatedEmail(
   requestData: Record<string, unknown>,
   quotation: QuotationDetail,
   pdfBytes: Buffer | null,
+  businessBranding: QuotationBusinessBranding,
 ): Promise<void> {
   const customer = quotation.customer;
   const email = customer.email?.trim();
@@ -505,7 +541,12 @@ async function sendQuotationCreatedEmail(
         : null,
     );
 
+    const visitReference = formatInspectionVisitReference(
+      quotation.inspectionRequestId,
+    );
+
     const details = [
+      { label: "Reference", value: visitReference },
       { label: "Service", value: quotation.serviceTitle },
       { label: "Customer", value: customer.fullName || "—" },
     ];
@@ -537,38 +578,18 @@ async function sendQuotationCreatedEmail(
       });
     }
 
-    let bookingSlug: string | null = null;
-    let businessName: string | null = null;
-    let logoUrl: string | null = null;
-    try {
-      const businessSnap = await adminDb
-        .collection("businesses")
-        .doc(quotation.businessId)
-        .get();
-      const businessData = businessSnap.data() ?? {};
-      bookingSlug =
-        typeof businessData.bookingSlug === "string"
-          ? businessData.bookingSlug
-          : null;
-      businessName =
-        typeof businessData.businessName === "string"
-          ? businessData.businessName
-          : null;
-      logoUrl =
-        typeof businessData.logoUrl === "string" ? businessData.logoUrl : null;
-    } catch {
-      /* best-effort */
-    }
+    const { businessName, bookingSlug, logoUrl } = businessBranding;
 
     const bookingEngineUrl = bookingSlug ? buildBookingUrl(bookingSlug) : null;
     const greetingName = customer.fullName?.trim().split(/\s+/)[0] ?? null;
+    const businessLabel = businessName?.trim() || "your trade provider";
 
     const html = renderEmail({
       eyebrow: "Quotation",
       tone: "brand",
       title: `Quotation for ${quotation.serviceTitle}`,
       greetingName,
-      body: `Thank you for your visit. Here is your quotation summary from the inspection. A PDF copy is attached for your records.`,
+      body: `Thank you for your visit with ${businessLabel}. Here is your quotation summary from the inspection. A PDF copy is attached for your records.`,
       details,
       highlight: `Aus $${quotation.finalPriceAud.toFixed(2)}`,
       highlightLabel: "Final price",
@@ -581,10 +602,15 @@ async function sendQuotationCreatedEmail(
       logoUrl,
     });
 
+    const subjectBusiness = businessName?.trim();
+    const subject = subjectBusiness
+      ? `${subjectBusiness} — Quotation — ${quotation.serviceTitle}`
+      : `Quotation — ${quotation.serviceTitle}`;
+
     await sendEmail({
       sender: "request",
       to: email,
-      subject: `Quotation — ${quotation.serviceTitle}`,
+      subject,
       htmlBody: html,
       attachments: pdfBytes
         ? [

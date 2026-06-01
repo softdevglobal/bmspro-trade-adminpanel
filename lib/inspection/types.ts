@@ -362,6 +362,15 @@ export function formatSlotDate(date: string): string {
   });
 }
 
+/** Short, human-friendly reference code derived from an inspection visit id. */
+export function formatInspectionVisitReference(
+  inspectionRequestId: string,
+): string {
+  const id = inspectionRequestId.trim();
+  if (!id) return "—";
+  return id.slice(0, 8).toUpperCase();
+}
+
 export function formatAddress(address: InspectionAddress): string {
   const postcode = address.postcode.trim();
   const parts = [address.street, address.suburb, address.state]
