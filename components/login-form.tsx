@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
+import { ForgotPasswordModal } from "@/components/forgot-password-modal";
 import { FormEvent, useRef, useState } from "react";
 
 type FirebaseAuthError = { code?: string; message?: string };
@@ -35,6 +36,7 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   async function handleLogin(email: string, password: string) {
     setErrorMessage(null);
@@ -64,6 +66,7 @@ export function LoginForm() {
   }
 
   return (
+    <>
     <form
       ref={formRef}
       className="flex flex-col gap-4"
@@ -98,6 +101,7 @@ export function LoginForm() {
             required
             placeholder="admin@business.com"
             enterKeyHint="next"
+            suppressHydrationWarning
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -124,12 +128,13 @@ export function LoginForm() {
           >
             Password
           </label>
-          <a
-            href="#"
-            className="font-body text-[13px] font-semibold text-primary hover:text-primary-container transition-colors"
+          <button
+            type="button"
+            onClick={() => setForgotOpen(true)}
+            className="font-body text-[13px] font-semibold text-primary hover:text-primary/70 transition-colors"
           >
-            Forgot?
-          </a>
+            Forgot password?
+          </button>
         </div>
         <div className="relative">
           <span className="material-symbols-outlined pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[20px] text-outline">
@@ -143,6 +148,7 @@ export function LoginForm() {
             required
             placeholder="Enter your password"
             enterKeyHint="go"
+            suppressHydrationWarning
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -164,7 +170,7 @@ export function LoginForm() {
         </div>
       </div>
 
-      <label className="-mt-0.5 flex cursor-pointer select-none items-center gap-2">
+      <label className="-mt-0.5 inline-flex cursor-pointer select-none items-center gap-2">
         <input
           type="checkbox"
           name="remember"
@@ -196,6 +202,13 @@ export function LoginForm() {
           </>
         )}
       </button>
+
     </form>
+
+    <ForgotPasswordModal
+      open={forgotOpen}
+      onClose={() => setForgotOpen(false)}
+    />
+    </>
   );
 }

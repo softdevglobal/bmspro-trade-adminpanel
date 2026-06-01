@@ -30,6 +30,7 @@ type StaffPayload = {
   phone: string;
   staffType: string;
   availability: DayAvailability[];
+  canget_qutaion: boolean;
 };
 
 type StaffUpdatePayload = StaffPayload & {
@@ -133,6 +134,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   const phone = sanitizeString(input.phone).replace(/\D/g, "");
   const staffType = sanitizeString(input.staffType);
   const availability = parseAvailability(input.availability, allowedServiceAreas);
+  const canget_qutaion = input.canget_qutaion === true;
 
   if (!fullName) {
     return { ok: false, error: "Full name is required." };
@@ -183,6 +185,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
       phone,
       staffType,
       availability,
+      canget_qutaion,
     },
   };
 }
@@ -387,6 +390,7 @@ export async function POST(request: Request) {
       role: "staff",
       staffType: parsed.value.staffType,
       availability: parsed.value.availability,
+      canget_qutaion: parsed.value.canget_qutaion,
       status: "active",
       isActive: true,
       mustChangePassword: true,
@@ -469,6 +473,7 @@ export async function GET(request: Request) {
         phone: sanitizeString(data.phone) || null,
         role: sanitizeString(data.role),
         staffType: staffType(data.staffType, data.skills),
+        canget_qutaion: data.canget_qutaion === true,
         availability: summaryOnly
           ? {}
           : availabilityForResponse(data.availability, serviceAreas),
@@ -485,6 +490,7 @@ export async function GET(request: Request) {
       email: member.email,
       phone: member.phone,
       staffType: member.staffType,
+      canget_qutaion: member.canget_qutaion,
       availability: member.availability,
       status: member.status,
       createdAt: member.createdAt,
@@ -616,6 +622,7 @@ export async function PATCH(request: Request) {
     phone: parsed.value.phone,
     staffType: parsed.value.staffType,
     availability: parsed.value.availability,
+    canget_qutaion: parsed.value.canget_qutaion,
     updatedAt: FieldValue.serverTimestamp(),
   });
 
