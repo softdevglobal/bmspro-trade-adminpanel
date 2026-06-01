@@ -39,6 +39,14 @@
         { "fieldPath": "customerEmail", "order": "ASCENDING" },
         { "fieldPath": "read", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "inspection_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "assignedTo.uid", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
