@@ -252,6 +252,65 @@ export async function uploadQuotationImage(
 }
 
 /**
+ * Uploads a catalog item photo to Firebase Storage.
+ */
+export async function uploadItemImage(
+  file: Buffer,
+  contentType: string,
+  options: {
+    businessId: string;
+    uid: string;
+    filename?: string;
+  },
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  const resolved = resolveImageContentType(
+    contentType,
+    options.filename ?? "",
+    file,
+  );
+  if (!resolved) {
+    return {
+      ok: false,
+      error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF.",
+    };
+  }
+  contentType = resolved;
+
+  if (file.length > MAX_BYTES) {
+    return { ok: false, error: "Image must be 5 MB or smaller." };
+  }
+
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const bucket = getStorage().bucket(bucketName);
+  const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+  const path = `items/${options.businessId}/${options.uid}/${Date.now()}-${randomUUID()}.${ext}`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType,
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+        },
+      },
+    });
+
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, imageUrl };
+  } catch (error) {
+    console.error("uploadItemImage failed:", error);
+    return { ok: false, error: "Could not upload image." };
+  }
+}
+
+/**
  * Uploads a generated quotation PDF to Firebase Storage and returns a public
  * download URL.
  */

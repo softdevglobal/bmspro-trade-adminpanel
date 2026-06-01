@@ -2,18 +2,21 @@
 
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { auth } from "@/lib/firebase/client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 type CatalogItem = {
   id: string;
   name: string;
   priceAud: number;
+  imageUrl: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+
+const NUMBER_INPUT_CLASS = `${INPUT_CLASS} [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`;
 
 async function readJson<T extends { ok?: boolean; error?: string }>(
   response: Response,
@@ -62,6 +65,38 @@ async function authFetch<T>(
 
 function formatPrice(value: number): string {
   return `Aus $${value.toFixed(2)}`;
+}
+
+async function uploadItemImageFile(
+  file: File,
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  const user = auth.currentUser;
+  if (!user) return { ok: false, error: "Please sign in again." };
+
+  const token = await user.getIdToken();
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/uploads/item-image", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  const data = await readJson<{
+    ok?: boolean;
+    error?: string;
+    imageUrl?: string;
+  }>(response);
+
+  if (!response.ok || !data.ok || !data.imageUrl) {
+    return {
+      ok: false,
+      error: typeof data.error === "string" ? data.error : "Could not upload image.",
+    };
+  }
+
+  return { ok: true, imageUrl: data.imageUrl };
 }
 
 export function ItemListBoard() {
@@ -200,22 +235,30 @@ export function ItemListBoard() {
           ) : null}
         </div>
       ) : (
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((item) => (
             <li
               key={item.id}
-              className="group flex items-center gap-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4"
+              className="group flex items-center gap-4 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-5"
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-container text-on-primary">
-                <span className="material-symbols-outlined text-[22px]">
-                  sell
-                </span>
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
+                {item.imageUrl ? (
+                  <img
+                    src={item.imageUrl}
+                    alt={item.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="material-symbols-outlined text-[26px]">
+                    sell
+                  </span>
+                )}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-display text-[15px] font-semibold text-on-surface">
+                <p className="truncate font-display text-[17px] font-semibold text-on-surface">
                   {item.name}
                 </p>
-                <p className="mt-0.5 font-body text-[13px] font-semibold text-primary">
+                <p className="font-numeric mt-1 text-[15px] font-semibold text-primary">
                   {formatPrice(item.priceAud)}
                 </p>
               </div>
@@ -224,9 +267,9 @@ export function ItemListBoard() {
                   type="button"
                   onClick={() => openEdit(item)}
                   aria-label={`Edit ${item.name}`}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
                 >
-                  <span className="material-symbols-outlined text-[20px]">
+                  <span className="material-symbols-outlined text-[22px]">
                     edit
                   </span>
                 </button>
@@ -234,9 +277,9 @@ export function ItemListBoard() {
                   type="button"
                   onClick={() => setDeleteTarget(item)}
                   aria-label={`Delete ${item.name}`}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-error-container hover:text-error"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-error-container hover:text-error"
                 >
-                  <span className="material-symbols-outlined text-[20px]">
+                  <span className="material-symbols-outlined text-[22px]">
                     delete
                   </span>
                 </button>
@@ -294,6 +337,8 @@ function ItemEditorModal({
   const [price, setPrice] = useState(
     item ? item.priceAud.toString() : "",
   );
+  const [imageUrl, setImageUrl] = useState<string | null>(item?.imageUrl ?? null);
+  const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -330,7 +375,11 @@ function ItemEditorModal({
     const method = isEdit ? "PATCH" : "POST";
     const result = await authFetch<{ ok: true }>(path, {
       method,
-      body: JSON.stringify({ name: trimmedName, priceAud: parsedPrice }),
+      body: JSON.stringify({
+        name: trimmedName,
+        priceAud: parsedPrice,
+        imageUrl,
+      }),
     });
 
     setIsSaving(false);
@@ -339,6 +388,23 @@ function ItemEditorModal({
       return;
     }
     onSaved();
+  }
+
+  async function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setIsUploading(true);
+    setLocalError(null);
+    const result = await uploadItemImageFile(file);
+    setIsUploading(false);
+
+    if (!result.ok) {
+      setLocalError(result.error);
+      return;
+    }
+    setImageUrl(result.imageUrl);
   }
 
   return (
@@ -380,6 +446,68 @@ function ItemEditorModal({
 
           <label className="flex flex-col gap-2">
             <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+              Photo
+            </span>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative mx-auto h-24 w-24 shrink-0 overflow-hidden rounded-xl border-2 border-dashed border-outline-variant bg-surface-container-low sm:mx-0">
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt="Item preview"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[28px]">
+                      add_a_photo
+                    </span>
+                    <span className="font-body text-[10px] font-semibold uppercase tracking-wide">
+                      No photo
+                    </span>
+                  </div>
+                )}
+                {isUploading ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-on-background/40 backdrop-blur-[2px]">
+                    <span className="material-symbols-outlined animate-spin text-[24px] text-primary">
+                      progress_activity
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high">
+                  <span className="material-symbols-outlined text-[18px]">
+                    upload
+                  </span>
+                  {isUploading ? "Uploading…" : "Upload photo"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="sr-only"
+                    disabled={isUploading || isSaving}
+                    onChange={(event) => void handlePhotoChange(event)}
+                  />
+                </label>
+                {imageUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => setImageUrl(null)}
+                    disabled={isUploading || isSaving}
+                    className="rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-error disabled:opacity-60"
+                  >
+                    Remove photo
+                  </button>
+                ) : null}
+                <p className="font-body text-[11px] text-on-surface-variant">
+                  JPEG, PNG, WebP or GIF · max 5 MB
+                </p>
+              </div>
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
               Name <span className="text-error">*</span>
             </span>
             <input
@@ -404,7 +532,7 @@ function ItemEditorModal({
               value={price}
               onChange={(event) => setPrice(event.target.value)}
               placeholder="0.00"
-              className={INPUT_CLASS}
+              className={NUMBER_INPUT_CLASS}
             />
           </label>
         </div>
@@ -420,7 +548,7 @@ function ItemEditorModal({
           <button
             type="button"
             onClick={() => void handleSave()}
-            disabled={isSaving}
+            disabled={isSaving || isUploading}
             className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
           >
             {isSaving ? (
