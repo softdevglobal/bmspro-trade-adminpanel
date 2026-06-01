@@ -389,6 +389,7 @@ export async function POST(request: Request) {
       availability: parsed.value.availability,
       status: "active",
       isActive: true,
+      mustChangePassword: true,
       createdByUid: auth.uid,
       createdByEmail: auth.email ?? null,
       createdAt: now,
