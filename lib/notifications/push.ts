@@ -27,7 +27,13 @@ type OwnerPushInput = {
   data: Record<string, string>;
 };
 
-/** Best-effort FCM push to the owner's mobile device. */
+/**
+ * Best-effort FCM push to the owner's mobile device.
+ *
+ * Sends a data-only message so the mobile app does not show a system
+ * notification while foreground (Firestore listener handles that). Background
+ * delivery is handled by the app's FCM background handler.
+ */
 export async function sendOwnerMobilePush(
   input: OwnerPushInput,
 ): Promise<void> {
@@ -38,31 +44,23 @@ export async function sendOwnerMobilePush(
 
     await getMessaging(adminApp).send({
       token: fcmToken.trim(),
-      notification: {
+      data: {
+        ...input.data,
         title: input.title,
         body: input.body,
+        message: input.body,
       },
-      data: input.data,
       android: {
         priority: "high",
-        notification: {
-          channelId: "appointments",
-          sound: "default",
-        },
       },
       apns: {
         headers: {
           "apns-priority": "10",
-          "apns-push-type": "alert",
+          "apns-push-type": "background",
         },
         payload: {
           aps: {
-            alert: {
-              title: input.title,
-              body: input.body,
-            },
-            sound: "default",
-            badge: 1,
+            "content-available": 1,
           },
         },
       },
