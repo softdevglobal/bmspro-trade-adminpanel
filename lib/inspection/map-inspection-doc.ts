@@ -135,6 +135,7 @@ export function mapInspectionDoc(
         : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
+    visitStartedAt: toMillis(data.visitStartedAt),
   };
 }
 

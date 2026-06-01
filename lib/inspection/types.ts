@@ -104,6 +104,7 @@ export type InspectionRequestDetail = {
   budgetAud: number | null;
   createdAt: number | null;
   updatedAt: number | null;
+  visitStartedAt: number | null;
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
