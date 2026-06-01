@@ -18,6 +18,8 @@ const INPUT_CLASS =
 
 const NUMBER_INPUT_CLASS = `${INPUT_CLASS} [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`;
 
+const ITEM_EDITOR_STEPS = 2;
+
 async function readJson<T extends { ok?: boolean; error?: string }>(
   response: Response,
 ): Promise<T> {
@@ -333,6 +335,7 @@ function ItemEditorModal({
   onError: (message: string | null) => void;
 }) {
   const isEdit = item !== null;
+  const [currentStep, setCurrentStep] = useState(1);
   const [name, setName] = useState(item?.name ?? "");
   const [price, setPrice] = useState(
     item ? item.priceAud.toString() : "",
@@ -341,6 +344,8 @@ function ItemEditorModal({
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  const progressPercent = Math.round((currentStep / ITEM_EDITOR_STEPS) * 100);
 
   useEffect(() => {
     function handleKey(event: KeyboardEvent) {
@@ -354,18 +359,36 @@ function ItemEditorModal({
     };
   }, [onClose]);
 
-  async function handleSave() {
-    if (isSaving) return;
+  function validateForm(): boolean {
     const trimmedName = name.trim();
     const parsedPrice = Number.parseFloat(price.trim());
     if (trimmedName.length < 1) {
       setLocalError("Item name is required.");
-      return;
+      return false;
     }
     if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
       setLocalError("Enter a valid price.");
-      return;
+      return false;
     }
+    setLocalError(null);
+    return true;
+  }
+
+  function handleContinue() {
+    if (!validateForm()) return;
+    setCurrentStep(2);
+  }
+
+  function handleBack() {
+    setLocalError(null);
+    setCurrentStep(1);
+  }
+
+  async function handleSave() {
+    if (isSaving || !validateForm()) return;
+
+    const trimmedName = name.trim();
+    const parsedPrice = Number.parseFloat(price.trim());
 
     setIsSaving(true);
     setLocalError(null);
@@ -407,6 +430,12 @@ function ItemEditorModal({
     setImageUrl(result.imageUrl);
   }
 
+  const parsedPreviewPrice = Number.parseFloat(price.trim());
+  const previewPrice =
+    Number.isFinite(parsedPreviewPrice) && parsedPreviewPrice >= 0
+      ? parsedPreviewPrice
+      : 0;
+
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-4">
       <button
@@ -418,157 +447,315 @@ function ItemEditorModal({
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 w-full max-w-md overflow-hidden rounded-t-2xl border border-outline-variant bg-background shadow-2xl sm:rounded-2xl"
+        aria-labelledby="item-editor-title"
+        className="relative z-10 grid h-[min(92dvh,calc(100dvh-2rem))] max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-md grid-rows-[auto_1fr_auto] overflow-hidden rounded-t-2xl border border-outline-variant bg-background shadow-2xl sm:rounded-2xl"
       >
-        <header className="flex items-center justify-between gap-4 border-b border-outline-variant px-5 py-4">
-          <h2 className="font-display text-headline-sm font-semibold text-on-surface">
-            {isEdit ? "Edit item" : "Add item"}
-          </h2>
+        <header className="flex items-start justify-between gap-4 border-b border-outline-variant px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-body text-[12px] font-semibold uppercase tracking-wider text-primary">
+              Step {currentStep} of {ITEM_EDITOR_STEPS}
+            </p>
+            <h2
+              id="item-editor-title"
+              className="font-display text-headline-sm font-semibold text-on-surface"
+            >
+              {isEdit ? "Edit item" : "Add item"}
+            </h2>
+            <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+              {currentStep === 1
+                ? "Add the photo, name and price for your catalog item."
+                : "Review how this item will appear in your list."}
+            </p>
+            <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-low"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-low"
             aria-label="Close"
           >
             <span className="material-symbols-outlined">close</span>
           </button>
         </header>
 
-        <div className="flex flex-col gap-4 px-5 py-5">
-          {localError && (
-            <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
+        <div className="min-h-0 overflow-y-auto px-5 py-5">
+          {localError ? (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
               <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
                 error
               </span>
               <span>{localError}</span>
             </div>
-          )}
+          ) : null}
 
-          <label className="flex flex-col gap-2">
-            <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
-              Photo
-            </span>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="relative mx-auto h-24 w-24 shrink-0 overflow-hidden rounded-xl border-2 border-dashed border-outline-variant bg-surface-container-low sm:mx-0">
-                {imageUrl ? (
-                  <img
-                    src={imageUrl}
-                    alt="Item preview"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[28px]">
-                      add_a_photo
-                    </span>
-                    <span className="font-body text-[10px] font-semibold uppercase tracking-wide">
-                      No photo
-                    </span>
-                  </div>
-                )}
-                {isUploading ? (
-                  <div className="absolute inset-0 flex items-center justify-center bg-on-background/40 backdrop-blur-[2px]">
-                    <span className="material-symbols-outlined animate-spin text-[24px] text-primary">
-                      progress_activity
-                    </span>
-                  </div>
-                ) : null}
-              </div>
+          {currentStep === 1 ? (
+            <div className="flex flex-col gap-4">
+              <ItemEditorHero
+                eyebrow="Step 1 · Item details"
+                title="Photo, name and price"
+                description="These details appear in your item catalog and quotations."
+                icon="inventory_2"
+              />
 
-              <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high">
-                  <span className="material-symbols-outlined text-[18px]">
-                    upload
-                  </span>
-                  {isUploading ? "Uploading…" : "Upload photo"}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    className="sr-only"
-                    disabled={isUploading || isSaving}
-                    onChange={(event) => void handlePhotoChange(event)}
-                  />
-                </label>
-                {imageUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => setImageUrl(null)}
-                    disabled={isUploading || isSaving}
-                    className="rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-error disabled:opacity-60"
-                  >
-                    Remove photo
-                  </button>
-                ) : null}
-                <p className="font-body text-[11px] text-on-surface-variant">
-                  JPEG, PNG, WebP or GIF · max 5 MB
-                </p>
-              </div>
+              <label className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Photo
+                </span>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="relative mx-auto h-24 w-24 shrink-0 overflow-hidden rounded-xl border-2 border-dashed border-outline-variant bg-surface-container-low sm:mx-0">
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt="Item preview"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[28px]">
+                          add_a_photo
+                        </span>
+                        <span className="font-body text-[10px] font-semibold uppercase tracking-wide">
+                          No photo
+                        </span>
+                      </div>
+                    )}
+                    {isUploading ? (
+                      <div className="absolute inset-0 flex items-center justify-center bg-on-background/40 backdrop-blur-[2px]">
+                        <span className="material-symbols-outlined animate-spin text-[24px] text-primary">
+                          progress_activity
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high">
+                      <span className="material-symbols-outlined text-[18px]">
+                        upload
+                      </span>
+                      {isUploading ? "Uploading…" : "Upload photo"}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        className="sr-only"
+                        disabled={isUploading || isSaving}
+                        onChange={(event) => void handlePhotoChange(event)}
+                      />
+                    </label>
+                    {imageUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => setImageUrl(null)}
+                        disabled={isUploading || isSaving}
+                        className="rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-error disabled:opacity-60"
+                      >
+                        Remove photo
+                      </button>
+                    ) : null}
+                    <p className="font-body text-[11px] text-on-surface-variant">
+                      JPEG, PNG, WebP or GIF · max 5 MB
+                    </p>
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Name <span className="text-error">*</span>
+                </span>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="e.g. Tap replacement"
+                  className={INPUT_CLASS}
+                  autoFocus
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Price (AUD) <span className="text-error">*</span>
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  value={price}
+                  onChange={(event) => setPrice(event.target.value)}
+                  placeholder="0.00"
+                  className={NUMBER_INPUT_CLASS}
+                />
+              </label>
             </div>
-          </label>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <ItemEditorHero
+                eyebrow="Step 2 · Review"
+                title="Preview before saving"
+                description="Check the photo, name and price, then save this item."
+                icon="fact_check"
+              />
 
-          <label className="flex flex-col gap-2">
-            <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
-              Name <span className="text-error">*</span>
-            </span>
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Tap replacement"
-              className={INPUT_CLASS}
-              autoFocus
-            />
-          </label>
-
-          <label className="flex flex-col gap-2">
-            <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
-              Price (AUD) <span className="text-error">*</span>
-            </span>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={price}
-              onChange={(event) => setPrice(event.target.value)}
-              placeholder="0.00"
-              className={NUMBER_INPUT_CLASS}
-            />
-          </label>
+              <ItemPreviewPanel
+                name={name.trim() || "Untitled item"}
+                priceAud={previewPrice}
+                imageUrl={imageUrl}
+              />
+            </div>
+          )}
         </div>
 
-        <footer className="flex items-center justify-end gap-3 border-t border-outline-variant px-5 py-4">
+        <footer className="flex items-center justify-between gap-3 border-t border-outline-variant px-5 py-4 shadow-[0_-8px_24px_rgba(0,42,150,0.08)]">
           <button
             type="button"
-            onClick={onClose}
+            onClick={currentStep === 1 ? onClose : handleBack}
             className="rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
           >
-            Cancel
+            {currentStep === 1 ? "Cancel" : "Back"}
           </button>
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={isSaving || isUploading}
-            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
-          >
-            {isSaving ? (
-              <>
-                <span className="material-symbols-outlined animate-spin text-[18px]">
-                  progress_activity
-                </span>
-                Saving...
-              </>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[18px]">
-                  save
-                </span>
-                {isEdit ? "Save changes" : "Add item"}
-              </>
-            )}
-          </button>
+
+          {currentStep < ITEM_EDITOR_STEPS ? (
+            <button
+              type="button"
+              onClick={handleContinue}
+              disabled={isUploading}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
+            >
+              Continue
+              <span className="material-symbols-outlined text-[18px]">
+                arrow_forward
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={isSaving || isUploading}
+              className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
+            >
+              {isSaving ? (
+                <>
+                  <span className="material-symbols-outlined animate-spin text-[18px]">
+                    progress_activity
+                  </span>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">
+                    save
+                  </span>
+                  {isEdit ? "Save changes" : "Add item"}
+                </>
+              )}
+            </button>
+          )}
         </footer>
       </div>
     </div>
+  );
+}
+
+function ItemEditorHero({
+  eyebrow,
+  title,
+  description,
+  icon,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  icon: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#00174b] via-primary-container to-primary px-4 py-4 text-on-primary">
+      <div
+        className="pointer-events-none absolute -right-4 top-0 opacity-[0.1]"
+        aria-hidden
+      >
+        <span className="material-symbols-outlined text-[5rem]">{icon}</span>
+      </div>
+      <p className="relative font-body text-[10px] font-bold uppercase tracking-[0.16em] text-white/80">
+        {eyebrow}
+      </p>
+      <h3 className="relative mt-1 font-display text-[1.15rem] font-semibold text-white">
+        {title}
+      </h3>
+      <p className="relative mt-1.5 font-body text-[12px] text-white/85">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function ItemPreviewPanel({
+  name,
+  priceAud,
+  imageUrl,
+}: {
+  name: string;
+  priceAud: number;
+  imageUrl: string | null;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+      <div className="border-b border-outline-variant/60 bg-surface-container-low px-4 py-3">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+          Catalog preview
+        </p>
+      </div>
+
+      <div className="flex items-center gap-4 p-5">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
+          {imageUrl ? (
+            <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
+          ) : (
+            <span className="material-symbols-outlined text-[26px]">sell</span>
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-display text-[17px] font-semibold text-on-surface">
+            {name}
+          </p>
+          <p className="font-numeric mt-1 text-[15px] font-semibold text-primary">
+            {formatPrice(priceAud)}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 border-t border-outline-variant/60 p-4 sm:grid-cols-2">
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Name
+          </p>
+          <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
+            {name}
+          </p>
+        </div>
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Price
+          </p>
+          <p className="font-numeric mt-1 text-[13px] font-semibold text-on-surface">
+            {formatPrice(priceAud)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5 sm:col-span-2">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Photo
+          </p>
+          <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
+            {imageUrl ? "Photo added" : "No photo"}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
