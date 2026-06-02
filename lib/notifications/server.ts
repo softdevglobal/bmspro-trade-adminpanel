@@ -20,13 +20,8 @@ import {
   type InspectionRequestStatus,
   type InspectionSlot,
 } from "@/lib/inspection/types";
-import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
-import {
-  renderEmail,
-  type EmailDetailRow,
-  type EmailTone,
-} from "@/lib/email/templates";
-import { sendEmail } from "@/lib/email/zeptomail";
+import type { EmailDetailRow } from "@/lib/email/layout";
+import { sendInspectionCustomerNotificationEmail } from "@/lib/email/templates/inspection-customer-notification";
 import {
   resolveBusinessOwnerUid,
   sendOwnerMobilePush,
@@ -36,20 +31,6 @@ import {
   notifyBusinessNotificationsChanged,
   notifyCustomerNotificationsChanged,
 } from "@/lib/notifications/realtime-hub";
-
-/** Eyebrow + tone shown in the customer email for each notification type. */
-const EMAIL_PRESENTATION: Record<
-  NotificationType,
-  { eyebrow: string; tone: EmailTone }
-> = {
-  request_created: { eyebrow: "Inspection request", tone: "brand" },
-  request_scheduled: { eyebrow: "Visit confirmed", tone: "success" },
-  request_proposed: { eyebrow: "New times proposed", tone: "warning" },
-  request_assigned: { eyebrow: "Inspector assigned", tone: "success" },
-  visit_on_the_way: { eyebrow: "On the way", tone: "brand" },
-  request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },
-  request_completed: { eyebrow: "Visit completed", tone: "success" },
-};
 
 const MAX_BATCH = 400;
 
@@ -111,7 +92,19 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
   );
 
   if (input.audience === "customer" && input.customerEmail) {
-    await sendCustomerNotificationEmail(input);
+    await sendInspectionCustomerNotificationEmail({
+      customerEmail: input.customerEmail,
+      customerName: input.customerName,
+      bookingSlug: input.bookingSlug,
+      businessName: input.businessName,
+      logoUrl: input.logoUrl,
+      type: input.type,
+      title: input.title,
+      body: input.body,
+      emailDetails: input.emailDetails,
+      emailHighlight: input.emailHighlight,
+      emailHighlightLabel: input.emailHighlightLabel,
+    });
   }
 
   if (input.audience === "business" && input.businessId) {
@@ -119,57 +112,6 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
   } else if (input.audience === "customer" && input.customerId) {
     notifyCustomerNotificationsChanged(input.customerId);
   }
-}
-
-/** Builds the customer-facing "view your request" link for emails. */
-function customerRequestUrl(bookingSlug: string | null | undefined): string | null {
-  if (!bookingSlug) return null;
-  const base = buildBookingUrl(bookingSlug);
-  if (!base) return null;
-  return `${base}/account/requests`;
-}
-
-/** Best-effort email mirroring a customer notification. */
-async function sendCustomerNotificationEmail(
-  input: CreateNotificationInput,
-): Promise<void> {
-  if (!input.customerEmail) return;
-  try {
-    const ctaUrl = customerRequestUrl(input.bookingSlug);
-    const presentation = EMAIL_PRESENTATION[input.type];
-    const html = renderEmail({
-      eyebrow: presentation?.eyebrow ?? "Inspection request",
-      tone: presentation?.tone ?? "brand",
-      title: input.title,
-      greetingName: firstName(input.customerName),
-      body: input.body,
-      details: input.emailDetails,
-      highlight: input.emailHighlight ?? null,
-      highlightLabel: input.emailHighlightLabel ?? null,
-      ctaUrl,
-      ctaLabel: "View my request",
-      footnote:
-        "You're receiving this because you booked through BMS Pro Trade.",
-      businessName: input.businessName,
-      logoUrl: input.logoUrl ?? null,
-    });
-    await sendEmail({
-      sender: "request",
-      to: input.customerEmail,
-      toName: input.customerName ?? null,
-      subject: input.title,
-      htmlBody: html,
-    });
-  } catch {
-    /* email is best-effort */
-  }
-}
-
-/** Returns the first word of a full name, or null. */
-function firstName(name: string | null | undefined): string | null {
-  const trimmed = name?.trim();
-  if (!trimmed) return null;
-  return trimmed.split(/\s+/)[0];
 }
 
 function requestHeadline(request: InspectionRequestDetail): string {
