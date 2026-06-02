@@ -2,13 +2,8 @@ import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
-import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
-  formatAddress,
-  formatInspectionVisitReference,
-  formatSlotDate,
-  formatVisitWindow,
   type InspectionAddress,
   type InspectionCustomer,
 } from "@/lib/inspection/types";
@@ -525,106 +520,43 @@ async function sendQuotationCreatedEmail(
   const email = customer.email?.trim();
   if (!email) return;
 
-  try {
-    const { renderEmail } = await import("@/lib/email/templates");
-    const { sendEmail } = await import("@/lib/email/zeptomail");
-    const scheduledSlot = requestData.scheduledSlot as
-      | { date?: string; timeRange?: string }
-      | null
-      | undefined;
-    const visitWindow = formatVisitWindow(
+  const { sendQuotationSentEmail } = await import(
+    "@/lib/email/templates/quotation-sent"
+  );
+
+  const scheduledSlot = requestData.scheduledSlot as
+    | { date?: string; timeRange?: string }
+    | null
+    | undefined;
+
+  const { businessName, bookingSlug, logoUrl } = businessBranding;
+
+  await sendQuotationSentEmail({
+    customerEmail: email,
+    customerFullName: customer.fullName,
+    serviceTitle: quotation.serviceTitle,
+    inspectionRequestId: quotation.inspectionRequestId,
+    address: quotation.address,
+    scheduledSlot,
+    scheduledStartTime:
       typeof requestData.scheduledStartTime === "string"
         ? requestData.scheduledStartTime
         : null,
+    scheduledEndTime:
       typeof requestData.scheduledEndTime === "string"
         ? requestData.scheduledEndTime
         : null,
-    );
-
-    const visitReference = formatInspectionVisitReference(
-      quotation.inspectionRequestId,
-    );
-
-    const details = [
-      { label: "Reference", value: visitReference },
-      { label: "Service", value: quotation.serviceTitle },
-      { label: "Customer", value: customer.fullName || "—" },
-    ];
-    const address = formatAddress(quotation.address);
-    if (address) details.push({ label: "Address", value: address });
-    if (scheduledSlot?.date) {
-      details.push({
-        label: "Visit date",
-        value: formatSlotDate(scheduledSlot.date),
-      });
-    }
-    if (visitWindow) {
-      details.push({ label: "Visit time", value: visitWindow });
-    }
-    for (const item of quotation.lineItems) {
-      details.push({
-        label: item.name,
-        value: `Aus $${item.priceAud.toFixed(2)}`,
-      });
-    }
-    details.push({
-      label: "Total item price",
-      value: `Aus $${quotation.subtotalAud.toFixed(2)}`,
-    });
-    for (const addition of quotation.additions) {
-      details.push({
-        label: `+ ${addition.name}`,
-        value: `Aus $${addition.priceAud.toFixed(2)}`,
-      });
-    }
-
-    const { businessName, bookingSlug, logoUrl } = businessBranding;
-
-    const bookingEngineUrl = bookingSlug ? buildBookingUrl(bookingSlug) : null;
-    const greetingName = customer.fullName?.trim().split(/\s+/)[0] ?? null;
-    const businessLabel = businessName?.trim() || "your trade provider";
-
-    const html = renderEmail({
-      eyebrow: "Quotation",
-      tone: "brand",
-      title: `Quotation for ${quotation.serviceTitle}`,
-      greetingName,
-      body: `Thank you for your visit with ${businessLabel}. Here is your quotation summary from the inspection. A PDF copy is attached for your records.`,
-      details,
-      highlight: `Aus $${quotation.finalPriceAud.toFixed(2)}`,
-      highlightLabel: "Final price",
-      ctaUrl: bookingEngineUrl,
-      ctaLabel: bookingEngineUrl ? "Go to booking engine" : undefined,
-      footnote:
-        quotation.notes?.trim() ||
-        "We will follow up if any changes are needed before work begins.",
-      businessName,
-      logoUrl,
-    });
-
-    const subjectBusiness = businessName?.trim();
-    const subject = subjectBusiness
-      ? `${subjectBusiness} — Quotation — ${quotation.serviceTitle}`
-      : `Quotation — ${quotation.serviceTitle}`;
-
-    await sendEmail({
-      sender: "request",
-      to: email,
-      subject,
-      htmlBody: html,
-      attachments: pdfBytes
-        ? [
-            {
-              content: pdfBytes.toString("base64"),
-              mimeType: "application/pdf",
-              name: `quotation-${quotation.serviceTitle || "bmspro"}.pdf`
-                .replace(/[^a-z0-9.\-]+/gi, "-")
-                .toLowerCase(),
-            },
-          ]
-        : undefined,
-    });
-  } catch {
-    /* email is best-effort */
-  }
+    lineItems: quotation.lineItems,
+    additions: quotation.additions,
+    subtotalAud: quotation.subtotalAud,
+    finalPriceAud: quotation.finalPriceAud,
+    notes: quotation.notes,
+    businessName,
+    bookingSlug,
+    logoUrl,
+    pdfBytes,
+    pdfFileName: `quotation-${quotation.serviceTitle || "bmspro"}.pdf`
+      .replace(/[^a-z0-9.\-]+/gi, "-")
+      .toLowerCase(),
+  });
 }

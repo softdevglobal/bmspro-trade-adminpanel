@@ -9,7 +9,7 @@ import {
   type CustomerProfile,
   type CustomerProfileInput,
 } from "@/lib/customer/types";
-import { sendCustomerWelcomeEmail } from "@/lib/email/account-emails";
+import { sendCustomerWelcomeEmail } from "@/lib/email/templates";
 import { FieldValue } from "firebase-admin/firestore";
 
 export type AuthedCustomer = {

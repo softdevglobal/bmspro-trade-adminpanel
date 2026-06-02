@@ -1,4 +1,4 @@
-import { sendStaffWelcomeEmail } from "@/lib/email/account-emails";
+import { sendStaffWelcomeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";

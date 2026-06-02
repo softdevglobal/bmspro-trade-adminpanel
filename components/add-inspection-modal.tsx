@@ -12,10 +12,21 @@ import type {
   InspectionSlot,
   InspectionTimeRange,
 } from "@/lib/inspection/types";
-import { TIME_RANGES } from "@/lib/inspection/types";
+import {
+  TIME_RANGES,
+  TIME_RANGE_LABELS,
+  formatAddress,
+  formatSlotDate,
+} from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 type Props = {
   open: boolean;
@@ -50,6 +61,11 @@ const STEPS = [
     subtitle:
       "Customer contact info for confirming the visit and day-of communication.",
   },
+  {
+    title: "Review & create",
+    subtitle:
+      "Check everything below, then create the inspection request.",
+  },
 ] as const;
 
 const EMPTY_ADDRESS: ServiceAddress = {
@@ -75,12 +91,185 @@ const TIME_OPTIONS: {
   { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
 ];
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type FieldKey =
+  | "serviceId"
+  | "customTitle"
+  | "customDescription"
+  | "budgetAud"
+  | "street"
+  | "suburb"
+  | "state"
+  | "postcode"
+  | "preferredSlots"
+  | "fullName"
+  | "email"
+  | "phone";
+
+type FieldErrors = Partial<Record<FieldKey, string>>;
+
+function inputClassName(invalid: boolean): string {
+  return `${INPUT_CLASS}${
+    invalid
+      ? " border-error/70 ring-2 ring-error/15 focus:border-error/70 focus:ring-error/20"
+      : ""
+  }`;
+}
+
+type InspectionFormState = {
+  requestType: InspectionRequestType;
+  selectedServiceId: string | null;
+  customTitle: string;
+  customDescription: string;
+  customerNotes: string;
+  budgetAud: string;
+  address: ServiceAddress;
+  preferredSlots: InspectionSlot[];
+  customer: { fullName: string; email: string; phone: string };
+};
+
+function computeFieldErrors(form: InspectionFormState): FieldErrors {
+  const errors: FieldErrors = {};
+
+  if (form.requestType === "existing_service") {
+    if (!form.selectedServiceId) {
+      errors.serviceId = "Select a service from the list.";
+    }
+  } else {
+    const title = form.customTitle.trim();
+    if (!title) errors.customTitle = "Job title is required.";
+    else if (title.length < 3) {
+      errors.customTitle = "Use at least 3 characters.";
+    }
+
+    const description = form.customDescription.trim();
+    if (!description) {
+      errors.customDescription = "Describe the work needed.";
+    } else if (description.length < 10) {
+      errors.customDescription = `Add more detail (${description.length}/10 characters minimum).`;
+    }
+  }
+
+  const budget = form.budgetAud.trim();
+  if (budget) {
+    const cleaned = budget.replace(/[^\d.]/g, "");
+    const num = Number(cleaned);
+    if (!Number.isFinite(num) || num <= 0) {
+      errors.budgetAud = "Enter a valid amount (e.g. 2500).";
+    }
+  }
+
+  const street = form.address.street.trim();
+  if (street.length < 3) {
+    errors.street =
+      street.length === 0
+        ? "Street address is required."
+        : "Enter at least 3 characters.";
+  }
+
+  const suburb = form.address.suburb.trim();
+  if (suburb.length < 2) {
+    errors.suburb =
+      suburb.length === 0 ? "Suburb is required." : "Enter at least 2 characters.";
+  }
+
+  const state = form.address.state.trim();
+  if (state.length < 2) {
+    errors.state =
+      state.length === 0 ? "State is required." : "Enter at least 2 characters.";
+  }
+
+  const postcode = form.address.postcode.trim();
+  if (postcode.length < 4) {
+    errors.postcode =
+      postcode.length === 0
+        ? "Postcode is required."
+        : "Enter a 4-digit postcode.";
+  } else if (!/^\d{4}$/.test(postcode)) {
+    errors.postcode = "Use a 4-digit Australian postcode.";
+  }
+
+  if (form.preferredSlots.length === 0) {
+    errors.preferredSlots = "Pick at least one preferred date.";
+  } else {
+    const missingIndex = form.preferredSlots.findIndex((slot) => !slot.date);
+    if (missingIndex >= 0) {
+      errors.preferredSlots = `Choose a date for option ${missingIndex + 1}.`;
+    } else {
+      const keys = form.preferredSlots.map(
+        (slot) => `${slot.date}-${slot.timeRange}`,
+      );
+      if (new Set(keys).size !== keys.length) {
+        errors.preferredSlots =
+          "Each date and time window must be unique.";
+      }
+    }
+  }
+
+  const fullName = form.customer.fullName.trim();
+  if (fullName.length < 2) {
+    errors.fullName =
+      fullName.length === 0
+        ? "Full name is required."
+        : "Enter at least 2 characters.";
+  }
+
+  const email = form.customer.email.trim();
+  if (!email) errors.email = "Email is required.";
+  else if (!EMAIL_REGEX.test(email)) {
+    errors.email = "Enter a valid email address.";
+  }
+
+  const phoneDigits = form.customer.phone.replace(/\D/g, "");
+  if (!phoneDigits) errors.phone = "Mobile number is required.";
+  else if (phoneDigits.length < 6) {
+    errors.phone = "Enter a valid mobile number.";
+  }
+
+  return errors;
+}
+
+function FieldFeedback({
+  error,
+  hint,
+  errorId,
+}: {
+  error?: string | null;
+  hint?: string;
+  errorId: string;
+}) {
+  if (error) {
+    return (
+      <span
+        id={errorId}
+        role="alert"
+        className="mt-1 flex items-start gap-1 font-body text-[12px] text-error"
+      >
+        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[14px]">
+          error
+        </span>
+        {error}
+      </span>
+    );
+  }
+  if (hint) {
+    return (
+      <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+        {hint}
+      </span>
+    );
+  }
+  return null;
+}
+
 function isAddressComplete(address: ServiceAddress): boolean {
+  const postcode = address.postcode.trim();
   return (
     address.street.trim().length >= 3 &&
     address.suburb.trim().length >= 2 &&
     address.state.trim().length >= 2 &&
-    address.postcode.trim().length >= 4
+    /^\d{4}$/.test(postcode)
   );
 }
 
@@ -313,6 +502,116 @@ function PreferredSlotRow({
   );
 }
 
+function PreviewSection({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+      <h4 className="flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
+        <span className="material-symbols-outlined text-[16px] text-primary">
+          {icon}
+        </span>
+        {title}
+      </h4>
+      <div className="mt-3 space-y-2">{children}</div>
+    </section>
+  );
+}
+
+function PreviewRow({ label, value }: { label: string; value: string }) {
+  if (!value.trim()) return null;
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-4">
+      <span className="shrink-0 font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant sm:w-28">
+        {label}
+      </span>
+      <span className="min-w-0 flex-1 font-body text-[14px] text-on-surface whitespace-pre-wrap">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function InspectionPreview({
+  form,
+  selectedServiceName,
+}: {
+  form: InspectionFormState;
+  selectedServiceName: string | null;
+}) {
+  const jobSummary =
+    form.requestType === "existing_service"
+      ? selectedServiceName ?? "Selected service"
+      : form.customTitle.trim();
+
+  return (
+    <div className="space-y-4">
+      <StepHeader step={5} title="Review & create" />
+
+      <PreviewSection title="Job details" icon="handyman">
+        <PreviewRow
+          label="Type"
+          value={
+            form.requestType === "existing_service"
+              ? "Existing service"
+              : "Custom quotation"
+          }
+        />
+        <PreviewRow label="Summary" value={jobSummary} />
+        {form.requestType === "custom_quote" ? (
+          <PreviewRow label="Scope" value={form.customDescription.trim()} />
+        ) : null}
+        {form.customerNotes.trim() ? (
+          <PreviewRow label="Notes" value={form.customerNotes.trim()} />
+        ) : null}
+        {form.budgetAud.trim() ? (
+          <PreviewRow label="Budget" value={`Aus $ ${form.budgetAud.trim()}`} />
+        ) : null}
+      </PreviewSection>
+
+      <PreviewSection title="Service address" icon="location_on">
+        <PreviewRow label="Address" value={formatAddress(form.address)} />
+      </PreviewSection>
+
+      <PreviewSection title="Preferred visits" icon="event">
+        <ul className="space-y-2">
+          {form.preferredSlots.map((slot, index) => (
+            <li
+              key={`${slot.date}-${slot.timeRange}-${index}`}
+              className="flex items-center gap-2 rounded-lg border border-outline-variant/40 bg-white px-3 py-2 font-body text-[13px] text-on-surface"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
+                {index + 1}
+              </span>
+              <span>
+                {formatSlotDate(slot.date)} · {TIME_RANGE_LABELS[slot.timeRange]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </PreviewSection>
+
+      <PreviewSection title="Customer" icon="person">
+        <PreviewRow label="Name" value={form.customer.fullName.trim()} />
+        <PreviewRow label="Mobile" value={form.customer.phone} />
+        <PreviewRow label="Email" value={form.customer.email.trim()} />
+      </PreviewSection>
+
+      <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+        A customer account will be created if this email is new. The customer
+        receives a welcome email (with login details when applicable) and an
+        inspection request confirmation.
+      </p>
+    </div>
+  );
+}
+
 function createInitialForm() {
   return {
     requestType: "custom_quote" as InspectionRequestType,
@@ -336,10 +635,18 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
 
   const activeServices = useMemo(
     () => services.filter((service) => service.isActive),
     [services],
+  );
+
+  const selectedService = useMemo(
+    () =>
+      activeServices.find((service) => service.id === form.selectedServiceId) ??
+      null,
+    [activeServices, form.selectedServiceId],
   );
 
   const minDate = useMemo(() => todayIso(), []);
@@ -347,6 +654,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
   const reset = useCallback(() => {
     setStep(1);
     setForm(createInitialForm());
+    setTouched({});
     setError(null);
     setSubmitting(false);
     setSuccess(false);
@@ -426,8 +734,53 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
 
   const step4Valid =
     form.customer.fullName.trim().length >= 2 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customer.email.trim()) &&
-    form.customer.phone.replace(/\D/g, "").length > 0;
+    EMAIL_REGEX.test(form.customer.email.trim()) &&
+    form.customer.phone.replace(/\D/g, "").length >= 6;
+
+  const fieldErrors = useMemo(() => computeFieldErrors(form), [form]);
+
+  const showFieldError = useCallback(
+    (key: FieldKey) => Boolean(touched[key] && fieldErrors[key]),
+    [touched, fieldErrors],
+  );
+
+  const fieldErrorMessage = useCallback(
+    (key: FieldKey) => (touched[key] ? fieldErrors[key] ?? null : null),
+    [touched, fieldErrors],
+  );
+
+  const touchField = useCallback((key: FieldKey) => {
+    setTouched((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+  }, []);
+
+  const touchStepFields = useCallback(
+    (stepNum: number) => {
+      setTouched((prev) => {
+        const next = { ...prev };
+        if (stepNum === 1) {
+          if (form.requestType === "existing_service") next.serviceId = true;
+          else {
+            next.customTitle = true;
+            next.customDescription = true;
+          }
+          if (form.budgetAud.trim()) next.budgetAud = true;
+        } else if (stepNum === 2) {
+          next.street = true;
+          next.suburb = true;
+          next.state = true;
+          next.postcode = true;
+        } else if (stepNum === 3) {
+          next.preferredSlots = true;
+        } else if (stepNum === 4) {
+          next.fullName = true;
+          next.email = true;
+          next.phone = true;
+        }
+        return next;
+      });
+    },
+    [form.requestType, form.budgetAud],
+  );
 
   const canContinue =
     (step === 1 && step1Valid) ||
@@ -512,10 +865,26 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
 
   function goNext() {
     if (!canContinue) {
-      if (step === 1) setError("Complete the job details to continue.");
-      else if (step === 2) setError("Enter a complete service address.");
-      else if (step === 3) setError("Pick at least one date and time window.");
-      else setError("Enter valid customer contact details.");
+      touchStepFields(step);
+      const stepError =
+        step === 1
+          ? fieldErrors.serviceId ??
+            fieldErrors.customTitle ??
+            fieldErrors.customDescription ??
+            fieldErrors.budgetAud
+          : step === 2
+            ? fieldErrors.street ??
+              fieldErrors.suburb ??
+              fieldErrors.state ??
+              fieldErrors.postcode
+            : step === 3
+              ? fieldErrors.preferredSlots
+              : fieldErrors.fullName ??
+                fieldErrors.email ??
+                fieldErrors.phone;
+      setError(
+        stepError ?? "Please fix the highlighted fields before continuing.",
+      );
       return;
     }
     setError(null);
@@ -707,6 +1076,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
 
                   {form.requestType === "existing_service" ? (
                     activeServices.length > 0 ? (
+                      <>
                       <ul className="overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
                         {activeServices.map((service, index) => {
                           const selected =
@@ -730,6 +1100,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                                         ? null
                                         : service.id,
                                   }));
+                                  touchField("serviceId");
                                   setError(null);
                                 }}
                                 className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
@@ -771,6 +1142,13 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                           );
                         })}
                       </ul>
+                      {fieldErrorMessage("serviceId") ? (
+                        <FieldFeedback
+                          error={fieldErrorMessage("serviceId")}
+                          errorId="serviceId-error"
+                        />
+                      ) : null}
+                      </>
                     ) : (
                       <p className="font-body text-body-md text-on-surface-variant">
                         No active services yet — use a custom quotation request.
@@ -790,9 +1168,20 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                             }));
                             setError(null);
                           }}
+                          onBlur={() => touchField("customTitle")}
                           placeholder="e.g. Replace kitchen tap and check leak"
-                          className={INPUT_CLASS}
+                          className={inputClassName(showFieldError("customTitle"))}
                           maxLength={120}
+                          aria-invalid={showFieldError("customTitle")}
+                          aria-describedby={
+                            fieldErrorMessage("customTitle")
+                              ? "customTitle-error"
+                              : undefined
+                          }
+                        />
+                        <FieldFeedback
+                          error={fieldErrorMessage("customTitle")}
+                          errorId="customTitle-error"
                         />
                       </label>
                       <label className="block">
@@ -806,15 +1195,23 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                             }));
                             setError(null);
                           }}
+                          onBlur={() => touchField("customDescription")}
                           rows={4}
                           placeholder="Tell us the scope, materials involved, urgency, etc."
-                          className={`${INPUT_CLASS} resize-y`}
+                          className={`${inputClassName(showFieldError("customDescription"))} resize-y`}
                           maxLength={1500}
+                          aria-invalid={showFieldError("customDescription")}
+                          aria-describedby="customDescription-feedback"
                         />
-                        <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
-                          At least 10 characters so the team can size up the
-                          visit.
-                        </span>
+                        <FieldFeedback
+                          error={fieldErrorMessage("customDescription")}
+                          hint={
+                            !fieldErrorMessage("customDescription")
+                              ? `At least 10 characters (${form.customDescription.trim().length}/10).`
+                              : undefined
+                          }
+                          errorId="customDescription-feedback"
+                        />
                       </label>
                     </div>
                   )}
@@ -861,14 +1258,23 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                               }));
                               setError(null);
                             }}
+                            onBlur={() => touchField("budgetAud")}
                             placeholder="e.g. 2500"
-                            className={`${INPUT_CLASS} mt-0 pl-[3.65rem] pr-3`}
+                            className={`${inputClassName(showFieldError("budgetAud"))} mt-0 pl-[3.65rem] pr-3`}
                             maxLength={12}
+                            aria-invalid={showFieldError("budgetAud")}
+                            aria-describedby="budgetAud-feedback"
                           />
                         </div>
-                        <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
-                          Rough amount the customer has in mind (optional).
-                        </span>
+                        <FieldFeedback
+                          error={fieldErrorMessage("budgetAud")}
+                          hint={
+                            !fieldErrorMessage("budgetAud")
+                              ? "Rough amount the customer has in mind (optional)."
+                              : undefined
+                          }
+                          errorId="budgetAud-feedback"
+                        />
                       </label>
                     </div>
                   </div>
@@ -891,9 +1297,20 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         onChange={(event) =>
                           updateAddress("street", event.target.value)
                         }
+                        onBlur={() => touchField("street")}
                         placeholder="e.g. 12 Main Street"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("street"))}
+                        aria-invalid={showFieldError("street")}
+                        aria-describedby={
+                          fieldErrorMessage("street")
+                            ? "street-error"
+                            : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("street")}
+                        errorId="street-error"
                       />
                     </label>
                     <label className="block">
@@ -904,9 +1321,20 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         onChange={(event) =>
                           updateAddress("suburb", event.target.value)
                         }
+                        onBlur={() => touchField("suburb")}
                         placeholder="e.g. Surry Hills"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("suburb"))}
+                        aria-invalid={showFieldError("suburb")}
+                        aria-describedby={
+                          fieldErrorMessage("suburb")
+                            ? "suburb-error"
+                            : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("suburb")}
+                        errorId="suburb-error"
                       />
                     </label>
                     <label className="block">
@@ -917,9 +1345,18 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         onChange={(event) =>
                           updateAddress("state", event.target.value)
                         }
+                        onBlur={() => touchField("state")}
                         placeholder="e.g. NSW"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("state"))}
+                        aria-invalid={showFieldError("state")}
+                        aria-describedby={
+                          fieldErrorMessage("state") ? "state-error" : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("state")}
+                        errorId="state-error"
                       />
                     </label>
                     <label className="block sm:col-span-2 sm:max-w-[12rem]">
@@ -929,11 +1366,25 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         inputMode="numeric"
                         value={form.address.postcode}
                         onChange={(event) =>
-                          updateAddress("postcode", event.target.value)
+                          updateAddress(
+                            "postcode",
+                            event.target.value.replace(/\D/g, "").slice(0, 4),
+                          )
                         }
+                        onBlur={() => touchField("postcode")}
                         placeholder="e.g. 2000"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("postcode"))}
+                        aria-invalid={showFieldError("postcode")}
+                        aria-describedby={
+                          fieldErrorMessage("postcode")
+                            ? "postcode-error"
+                            : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("postcode")}
+                        errorId="postcode-error"
                       />
                     </label>
                   </div>
@@ -947,6 +1398,12 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                     title={current.title}
                     hint={`${form.preferredSlots.length} of 3`}
                   />
+                  {fieldErrorMessage("preferredSlots") ? (
+                    <FieldFeedback
+                      error={fieldErrorMessage("preferredSlots")}
+                      errorId="preferredSlots-error"
+                    />
+                  ) : null}
                   <ul className="space-y-3">
                     {form.preferredSlots.map((slot, index) => (
                       <PreferredSlotRow
@@ -955,8 +1412,14 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         index={index}
                         minDate={minDate}
                         allSlots={form.preferredSlots}
-                        onDateChange={(iso) => handleSlotDateChange(index, iso)}
-                        onTimeChange={(range) => updateSlotTime(index, range)}
+                        onDateChange={(iso) => {
+                          touchField("preferredSlots");
+                          handleSlotDateChange(index, iso);
+                        }}
+                        onTimeChange={(range) => {
+                          touchField("preferredSlots");
+                          updateSlotTime(index, range);
+                        }}
                         onRemove={() => removeSlot(index)}
                         canRemove={form.preferredSlots.length > 1}
                       />
@@ -977,6 +1440,13 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                 </div>
               ) : null}
 
+              {step === 5 ? (
+                <InspectionPreview
+                  form={form}
+                  selectedServiceName={selectedService?.name ?? null}
+                />
+              ) : null}
+
               {step === 4 ? (
                 <div className="space-y-4">
                   <StepHeader
@@ -993,9 +1463,20 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         onChange={(event) =>
                           updateCustomer("fullName", event.target.value)
                         }
+                        onBlur={() => touchField("fullName")}
                         placeholder="e.g. Alex Thompson"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("fullName"))}
+                        aria-invalid={showFieldError("fullName")}
+                        aria-describedby={
+                          fieldErrorMessage("fullName")
+                            ? "fullName-error"
+                            : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("fullName")}
+                        errorId="fullName-error"
                       />
                     </label>
                     <label className="block">
@@ -1007,9 +1488,18 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         onChange={(event) =>
                           updateCustomer("phone", event.target.value)
                         }
+                        onBlur={() => touchField("phone")}
                         placeholder="0400000000"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("phone"))}
+                        aria-invalid={showFieldError("phone")}
+                        aria-describedby={
+                          fieldErrorMessage("phone") ? "phone-error" : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("phone")}
+                        errorId="phone-error"
                       />
                     </label>
                     <label className="block">
@@ -1020,9 +1510,18 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                         onChange={(event) =>
                           updateCustomer("email", event.target.value)
                         }
+                        onBlur={() => touchField("email")}
                         placeholder="you@example.com"
                         autoComplete="off"
-                        className={INPUT_CLASS}
+                        className={inputClassName(showFieldError("email"))}
+                        aria-invalid={showFieldError("email")}
+                        aria-describedby={
+                          fieldErrorMessage("email") ? "email-error" : undefined
+                        }
+                      />
+                      <FieldFeedback
+                        error={fieldErrorMessage("email")}
+                        errorId="email-error"
                       />
                     </label>
                   </div>
@@ -1056,7 +1555,8 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                 <button
                   type="button"
                   onClick={goNext}
-                  className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary"
+                  disabled={!canContinue}
+                  className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
                 >
                   Continue
                   <span className="material-symbols-outlined text-[18px]">
@@ -1067,7 +1567,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                 <button
                   type="button"
                   onClick={() => void submit()}
-                  disabled={submitting || !step4Valid}
+                  disabled={submitting}
                   className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
                 >
                   {submitting ? (

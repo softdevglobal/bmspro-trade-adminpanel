@@ -24,8 +24,16 @@ export type EmailTemplateContent = {
   footnote?: string | null;
   /** Business name shown in the footer; falls back to brand only. */
   businessName?: string | null;
-  /** Optional business logo (public HTTPS URL) shown in the header band. */
+  /** Optional logo (HTTPS) in the header band — used when platformLogoUrl is not set. */
   logoUrl?: string | null;
+  /** BMS Pro Trade (or platform) logo in the blue header band. */
+  platformLogoUrl?: string | null;
+  /** Main headline in the blue header (e.g. "Welcome to BMS Pro Trade"). */
+  headerHeadline?: string | null;
+  /** Business logo shown at the top of the white body section. */
+  bodyLogoUrl?: string | null;
+  /** Blue header text + logo alignment (default left). */
+  headerAlign?: "left" | "center";
   /** Styled two-line login card (email + password on separate rows). */
   loginCredentials?: {
     email: string;
@@ -93,6 +101,15 @@ const TEXT = "#1f2933";
 const MUTED = "#64748b";
 const BORDER = "#e6e9ef";
 const SURFACE = "#eef1f6";
+
+/** HTTPS URL or inline data URI (for embedded platform logos). */
+function resolveEmailImageUrl(url: string | null | undefined): string | null {
+  if (!url?.trim()) return null;
+  const trimmed = url.trim();
+  if (/^data:image\//i.test(trimmed)) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return null;
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -196,14 +213,52 @@ export function renderEmail(content: EmailTemplateContent): string {
   const headerBrand = content.businessName
     ? escapeHtml(content.businessName)
     : BRAND;
-  const logoUrl =
-    content.logoUrl && /^https?:\/\//.test(content.logoUrl)
-      ? content.logoUrl
-      : null;
-  const logoBlock = logoUrl
-    ? `<img src="${escapeHtml(
-        logoUrl,
-      )}" alt="${headerBrand}" width="46" height="46" style="display:block;width:46px;height:46px;border-radius:10px;object-fit:cover;background:#ffffff;margin:0 0 12px;" />`
+  const headerHeadlineText = content.headerHeadline
+    ? escapeHtml(content.headerHeadline)
+    : headerBrand;
+
+  const headerAlign = content.headerAlign ?? "left";
+  const headerCentered = headerAlign === "center";
+
+  /** Wrap header logo in a centered table (margin:auto fails in many inboxes). */
+  function wrapHeaderLogo(imgHtml: string, bottomSpacing: string): string {
+    if (!headerCentered) return imgHtml;
+    return `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 ${bottomSpacing};">
+          <tr>
+            <td align="center" style="text-align:center;">
+              ${imgHtml}
+            </td>
+          </tr>
+        </table>`;
+  }
+
+  /** Platform logo in header when set; otherwise optional business logoUrl (other emails). */
+  const platformHeaderLogo = resolveEmailImageUrl(content.platformLogoUrl);
+  const headerLogoUrl =
+    platformHeaderLogo ?? resolveEmailImageUrl(content.logoUrl);
+  const logoBlock = headerLogoUrl
+    ? platformHeaderLogo
+      ? wrapHeaderLogo(
+          `<img src="${escapeHtml(
+            headerLogoUrl,
+          )}" alt="${escapeHtml(BRAND)}" width="160" align="center" style="display:block;max-width:160px;width:160px;height:auto;margin:0 auto;border:0;" />`,
+          "14px",
+        )
+      : wrapHeaderLogo(
+          `<img src="${escapeHtml(
+            headerLogoUrl,
+          )}" alt="${escapeHtml(BRAND)}" width="46" height="46" align="center" style="display:block;width:46px;height:46px;border-radius:10px;object-fit:cover;background:#ffffff;margin:0 auto;" />`,
+          "12px",
+        )
+    : "";
+
+  /** Business logo in the white body section only. */
+  const bodyLogoUrl = resolveEmailImageUrl(content.bodyLogoUrl);
+  const bodyLogoBlock = bodyLogoUrl
+    ? `<div style="margin:0 0 22px;text-align:center;">
+        <img src="${escapeHtml(bodyLogoUrl)}" alt="${headerBrand}" width="80" height="80" style="display:inline-block;width:80px;height:80px;border-radius:14px;object-fit:contain;border:1px solid ${BORDER};background:#ffffff;padding:6px;" />
+      </div>`
     : "";
 
   const credentialsBlock = content.loginCredentials
@@ -274,18 +329,19 @@ export function renderEmail(content: EmailTemplateContent): string {
         <td align="center">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:540px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid ${BORDER};box-shadow:0 12px 36px -20px rgba(15,23,42,0.25);">
             <tr>
-              <td style="background:linear-gradient(135deg,${tone.headerFrom},${tone.headerTo});padding:26px 30px;">
+              <td align="${headerCentered ? "center" : "left"}" style="background:linear-gradient(135deg,${tone.headerFrom},${tone.headerTo});padding:26px 30px;text-align:${headerCentered ? "center" : "left"};">
                 ${logoBlock}
-                <p style="margin:0;font-size:17px;font-weight:800;letter-spacing:0.04em;color:#ffffff;">${headerBrand}</p>
+                <p style="margin:0;font-size:17px;font-weight:800;letter-spacing:0.04em;color:#ffffff;text-align:${headerCentered ? "center" : "left"};">${headerHeadlineText}</p>
                 ${
                   eyebrow
-                    ? `<p style="margin:6px 0 0;font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.78);">${eyebrow}</p>`
+                    ? `<p style="margin:6px 0 0;font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.78);text-align:${headerCentered ? "center" : "left"};">${eyebrow}</p>`
                     : ""
                 }
               </td>
             </tr>
             <tr>
               <td style="padding:30px;">
+                ${bodyLogoBlock}
                 <h1 style="margin:0 0 16px;font-size:21px;line-height:1.3;color:${TEXT};font-weight:700;">${title}</h1>
                 ${greeting}
                 ${paragraphs(content.body, MUTED)}
