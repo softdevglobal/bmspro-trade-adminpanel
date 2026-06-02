@@ -9,6 +9,7 @@ import {
 import { INSPECTION_COLLECTION } from "@/lib/inspection/types";
 import type {
   InspectionAssignment,
+  InspectionRequestCreatedSource,
   InspectionRequestDetail,
   InspectionRequestInput,
   InspectionRequestStatus,
@@ -77,7 +78,10 @@ async function lookupService(
 export async function createInspectionRequest(
   businessId: string,
   input: InspectionRequestInput,
-  options: { customerId?: string | null } = {},
+  options: {
+    customerId?: string | null;
+    createdSource: InspectionRequestCreatedSource;
+  },
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; error: string }
@@ -108,6 +112,7 @@ export async function createInspectionRequest(
     customRequest: input.customRequest,
     customer: input.customer,
     customerId: options.customerId ?? null,
+    createdSource: options.createdSource,
     address: input.address,
     preferredSlots: input.preferredSlots,
     ownerProposedSlots: [],

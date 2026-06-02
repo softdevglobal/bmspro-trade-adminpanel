@@ -66,6 +66,7 @@ export async function POST(request: Request) {
 
   const result = await createInspectionRequest(businessId, parsed.value, {
     customerId,
+    createdSource: "booking_engine",
   });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });

@@ -12,6 +12,7 @@ import {
   type InspectionAssignment,
   type InspectionCustomer,
   type InspectionSlot,
+  parseCreatedSource,
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
 import { toMillis } from "@/lib/onboarding/services/display";
@@ -118,6 +119,7 @@ function mapBookingDoc(
     customRequest,
     customer: parseCustomer(data.customer),
     customerId: typeof data.customerId === "string" ? data.customerId : null,
+    createdSource: parseCreatedSource(data.createdSource),
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),

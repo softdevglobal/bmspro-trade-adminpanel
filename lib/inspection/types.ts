@@ -42,6 +42,40 @@ export const STATUS_LABELS: Record<InspectionRequestStatus, string> = {
   completed: "Completed",
 };
 
+/** Where a new inspection_requests document was created. */
+export const INSPECTION_CREATED_SOURCES = [
+  "booking_engine",
+  "owner_dashboard",
+  "owner_mobile",
+] as const;
+export type InspectionRequestCreatedSource =
+  (typeof INSPECTION_CREATED_SOURCES)[number];
+
+export const CREATED_SOURCE_LABELS: Record<
+  InspectionRequestCreatedSource,
+  string
+> = {
+  booking_engine: "Booking engine",
+  owner_dashboard: "Admin panel",
+  owner_mobile: "Mobile app",
+};
+
+export function isCreatedSource(
+  value: unknown,
+): value is InspectionRequestCreatedSource {
+  return (
+    typeof value === "string" &&
+    (INSPECTION_CREATED_SOURCES as readonly string[]).includes(value)
+  );
+}
+
+export function parseCreatedSource(
+  raw: unknown,
+): InspectionRequestCreatedSource | null {
+  if (raw === "booking") return "booking_engine";
+  return isCreatedSource(raw) ? raw : null;
+}
+
 /** Each preferred or proposed slot — date plus a coarse time range. */
 export type InspectionSlot = {
   date: string; // YYYY-MM-DD
@@ -93,6 +127,8 @@ export type InspectionRequestDetail = {
   customRequest: { title: string; description: string } | null;
   customer: InspectionCustomer;
   customerId: string | null;
+  /** Set on create; null on older documents. */
+  createdSource: InspectionRequestCreatedSource | null;
   address: InspectionAddress;
   preferredSlots: InspectionSlot[];
   ownerProposedSlots: InspectionSlot[];
