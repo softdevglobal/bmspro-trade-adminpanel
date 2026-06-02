@@ -81,6 +81,8 @@ export type CustomerWelcomeEmailInput = {
   bookingSlug?: string | null;
   /** Optional business logo URL shown in the email header. */
   logoUrl?: string | null;
+  /** Temporary password, only for accounts created by the business. */
+  temporaryPassword?: string | null;
 };
 
 /**
@@ -111,8 +113,17 @@ export async function sendCustomerWelcomeEmail(
     tone: "brand",
     title: "Your customer account is ready",
     greetingName: firstName(input.fullName),
-    body: `Thanks for joining BMS Pro Trade. You can now request inspection visits, track proposed times, and see confirmed visit details with ${business}.\n\nSign in anytime with the email you used to register.`,
+    body: input.temporaryPassword
+      ? `${business} created a BMS Pro Trade account for you so you can track your inspection visit. Sign in with the credentials below, then change your password from your account.\n\nYou can request inspection visits, track proposed times, and see confirmed visit details.`
+      : `Thanks for joining BMS Pro Trade. You can now request inspection visits, track proposed times, and see confirmed visit details with ${business}.\n\nSign in anytime with the email you used to register.`,
     details,
+    loginCredentials: input.temporaryPassword
+      ? {
+          email: input.email,
+          password: input.temporaryPassword,
+          label: "Your login credentials",
+        }
+      : undefined,
     ctaUrl: accountUrl,
     ctaLabel: slug ? "View my account" : "Open booking",
     footnote:

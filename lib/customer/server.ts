@@ -5,6 +5,7 @@ import { toMillis } from "@/lib/onboarding/services/display";
 import {
   CUSTOMER_COLLECTION,
   normalizeEmail,
+  normalizePhone,
   type CustomerProfile,
   type CustomerProfileInput,
 } from "@/lib/customer/types";
@@ -167,6 +168,112 @@ export async function getOrCreateCustomerProfile(
   await attachRegistrationBusinessIfEmpty(customer.uid, options.bookingSlug);
   const created = await ref.get();
   return mapCustomerDoc(created.id, created.data() ?? {});
+}
+
+/** Default password for customer accounts created by a business owner. */
+export const DEFAULT_CUSTOMER_PASSWORD = "00001111";
+
+export type EnsuredCustomerAccount = {
+  uid: string;
+  email: string;
+  /** True when the account was created during this call (new sign-up). */
+  created: boolean;
+};
+
+/**
+ * Ensures a customer account exists for the given email — creating a Firebase
+ * Auth user with the default password and a `customers/{uid}` profile when one
+ * doesn't already exist. Used when a business owner adds an inspection on a
+ * customer's behalf. Best-effort welcome email with credentials on creation.
+ */
+export async function ensureCustomerAccount(input: {
+  email: string;
+  fullName: string;
+  phone: string;
+  businessId: string;
+  businessName?: string | null;
+  bookingSlug?: string | null;
+  logoUrl?: string | null;
+}): Promise<EnsuredCustomerAccount> {
+  const email = normalizeEmail(input.email);
+  const fullName = input.fullName.trim();
+  const phone = normalizePhone(input.phone);
+
+  let uid: string;
+  let created = false;
+
+  try {
+    const existing = await adminAuth.getUserByEmail(email);
+    uid = existing.uid;
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code !== "auth/user-not-found") throw error;
+
+    const authUser = await adminAuth.createUser({
+      email,
+      password: DEFAULT_CUSTOMER_PASSWORD,
+      displayName: fullName || undefined,
+      emailVerified: false,
+    });
+    uid = authUser.uid;
+    created = true;
+  }
+
+  const ref = adminDb.collection(CUSTOMER_COLLECTION).doc(uid);
+  const snap = await ref.get();
+  const now = FieldValue.serverTimestamp();
+
+  // New to the customers collection — even if a login already existed.
+  const isNewCustomer = !snap.exists;
+
+  if (isNewCustomer) {
+    await ref.set({
+      uid,
+      email,
+      fullName,
+      phone,
+      registeredBusinessId: input.businessId,
+      registeredBookingSlug: input.bookingSlug ?? null,
+      registeredBusinessName: input.businessName ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else {
+    const data = snap.data() ?? {};
+    const update: Record<string, unknown> = { email, updatedAt: now };
+    if (fullName && !data.fullName) update.fullName = fullName;
+    if (phone && !data.phone) update.phone = phone;
+    if (!data.registeredBusinessId) {
+      update.registeredBusinessId = input.businessId;
+      update.registeredBookingSlug = input.bookingSlug ?? null;
+      update.registeredBusinessName = input.businessName ?? null;
+    }
+    await ref.set(update, { merge: true });
+  }
+
+  // Send the welcome email whenever the email wasn't already a customer.
+  // Only include the default password when we actually created the login
+  // (otherwise we'd be claiming a password we don't control).
+  if (isNewCustomer) {
+    try {
+      await sendCustomerWelcomeEmail({
+        email,
+        fullName,
+        businessName: input.businessName ?? null,
+        bookingSlug: input.bookingSlug ?? null,
+        logoUrl: input.logoUrl ?? null,
+        temporaryPassword: created ? DEFAULT_CUSTOMER_PASSWORD : null,
+      });
+      await ref.set(
+        { welcomeEmailSent: true, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    } catch {
+      /* welcome email is best-effort */
+    }
+  }
+
+  return { uid, email, created };
 }
 
 export async function updateCustomerProfile(

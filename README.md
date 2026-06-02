@@ -1,6 +1,18 @@
 # BMS Pro Trade — Admin Panel
 
-A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super-admin tenant management, business-owner dashboards (inspection visits, team, services, customers), a public customer booking engine, and full transactional email.
+A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super-admin tenant management, business-owner dashboards (inspection visits, team, services, customers), a public customer booking engine, custom admin password reset (6-digit code), and transactional email via ZeptoMail.
+
+### Feature quick reference
+
+| Feature | UI | API / server | Docs section |
+|---|---|---|---|
+| Owner **Add Inspection** (4-step modal) | `components/add-inspection-modal.tsx` | `POST /api/inspection-requests` | [§8](#get--post-apiinspection-requests), [§11](#12-dashboard-pages) |
+| Auto customer + default password `00001111` | Step 4 contact in modal | `ensureCustomerAccount()` in `lib/customer/server.ts` | [§5 customers](#customersuid), [§8 POST](#get--post-apiinspection-requests) |
+| Public booking / inspection request | `components/booking-engine.tsx` | `POST /api/booking/inspection-request` | [§8 booking](#post-apibookinginspection-request) |
+| Custom admin password reset | `components/forgot-password-modal.tsx` | `POST /api/auth/send-reset-code`, `reset-password` | [§7](#7-how-password-reset-works) |
+| Email HTML templates | — | `lib/email/templates.ts` + `account-emails.ts` | [§6 — Where templates live](#where-email-templates-live) |
+| Staff **Can get quotation** | `components/team-staff-form.tsx` | `users.canget_qutaion` via `/api/team/staff` | [§5 users](#usersuid) |
+| Brand logo / favicon | `sidebar.tsx`, `app/login/page.tsx` | `public/bms_pro_blue.jpeg`, `app/icon.jpg` | [§3](#3-folder-structure) |
 
 ---
 
@@ -11,14 +23,16 @@ A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super
 3. [Folder Structure](#3-folder-structure)
 4. [How Authentication Works](#4-how-authentication-works)
 5. [How the Database Works (Firestore)](#5-how-the-database-works-firestore)
-6. [How Email Works (ZeptoMail)](#6-how-email-works-zeptomail)
+6. [How Email Works (ZeptoMail)](#6-how-email-works-zeptomail) — includes [where email templates live](#where-email-templates-live)
 7. [How Password Reset Works](#7-how-password-reset-works)
-8. [API Routes](#8-api-routes)
-9. [lib/ — Shared Logic](#9-lib--shared-logic)
-10. [components/ — UI Components](#10-components--ui-components)
-11. [Dashboard Pages](#11-dashboard-pages)
-12. [Running the Project](#12-running-the-project)
-13. [Scripts](#13-scripts)
+8. [API Routes & Backend Functions](#8-api-routes--backend-functions)
+9. [Route Flow Diagrams](#9-route-flow-diagrams)
+10. [`lib/` — Shared Logic](#10-lib--shared-logic)
+11. [`components/` — UI Components](#11-components--ui-components)
+12. [Dashboard Pages](#12-dashboard-pages)
+13. [Running the Project](#13-running-the-project)
+14. [Scripts](#14-scripts)
+15. [Architecture Overview](#architecture-overview)
 
 ---
 
@@ -142,8 +156,16 @@ bmspro-trade-adminpanel/
 │       │   └── notifications/[id]/route.ts
 │       └── onboarding/submit/route.ts
 │
-├── components/                   # All React components (see §10)
-├── lib/                          # All shared server + client logic (see §9)
+├── components/                   # All React components (see §11)
+│   ├── add-inspection-modal.tsx  # Owner 4-step Add Inspection wizard
+│   ├── inspection-visits-board.tsx
+│   ├── booking-engine.tsx
+│   └── ...
+├── lib/                          # All shared server + client logic (see §10)
+│   └── email/                    # Transactional email (see §6 — Email templates)
+│       ├── templates.ts          # Shared HTML layout: renderEmail()
+│       ├── account-emails.ts     # Welcome + password reset senders
+│       └── zeptomail.ts          # ZeptoMail API transport
 ├── public/
 │   └── bms_pro_blue.jpeg         # Brand logo (served at /bms_pro_blue.jpeg)
 │                                 # Used in: sidebar header, top header, login page (desktop + mobile)
@@ -345,6 +367,16 @@ Written by `lib/customer/server.ts`. Document ID = Firebase Auth UID (customer a
 | `welcomeEmailSent` | `boolean` | `true` after welcome email sent |
 | `createdAt` | `Timestamp` | Server timestamp |
 | `updatedAt` | `Timestamp` | Server timestamp |
+
+**How customers are created:**
+
+| Path | Who creates | Password | Welcome email |
+|---|---|---|---|
+| Public `/booknow/[slug]` | Customer signs up in `CustomerAuthModal` | Customer chooses | `sendCustomerWelcomeEmail` (no password) on first profile save |
+| Owner **Add Inspection** modal | `ensureCustomerAccount()` in `POST /api/inspection-requests` | Default **`00001111`** if new Firebase Auth user | Welcome email with credentials when email is **new to `customers` collection** |
+| Owner updates profile via API | Existing customer only | — | Welcome email once if `welcomeEmailSent` was false |
+
+**Default customer password (owner-created only):** `DEFAULT_CUSTOMER_PASSWORD = "00001111"` in `lib/customer/server.ts` (same value as default staff password).
 
 ---
 
@@ -607,11 +639,39 @@ npm run firebase:deploy-rules
 
 The project uses **ZeptoMail** for all transactional emails. It never uses Firebase's built-in email (except for auth-related links disabled in favour of the custom code flow).
 
+### Where email templates live
+
+There are **no separate `.html` or React email files**. All HTML is built in TypeScript under `lib/email/`:
+
+| File | Role | What to edit |
+|---|---|---|
+| **`lib/email/templates.ts`** | **Master layout** — single shared design for every email | Header gradient, logo band, body typography, detail tables, highlight callout, login-credentials card, CTA button, footer. Export: `renderEmail(content)`, `renderCustomerEmail()` (alias) |
+| **`lib/email/account-emails.ts`** | **Account / auth copy** — fills `renderEmail()` per use case | Subject lines, eyebrow, title, body text, `details` rows, `loginCredentials` for staff/customer welcome |
+| **`lib/email/zeptomail.ts`** | **Transport only** — no HTML | `sendEmail({ sender, to, subject, htmlBody })` → ZeptoMail API |
+| **`lib/notifications/server.ts`** | **Inspection lifecycle copy** — customer notification emails | `EMAIL_PRESENTATION` (tone per type), `sendCustomerNotificationEmail()` builds `renderEmail()` from notification title/body |
+
+**Layout vs copy:** Change **look and feel** in `templates.ts`. Change **wording or which fields appear** in `account-emails.ts` or `notifications/server.ts`.
+
+### Which file sends which email
+
+| Email | Template builder | Sender function | ZeptoMail sender | Triggered from |
+|---|---|---|---|---|
+| Business owner welcome | `account-emails.ts` | `sendOwnerWelcomeEmail` | `system` | `lib/onboarding/server.ts` (tenant create) |
+| Customer welcome (book-now signup) | `account-emails.ts` | `sendCustomerWelcomeEmail` | `system` | `lib/customer/server.ts` (`updateCustomerProfile`) |
+| Customer welcome (owner Add Inspection, password `00001111`) | `account-emails.ts` | `sendCustomerWelcomeEmail` + `temporaryPassword` | `system` | `lib/customer/server.ts` (`ensureCustomerAccount`) |
+| Staff welcome + temp password | `account-emails.ts` | `sendStaffWelcomeEmail` | `system` | `app/api/team/staff/route.ts` (POST) |
+| Admin password reset 6-digit code | `account-emails.ts` | `sendPasswordResetCodeEmail` | `system` | `app/api/auth/send-reset-code/route.ts` |
+| Inspection request received (customer) | `notifications/server.ts` | `notifyCustomerOfNewRequest` → `sendCustomerNotificationEmail` | `request` | `lib/inspection/server.ts` (`createInspectionRequest`) |
+| Visit confirmed / proposed / assigned / cancelled / completed (customer) | `notifications/server.ts` | `notifyCustomerOfStatusChange`, `notifyCustomerOfAssignment`, etc. | `request` | `lib/inspection/server.ts` (`applyOwnerAction`, etc.) |
+
+> **Business owners** get inspection updates as **in-app** `business_notifications` only (no email in `notifications/server.ts`). **Customers** get Firestore notifications **and** a matching email when `customerEmail` is set.
+
 ### Architecture
 
 ```
-API Route / lib function
-  → sendEmail()                   [lib/email/zeptomail.ts]
+Caller (API route or lib/server.ts)
+  → build copy + call renderEmail({ ... })     [lib/email/templates.ts]
+  → sendEmail({ htmlBody, sender, to, ... })   [lib/email/zeptomail.ts]
       → SendMailClient (zeptomail npm package)
           → ZeptoMail REST API → delivered to recipient
 ```
@@ -630,15 +690,17 @@ API Route / lib function
 | Function | Description |
 |---|---|
 | `sendOwnerWelcomeEmail(input)` | Sends welcome email when a business owner is onboarded |
-| `sendCustomerWelcomeEmail(input)` | Sends welcome to a new customer on the book-now side |
+| `sendCustomerWelcomeEmail(input)` | Sends welcome to a new customer. When `temporaryPassword` is set (owner-created account), includes a login-credentials card (email + password) |
 | `sendStaffWelcomeEmail(input)` | Sends welcome + temp password to a new staff member |
 | `sendPasswordResetCodeEmail(input)` | Sends the 6-digit password reset code |
 
-### HTML Template System
+### HTML template system (`lib/email/templates.ts`)
 
-**File:** `lib/email/templates.ts`
+**Exports:** `renderEmail`, `renderCustomerEmail`, types `EmailTemplateContent`, `EmailDetailRow`, `EmailTone`.
 
-All emails use `renderEmail(content)` which returns a fully inlined HTML string. The template supports:
+**Internal helpers** (same file, not exported): `loginCredentialsBlock`, `detailRows`, `paragraphs`, `escapeHtml`, tone palette `TONES`.
+
+All emails use `renderEmail(content)`, which returns one fully inlined HTML document (table-based, email-client safe). The template supports:
 
 ```ts
 renderEmail({
@@ -801,7 +863,7 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 |---|---|---|
 | **None** | Anyone | Public routes: `send-reset-code`, `reset-password`, `onboarding/submit`, `booking/inspection-request` |
 | **Super admin** | Super admins only | `decoded.superAdmin === true` OR `role === "super_admin"` claim OR active doc in `super_admins/{uid}` |
-| **Business owner** | Owners + admins | `businessId` JWT claim + `role` ∈ `"owner"` or `"admin"` |
+| **Business owner** | Owners + admins | `businessId` JWT claim + `role` ∈ `"owner"` or `"admin"` — includes `GET`/`POST /api/inspection-requests`, team, services, notifications |
 | **Super admin OR owner** | Either | `requireSession` — tries super admin first, then owner |
 | **Optional session** | Anyone | Business logo upload (public onboarding also allowed) |
 | **Customer** | Customers | Any Firebase Auth user with `email` on token (`authenticateCustomerRequest`) |
@@ -1013,16 +1075,36 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 
 ---
 
-### `GET /api/inspection-requests`
+### `GET / POST /api/inspection-requests`
 
 **Auth:** Business owner/admin  
 **File:** `app/api/inspection-requests/route.ts`
 
 **Functions:**
 
-| Function | Does |
+| Method | Does |
 |---|---|
 | `GET` | `listInspectionRequests(businessId)` → reads up to 80 requests from `inspection_requests` ordered by `createdAt` desc |
+| `POST` | Owner creates an inspection on behalf of a customer (same body shape as public booking, **without** `slug`) |
+
+**`POST` flow:**
+
+1. `parseInspectionRequestInput(body)` — validates request type, customer, address, slots, notes, budget.
+2. `ensureCustomerAccount({ email, fullName, phone, businessId, ... })` — see **`lib/customer/server.ts`** below.
+   - If email is **not** in `customers/{uid}`: creates Firebase Auth user (password `00001111` when new login) + `customers` doc → sends **welcome email** (with password only when Auth user was created in this step).
+   - If email **already** in `customers`: reuses `uid`; no welcome email.
+3. `createInspectionRequest(businessId, input, { customerId })` — writes `inspection_requests` → **inspection notification emails** to business + customer (`notifyBusinessOfNewRequest`, `notifyCustomerOfNewRequest`).
+
+**Emails sent on successful `POST` (new customer):**
+
+| # | Email | Sender | When |
+|---|---|---|---|
+| 1 | Customer welcome (optional login card with `00001111`) | `system` | Email not already in `customers` collection |
+| 2 | Inspection request received | `request` | Always (via `createInspectionRequest`) |
+
+**Required `POST` body fields:** Same as public booking — `requestType`, `customer`, `address`, `preferredSlots` (1–3), optional `serviceId` / `customRequest`, `customerNotes`, `budgetAud`.
+
+**Response:** `{ ok: true, requestId, request }` with HTTP `201`.
 
 ---
 
@@ -1069,6 +1151,8 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 | `POST(req)` | Parse + validate booking request → `createInspectionRequest(businessId, input, { customerId? })` |
 
 **Required body fields:** `slug`, customer contact, address, at least 1 preferred slot.
+
+> **Owner vs public:** Business owners use **`POST /api/inspection-requests`** (no `slug`; auto-creates customer with default password `00001111` + welcome email when new). Public customers use this route with `slug` and optional sign-in.
 
 ---
 
@@ -1225,6 +1309,7 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 | `notifyCustomerOfStatusChange(request, nextStatus, ctx)` | Creates status-change notification (scheduled/proposed/cancelled/completed) | write `customer_notifications` |
 | `notifyCustomerOfAssignment(request, ctx)` | Creates `request_assigned` notification | write `customer_notifications` |
 | `notifyBusinessOfCustomerAcceptance(request, ctx)` | Creates `request_scheduled` notification on business side | write `business_notifications` |
+| `sendCustomerNotificationEmail(input)` *(private)* | Builds HTML via `renderEmail()` + sends ZeptoMail (`request` sender) | ZeptoMail |
 | `listBusinessNotifications(businessId)` | Reads up to 50 notifications desc | read `business_notifications` |
 | `listCustomerNotifications(uid, email)` | Reads by `customerId` + `customerEmail`, deduplicates | read `customer_notifications` |
 | `markNotificationRead(id, guard)` | Updates `read: true` with ownership check | update collection |
@@ -1236,13 +1321,22 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 
 #### `lib/customer/server.ts`
 
-| Function | Does | Firestore / Auth |
+| Constant / function | Does | Firestore / Auth |
 |---|---|---|
+| `DEFAULT_CUSTOMER_PASSWORD` | `"00001111"` — used when owner auto-creates a customer login | — |
+| `ensureCustomerAccount(input)` | Ensures `customers/{uid}` exists for email; creates Auth + profile if needed; welcome email when **new to `customers`** | Auth create/read; read/write `customers`; ZeptoMail |
 | `authenticateCustomerRequest(request)` | Verifies Bearer token; returns `{ uid, email }` | Auth verify |
 | `resolveBusinessByBookingSlug(slug)` | Queries `businesses` where `bookingSlug == slug` | read `businesses` |
 | `getOrCreateCustomerProfile(customer, opts)` | Reads `customers/{uid}`; creates if missing; syncs email field | read/write `customers` |
 | `updateCustomerProfile(customer, input)` | Updates `fullName`, `phone`; sends welcome email once | read/write `customers`; read `businesses` |
 | `attachRegistrationBusinessIfEmpty(uid, slug?)` | Sets `registeredBusinessId` etc. on first-touch | read/write `customers`, read `businesses` |
+
+**`ensureCustomerAccount` details:**
+
+- Looks up email in Firebase Auth; on `auth/user-not-found`, creates user with `DEFAULT_CUSTOMER_PASSWORD`.
+- Writes or merges `customers/{uid}` with `fullName`, `phone`, `registeredBusinessId`, etc.
+- If the email was **not** already in `customers`: calls `sendCustomerWelcomeEmail` with `temporaryPassword: "00001111"` only when Auth user was created in this call; sets `welcomeEmailSent: true`.
+- Returns `{ uid, email, created }` where `created` means a new Auth user was created (not the same as “new to customers”).
 
 ---
 
@@ -1663,20 +1757,43 @@ Client (business owner)
 
 ---
 
-### `GET /api/inspection-requests`
+### `GET / POST /api/inspection-requests`
 
 ```
 Client (business owner)
   │
-  ├── requireBusinessOwner(request)            ──► Firebase Auth VERIFY
+  ├── GET /api/inspection-requests
+  │     ├── requireBusinessOwner(request)      ──► Firebase Auth VERIFY
+  │     ├── listInspectionRequests(businessId)
+  │     │     └── adminDb.collection("inspection_requests")
+  │     │             .where("businessId","==",id)
+  │     │             .limit(80).get()         ──► Firestore READ
+  │     └── return { ok: true, requests }
   │
-  ├── listInspectionRequests(businessId)
-  │     └── adminDb.collection("inspection_requests")
-  │             .where("businessId","==",id)
-  │             .orderBy("createdAt","desc")
-  │             .limit(80).get()               ──► Firestore READ
-  │
-  └── return { ok: true, requests: InspectionRequestDetail[] }
+  └── POST /api/inspection-requests
+        │     body: { requestType, customer, address, preferredSlots, ... }
+        │
+        ├── requireBusinessOwner(request)      ──► Firebase Auth VERIFY
+        │
+        ├── parseInspectionRequestInput(body)  (validate)
+        │
+        ├── adminDb.collection("businesses").doc(businessId).get()  ──► Firestore READ
+        │
+        ├── ensureCustomerAccount({ email, fullName, phone, businessId, ... })
+        │     ├── adminAuth.getUserByEmail(email)              ──► Firebase Auth READ
+        │     ├── [if not found]
+        │     │     adminAuth.createUser({ password: "00001111" }) ──► Firebase Auth WRITE
+        │     ├── adminDb.collection("customers").doc(uid)
+        │     │     .get() / .set() / merge                    ──► Firestore READ/WRITE
+        │     └── [if new to customers collection]
+        │           sendCustomerWelcomeEmail({ temporaryPassword? }) ──► ZeptoMail (system)
+        │
+        ├── createInspectionRequest(businessId, input, { customerId })
+        │     ├── adminDb.collection("inspection_requests").add() ──► Firestore WRITE
+        │     ├── notifyBusinessOfNewRequest()                 ──► Firestore + email
+        │     └── notifyCustomerOfNewRequest()                 ──► Firestore + email
+        │
+        └── return { ok: true, requestId, request }  (201)
 ```
 
 ---
@@ -2024,10 +2141,15 @@ Anonymous (public self-signup)
 - **`admin.ts`** — Server Firebase Admin (`adminAuth`, `adminDb`, `adminStorage`). Used in API routes only. Import with `import "server-only"` already enforced.
 - **`customer-client.ts`** — Separate Firebase client for the customer book-now side.
 
-### `lib/email/`
-- **`zeptomail.ts`** — `sendEmail(input)`. The only place that calls the ZeptoMail SDK.
-- **`templates.ts`** — `renderEmail(content)`. Returns fully inlined HTML. Supports tones, highlights, CTA buttons, login cards.
-- **`account-emails.ts`** — High-level email functions: `sendOwnerWelcomeEmail`, `sendCustomerWelcomeEmail`, `sendStaffWelcomeEmail`, `sendPasswordResetCodeEmail`.
+### `lib/email/` — transactional email (templates + send)
+
+| File | Purpose |
+|---|---|
+| **`templates.ts`** | **Master HTML template** — `renderEmail()` layout (header, body, details table, highlight, login card, CTA, footer). Edit design here. |
+| **`account-emails.ts`** | Welcome + reset **copy** — calls `renderEmail` then `sendEmail` for owners, customers, staff, password codes. |
+| **`zeptomail.ts`** | ZeptoMail transport — `sendEmail()` only; reads `ZEPTOMAIL_*` env vars. |
+
+Inspection update emails are **not** in `lib/email/`; their copy and `renderEmail()` calls live in **`lib/notifications/server.ts`** (`EMAIL_PRESENTATION`, `sendCustomerNotificationEmail`).
 
 ### `lib/business/`
 - **`business-profile-context.tsx`** — React context that listens to `businesses/{id}` in real-time (Firestore `onSnapshot`). Provides `businessName`, `logoUrl`, `bookingSlug`.
@@ -2044,6 +2166,10 @@ Anonymous (public self-signup)
 - **`inspection-requests-context.tsx`** — React context with real-time Firestore listener for the owner's inspection board.
 - **`use-inspection-requests.ts`** — Hook to access the context.
 
+### `lib/customer/`
+- **`types.ts`** — `CUSTOMER_COLLECTION`, profile types, email/phone validators.
+- **`server.ts`** — Customer auth verification, profile CRUD, **`ensureCustomerAccount`** (owner Add Inspection), `DEFAULT_CUSTOMER_PASSWORD`.
+
 ### `lib/notifications/`
 - **`server.ts`** — Create, list, mark-read, delete notifications in Firestore. Also triggers email notifications for relevant events.
 - **`business-notifications-context.tsx`** — Real-time notification listener for business owners.
@@ -2055,7 +2181,7 @@ Anonymous (public self-signup)
 
 ---
 
-## 10. `components/` — UI Components
+## 11. `components/` — UI Components
 
 ### Auth & Layout
 | Component | Description |
@@ -2067,14 +2193,16 @@ Anonymous (public self-signup)
 | `forgot-password-modal.tsx` | 5-stage password reset flow (modal) |
 | `login-redirect.tsx` | Redirects already-authenticated users away from `/login` |
 | `dashboard-shell.tsx` | Main dashboard layout: fixed header, sidebar, content area |
-| `sidebar.tsx` | Role-filtered navigation links |
+| `sidebar.tsx` | Role-filtered nav; header uses static `/bms_pro_blue.jpeg` brand logo |
 | `sign-out-confirm-modal.tsx` | Confirm dialog before sign-out |
 
 ### Dashboard Features
 | Component | Description |
 |---|---|
-| `inspection-visits-board.tsx` | Full inspection request workflow UI |
-| `team-staff-form.tsx` | Staff list + add/edit/delete against `/api/team/staff` |
+| `inspection-visits-board.tsx` | Inspection request board: filters, detail drawer, owner actions, **Add Inspection** + Refresh buttons |
+| `add-inspection-modal.tsx` | 4-step owner modal (job → address → dates → contact); submits to `POST /api/inspection-requests` |
+| `booking-slot-date-picker.tsx` | Shared calendar + morning/afternoon slot picker (booking engine + add-inspection modal) |
+| `team-staff-form.tsx` | Staff list + add/edit; **Can get quotation** toggle (`canget_qutaion`); default password `00001111` on create |
 | `tenants-table.tsx` | Super-admin tenant list + create modal |
 | `business-logo-settings.tsx` | Logo upload on settings page |
 | `booking-link-card.tsx` | Shows/copies the public booking URL |
@@ -2099,12 +2227,12 @@ Anonymous (public self-signup)
 
 ---
 
-## 11. Dashboard Pages
+## 12. Dashboard Pages
 
 | URL | Role | What it shows |
 |---|---|---|
 | `/dashboard` | All | Today: KPI cards, booking link, quick actions |
-| `/dashboard/inspection-visits` | Owner | Inspection request board (kanban-style) |
+| `/dashboard/inspection-visits` | Owner | Inspection request board; **Add Inspection** opens 4-step modal; auto-creates customer + emails |
 | `/dashboard/bookings` | Owner | Placeholder — links to inspection visits |
 | `/dashboard/customers` | Owner | Customer list derived from inspection data |
 | `/dashboard/team` | Owner | Staff list, add/edit, availability |
@@ -2119,7 +2247,7 @@ The dashboard `layout.tsx` wraps all pages in:
 
 ---
 
-## 12. Running the Project
+## 13. Running the Project
 
 ### Install dependencies
 ```bash
@@ -2149,7 +2277,7 @@ npm run lint
 
 ---
 
-## 13. Scripts
+## 14. Scripts
 
 ### Seed the first super admin
 ```bash
@@ -2182,26 +2310,38 @@ Browser
 
 Next.js App Router
   ├── app/  (pages + API routes)
-  │     └── api/auth/…           Custom password reset (6-digit code)
-  │     └── api/admin/…          Super-admin operations
-  │     └── api/business/…       Owner profile + services + team
-  │     └── api/inspection-*/…   Inspection request workflow
-  │     └── api/notifications/…  Owner + customer notifications
-  │     └── api/customer/…       Customer bookings + profile
+  │     └── api/auth/…              Custom password reset (6-digit code)
+  │     └── api/admin/…             Super-admin operations
+  │     └── api/business/…          Owner profile + logo upload
+  │     └── api/inspection-requests POST (owner Add Inspection) + GET + PATCH [id]
+  │     └── api/booking/…           Public inspection request (by slug)
+  │     └── api/team/staff          Staff CRUD (default password 00001111)
+  │     └── api/notifications/…     Owner + customer notifications
+  │     └── api/customer/…          Customer bookings + profile
   │
   ├── lib/
-  │     ├── firebase/client.ts   → Firestore + Auth (browser)
-  │     ├── firebase/admin.ts    → Firestore + Auth + Storage (server)
-  │     └── email/zeptomail.ts   → ZeptoMail API (server)
+  │     ├── firebase/client.ts      → Firestore + Auth (browser)
+  │     ├── firebase/admin.ts       → Firestore + Auth + Storage (server)
+  │     ├── customer/server.ts      → ensureCustomerAccount (owner flow)
+  │     ├── inspection/server.ts    → createInspectionRequest + owner actions
+  │     ├── notifications/server.ts → in-app + customer inspection emails
+  │     └── email/
+  │           templates.ts          → renderEmail() HTML layout
+  │           account-emails.ts     → welcome + reset senders
+  │           zeptomail.ts            → ZeptoMail transport
   │
-  └── components/  (all UI)
+  └── components/
+        add-inspection-modal.tsx    → owner 4-step wizard
+        inspection-visits-board.tsx → board + Add Inspection button
+        booking-engine.tsx            → public book-now flow
+        forgot-password-modal.tsx     → admin reset UI
 
 Firebase (Backend)
-  ├── Authentication             User accounts (admin + customer)
-  ├── Firestore                  All application data
+  ├── Authentication             User accounts (admin, staff, customer)
+  ├── Firestore                  businesses, users, customers, inspection_requests, …
   └── Storage                    Logo + service images
 
 ZeptoMail (Email)
-  ├── system sender (noreply@)   Welcome, reset code, account emails
-  └── request sender (request@)  Inspection request notifications
+  ├── system sender (noreply@)   Welcome, reset code, owner/staff/customer account
+  └── request sender (request@)  Customer inspection status emails
 ```
