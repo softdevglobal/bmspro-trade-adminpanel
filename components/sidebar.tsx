@@ -26,7 +26,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
-  { href: "#", label: "Calendar", icon: "calendar_month" },
+  { href: "/dashboard/calendar", label: "Calendar", icon: "calendar_month" },
   {
     href: "/dashboard/inspection-visits",
     label: "Inspection visits",
@@ -51,6 +51,12 @@ const NAV_ITEMS: NavItem[] = [
     href: "/dashboard/customers",
     label: "Customers",
     icon: "group",
+    businessOwner: true,
+  },
+  {
+    href: "/dashboard/items",
+    label: "Item list",
+    icon: "inventory_2",
     businessOwner: true,
   },
   { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },

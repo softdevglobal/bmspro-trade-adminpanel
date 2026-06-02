@@ -42,6 +42,7 @@ const EMAIL_PRESENTATION: Record<
   request_scheduled: { eyebrow: "Visit confirmed", tone: "success" },
   request_proposed: { eyebrow: "New times proposed", tone: "warning" },
   request_assigned: { eyebrow: "Inspector assigned", tone: "success" },
+  visit_on_the_way: { eyebrow: "On the way", tone: "brand" },
   request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },
   request_completed: { eyebrow: "Visit completed", tone: "success" },
 };
@@ -432,6 +433,64 @@ export async function notifyCustomerOfAssignment(
       emailDetails,
       emailHighlight: visitWindow ? visitWindow : null,
       emailHighlightLabel: visitWindow ? "Arrival window" : null,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Notify the customer their inspector has started the visit and is on the way. */
+export async function notifyCustomerOfVisitOnTheWay(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  if (!request.assignedTo) return;
+
+  const business = context.businessName ?? "The business";
+  const inspector = request.assignedTo.name;
+  const headline = requestHeadline(request);
+  const visitWindow = formatVisitWindow(
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  );
+  const address = formatAddress(request.address);
+
+  const emailDetails: EmailDetailRow[] = [
+    { label: "Service", value: headline },
+    { label: "Inspector", value: inspector },
+  ];
+  if (address) {
+    emailDetails.push({ label: "Address", value: address });
+  }
+  if (request.scheduledSlot) {
+    emailDetails.push({
+      label: "Date",
+      value: formatSlotDate(request.scheduledSlot.date),
+    });
+  }
+
+  const body = visitWindow
+    ? `${inspector} from ${business} is on the way for ${headline}. Expected arrival: ${visitWindow}.`
+    : `${inspector} from ${business} is on the way for ${headline}.`;
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerName: request.customer.fullName || null,
+      requestId: request.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: request.status,
+      type: "visit_on_the_way",
+      title: `${inspector} is on the way`,
+      body,
+      emailDetails,
+      emailHighlight: visitWindow,
+      emailHighlightLabel: visitWindow ? "Expected arrival" : null,
     });
   } catch {
     /* best-effort */

@@ -5,6 +5,8 @@
  * triage them in /dashboard/inspection-visits.
  */
 
+import { toMillis } from "@/lib/onboarding/services/display";
+
 export const INSPECTION_COLLECTION = "inspection_requests";
 
 export const REQUEST_TYPES = ["existing_service", "custom_quote"] as const;
@@ -105,7 +107,45 @@ export type InspectionRequestDetail = {
   createdAt: number | null;
   updatedAt: number | null;
   visitStartedAt: number | null;
+  visitEndedAt: number | null;
+  /** Summary mirrored from quotations when a quote is sent. */
+  quotation: InspectionQuotationSummary | null;
 };
+
+/** Quotation summary stored on inspection_requests after a quote is created. */
+export type InspectionQuotationSummary = {
+  id: string;
+  pdfUrl: string | null;
+  finalPriceAud: number | null;
+  subtotalAud: number | null;
+  additionsTotalAud: number | null;
+  status: string | null;
+  createdAt: number | null;
+};
+
+export function parseInspectionQuotation(
+  raw: unknown,
+): InspectionQuotationSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const id = typeof item.id === "string" ? item.id.trim() : "";
+  if (!id) return null;
+
+  const readPrice = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+  const pdfUrlRaw = typeof item.pdfUrl === "string" ? item.pdfUrl.trim() : "";
+
+  return {
+    id,
+    pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
+    finalPriceAud: readPrice(item.finalPriceAud),
+    subtotalAud: readPrice(item.subtotalAud),
+    additionsTotalAud: readPrice(item.additionsTotalAud),
+    status: typeof item.status === "string" ? item.status : null,
+    createdAt: toMillis(item.createdAt),
+  };
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -320,6 +360,15 @@ export function formatSlotDate(date: string): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+/** Short, human-friendly reference code derived from an inspection visit id. */
+export function formatInspectionVisitReference(
+  inspectionRequestId: string,
+): string {
+  const id = inspectionRequestId.trim();
+  if (!id) return "—";
+  return id.slice(0, 8).toUpperCase();
 }
 
 export function formatAddress(address: InspectionAddress): string {

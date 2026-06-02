@@ -10,6 +10,7 @@ import {
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   type InspectionSlot,
+  parseInspectionQuotation,
 } from "@/lib/inspection/types";
 
 function parseAddress(raw: unknown): InspectionAddress {
@@ -136,6 +137,8 @@ export function mapInspectionDoc(
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
     visitStartedAt: toMillis(data.visitStartedAt),
+    visitEndedAt: toMillis(data.visitEndedAt),
+    quotation: parseInspectionQuotation(data.quotation),
   };
 }
 

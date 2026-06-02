@@ -1392,7 +1392,7 @@ export default function ServicesPage() {
                   {stat.label}
                 </span>
               </div>
-              <p className="font-display text-[24px] font-bold text-on-surface">
+              <p className="font-numeric text-[24px] font-bold text-on-surface">
                 {stat.value}
               </p>
               {"hint" in stat && stat.hint ? (
