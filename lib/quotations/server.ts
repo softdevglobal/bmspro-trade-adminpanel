@@ -58,6 +58,7 @@ export type QuotationDetail = {
   finalPriceAud: number;
   notes: string | null;
   paymentInstructions: string | null;
+  termsAndConditions: string | null;
   discountAud: number;
   depositRequest: QuotationDepositRequest | null;
   validUntil: string | null;
@@ -281,6 +282,10 @@ function mapQuotationDoc(
       typeof data.paymentInstructions === "string"
         ? data.paymentInstructions
         : null,
+    termsAndConditions:
+      typeof data.termsAndConditions === "string"
+        ? data.termsAndConditions
+        : null,
     discountAud:
       typeof data.discountAud === "number" && Number.isFinite(data.discountAud)
         ? Math.max(0, data.discountAud)
@@ -362,6 +367,22 @@ function parseLineItems(raw: unknown): QuotationLineItem[] | null {
     });
   }
   return items;
+}
+
+function serializeLineItemForFirestore(item: QuotationLineItem) {
+  return {
+    name: item.name,
+    priceAud: item.priceAud,
+    code: item.code?.trim() || null,
+    description: item.description?.trim() || null,
+    quantity: typeof item.quantity === "number" ? item.quantity : null,
+    rateAud: typeof item.rateAud === "number" ? item.rateAud : null,
+    gstPercent: typeof item.gstPercent === "number" ? item.gstPercent : null,
+  };
+}
+
+function serializeLineItemsForFirestore(items: QuotationLineItem[]) {
+  return items.map(serializeLineItemForFirestore);
 }
 
 /** Parses optional additions (extra charges). Invalid rows are dropped. */
@@ -530,7 +551,7 @@ export async function createQuotationForInspection(
     serviceTitle: requestHeadline(requestData),
     customer: requestData.customer ?? {},
     address: requestData.address ?? {},
-    lineItems,
+    lineItems: serializeLineItemsForFirestore(lineItems),
     additions,
     subtotalAud,
     additionsTotalAud,
@@ -688,6 +709,7 @@ export type StandaloneQuotationInput = {
   finalPriceAud?: number | null;
   notes?: string | null;
   paymentInstructions?: string | null;
+  termsAndConditions?: string | null;
   discountAud?: number | null;
   validUntil?: string | null;
   imageUrls?: string[];
@@ -826,16 +848,16 @@ export async function createStandaloneQuotation(
   const imageUrls = parseImageUrls(input.imageUrls);
 
   const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
-  const basePaymentInstructions =
-    typeof input.paymentInstructions === "string" &&
-    input.paymentInstructions.trim()
-      ? input.paymentInstructions.trim()
+  const baseTerms =
+    typeof input.termsAndConditions === "string" &&
+    input.termsAndConditions.trim()
+      ? input.termsAndConditions.trim()
       : null;
-  const paymentInstructions = depositRequest
-    ? basePaymentInstructions
-      ? `${basePaymentInstructions}\n\n${depositPaymentNote(depositRequest)}`
+  const termsAndConditions = depositRequest
+    ? baseTerms
+      ? `${baseTerms}\n\n${depositPaymentNote(depositRequest)}`
       : depositPaymentNote(depositRequest)
-    : basePaymentInstructions;
+    : baseTerms;
 
   const businessBranding = await loadQuotationBusinessBranding(businessId);
 
@@ -908,7 +930,7 @@ export async function createStandaloneQuotation(
     serviceTitle: title,
     customer,
     address,
-    lineItems,
+    lineItems: serializeLineItemsForFirestore(lineItems),
     additions,
     subtotalAud,
     additionsTotalAud,
@@ -918,7 +940,8 @@ export async function createStandaloneQuotation(
       typeof input.notes === "string" && input.notes.trim()
         ? input.notes.trim()
         : null,
-    paymentInstructions,
+    paymentInstructions: null,
+    termsAndConditions,
     discountAud,
     depositRequest,
     validUntil:

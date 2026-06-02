@@ -115,9 +115,9 @@ export async function POST(request: Request) {
           ? payload.finalPriceAud
           : null,
       notes: typeof payload.notes === "string" ? payload.notes : null,
-      paymentInstructions:
-        typeof payload.paymentInstructions === "string"
-          ? payload.paymentInstructions
+      termsAndConditions:
+        typeof payload.termsAndConditions === "string"
+          ? payload.termsAndConditions
           : null,
       discountAud:
         typeof payload.discountAud === "number" &&

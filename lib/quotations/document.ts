@@ -41,6 +41,7 @@ export type QuotationDocumentData = {
   discountAud: number;
   gstAud: number;
   totalAud: number;
+  termsAndConditions: string | null;
   paymentInstructions: string | null;
   notes: string | null;
   business: QuotationDocumentBusiness;
@@ -92,6 +93,15 @@ export function computeQuotationLineAmounts(input: {
       ? Math.round((amountAud / input.quantity) * 100) / 100
       : input.rate;
   return { amountAud, rateAudExGst };
+}
+
+export function resolveQuotationTerms(input: {
+  termsAndConditions?: string | null;
+  paymentInstructions?: string | null;
+}): string | null {
+  if (input.termsAndConditions?.trim()) return input.termsAndConditions.trim();
+  if (input.paymentInstructions?.trim()) return input.paymentInstructions.trim();
+  return null;
 }
 
 export function computeDocumentTotals(input: {

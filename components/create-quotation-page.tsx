@@ -2,6 +2,10 @@
 
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import {
+  DiscountEditModal,
+  type DocumentDiscount,
+} from "@/components/discount-edit-modal";
+import {
   DepositRequestModal,
   type DepositRequest,
 } from "@/components/deposit-request-modal";
@@ -33,7 +37,13 @@ import {
 
 type Tab = "create" | "preview" | "send";
 
-type CatalogItem = { id: string; name: string; code: string | null; priceAud: number };
+type CatalogItem = {
+  id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  priceAud: number;
+};
 
 type CustomerOption = {
   id: string;
@@ -113,6 +123,18 @@ function addDaysIso(iso: string, days: number): string {
 
 function formatAud(value: number): string {
   return `Aus $${value.toFixed(2)}`;
+}
+
+function SaveSpinner({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center justify-center gap-2">
+      <span
+        aria-hidden
+        className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent"
+      />
+      {label}
+    </span>
+  );
 }
 
 function parseNum(value: string): number {
@@ -243,6 +265,9 @@ export function CreateQuotationPage() {
   });
 
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [catalogSuggestField, setCatalogSuggestField] = useState<
+    "code" | "name" | null
+  >(null);
   const [lineItems, setLineItems] = useState<SavedLineItem[]>([]);
   const [itemDraft, setItemDraft] = useState<DraftLineItem | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -251,14 +276,15 @@ export function CreateQuotationPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [commentOpen, setCommentOpen] = useState(false);
+  const [termsAndConditions, setTermsAndConditions] = useState("");
+  const [termsLoaded, setTermsLoaded] = useState(false);
   const [comment, setComment] = useState("");
-  const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentInstructions, setPaymentInstructions] = useState("");
 
   const [quotationDate, setQuotationDate] = useState(todayIso());
   const [terms, setTerms] = useState<TermsId>("same_day");
-  const [discountAud, setDiscountAud] = useState("");
+  const [documentDiscount, setDocumentDiscount] =
+    useState<DocumentDiscount | null>(null);
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstPercentage, setGstPercentage] = useState(10);
   const [gstPricing, setGstPricing] = useState<GstPricingMode>("exclusive");
@@ -289,14 +315,33 @@ export function CreateQuotationPage() {
       .slice(0, 8);
   }, [customerOptions, customerSearch]);
 
+  const catalogSuggestions = useMemo(() => {
+    if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
+    const query =
+      catalogSuggestField === "code"
+        ? (itemDraft.code ?? "").trim().toLowerCase()
+        : (itemDraft.name ?? "").trim().toLowerCase();
+    const matches = query
+      ? catalog.filter((item) => {
+          const name = item.name.toLowerCase();
+          const code = (item.code ?? "").toLowerCase();
+          const description = (item.description ?? "").toLowerCase();
+          return (
+            name.includes(query) ||
+            code.includes(query) ||
+            description.includes(query)
+          );
+        })
+      : catalog;
+    return matches.slice(0, 8);
+  }, [catalog, itemDraft, catalogSuggestField]);
+
   const dueDate = useMemo(() => {
     const opt = TERMS_OPTIONS.find((t) => t.id === terms);
     return addDaysIso(quotationDate, opt?.days ?? 0);
   }, [quotationDate, terms]);
 
   const minQuotationDate = useMemo(() => addDaysIso(todayIso(), -730), []);
-
-  const discountAmount = parseNum(discountAud);
 
   useEffect(() => {
     setLineItems((prev) =>
@@ -340,6 +385,21 @@ export function CreateQuotationPage() {
     [lineItems, gstEnabled, gstPercentage, gstPricing],
   );
 
+  const subtotal = useMemo(
+    () =>
+      documentLineItems.reduce((sum, item) => sum + item.amountAud, 0),
+    [documentLineItems],
+  );
+
+  const discountAmount = useMemo(() => {
+    if (!documentDiscount) return 0;
+    if (documentDiscount.mode === "percent") {
+      const pct = Math.min(100, Math.max(0, documentDiscount.percent));
+      return Math.round(((subtotal * pct) / 100) * 100) / 100;
+    }
+    return Math.min(documentDiscount.amountAud, subtotal);
+  }, [documentDiscount, subtotal]);
+
   const documentTotals = useMemo(
     () =>
       computeDocumentTotals({
@@ -349,7 +409,6 @@ export function CreateQuotationPage() {
     [documentLineItems, discountAmount],
   );
 
-  const subtotal = documentTotals.subtotalAud;
   const gstAmount = documentTotals.gstAud;
   const total = documentTotals.totalAud;
   const depositPaidAud = depositRequest?.amountAud ?? 0;
@@ -368,6 +427,16 @@ export function CreateQuotationPage() {
     }
   }, [total, depositRequest]);
 
+  useEffect(() => {
+    if (!documentDiscount || documentDiscount.mode !== "fixed") return;
+    const capped = Math.min(documentDiscount.amountAud, subtotal);
+    if (Math.abs(capped - documentDiscount.amountAud) > 0.001) {
+      setDocumentDiscount((prev) =>
+        prev ? { ...prev, amountAud: capped } : prev,
+      );
+    }
+  }, [subtotal, documentDiscount]);
+
   async function refreshCatalog(token: string) {
     try {
       const itemsRes = await fetch("/api/items", {
@@ -382,6 +451,7 @@ export function CreateQuotationPage() {
           itemsData.items.map((item) => ({
             ...item,
             code: item.code ?? null,
+            description: item.description ?? null,
           })),
         );
       }
@@ -410,6 +480,7 @@ export function CreateQuotationPage() {
             itemsData.items.map((item) => ({
               ...item,
               code: item.code ?? null,
+              description: item.description ?? null,
             })),
           );
         }
@@ -422,6 +493,7 @@ export function CreateQuotationPage() {
             businessEmail?: string | null;
             businessPhone?: string | null;
             abn?: string | null;
+            termsAndConditions?: string | null;
           };
         };
         if (profileRes.ok && profileData.ok && profileData.profile) {
@@ -434,12 +506,16 @@ export function CreateQuotationPage() {
           setBusinessEmail(profile.businessEmail ?? null);
           setBusinessPhone(profile.businessPhone ?? null);
           setBusinessAbn(profile.abn ?? null);
+          if (!termsLoaded) {
+            setTermsAndConditions(profile.termsAndConditions ?? "");
+            setTermsLoaded(true);
+          }
         }
       } catch {
         /* optional */
       }
     })();
-  }, [user]);
+  }, [user, termsLoaded]);
 
   function selectCustomer(option: CustomerOption) {
     setCustomer({
@@ -461,6 +537,7 @@ export function CreateQuotationPage() {
   }
 
   function startAddItem() {
+    setCatalogSuggestField(null);
     setItemDraft({
       code: "",
       name: "",
@@ -475,6 +552,7 @@ export function CreateQuotationPage() {
   }
 
   function startEditItem(item: SavedLineItem) {
+    setCatalogSuggestField(null);
     setItemDraft({
       code: item.code ?? "",
       name: item.name ?? "",
@@ -530,6 +608,7 @@ export function CreateQuotationPage() {
     }
     setItemDraft(null);
     setEditingItemId(null);
+    setCatalogSuggestField(null);
     setError(null);
 
     if (user) {
@@ -545,6 +624,7 @@ export function CreateQuotationPage() {
             name,
             priceAud: rate,
             code: code || null,
+            description: (itemDraft.description ?? "").trim() || null,
           }),
         });
         await refreshCatalog(token);
@@ -552,6 +632,72 @@ export function CreateQuotationPage() {
         /* catalog save is best-effort */
       }
     }
+  }
+
+  function applyCatalogItem(item: CatalogItem) {
+    setItemDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            code: item.code ?? "",
+            name: item.name,
+            description: item.description ?? "",
+            rate: String(item.priceAud),
+          }
+        : prev,
+    );
+    setCatalogSuggestField(null);
+  }
+
+  function renderCatalogSuggestions(activeField: "code" | "name") {
+    if (catalogSuggestField !== activeField || catalogSuggestions.length === 0) {
+      return null;
+    }
+    const query =
+      activeField === "code"
+        ? (itemDraft?.code ?? "").trim()
+        : (itemDraft?.name ?? "").trim();
+    return (
+      <ul
+        role="listbox"
+        className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-outline-variant bg-background py-1 shadow-lg"
+      >
+        {!query ? (
+          <li className="px-3 py-1.5 font-body text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+            Saved items
+          </li>
+        ) : null}
+        {catalogSuggestions.map((item) => (
+          <li key={item.id} role="option">
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => applyCatalogItem(item)}
+              className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-surface-container-low"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-body text-[13px] font-semibold text-on-surface">
+                  {item.name}
+                </span>
+                {item.code ? (
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    {item.code}
+                  </span>
+                ) : null}
+                {item.description ? (
+                  <span className="mt-0.5 block truncate font-body text-[10px] text-on-surface-variant/80">
+                    {item.description}
+                  </span>
+                ) : null}
+              </span>
+              <span className="shrink-0 font-numeric text-[12px] font-semibold text-primary">
+                {formatAud(item.priceAud)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
   }
 
   async function uploadImage(event: ChangeEvent<HTMLInputElement>) {
@@ -655,8 +801,8 @@ export function CreateQuotationPage() {
           })),
           finalPriceAud: total,
           discountAud: discountAmount,
+          termsAndConditions: termsAndConditions.trim() || null,
           notes: comment.trim() || null,
-          paymentInstructions: paymentInstructions.trim() || null,
           validUntil: dueDate,
           imageUrls,
           depositRequest: depositRequest
@@ -669,10 +815,18 @@ export function CreateQuotationPage() {
             : null,
         }),
       });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        error?: string;
-      };
+      const responseText = await response.text();
+      let payload: { ok?: boolean; error?: string };
+      try {
+        payload = responseText.trim()
+          ? (JSON.parse(responseText) as { ok?: boolean; error?: string })
+          : { ok: false, error: "Empty response from server." };
+      } catch {
+        payload = {
+          ok: false,
+          error: responseText.trim() || "Could not save quotation.",
+        };
+      }
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error ?? "Could not save quotation.");
       }
@@ -707,7 +861,8 @@ export function CreateQuotationPage() {
       discountAud: discountAmount,
       gstAud: gstAmount,
       totalAud: total,
-      paymentInstructions: paymentInstructions.trim() || null,
+      termsAndConditions: termsAndConditions.trim() || null,
+      paymentInstructions: null,
       notes: comment.trim() || null,
       business: {
         businessName,
@@ -730,7 +885,7 @@ export function CreateQuotationPage() {
     discountAmount,
     gstAmount,
     total,
-    paymentInstructions,
+    termsAndConditions,
     comment,
     businessName,
     logoUrl,
@@ -771,9 +926,9 @@ export function CreateQuotationPage() {
               type="button"
               onClick={() => void save()}
               disabled={submitting}
-              className="rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
+              className="inline-flex min-w-[5.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? <SaveSpinner label="Saving…" /> : "Save"}
             </button>
           </div>
         </div>
@@ -1054,53 +1209,67 @@ export function CreateQuotationPage() {
 
                 {itemDraft ? (
                   <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
-                    <datalist id="quotation-item-catalog">
-                      {catalog.map((item) => (
-                        <option key={item.id} value={item.name} />
-                      ))}
-                    </datalist>
                     <label className="block">
                       <span className={LABEL_CLASS}>Item code</span>
-                      <input
-                        type="text"
-                        value={itemDraft.code ?? ""}
-                        onChange={(e) =>
-                          setItemDraft((prev) =>
-                            prev ? { ...prev, code: e.target.value } : prev,
-                          )
-                        }
-                        placeholder="e.g. TAP-001"
-                        className={INPUT_CLASS}
-                        autoFocus
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={itemDraft.code ?? ""}
+                          onChange={(e) =>
+                            setItemDraft((prev) =>
+                              prev ? { ...prev, code: e.target.value } : prev,
+                            )
+                          }
+                          onFocus={() => setCatalogSuggestField("code")}
+                          onBlur={() => {
+                            window.setTimeout(
+                              () =>
+                                setCatalogSuggestField((field) =>
+                                  field === "code" ? null : field,
+                                ),
+                              150,
+                            );
+                          }}
+                          placeholder="e.g. TAP-001"
+                          className={INPUT_CLASS}
+                          autoComplete="off"
+                          autoFocus
+                        />
+                        {renderCatalogSuggestions("code")}
+                      </div>
                     </label>
                     <label className="mt-3 block">
                       <span className={LABEL_CLASS}>Item name</span>
-                      <input
-                        type="text"
-                        list="quotation-item-catalog"
-                        value={itemDraft.name ?? ""}
-                        onChange={(e) => {
-                          const name = e.target.value;
-                          const match = catalog.find(
-                            (c) =>
-                              c.name.toLowerCase() === name.trim().toLowerCase(),
-                          );
-                          setItemDraft((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  name,
-                                  code: match ? (match.code ?? "") : (prev.code ?? ""),
-                                  rate: match
-                                    ? String(match.priceAud)
-                                    : prev.rate,
-                                }
-                              : prev,
-                          );
-                        }}
-                        className={INPUT_CLASS}
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={itemDraft.name ?? ""}
+                          onChange={(e) =>
+                            setItemDraft((prev) =>
+                              prev ? { ...prev, name: e.target.value } : prev,
+                            )
+                          }
+                          onFocus={() => setCatalogSuggestField("name")}
+                          onBlur={() => {
+                            window.setTimeout(
+                              () =>
+                                setCatalogSuggestField((field) =>
+                                  field === "name" ? null : field,
+                                ),
+                              150,
+                            );
+                          }}
+                          className={INPUT_CLASS}
+                          autoComplete="off"
+                        />
+                        {renderCatalogSuggestions("name")}
+                      </div>
+                      {catalog.length > 0 ? (
+                        <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+                          Type or focus to search {catalog.length} saved item
+                          {catalog.length === 1 ? "" : "s"}.
+                        </p>
+                      ) : null}
                     </label>
                     <label className="mt-3 block">
                       <span className={LABEL_CLASS}>Item description</span>
@@ -1257,6 +1426,7 @@ export function CreateQuotationPage() {
                         onClick={() => {
                           setItemDraft(null);
                           setEditingItemId(null);
+                          setCatalogSuggestField(null);
                         }}
                         className="rounded-lg px-3 py-2 font-body text-[13px] font-semibold text-on-surface-variant hover:bg-surface-container-low"
                       >
@@ -1337,56 +1507,54 @@ export function CreateQuotationPage() {
                 ) : null}
               </section>
 
-              {/* Comments & payment */}
+              {/* Terms and conditions */}
+              <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                    Terms and conditions
+                  </h2>
+                  <Link
+                    href="/dashboard/settings"
+                    className="font-body text-[12px] font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+                  >
+                    Edit default in Settings
+                  </Link>
+                </div>
+                <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                  Pre-filled from your business settings. Changes here apply to
+                  this quotation only.
+                </p>
+                <label className="mt-3 block">
+                  <textarea
+                    value={termsAndConditions}
+                    onChange={(e) => setTermsAndConditions(e.target.value)}
+                    rows={6}
+                    maxLength={5000}
+                    placeholder="Payment terms, warranty, cancellation policy, etc."
+                    className={`${INPUT_CLASS} resize-y leading-relaxed`}
+                  />
+                </label>
+              </section>
+
+              {/* Comments */}
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
-                  Comments and payment instructions
+                  Comments
                 </h2>
-                <div className="mt-3 flex flex-wrap gap-4">
-                  {!commentOpen ? (
-                    <button
-                      type="button"
-                      onClick={() => setCommentOpen(true)}
-                      className="font-body text-[14px] font-semibold text-primary"
-                    >
-                      Add comment
-                    </button>
-                  ) : null}
-                  {!paymentOpen ? (
-                    <button
-                      type="button"
-                      onClick={() => setPaymentOpen(true)}
-                      className="font-body text-[14px] font-semibold text-primary"
-                    >
-                      Add payment instructions
-                    </button>
-                  ) : null}
-                </div>
-                {commentOpen ? (
-                  <label className="mt-3 block">
-                    <span className={LABEL_CLASS}>Comment</span>
-                    <textarea
-                      value={comment}
-                      onChange={(e) => setComment(e.target.value)}
-                      rows={3}
-                      className={`${INPUT_CLASS} resize-y`}
-                      maxLength={2000}
-                    />
-                  </label>
-                ) : null}
-                {paymentOpen ? (
-                  <label className="mt-3 block">
-                    <span className={LABEL_CLASS}>Payment instructions</span>
-                    <textarea
-                      value={paymentInstructions}
-                      onChange={(e) => setPaymentInstructions(e.target.value)}
-                      rows={3}
-                      placeholder="Bank details, payment terms, etc."
-                      className={`${INPUT_CLASS} resize-y`}
-                      maxLength={2000}
-                    />
-                  </label>
-                ) : null}
+                <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                  Optional notes for the customer. Shown on the quotation PDF
+                  and preview.
+                </p>
+                <label className="mt-3 block">
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    rows={4}
+                    maxLength={2000}
+                    placeholder="Add a comment for this quotation…"
+                    className={`${INPUT_CLASS} resize-y leading-relaxed`}
+                  />
+                </label>
               </section>
             </div>
           ) : null}
@@ -1441,9 +1609,13 @@ export function CreateQuotationPage() {
                 type="button"
                 onClick={() => void save()}
                 disabled={submitting || !customer.email.trim()}
-                className="w-full rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
+                className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
               >
-                {submitting ? "Sending…" : "Save & send quotation"}
+                {submitting ? (
+                  <SaveSpinner label="Sending…" />
+                ) : (
+                  "Save & send quotation"
+                )}
               </button>
             </div>
           ) : null}
@@ -1513,22 +1685,30 @@ export function CreateQuotationPage() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-on-surface-variant">Discount</span>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-body text-[11px] text-on-surface-variant">
-                      $
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={discountAud}
-                      onChange={(e) => setDiscountAud(e.target.value)}
-                      placeholder="0.00"
-                      className={`${NUMBER_INPUT_CLASS} mt-0 w-[6.5rem] py-1.5 pl-5 pr-2 text-right text-[13px]`}
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDiscountModalOpen(true)}
+                    className="font-body text-[12px] text-on-surface-variant underline underline-offset-2 hover:text-primary"
+                  >
+                    Discount
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscountModalOpen(true)}
+                    className="font-numeric text-[13px] font-medium text-on-surface hover:text-primary"
+                  >
+                    {discountAmount > 0
+                      ? `−${formatAud(discountAmount)}`
+                      : formatAud(0)}
+                  </button>
                 </div>
+                {documentDiscount && discountAmount > 0 ? (
+                  <p className="text-right font-body text-[10px] text-on-surface-variant">
+                    {documentDiscount.mode === "percent"
+                      ? `${documentDiscount.percent}% off subtotal`
+                      : "Fixed discount"}
+                  </p>
+                ) : null}
                 <div className="rounded-xl border border-outline-variant/40 bg-gradient-to-br from-surface-container-lowest to-surface-container-low/80 p-2.5">
                   <button
                     type="button"
@@ -1660,7 +1840,7 @@ export function CreateQuotationPage() {
                 <button
                   type="button"
                   onClick={() => setDepositModalOpen(true)}
-                  className="font-body text-[13px] font-semibold text-primary hover:underline"
+                  className="font-body text-[13px] font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
                 >
                   {depositRequest
                     ? "Edit deposit request"
@@ -1678,6 +1858,14 @@ export function CreateQuotationPage() {
             </div>
           </div>
         </aside>
+
+        <DiscountEditModal
+          open={discountModalOpen}
+          subtotalAud={subtotal}
+          initial={documentDiscount}
+          onClose={() => setDiscountModalOpen(false)}
+          onSave={setDocumentDiscount}
+        />
 
         <DepositRequestModal
           open={depositModalOpen}

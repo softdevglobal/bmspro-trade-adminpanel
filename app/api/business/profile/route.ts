@@ -68,6 +68,7 @@ export async function PATCH(request: Request) {
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
+    termsAndConditions?: string | null;
   } = {};
 
   if ("logoUrl" in raw) {
@@ -93,6 +94,21 @@ export async function PATCH(request: Request) {
         );
       }
       updates.gstPercentage = parsed.value;
+    }
+  }
+
+  if ("termsAndConditions" in raw) {
+    if (raw.termsAndConditions == null) {
+      updates.termsAndConditions = null;
+    } else if (typeof raw.termsAndConditions === "string") {
+      const trimmed = raw.termsAndConditions.trim();
+      if (trimmed.length > 5000) {
+        return NextResponse.json(
+          { ok: false, error: "Terms and conditions must be 5000 characters or less." },
+          { status: 400 },
+        );
+      }
+      updates.termsAndConditions = trimmed || null;
     }
   }
 

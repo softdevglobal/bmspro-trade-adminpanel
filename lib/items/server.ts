@@ -9,6 +9,7 @@ export type CatalogItem = {
   id: string;
   name: string;
   code: string | null;
+  description: string | null;
   priceAud: number;
   imageUrl: string | null;
   createdAt: number | null;
@@ -19,6 +20,7 @@ export type CatalogItemInput = {
   name: string;
   priceAud: number;
   code?: string | null;
+  description?: string | null;
   imageUrl?: string | null;
 };
 
@@ -43,6 +45,10 @@ function mapItemDoc(id: string, data: Record<string, unknown>): CatalogItem {
     code:
       typeof data.code === "string" && data.code.trim()
         ? data.code.trim()
+        : null,
+    description:
+      typeof data.description === "string" && data.description.trim()
+        ? data.description.trim()
         : null,
     priceAud:
       typeof data.priceAud === "number" && Number.isFinite(data.priceAud)
@@ -85,6 +91,15 @@ function parseCode(raw: unknown): string | null | undefined {
   return trimmed || null;
 }
 
+function parseDescription(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length > 500) return undefined;
+  return trimmed || null;
+}
+
 export function parseCatalogItemInput(raw: unknown): CatalogItemInput | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
@@ -103,6 +118,11 @@ export function parseCatalogItemInput(raw: unknown): CatalogItemInput | null {
     const code = parseCode(item.code);
     if (code === undefined) return null;
     parsed.code = code;
+  }
+  if ("description" in item) {
+    const description = parseDescription(item.description);
+    if (description === undefined) return null;
+    parsed.description = description;
   }
   if ("imageUrl" in item) {
     const imageUrl = parseImageUrl(item.imageUrl);
@@ -157,6 +177,9 @@ export async function upsertCatalogItem(
     if (input.code !== undefined) {
       updates.code = input.code;
     }
+    if (input.description !== undefined) {
+      updates.description = input.description;
+    }
     await ref.set(updates, { merge: true });
     const saved = await ref.get();
     return mapItemDoc(ref.id, saved.data() ?? {});
@@ -178,6 +201,9 @@ export async function upsertCatalogItem(
   if (input.code) {
     payload.code = input.code;
   }
+  if (input.description) {
+    payload.description = input.description;
+  }
   await ref.set(payload);
   const saved = await ref.get();
   return mapItemDoc(ref.id, saved.data() ?? {});
@@ -189,6 +215,7 @@ export function catalogInputFromQuotationLineItem(item: {
   rateAud?: number | null;
   priceAud: number;
   code?: string | null;
+  description?: string | null;
 }): CatalogItemInput {
   return {
     name: item.name,
@@ -197,6 +224,7 @@ export function catalogInputFromQuotationLineItem(item: {
         ? item.rateAud
         : item.priceAud,
     code: item.code?.trim() || null,
+    description: item.description?.trim() || null,
   };
 }
 
@@ -259,6 +287,9 @@ export async function updateCatalogItem(
   }
   if (input.code !== undefined) {
     updates.code = input.code;
+  }
+  if (input.description !== undefined) {
+    updates.description = input.description;
   }
 
   await ref.set(updates, { merge: true });

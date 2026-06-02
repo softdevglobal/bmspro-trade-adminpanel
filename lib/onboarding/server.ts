@@ -285,6 +285,7 @@ export type BusinessProfile = {
   businessEmail: string | null;
   businessPhone: string | null;
   abn: string | null;
+  termsAndConditions: string | null;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -323,6 +324,11 @@ export async function getBusinessProfile(
     businessPhone:
       typeof data.businessPhone === "string" ? data.businessPhone : null,
     abn: typeof data.abn === "string" ? data.abn : null,
+    termsAndConditions:
+      typeof data.termsAndConditions === "string" &&
+      data.termsAndConditions.trim()
+        ? data.termsAndConditions.trim()
+        : null,
   };
 }
 
@@ -333,6 +339,7 @@ export async function updateBusinessProfile(
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
+    termsAndConditions?: string | null;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -352,6 +359,10 @@ export async function updateBusinessProfile(
 
   if ("gstPercentage" in updates) {
     payload.gstPercentage = updates.gstPercentage;
+  }
+
+  if ("termsAndConditions" in updates) {
+    payload.termsAndConditions = updates.termsAndConditions;
   }
 
   await adminDb.collection("businesses").doc(businessId).update(payload);

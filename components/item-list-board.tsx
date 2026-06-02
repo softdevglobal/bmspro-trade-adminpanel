@@ -8,6 +8,7 @@ type CatalogItem = {
   id: string;
   name: string;
   code: string | null;
+  description: string | null;
   priceAud: number;
   imageUrl: string | null;
   createdAt: number | null;
@@ -136,7 +137,8 @@ export function ItemListBoard() {
     return items.filter(
       (item) =>
         item.name.toLowerCase().includes(query) ||
-        (item.code?.toLowerCase().includes(query) ?? false),
+        (item.code?.toLowerCase().includes(query) ?? false) ||
+        (item.description?.toLowerCase().includes(query) ?? false),
     );
   }, [items, search]);
 
@@ -348,6 +350,7 @@ function ItemEditorModal({
   const [currentStep, setCurrentStep] = useState(1);
   const [name, setName] = useState(item?.name ?? "");
   const [code, setCode] = useState(item?.code ?? "");
+  const [description, setDescription] = useState(item?.description ?? "");
   const [price, setPrice] = useState(
     item ? item.priceAud.toString() : "",
   );
@@ -413,6 +416,7 @@ function ItemEditorModal({
         name: trimmedName,
         priceAud: parsedPrice,
         code: code.trim() || null,
+        description: description.trim() || null,
         imageUrl,
       }),
     });
@@ -605,6 +609,20 @@ function ItemEditorModal({
 
               <label className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Description
+                </span>
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Optional details for quotations"
+                  rows={3}
+                  maxLength={500}
+                  className={`${INPUT_CLASS} resize-y`}
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Price (AUD) <span className="text-error">*</span>
                 </span>
                 <input
@@ -631,6 +649,7 @@ function ItemEditorModal({
               <ItemPreviewPanel
                 name={name.trim() || "Untitled item"}
                 code={code.trim() || null}
+                description={description.trim() || null}
                 priceAud={previewPrice}
                 imageUrl={imageUrl}
               />
@@ -724,11 +743,13 @@ function ItemEditorHero({
 function ItemPreviewPanel({
   name,
   code,
+  description,
   priceAud,
   imageUrl,
 }: {
   name: string;
   code: string | null;
+  description: string | null;
   priceAud: number;
   imageUrl: string | null;
 }) {
@@ -781,6 +802,14 @@ function ItemPreviewPanel({
           </p>
           <p className="font-numeric mt-1 text-[13px] font-semibold text-on-surface">
             {formatPrice(priceAud)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5 sm:col-span-2">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Description
+          </p>
+          <p className="mt-1 whitespace-pre-line font-body text-[13px] text-on-surface">
+            {description ?? "—"}
           </p>
         </div>
         <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5">

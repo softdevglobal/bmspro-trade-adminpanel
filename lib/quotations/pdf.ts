@@ -4,6 +4,7 @@ import {
   computeDocumentTotals,
   formatQuoteDate,
   formatQuoteMoney,
+  resolveQuotationTerms,
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
@@ -15,6 +16,7 @@ import {
   PDFImage,
   PDFPage,
   StandardFonts,
+  degrees,
   rgb,
 } from "pdf-lib";
 
@@ -24,16 +26,117 @@ const MARGIN = 44;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
 const BRAND = rgb(0.043, 0.2, 0.627);
-const BRAND_SOFT = rgb(0.93, 0.96, 1);
 const TEXT = rgb(0.12, 0.14, 0.18);
 const MUTED = rgb(0.42, 0.46, 0.52);
 const BORDER = rgb(0.82, 0.84, 0.88);
-const HEADER_BG = rgb(0.94, 0.95, 0.97);
-const ROW_ALT = rgb(0.98, 0.985, 1);
+const ROW_ALT = rgb(0.975, 0.98, 0.99);
 const TOTAL_BAR = rgb(0.1, 0.12, 0.16);
 const WHITE = rgb(1, 1, 1);
 
 const LOGO_MAX = 72;
+
+function lerpColor(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number },
+  t: number,
+) {
+  return rgb(
+    a.r + (b.r - a.r) * t,
+    a.g + (b.g - a.g) * t,
+    a.b + (b.b - a.b) * t,
+  );
+}
+
+function drawPageDecorations(targetPage: PDFPage, fontBold: PDFFont) {
+  // Full-page pearl gradient — the document surface itself, not a white box on top.
+  const bands = 36;
+  const top = { r: 0.965, g: 0.975, b: 0.995 };
+  const mid = { r: 0.98, g: 0.985, b: 0.99 };
+  const bottom = { r: 0.992, g: 0.988, b: 0.982 };
+  for (let i = 0; i < bands; i++) {
+    const t = i / (bands - 1);
+    const color =
+      t < 0.45
+        ? lerpColor(top, mid, t / 0.45)
+        : lerpColor(mid, bottom, (t - 0.45) / 0.55);
+    targetPage.drawRectangle({
+      x: 0,
+      y: PAGE_HEIGHT - (PAGE_HEIGHT / bands) * (i + 1),
+      width: PAGE_WIDTH,
+      height: PAGE_HEIGHT / bands + 1.5,
+      color,
+    });
+  }
+
+  // Soft corner blooms on the page surface
+  targetPage.drawCircle({
+    x: PAGE_WIDTH - 36,
+    y: PAGE_HEIGHT - 48,
+    size: 240,
+    color: BRAND,
+    opacity: 0.045,
+  });
+  targetPage.drawCircle({
+    x: PAGE_WIDTH * 0.55,
+    y: PAGE_HEIGHT * 0.18,
+    size: 200,
+    color: rgb(0.72, 0.84, 0.98),
+    opacity: 0.035,
+  });
+  targetPage.drawCircle({
+    x: 48,
+    y: 72,
+    size: 170,
+    color: rgb(0.94, 0.9, 0.84),
+    opacity: 0.05,
+  });
+
+  // Fine linen texture (sparse dots)
+  for (let row = 0; row < 42; row++) {
+    for (let col = 0; col < 30; col++) {
+      if ((row + col) % 3 !== 0) continue;
+      targetPage.drawCircle({
+        x: 28 + col * 18,
+        y: 28 + row * 19,
+        size: 0.55,
+        color: BRAND,
+        opacity: 0.028,
+      });
+    }
+  }
+
+  // Watermark sitting on the page background
+  targetPage.drawText("QUOTE", {
+    x: PAGE_WIDTH * 0.18,
+    y: PAGE_HEIGHT * 0.42,
+    size: 92,
+    font: fontBold,
+    color: BRAND,
+    opacity: 0.022,
+    rotate: degrees(-18),
+  });
+
+  // Slim top accent — no side rail
+  targetPage.drawRectangle({
+    x: 0,
+    y: PAGE_HEIGHT - 3.5,
+    width: PAGE_WIDTH,
+    height: 3.5,
+    color: BRAND,
+  });
+
+  // Inset letterhead frame
+  const framePad = 10;
+  targetPage.drawRectangle({
+    x: MARGIN - framePad,
+    y: MARGIN - framePad,
+    width: CONTENT_WIDTH + framePad * 2,
+    height: PAGE_HEIGHT - MARGIN * 2 + framePad * 2,
+    borderColor: rgb(0.8, 0.84, 0.9),
+    borderWidth: 0.6,
+    opacity: 0.55,
+  });
+}
 
 async function embedLogoFromUrl(
   doc: PDFDocument,
@@ -152,8 +255,9 @@ export function buildQuotationDocumentFromDetail(
     discountAud,
     gstAud: totals.gstAud,
     totalAud: quotation.finalPriceAud || totals.totalAud,
-    paymentInstructions: quotation.paymentInstructions,
-    notes: quotation.notes,
+    termsAndConditions: resolveQuotationTerms(quotation),
+    paymentInstructions: null,
+    notes: quotation.notes?.trim() ? quotation.notes.trim() : null,
     business: {
       businessName: branding.businessName?.trim() || "Business",
       logoUrl: branding.logoUrl ?? null,
@@ -195,6 +299,7 @@ export async function generateQuotationPdf(
   const fontNumericBold = await doc.embedFont(StandardFonts.TimesRomanBold);
 
   let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  drawPageDecorations(page, fontBold);
   let y = PAGE_HEIGHT;
 
   const logoImage =
@@ -283,21 +388,13 @@ export async function generateQuotationPdf(
   const ensureSpace = (needed: number) => {
     if (y - needed < MARGIN + 72) {
       page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+      drawPageDecorations(page, fontBold);
       y = PAGE_HEIGHT - MARGIN;
     }
   };
 
-  // ── Top brand accent ──
-  page.drawRectangle({
-    x: 0,
-    y: PAGE_HEIGHT - 5,
-    width: PAGE_WIDTH,
-    height: 5,
-    color: BRAND,
-  });
-  y = PAGE_HEIGHT - 28;
-
   // ── Header: title left, logo right ──
+  y = PAGE_HEIGHT - 36;
   const headerBottom = y - 88;
   if (logoImage) {
     const scale = Math.min(
@@ -314,8 +411,15 @@ export async function generateQuotationPdf(
     });
   }
 
-  drawText("Quote", MARGIN, y, { size: 30, bold: true, color: BRAND });
-  y -= 28;
+  drawText("Quote", MARGIN, y, { size: 32, bold: true, color: BRAND });
+  y -= 6;
+  page.drawLine({
+    start: { x: MARGIN, y: y - 2 },
+    end: { x: MARGIN + 52, y: y - 2 },
+    thickness: 3,
+    color: BRAND,
+  });
+  y -= 22;
   drawText(data.business.businessName, MARGIN, y, {
     size: 14,
     bold: true,
@@ -331,9 +435,10 @@ export async function generateQuotationPdf(
     y: y - cardH,
     width: CONTENT_WIDTH,
     height: cardH,
-    color: BRAND_SOFT,
-    borderColor: BORDER,
-    borderWidth: 0.5,
+    color: WHITE,
+    opacity: 0.88,
+    borderColor: rgb(0.78, 0.84, 0.92),
+    borderWidth: 0.75,
   });
   page.drawRectangle({
     x: MARGIN,
@@ -374,9 +479,18 @@ export async function generateQuotationPdf(
     y: y - 20,
     width: CONTENT_WIDTH,
     height: 22,
-    color: HEADER_BG,
-    borderColor: BORDER,
-    borderWidth: 0.5,
+    color: WHITE,
+    opacity: 0.78,
+    borderColor: rgb(0.78, 0.84, 0.92),
+    borderWidth: 0.75,
+  });
+  page.drawRectangle({
+    x: MARGIN,
+    y: y - 20,
+    width: CONTENT_WIDTH,
+    height: 3,
+    color: BRAND,
+    opacity: 0.12,
   });
   drawText(`Quote No:  ${data.quoteNo}`, MARGIN + 10, y - 6, {
     size: 9,
@@ -409,9 +523,18 @@ export async function generateQuotationPdf(
       y: y - rowH + 4,
       width: CONTENT_WIDTH,
       height: rowH,
-      color: HEADER_BG,
-      borderColor: BORDER,
+      color: WHITE,
+      opacity: 0.82,
+      borderColor: rgb(0.78, 0.84, 0.92),
       borderWidth: 0.75,
+    });
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - rowH + 4,
+      width: CONTENT_WIDTH,
+      height: 2.5,
+      color: BRAND,
+      opacity: 0.14,
     });
     const hy = y - 13;
     drawText("Code", cols.code.x + 4, hy, { size: 7.5, bold: true, color: MUTED });
@@ -435,13 +558,23 @@ export async function generateQuotationPdf(
 
   data.lineItems.forEach((item, index) => {
     ensureSpace(rowH + 4);
-    if (index % 2 === 1) {
+    if (index % 2 === 0) {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - rowH + 4,
+        width: CONTENT_WIDTH,
+        height: rowH,
+        color: WHITE,
+        opacity: 0.72,
+      });
+    } else {
       page.drawRectangle({
         x: MARGIN,
         y: y - rowH + 4,
         width: CONTENT_WIDTH,
         height: rowH,
         color: ROW_ALT,
+        opacity: 0.85,
       });
     }
     page.drawRectangle({
@@ -496,36 +629,49 @@ export async function generateQuotationPdf(
     color: BORDER,
   });
   const partsVal = formatQuoteMoney(data.subtotalAud);
-  drawText("Parts Subtotal", cols.desc.x, y - 4, { size: 10, bold: true });
+  drawText("Subtotal", cols.desc.x, y - 4, { size: 10, bold: true });
   drawNumberRight(partsVal, PAGE_WIDTH - MARGIN, y - 4, {
     size: 10,
     bold: true,
   });
   y -= 28;
 
-  // Payment details box
-  if (data.paymentInstructions?.trim()) {
+  // Terms and conditions
+  if (data.termsAndConditions?.trim()) {
     ensureSpace(48);
-    const payLines = wrapText(data.paymentInstructions.trim(), font, 10, CONTENT_WIDTH - 24);
-    const boxH = 22 + payLines.length * 13;
+    const termsLines = wrapText(
+      data.termsAndConditions.trim(),
+      font,
+      10,
+      CONTENT_WIDTH - 24,
+    );
+    const boxH = 22 + termsLines.length * 13;
     page.drawRectangle({
       x: MARGIN,
       y: y - boxH,
       width: CONTENT_WIDTH,
       height: boxH,
-      color: BRAND_SOFT,
-      borderColor: BORDER,
-      borderWidth: 0.5,
+      color: WHITE,
+      opacity: 0.88,
+      borderColor: rgb(0.78, 0.84, 0.92),
+      borderWidth: 0.75,
     });
-    drawText("Payment Details", MARGIN + 12, y - 16, {
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - boxH,
+      width: 4,
+      height: boxH,
+      color: BRAND,
+    });
+    drawText("Terms and conditions", MARGIN + 12, y - 16, {
       size: 11,
       bold: true,
       color: BRAND,
     });
-    let py = y - 32;
-    for (const line of payLines) {
-      drawText(line, MARGIN + 12, py, { size: 10 });
-      py -= 13;
+    let ty = y - 32;
+    for (const line of termsLines) {
+      drawText(line, MARGIN + 12, ty, { size: 10 });
+      ty -= 13;
     }
     y -= boxH + 16;
   }
@@ -545,7 +691,9 @@ export async function generateQuotationPdf(
     y: y - panelH,
     width: panelW,
     height: panelH,
-    borderColor: BORDER,
+    color: WHITE,
+    opacity: 0.9,
+    borderColor: rgb(0.78, 0.84, 0.92),
     borderWidth: 0.75,
   });
 
@@ -598,14 +746,13 @@ export async function generateQuotationPdf(
   });
   y -= panelH + 20;
 
-  // Notes
   if (data.notes?.trim()) {
     ensureSpace(40);
-    drawText("Notes", MARGIN, y, { size: 11, bold: true, color: BRAND });
+    drawText("Comments", MARGIN, y, { size: 11, bold: true, color: BRAND });
     y -= 14;
     page.drawLine({
       start: { x: MARGIN, y: y + 4 },
-      end: { x: MARGIN + 48, y: y + 4 },
+      end: { x: MARGIN + 64, y: y + 4 },
       thickness: 2,
       color: BRAND,
     });
