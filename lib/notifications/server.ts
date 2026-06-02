@@ -32,6 +32,10 @@ import {
   sendOwnerMobilePush,
 } from "@/lib/notifications/push";
 import { FieldValue } from "firebase-admin/firestore";
+import {
+  notifyBusinessNotificationsChanged,
+  notifyCustomerNotificationsChanged,
+} from "@/lib/notifications/realtime-hub";
 
 /** Eyebrow + tone shown in the customer email for each notification type. */
 const EMAIL_PRESENTATION: Record<
@@ -108,6 +112,12 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
 
   if (input.audience === "customer" && input.customerEmail) {
     await sendCustomerNotificationEmail(input);
+  }
+
+  if (input.audience === "business" && input.businessId) {
+    notifyBusinessNotificationsChanged(input.businessId);
+  } else if (input.audience === "customer" && input.customerId) {
+    notifyCustomerNotificationsChanged(input.customerId);
   }
 }
 
@@ -619,6 +629,11 @@ export async function markNotificationRead(
   if (!snap.exists) return false;
   if (!ownsNotification(snap.data() ?? {}, guard)) return false;
   await ref.update({ read: true });
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
+  }
   return true;
 }
 
@@ -683,6 +698,12 @@ export async function markAllNotificationsRead(
     }
     await batch.commit();
   }
+
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
+  }
 }
 
 export async function deleteNotification(
@@ -694,6 +715,11 @@ export async function deleteNotification(
   if (!snap.exists) return false;
   if (!ownsNotification(snap.data() ?? {}, guard)) return false;
   await ref.delete();
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
+  }
   return true;
 }
 
@@ -718,5 +744,11 @@ export async function deleteAllNotifications(
       batch.delete(adminDb.collection(collection).doc(id));
     }
     await batch.commit();
+  }
+
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
   }
 }

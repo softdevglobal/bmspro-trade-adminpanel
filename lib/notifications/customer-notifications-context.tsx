@@ -2,11 +2,12 @@
 
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import {
-  deleteAllNotificationsClient,
-  deleteNotificationClient,
-  markAllNotificationsReadClient,
-  subscribeCustomerNotifications,
-} from "@/lib/notifications/firestore-client";
+  connectCustomerNotificationStream,
+  deleteAllCustomerNotificationsApi,
+  deleteCustomerNotificationApi,
+  fetchCustomerNotifications,
+  markAllCustomerNotificationsReadApi,
+} from "@/lib/notifications/api-client";
 import type { NotificationRecord } from "@/lib/notifications/types";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
@@ -16,6 +17,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -38,58 +40,82 @@ export type CustomerNotificationsApi = {
 const CustomerNotificationsContext =
   createContext<CustomerNotificationsApi | null>(null);
 
-/**
- * One Firestore listener per signed-in customer (shared by nav, bell, account).
- * Pauses while the tab is hidden to avoid background read charges.
- */
+/** Customer notifications via HTTP + SSE (no Firestore listeners). */
 export function CustomerNotificationsProvider({
   children,
 }: {
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const { status, user } = useCustomerAuth();
+  const { status, user, getIdToken } = useCustomerAuth();
   const pageVisible = usePageVisible();
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
 
-  useEffect(() => {
-    if (
-      status !== "authenticated" ||
-      !user?.uid ||
-      !user.email ||
-      !isCustomerBookingRoute(pathname)
-    ) {
-      setNotifications([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    if (!pageVisible) return;
-
-    setLoading(true);
-    setError(null);
-    const unsubscribe = subscribeCustomerNotifications(
-      user.uid,
-      user.email,
-      (records) => {
-        setNotifications(records);
-        setLoading(false);
-        setError(null);
-      },
-      () => {
-        setError("Could not load notifications.");
-        setLoading(false);
-      },
-    );
-
-    return () => unsubscribe();
-  }, [status, user?.uid, user?.email, pageVisible, pathname]);
+  const enabled =
+    status === "authenticated" &&
+    Boolean(user?.uid) &&
+    Boolean(user?.email) &&
+    isCustomerBookingRoute(pathname);
 
   const reload = useCallback(async () => {
-    /* Real-time listener keeps state fresh; no HTTP refetch. */
-  }, []);
+    if (!enabled) return;
+    setLoading((current) => current || notifications.length === 0);
+    setError(null);
+    try {
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in.");
+      const records = await fetchCustomerNotifications(token);
+      setNotifications(records);
+    } catch {
+      setError("Could not load notifications.");
+    } finally {
+      setLoading(false);
+    }
+  }, [enabled, getIdToken, notifications.length]);
+
+  reloadRef.current = reload;
+
+  useEffect(() => {
+    if (!enabled || !pageVisible) {
+      if (!enabled) {
+        setNotifications([]);
+        setLoading(false);
+        setError(null);
+      }
+      return;
+    }
+
+    void reload();
+
+    let disconnectStream: (() => void) | undefined;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const token = await getIdToken();
+        if (!token || cancelled) return;
+        disconnectStream = connectCustomerNotificationStream(token, () => {
+          void reloadRef.current();
+        });
+      } catch {
+        /* SSE optional */
+      }
+    })();
+
+    const onFocus = () => void reloadRef.current();
+    window.addEventListener("focus", onFocus);
+    const interval = window.setInterval(() => void reloadRef.current(), 120_000);
+
+    return () => {
+      cancelled = true;
+      disconnectStream?.();
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(interval);
+    };
+  }, [enabled, pageVisible, reload, getIdToken]);
 
   const markAllRead = useCallback(async () => {
     const hasUnread = notifications.some((note) => !note.read);
@@ -99,34 +125,40 @@ export function CustomerNotificationsProvider({
       current.map((note) => ({ ...note, read: true })),
     );
     try {
-      await markAllNotificationsReadClient("customer", previous);
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in.");
+      await markAllCustomerNotificationsReadApi(token);
     } catch {
       setNotifications(previous);
     }
-  }, [notifications]);
+  }, [notifications, getIdToken]);
 
   const clearOne = useCallback(
     async (id: string) => {
       const previous = notifications;
       setNotifications((current) => current.filter((note) => note.id !== id));
       try {
-        await deleteNotificationClient("customer", id);
+        const token = await getIdToken();
+        if (!token) throw new Error("Not signed in.");
+        await deleteCustomerNotificationApi(token, id);
       } catch {
         setNotifications(previous);
       }
     },
-    [notifications],
+    [notifications, getIdToken],
   );
 
   const clearAll = useCallback(async () => {
     const previous = notifications;
     setNotifications([]);
     try {
-      await deleteAllNotificationsClient("customer", previous);
+      const token = await getIdToken();
+      if (!token) throw new Error("Not signed in.");
+      await deleteAllCustomerNotificationsApi(token);
     } catch {
       setNotifications(previous);
     }
-  }, [notifications]);
+  }, [notifications, getIdToken]);
 
   const unread = notifications.filter((note) => !note.read).length;
 

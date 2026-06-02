@@ -2,12 +2,12 @@
 
 import { useAuth } from "@/lib/auth/auth-context";
 import {
-  deleteAllNotificationsClient,
-  deleteNotificationClient,
-  markAllNotificationsReadClient,
-  subscribeBusinessNotificationsFull,
-  subscribeBusinessNotificationsUnread,
-} from "@/lib/notifications/firestore-client";
+  connectBusinessNotificationStream,
+  deleteAllBusinessNotificationsApi,
+  deleteBusinessNotificationApi,
+  fetchBusinessNotifications,
+  markAllBusinessNotificationsReadApi,
+} from "@/lib/notifications/api-client";
 import type { NotificationRecord } from "@/lib/notifications/types";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
@@ -17,6 +17,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -40,107 +41,119 @@ function isDashboardRoute(pathname: string | null): boolean {
 }
 
 /**
- * Unread-only listener for the badge; full list only while the panel is open.
+ * Notifications via HTTP + SSE push (no Firestore snapshot listeners).
  */
 export function BusinessNotificationsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { role, businessId } = useAuth();
+  const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
   const [panelOpen, setPanelOpen] = useState(false);
-  const [unreadList, setUnreadList] = useState<NotificationRecord[]>([]);
-  const [fullList, setFullList] = useState<NotificationRecord[]>([]);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const reloadRef = useRef<() => Promise<void>>(async () => {});
 
   const enabled =
     role === "business_owner" &&
     Boolean(businessId) &&
+    Boolean(user) &&
     isDashboardRoute(pathname);
 
-  useEffect(() => {
-    if (!enabled || !businessId) {
-      setUnreadList([]);
-      setFullList([]);
+  const reload = useCallback(async () => {
+    if (!enabled || !user) return;
+    setLoading((current) => current || notifications.length === 0);
+    try {
+      const token = await user.getIdToken();
+      const records = await fetchBusinessNotifications(token);
+      setNotifications(records);
+    } catch {
+      /* keep previous list */
+    } finally {
       setLoading(false);
-      return;
     }
-    if (!pageVisible) return;
+  }, [enabled, user, notifications.length]);
 
-    const unsubscribe = subscribeBusinessNotificationsUnread(
-      businessId,
-      setUnreadList,
-    );
-
-    return () => unsubscribe();
-  }, [enabled, businessId, pageVisible]);
+  reloadRef.current = reload;
 
   useEffect(() => {
-    if (!enabled || !businessId || !panelOpen) {
-      setFullList([]);
+    if (!enabled || !user || !pageVisible) {
+      if (!enabled) {
+        setNotifications([]);
+        setLoading(false);
+      }
       return;
     }
-    if (!pageVisible) return;
 
-    setLoading(true);
-    const unsubscribe = subscribeBusinessNotificationsFull(
-      businessId,
-      (records) => {
-        setFullList(records);
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
+    void reload();
 
-    return () => unsubscribe();
-  }, [enabled, businessId, pageVisible, panelOpen]);
+    let disconnectStream: (() => void) | undefined;
+    let cancelled = false;
 
-  const notifications = panelOpen ? fullList : unreadList;
-  const unread = unreadList.filter((note) => !note.read).length;
+    void (async () => {
+      try {
+        const token = await user.getIdToken();
+        if (cancelled) return;
+        disconnectStream = connectBusinessNotificationStream(token, () => {
+          void reloadRef.current();
+        });
+      } catch {
+        /* SSE optional; polling on focus still applies */
+      }
+    })();
+
+    const onFocus = () => void reloadRef.current();
+    window.addEventListener("focus", onFocus);
+    const interval = window.setInterval(() => void reloadRef.current(), 120_000);
+
+    return () => {
+      cancelled = true;
+      disconnectStream?.();
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(interval);
+    };
+  }, [enabled, user, pageVisible, reload]);
+
+  const unread = notifications.filter((note) => !note.read).length;
 
   const markAllRead = useCallback(async () => {
-    const source = panelOpen ? fullList : unreadList;
-    const hasUnread = source.some((note) => !note.read);
-    if (!hasUnread) return;
-    const previousUnread = unreadList;
-    const previousFull = fullList;
-    setUnreadList((current) => current.map((note) => ({ ...note, read: true })));
-    setFullList((current) => current.map((note) => ({ ...note, read: true })));
+    if (!user || unread === 0) return;
+    const previous = notifications;
+    setNotifications((current) =>
+      current.map((note) => ({ ...note, read: true })),
+    );
     try {
-      await markAllNotificationsReadClient("business", source);
+      const token = await user.getIdToken();
+      await markAllBusinessNotificationsReadApi(token);
     } catch {
-      setUnreadList(previousUnread);
-      setFullList(previousFull);
+      setNotifications(previous);
     }
-  }, [panelOpen, fullList, unreadList]);
+  }, [user, unread, notifications]);
 
   const clearOne = useCallback(
     async (id: string) => {
-      const previousUnread = unreadList;
-      const previousFull = fullList;
-      setUnreadList((current) => current.filter((note) => note.id !== id));
-      setFullList((current) => current.filter((note) => note.id !== id));
+      if (!user) return;
+      const previous = notifications;
+      setNotifications((current) => current.filter((note) => note.id !== id));
       try {
-        await deleteNotificationClient("business", id);
+        const token = await user.getIdToken();
+        await deleteBusinessNotificationApi(token, id);
       } catch {
-        setUnreadList(previousUnread);
-        setFullList(previousFull);
+        setNotifications(previous);
       }
     },
-    [unreadList, fullList],
+    [user, notifications],
   );
 
   const clearAll = useCallback(async () => {
-    const source = panelOpen ? fullList : unreadList;
-    const previousUnread = unreadList;
-    const previousFull = fullList;
-    setUnreadList([]);
-    setFullList([]);
+    if (!user || notifications.length === 0) return;
+    const previous = notifications;
+    setNotifications([]);
     try {
-      await deleteAllNotificationsClient("business", source);
+      const token = await user.getIdToken();
+      await deleteAllBusinessNotificationsApi(token);
     } catch {
-      setUnreadList(previousUnread);
-      setFullList(previousFull);
+      setNotifications(previous);
     }
-  }, [panelOpen, fullList, unreadList]);
+  }, [user, notifications]);
 
   const value = useMemo<BusinessNotificationsApi>(
     () => ({

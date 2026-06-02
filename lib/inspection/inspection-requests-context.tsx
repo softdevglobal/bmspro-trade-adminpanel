@@ -1,16 +1,15 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { subscribeBusinessInspectionRequests } from "@/lib/inspection/firestore-client";
+import { fetchBusinessInspectionRequests } from "@/lib/inspection/api-client";
 import type { InspectionRequestDetail } from "@/lib/inspection/types";
+import { usePollingFetch } from "@/lib/data/use-polling-fetch";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
 import {
   createContext,
   useContext,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
 
@@ -36,53 +35,36 @@ type InspectionRequestsValue = {
 const InspectionRequestsContext =
   createContext<InspectionRequestsValue | null>(null);
 
-/**
- * Subscribes to inspection_requests only on visits + customers pages
- * (not on every dashboard route).
- */
+/** Polls inspection_requests via API (no Firestore snapshot listener). */
 export function InspectionRequestsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { role, businessId } = useAuth();
+  const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
-  const [requests, setRequests] = useState<InspectionRequestDetail[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const enabled =
     role === "business_owner" &&
     Boolean(businessId) &&
-    needsInspectionFeed(pathname);
+    Boolean(user) &&
+    needsInspectionFeed(pathname) &&
+    pageVisible;
 
-  useEffect(() => {
-    if (!enabled || !businessId) {
-      setRequests([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    if (!pageVisible) return;
-
-    setLoading(true);
-    setError(null);
-    const unsubscribe = subscribeBusinessInspectionRequests(
-      businessId,
-      (next) => {
-        setRequests(next);
-        setLoading(false);
-        setError(null);
-      },
-      () => {
-        setError("Could not load inspection requests.");
-        setLoading(false);
-      },
-    );
-
-    return () => unsubscribe();
-  }, [enabled, businessId, pageVisible]);
+  const { data, loading, error } = usePollingFetch({
+    enabled,
+    intervalMs: 90_000,
+    fetcher: async () => {
+      if (!user) return [];
+      const token = await user.getIdToken();
+      return fetchBusinessInspectionRequests(token);
+    },
+  });
 
   const value = useMemo(
-    () => ({ requests, loading: enabled ? loading : false, error }),
-    [requests, loading, error, enabled],
+    () => ({
+      requests: data ?? [],
+      loading: enabled ? loading : false,
+      error,
+    }),
+    [data, loading, error, enabled],
   );
 
   return (

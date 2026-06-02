@@ -14,6 +14,9 @@ import type {
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
+
+export const BOOKING_LIST_LIMIT = 80;
 
 export type CreateBookingInput = {
   inspectionRequestId: string;
@@ -24,6 +27,21 @@ export type CreateBookingInput = {
   estimatedDurationMinutes: number;
   note?: string;
 };
+
+export async function listBusinessBookings(
+  businessId: string,
+): Promise<BookingDetail[]> {
+  const snapshot = await adminDb
+    .collection(BOOKING_COLLECTION)
+    .where("businessId", "==", businessId)
+    .limit(BOOKING_LIST_LIMIT)
+    .get();
+
+  const bookings = snapshot.docs.map((doc) =>
+    mapBookingDoc(doc.id, doc.data() ?? {}),
+  );
+  return sortBookingsNewestFirst(bookings);
+}
 
 export async function createBookingFromInspection(
   input: CreateBookingInput,
