@@ -6,12 +6,16 @@ import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
   formatAddress,
-  formatInspectionVisitReference,
   formatSlotDate,
   formatVisitWindow,
   type InspectionAddress,
   type InspectionCustomer,
 } from "@/lib/inspection/types";
+import {
+  displayInspectionRequestCode,
+  displayQuotationCode,
+} from "@/lib/reference-codes";
+import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const QUOTATION_COLLECTION = "quotations";
@@ -29,6 +33,7 @@ export type QuotationAddition = {
 
 export type QuotationDetail = {
   id: string;
+  quotationCode: string | null;
   businessId: string;
   inspectionRequestId: string;
   serviceTitle: string;
@@ -172,6 +177,10 @@ function mapQuotationDoc(
 
   return {
     id,
+    quotationCode:
+      typeof data.quotationCode === "string" && data.quotationCode.trim()
+        ? data.quotationCode.trim()
+        : null,
     businessId: typeof data.businessId === "string" ? data.businessId : "",
     inspectionRequestId:
       typeof data.inspectionRequestId === "string"
@@ -361,8 +370,16 @@ export async function createQuotationForInspection(
       : computedFinal;
   const imageUrls = parseImageUrls(input.imageUrls);
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
+  const quotationCode = buildQuotationCodeForInspection({
+    id: inspectionId,
+    requestCode:
+      typeof requestData.requestCode === "string"
+        ? requestData.requestCode
+        : null,
+  });
 
   await ref.set({
+    quotationCode,
     businessId,
     inspectionRequestId: inspectionId,
     serviceTitle: requestHeadline(requestData),
@@ -403,6 +420,10 @@ export async function createQuotationForInspection(
     pdfBytes = await generateQuotationPdf(quotation, {
       businessName: businessBranding.businessName,
       logoUrl: businessBranding.logoUrl,
+      inspectionRequestCode:
+        typeof requestData.requestCode === "string"
+          ? requestData.requestCode
+          : null,
     });
     const uploaded = await uploadQuotationPdf(pdfBytes, {
       businessId,
@@ -431,6 +452,7 @@ export async function createQuotationForInspection(
       {
         quotation: {
           id: ref.id,
+          quotationCode,
           finalPriceAud,
           subtotalAud,
           additionsTotalAud,
@@ -541,12 +563,17 @@ async function sendQuotationCreatedEmail(
         : null,
     );
 
-    const visitReference = formatInspectionVisitReference(
-      quotation.inspectionRequestId,
-    );
+    const visitReference = displayInspectionRequestCode({
+      id: quotation.inspectionRequestId,
+      requestCode:
+        typeof requestData.requestCode === "string"
+          ? requestData.requestCode
+          : null,
+    });
 
     const details = [
-      { label: "Reference", value: visitReference },
+      { label: "Visit reference", value: visitReference },
+      { label: "Quotation", value: displayQuotationCode(quotation) },
       { label: "Service", value: quotation.serviceTitle },
       { label: "Customer", value: customer.fullName || "—" },
     ];

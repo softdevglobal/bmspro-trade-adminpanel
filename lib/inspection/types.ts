@@ -6,6 +6,7 @@
  */
 
 import { toMillis } from "@/lib/onboarding/services/display";
+import { legacyInspectionReferenceFromId } from "@/lib/reference-codes";
 
 export const INSPECTION_COLLECTION = "inspection_requests";
 
@@ -129,6 +130,8 @@ export type InspectionRequestDetail = {
   customerId: string | null;
   /** Set on create; null on older documents. */
   createdSource: InspectionRequestCreatedSource | null;
+  /** Human-readable code, e.g. `INS-REQ 4K7H2M9P`. Null on older documents. */
+  requestCode: string | null;
   address: InspectionAddress;
   preferredSlots: InspectionSlot[];
   ownerProposedSlots: InspectionSlot[];
@@ -151,6 +154,7 @@ export type InspectionRequestDetail = {
 /** Quotation summary stored on inspection_requests after a quote is created. */
 export type InspectionQuotationSummary = {
   id: string;
+  quotationCode: string | null;
   pdfUrl: string | null;
   finalPriceAud: number | null;
   subtotalAud: number | null;
@@ -172,8 +176,14 @@ export function parseInspectionQuotation(
 
   const pdfUrlRaw = typeof item.pdfUrl === "string" ? item.pdfUrl.trim() : "";
 
+  const quotationCode =
+    typeof item.quotationCode === "string" && item.quotationCode.trim()
+      ? item.quotationCode.trim()
+      : null;
+
   return {
     id,
+    quotationCode,
     pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
     finalPriceAud: readPrice(item.finalPriceAud),
     subtotalAud: readPrice(item.subtotalAud),
@@ -398,13 +408,11 @@ export function formatSlotDate(date: string): string {
   });
 }
 
-/** Short, human-friendly reference code derived from an inspection visit id. */
+/** @deprecated Prefer `displayInspectionRequestCode` from `@/lib/reference-codes`. */
 export function formatInspectionVisitReference(
   inspectionRequestId: string,
 ): string {
-  const id = inspectionRequestId.trim();
-  if (!id) return "—";
-  return id.slice(0, 8).toUpperCase();
+  return legacyInspectionReferenceFromId(inspectionRequestId);
 }
 
 export function formatAddress(address: InspectionAddress): string {

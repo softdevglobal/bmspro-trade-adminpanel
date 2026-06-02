@@ -28,6 +28,10 @@ import {
   type InspectionSlot,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
+import {
+  displayInspectionRequestCode,
+  displayQuotationCode,
+} from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -372,6 +376,9 @@ function RequestCard({
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
             {title}
           </h4>
+          <p className="mt-1 font-mono text-[11px] font-semibold tracking-wide text-on-surface-variant">
+            {displayInspectionRequestCode(request)}
+          </p>
           <p className="mt-0.5 truncate font-body text-[13px] text-on-surface-variant">
             {request.customer.fullName} · {request.customer.phone}
           </p>
@@ -912,6 +919,9 @@ function DetailDrawerContent({
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Inspection request
           </p>
+          <p className="mt-1 font-mono text-[12px] font-semibold tracking-wide text-primary">
+            {displayInspectionRequestCode(request)}
+          </p>
           <h3 className="mt-1 truncate font-display text-[18px] font-semibold text-on-surface">
             {request.requestType === "existing_service"
               ? request.serviceName ?? "Existing service"
@@ -1151,6 +1161,7 @@ function DetailDrawerContent({
 
 type QuotationView = {
   id: string;
+  quotationCode: string | null;
   serviceTitle: string;
   lineItems: { name: string; priceAud: number }[];
   additions: { name: string; priceAud: number }[];
@@ -1269,6 +1280,9 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
     <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
+          <p className="font-mono text-[11px] font-semibold tracking-wide text-primary">
+            {displayQuotationCode(quotation)}
+          </p>
           <p className="truncate font-display text-[14px] font-semibold text-on-surface">
             {title}
           </p>

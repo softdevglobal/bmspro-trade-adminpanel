@@ -2,11 +2,11 @@
 
 import {
   formatAddress,
-  formatInspectionVisitReference,
   STATUS_LABELS,
   TIME_RANGE_SHORT_LABELS,
   formatVisitWindow,
 } from "@/lib/inspection/types";
+import { displayInspectionRequestCode } from "@/lib/reference-codes";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   buildMonthGridCalendarEvents,
@@ -31,7 +31,7 @@ import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 const VIEW_TABS = ["Today", "Week", "Month"] as const;
 
@@ -128,6 +128,31 @@ function formatWeekRange(anchor: Date): string {
   return `${startFmt.format(start)} – ${endFmt.format(end)}`;
 }
 
+function CalendarDetailRow({
+  label,
+  children,
+  mono,
+}: {
+  label: string;
+  children: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <p className="font-body text-[10px] font-bold uppercase tracking-wider text-outline">
+        {label}
+      </p>
+      <div
+        className={`mt-0.5 font-body text-[14px] leading-relaxed text-on-surface ${
+          mono ? "font-mono text-[13px] tracking-wide" : ""
+        }`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function CalendarDayEventCards({
   events,
   onOpenLink,
@@ -166,66 +191,70 @@ function CalendarDayEventCards({
             key={event.key}
             className={CALENDAR_SOURCE_CARD_CLASS[event.source]}
           >
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-2">
                 <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
+                  className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
                 >
                   {sourceLabel}
                 </span>
                 <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
+                  className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
                 >
                   {STATUS_LABELS[request.status]}
                 </span>
               </div>
-              <span className="shrink-0 font-numeric font-bold text-on-surface">
-                {timeLabel}
-              </span>
-            </div>
-            <h4 className="font-display text-lg font-bold text-on-surface">
-              {title}
-            </h4>
-            <p className="mt-1 font-body text-sm text-on-surface-variant">
-              {formatAddress(request.address)} · Ref{" "}
-              {formatInspectionVisitReference(request.id)}
-            </p>
-            <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-              {request.customer.fullName}
-            </p>
 
-            <div className="mt-4 flex items-center justify-between gap-3">
+              <p className="font-numeric text-[15px] font-bold text-on-surface">
+                {timeLabel}
+              </p>
+
+              <h4 className="font-display text-lg font-bold leading-snug text-on-surface">
+                {title}
+              </h4>
+
+              <CalendarDetailRow label="Address">
+                {formatAddress(request.address)}
+              </CalendarDetailRow>
+
+              <CalendarDetailRow label="Reference" mono>
+                {displayInspectionRequestCode(request)}
+              </CalendarDetailRow>
+
+              <CalendarDetailRow label="Customer">
+                {request.customer.fullName}
+              </CalendarDetailRow>
+
               {assignee ? (
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-outline-variant/60 bg-surface-container">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={staffAvatarUrl({
-                        id: assignee.uid,
-                        email: assignee.email ?? assignee.name,
-                        fullName: assignee.name,
-                      })}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  </span>
-                  <div className="min-w-0">
-                    <span className="block truncate font-body text-sm font-bold text-on-surface">
-                      {assignee.name}
-                    </span>
-                    <span className="rounded bg-slate-700 px-2 py-0.5 font-body text-[10px] font-semibold uppercase text-white">
+                <CalendarDetailRow label="Assigned to">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-9 w-9 shrink-0 overflow-hidden rounded-full border border-outline-variant/60 bg-surface-container">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={staffAvatarUrl({
+                            id: assignee.uid,
+                            email: assignee.email ?? assignee.name,
+                            fullName: assignee.name,
+                          })}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      </span>
+                      <span className="font-body text-[14px] font-bold text-on-surface">
+                        {assignee.name}
+                      </span>
+                    </div>
+                    <span className="w-fit rounded bg-slate-700 px-2 py-0.5 font-body text-[10px] font-semibold uppercase text-white">
                       {assignee.type === "owner" ? "Owner" : "Staff"}
                     </span>
                   </div>
-                </div>
-              ) : (
-                <span className="font-body text-[12px] font-semibold text-amber-700">
-                  Unassigned
-                </span>
-              )}
+                </CalendarDetailRow>
+              ) : null}
+
               <Link
                 href={`/dashboard/inspection-visits?request=${request.id}`}
-                className="shrink-0 font-body text-[13px] font-semibold text-primary hover:underline"
+                className="inline-flex w-fit font-body text-[14px] font-semibold text-primary hover:underline"
                 onClick={onOpenLink}
               >
                 Open

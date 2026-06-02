@@ -23,6 +23,7 @@ import {
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
+import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 
 type ServiceLookup = {
@@ -100,10 +101,12 @@ export async function createInspectionRequest(
 
   const ref = adminDb.collection(INSPECTION_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
+  const requestCode = await allocateInspectionRequestCode();
 
   await ref.set({
     id: ref.id,
     businessId,
+    requestCode,
     status: "pending" satisfies InspectionRequestStatus,
     requestType: input.requestType,
     serviceId: input.serviceId,

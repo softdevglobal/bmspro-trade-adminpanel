@@ -120,6 +120,10 @@ function mapBookingDoc(
     customer: parseCustomer(data.customer),
     customerId: typeof data.customerId === "string" ? data.customerId : null,
     createdSource: parseCreatedSource(data.createdSource),
+    requestCode:
+      typeof data.requestCode === "string" && data.requestCode.trim()
+        ? data.requestCode.trim()
+        : null,
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),

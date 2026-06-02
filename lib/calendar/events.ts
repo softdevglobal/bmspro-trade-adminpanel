@@ -76,20 +76,14 @@ export function calendarSourceForRequest(
   return "inspection_visits";
 }
 
+/** Only confirmed visits (scheduled/completed with a slot) appear on the calendar. */
 export function datesForRequestOnCalendar(
   request: InspectionRequestDetail,
 ): string[] {
-  if (request.status === "cancelled") return [];
-
-  if (request.status === "scheduled" || request.status === "completed") {
-    return request.scheduledSlot?.date ? [request.scheduledSlot.date] : [];
+  if (request.status !== "scheduled" && request.status !== "completed") {
+    return [];
   }
-
-  if (request.status === "owner_proposed") {
-    return request.ownerProposedSlots.map((slot) => slot.date);
-  }
-
-  return request.preferredSlots.map((slot) => slot.date);
+  return request.scheduledSlot?.date ? [request.scheduledSlot.date] : [];
 }
 
 export function matchesCalendarSource(
