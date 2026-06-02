@@ -22,6 +22,14 @@ export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
   inspection_visits: "Inspection visit",
 };
 
+/** Day-drawer card chrome (light blue vs light green). */
+export const CALENDAR_SOURCE_CARD_CLASS: Record<CalendarSource, string> = {
+  bookings:
+    "rounded-xl border border-primary/25 bg-primary/5 p-card-padding transition-all hover:border-primary/45 hover:shadow-md",
+  inspection_visits:
+    "rounded-xl border border-green-200 bg-green-50 p-card-padding transition-all hover:border-green-400 hover:shadow-md",
+};
+
 export type CalendarStat = {
   label: string;
   value: number;
@@ -61,11 +69,7 @@ export function dotColorForCalendarSource(source: CalendarSource): DotColor {
   return source === "bookings" ? "primary" : "green-500";
 }
 
-/**
- * Colour on the calendar is by data type, not `createdSource` or status.
- * Everything in `inspection_requests` is an inspection visit (green).
- * Blue bookings come from a separate appointments collection when wired in.
- */
+/** All `inspection_requests` rows are inspection visits on the calendar (green). */
 export function calendarSourceForRequest(
   _request: InspectionRequestDetail,
 ): CalendarSource {

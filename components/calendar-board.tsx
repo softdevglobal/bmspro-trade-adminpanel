@@ -10,6 +10,7 @@ import {
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   buildMonthGridCalendarEvents,
+  CALENDAR_SOURCE_CARD_CLASS,
   CALENDAR_SOURCE_LABELS,
   CALENDAR_STATUS_TONE,
   computeCombinedCalendarStats,
@@ -20,6 +21,7 @@ import {
   isoDateFromParts,
   requestTitle,
   toIsoDateLocal,
+  type CalendarEvent,
   type CalendarFilters,
   type CalendarStatusFilterKey,
 } from "@/lib/calendar/events";
@@ -51,6 +53,10 @@ const DAY_FORMAT = new Intl.DateTimeFormat("en-AU", {
   year: "numeric",
 });
 
+const WEEKDAY_LONG_FORMAT = new Intl.DateTimeFormat("en-AU", {
+  weekday: "long",
+});
+
 /** Matches service-detail-drawer: curved left edge, inset width, and max width on mobile. */
 const MOBILE_DRAWER_PANEL_CLASS =
   "absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-md flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl transition-transform duration-300 will-change-transform sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l";
@@ -77,6 +83,158 @@ function isSameDay(a: Date, b: Date): boolean {
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
+  );
+}
+
+function normalizeDate(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date: Date, delta: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + delta);
+  return normalizeDate(next);
+}
+
+function startOfWeekMonday(date: Date): Date {
+  const normalized = normalizeDate(date);
+  return addDays(normalized, -mondayOffset(normalized));
+}
+
+function weekDaysFromAnchor(anchor: Date): Date[] {
+  const start = startOfWeekMonday(anchor);
+  return Array.from({ length: 7 }, (_, index) => addDays(start, index));
+}
+
+function formatWeekRange(anchor: Date): string {
+  const days = weekDaysFromAnchor(anchor);
+  const start = days[0]!;
+  const end = days[6]!;
+  if (
+    start.getMonth() === end.getMonth() &&
+    start.getFullYear() === end.getFullYear()
+  ) {
+    return `${start.getDate()} – ${end.getDate()} ${MONTH_FORMAT.format(start)}`;
+  }
+  const startFmt = new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+  });
+  const endFmt = new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return `${startFmt.format(start)} – ${endFmt.format(end)}`;
+}
+
+function CalendarDayEventCards({
+  events,
+  onOpenLink,
+}: {
+  events: CalendarEvent[];
+  onOpenLink?: () => void;
+}) {
+  if (events.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-outline-variant px-4 py-10 text-center">
+        <span className="material-symbols-outlined text-[36px] text-outline-variant">
+          event_busy
+        </span>
+        <p className="mt-3 font-body text-[14px] text-on-surface-variant">
+          Nothing on this day yet.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {events.map((event) => {
+        const { request } = event;
+        const title = requestTitle(request);
+        const timeLabel = eventTimeLabel(request, event.date);
+        const assignee = request.assignedTo;
+        const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
+        const sourceTone =
+          event.source === "bookings"
+            ? "bg-primary/10 text-primary border border-primary/25"
+            : "bg-green-50 text-green-700 border border-green-200";
+
+        return (
+          <article
+            key={event.key}
+            className={CALENDAR_SOURCE_CARD_CLASS[event.source]}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
+                >
+                  {sourceLabel}
+                </span>
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
+                >
+                  {STATUS_LABELS[request.status]}
+                </span>
+              </div>
+              <span className="shrink-0 font-numeric font-bold text-on-surface">
+                {timeLabel}
+              </span>
+            </div>
+            <h4 className="font-display text-lg font-bold text-on-surface">
+              {title}
+            </h4>
+            <p className="mt-1 font-body text-sm text-on-surface-variant">
+              {formatAddress(request.address)} · Ref{" "}
+              {formatInspectionVisitReference(request.id)}
+            </p>
+            <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+              {request.customer.fullName}
+            </p>
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              {assignee ? (
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-outline-variant/60 bg-surface-container">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={staffAvatarUrl({
+                        id: assignee.uid,
+                        email: assignee.email ?? assignee.name,
+                        fullName: assignee.name,
+                      })}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </span>
+                  <div className="min-w-0">
+                    <span className="block truncate font-body text-sm font-bold text-on-surface">
+                      {assignee.name}
+                    </span>
+                    <span className="rounded bg-slate-700 px-2 py-0.5 font-body text-[10px] font-semibold uppercase text-white">
+                      {assignee.type === "owner" ? "Owner" : "Staff"}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <span className="font-body text-[12px] font-semibold text-amber-700">
+                  Unassigned
+                </span>
+              )}
+              <Link
+                href={`/dashboard/inspection-visits?request=${request.id}`}
+                className="shrink-0 font-body text-[13px] font-semibold text-primary hover:underline"
+                onClick={onOpenLink}
+              >
+                Open
+              </Link>
+            </div>
+          </article>
+        );
+      })}
+    </>
   );
 }
 
@@ -110,9 +268,10 @@ export function CalendarBoard() {
     error: requestsError,
   } = useInspectionRequests();
   const { staff, loading: staffLoading } = useBusinessStaffSummary();
-  const today = useMemo(() => new Date(), []);
+  const today = useMemo(() => normalizeDate(new Date()), []);
   const todayIso = useMemo(() => toIsoDateLocal(today), [today]);
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(today));
+  const [focusDate, setFocusDate] = useState(() => today);
   const [viewTab, setViewTab] = useState<(typeof VIEW_TABS)[number]>("Month");
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -154,11 +313,35 @@ export function CalendarBoard() {
 
   const unassignedCount = stats[1]?.value ?? 0;
 
+  const focusIso = useMemo(() => toIsoDateLocal(focusDate), [focusDate]);
+
   const selectedDayEvents = selectedIsoDate
     ? (monthEventsByDate[selectedIsoDate] ?? [])
     : [];
 
-  const monthLabel = MONTH_FORMAT.format(viewMonth);
+  const focusDayEvents = monthEventsByDate[focusIso] ?? [];
+
+  const weekDays = useMemo(
+    () => weekDaysFromAnchor(focusDate),
+    [focusDate],
+  );
+
+  const periodLabel = useMemo(() => {
+    if (viewTab === "Today") return DAY_FORMAT.format(focusDate);
+    if (viewTab === "Week") return formatWeekRange(focusDate);
+    return MONTH_FORMAT.format(viewMonth);
+  }, [viewTab, focusDate, viewMonth]);
+
+  const navAria = useMemo(() => {
+    if (viewTab === "Today") {
+      return { prev: "Previous day", next: "Next day" };
+    }
+    if (viewTab === "Week") {
+      return { prev: "Previous week", next: "Next week" };
+    }
+    return { prev: "Previous month", next: "Next month" };
+  }, [viewTab]);
+
   const leadingBlanks = mondayOffset(viewMonth);
   const totalDays = daysInMonth(viewMonth);
 
@@ -175,16 +358,44 @@ export function CalendarBoard() {
     };
   }, [bookingDrawerOpen, filterDrawerOpen]);
 
-  function openDay(day: number) {
-    setSelectedIsoDate(isoDateFromParts(viewMonth, day));
+  function openDayByIso(isoDate: string) {
+    setSelectedIsoDate(isoDate);
     setBookingDrawerOpen(true);
+  }
+
+  function openDay(day: number) {
+    openDayByIso(isoDateFromParts(viewMonth, day));
   }
 
   function handleViewTab(tab: (typeof VIEW_TABS)[number]) {
     setViewTab(tab);
     if (tab === "Today") {
+      setFocusDate(today);
       setViewMonth(startOfMonth(today));
+      return;
     }
+    if (tab === "Week") {
+      setFocusDate(today);
+      setViewMonth(startOfMonth(today));
+      return;
+    }
+    setViewMonth(startOfMonth(focusDate));
+  }
+
+  function navigatePeriod(direction: -1 | 1) {
+    if (viewTab === "Today") {
+      const next = addDays(focusDate, direction);
+      setFocusDate(next);
+      setViewMonth(startOfMonth(next));
+      return;
+    }
+    if (viewTab === "Week") {
+      const next = addDays(focusDate, direction * 7);
+      setFocusDate(next);
+      setViewMonth(startOfMonth(next));
+      return;
+    }
+    setViewMonth((current) => addMonths(current, direction));
   }
 
   function closeBookingDrawer() {
@@ -370,22 +581,22 @@ export function CalendarBoard() {
         <div className="flex flex-col gap-4 border-b border-outline-variant p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div className="flex items-center gap-4">
             <h3 className="font-display text-[22px] font-semibold text-on-surface sm:text-display-md">
-              {monthLabel}
+              {periodLabel}
             </h3>
             <div className="flex gap-1">
               <button
                 type="button"
-                onClick={() => setViewMonth((current) => addMonths(current, -1))}
+                onClick={() => navigatePeriod(-1)}
                 className="rounded-lg p-1 transition-colors hover:bg-surface-container"
-                aria-label="Previous month"
+                aria-label={navAria.prev}
               >
                 <span className="material-symbols-outlined">chevron_left</span>
               </button>
               <button
                 type="button"
-                onClick={() => setViewMonth((current) => addMonths(current, 1))}
+                onClick={() => navigatePeriod(1)}
                 className="rounded-lg p-1 transition-colors hover:bg-surface-container"
-                aria-label="Next month"
+                aria-label={navAria.next}
               >
                 <span className="material-symbols-outlined">chevron_right</span>
               </button>
@@ -407,70 +618,242 @@ export function CalendarBoard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-7">
-          {WEEKDAY_LABELS.map((label) => (
-            <div
-              key={label}
-              className="border-b border-r border-outline-variant bg-surface-container-low p-2 text-center font-body text-[11px] font-semibold tracking-wide text-outline sm:p-3 sm:text-[12px]"
-            >
-              {label}
-            </div>
-          ))}
-
-          {Array.from({ length: leadingBlanks }).map((_, index) => (
-            <div
-              key={`blank-${index}`}
-              className="min-h-[88px] border-b border-r border-outline-variant bg-surface/30 sm:min-h-[120px]"
-            />
-          ))}
-
-          {Array.from({ length: totalDays }).map((_, index) => {
-            const day = index + 1;
-            const isoDate = isoDateFromParts(viewMonth, day);
-            const cellDate = new Date(`${isoDate}T12:00:00`);
-            const isToday = isSameDay(cellDate, today);
-            const dayEvents = monthEventsByDate[isoDate] ?? [];
-
-            return (
-              <button
-                key={day}
-                type="button"
-                onClick={() => openDay(day)}
-                className={`group flex min-h-[88px] cursor-pointer flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors hover:bg-surface-container-low active:scale-[0.99] sm:min-h-[120px] sm:p-3 ${
-                  isToday ? "bg-primary/5" : ""
-                }`}
+        {viewTab === "Month" ? (
+          <div className="grid grid-cols-7">
+            {WEEKDAY_LABELS.map((label) => (
+              <div
+                key={label}
+                className="border-b border-r border-outline-variant bg-surface-container-low p-2 text-center font-body text-[11px] font-semibold tracking-wide text-outline sm:p-3 sm:text-[12px]"
               >
-                <div className="flex items-start justify-between gap-1">
-                  <span
-                    className={`font-numeric text-base font-bold sm:text-lg ${
-                      isToday
-                        ? "flex h-8 w-8 items-center justify-center rounded-full bg-primary text-on-primary"
-                        : "text-on-surface"
-                    }`}
-                  >
-                    {day}
-                  </span>
-                  {dayEvents.length > 0 ? (
-                    <span className="font-numeric text-[10px] font-bold text-outline-variant group-hover:text-primary">
-                      {dayEvents.length}{" "}
-                      {dayEvents.length === 1 ? "item" : "items"}
+                {label}
+              </div>
+            ))}
+
+            {Array.from({ length: leadingBlanks }).map((_, index) => (
+              <div
+                key={`blank-${index}`}
+                className="min-h-[88px] border-b border-r border-outline-variant bg-surface/30 sm:min-h-[120px]"
+              />
+            ))}
+
+            {Array.from({ length: totalDays }).map((_, index) => {
+              const day = index + 1;
+              const isoDate = isoDateFromParts(viewMonth, day);
+              const cellDate = new Date(`${isoDate}T12:00:00`);
+              const isTodayCell = isSameDay(cellDate, today);
+              const dayEvents = monthEventsByDate[isoDate] ?? [];
+
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => openDay(day)}
+                  className={`group flex min-h-[88px] cursor-pointer flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors hover:bg-surface-container-low active:scale-[0.99] sm:min-h-[120px] sm:p-3 ${
+                    isTodayCell ? "bg-primary/5" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-1">
+                    <span
+                      className={`font-numeric text-base font-bold sm:text-lg ${
+                        isTodayCell
+                          ? "flex h-8 w-8 items-center justify-center rounded-full bg-primary text-on-primary"
+                          : "text-on-surface"
+                      }`}
+                    >
+                      {day}
                     </span>
-                  ) : null}
-                </div>
-                {dayEvents.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {dayEvents.map((event) => (
-                      <span
-                        key={event.key}
-                        className={`h-2 w-2 rounded-full ${DOT_CLASS[event.dotColor]}`}
-                      />
-                    ))}
+                    {dayEvents.length > 0 ? (
+                      <span className="font-numeric text-[10px] font-bold text-outline-variant group-hover:text-primary">
+                        {dayEvents.length}{" "}
+                        {dayEvents.length === 1 ? "item" : "items"}
+                      </span>
+                    ) : null}
                   </div>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+                  {dayEvents.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {dayEvents.map((event) => (
+                        <span
+                          key={event.key}
+                          className={`h-2 w-2 rounded-full ${DOT_CLASS[event.dotColor]}`}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {viewTab === "Week" ? (
+          <>
+            {/* Mobile: stacked days — readable on narrow screens */}
+            <div className="divide-y divide-outline-variant lg:hidden">
+              {weekDays.map((day) => {
+                const isoDate = toIsoDateLocal(day);
+                const isTodayCell = isSameDay(day, today);
+                const dayEvents = monthEventsByDate[isoDate] ?? [];
+
+                return (
+                  <div
+                    key={`week-mobile-${isoDate}`}
+                    className={isTodayCell ? "bg-primary/[0.04]" : ""}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusDate(day);
+                        openDayByIso(isoDate);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-container-low"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center font-numeric text-base font-bold ${
+                            isTodayCell
+                              ? "rounded-full bg-primary text-on-primary"
+                              : "rounded-full bg-surface-container text-on-surface"
+                          }`}
+                        >
+                          {day.getDate()}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-body text-[15px] font-semibold text-on-surface">
+                            {WEEKDAY_LONG_FORMAT.format(day)}
+                          </p>
+                          <p className="font-body text-[12px] text-on-surface-variant">
+                            {DAY_FORMAT.format(day)}
+                          </p>
+                        </div>
+                      </div>
+                      {dayEvents.length > 0 ? (
+                        <span className="shrink-0 rounded-full bg-surface-container-high px-2.5 py-1 font-numeric text-[11px] font-bold text-on-surface-variant">
+                          {dayEvents.length}
+                        </span>
+                      ) : (
+                        <span className="font-body text-[12px] text-outline-variant">
+                          Free
+                        </span>
+                      )}
+                    </button>
+                    {dayEvents.length > 0 ? (
+                      <div className="flex flex-col gap-2 px-4 pb-4">
+                        {dayEvents.map((event) => (
+                          <button
+                            key={event.key}
+                            type="button"
+                            onClick={() => openDayByIso(isoDate)}
+                            className={`w-full rounded-xl border px-3 py-2.5 text-left font-body text-[13px] font-semibold leading-snug transition-opacity active:opacity-90 ${
+                              event.source === "bookings"
+                                ? "border-primary/25 bg-primary/10 text-primary"
+                                : "border-green-200 bg-green-50 text-green-800"
+                            }`}
+                          >
+                            {requestTitle(event.request)}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop: 7-column grid */}
+            <div className="hidden flex-col lg:flex">
+              <div className="grid grid-cols-7 border-b border-outline-variant">
+                {weekDays.map((day, index) => {
+                  const isoDate = toIsoDateLocal(day);
+                  const isTodayCell = isSameDay(day, today);
+                  const isFocusDay = isSameDay(day, focusDate);
+
+                  return (
+                    <button
+                      key={`week-head-${isoDate}`}
+                      type="button"
+                      onClick={() => {
+                        setFocusDate(day);
+                        openDayByIso(isoDate);
+                      }}
+                      className={`flex h-14 items-center justify-between gap-1 border-r border-outline-variant px-2 text-left transition-colors hover:bg-surface-container-low last:border-r-0 sm:px-3 ${
+                        isTodayCell ? "bg-primary/5" : "bg-surface-container-low"
+                      } ${isFocusDay && !isTodayCell ? "ring-1 ring-inset ring-primary/30" : ""}`}
+                    >
+                      <span className="font-body text-[10px] font-semibold uppercase tracking-wide text-outline sm:text-[11px]">
+                        {WEEKDAY_LABELS[index]}
+                      </span>
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center font-numeric text-sm font-bold ${
+                          isTodayCell
+                            ? "rounded-full bg-primary text-on-primary"
+                            : "text-on-surface"
+                        }`}
+                      >
+                        {day.getDate()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid min-h-[280px] grid-cols-7 auto-rows-fr">
+                {weekDays.map((day) => {
+                  const isoDate = toIsoDateLocal(day);
+                  const dayEvents = monthEventsByDate[isoDate] ?? [];
+
+                  return (
+                    <div
+                      key={`week-body-${isoDate}`}
+                      className="flex flex-col border-r border-outline-variant last:border-r-0"
+                    >
+                      <div className="flex flex-1 flex-col gap-1.5 p-2">
+                        {dayEvents.length === 0 ? (
+                          <p className="py-4 text-center font-body text-[11px] text-outline-variant">
+                            —
+                          </p>
+                        ) : (
+                          dayEvents.map((event) => (
+                            <button
+                              key={event.key}
+                              type="button"
+                              onClick={() => openDayByIso(isoDate)}
+                              className={`w-full truncate rounded-lg border px-2 py-1.5 text-left font-body text-[11px] font-semibold transition-opacity hover:opacity-90 ${
+                                event.source === "bookings"
+                                  ? "border-primary/25 bg-primary/10 text-primary"
+                                  : "border-green-200 bg-green-50 text-green-800"
+                              }`}
+                            >
+                              {requestTitle(event.request)}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {viewTab === "Today" ? (
+          <div className="p-4 sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="font-body text-[13px] font-semibold text-on-surface-variant">
+                {focusDayEvents.length > 0
+                  ? `${focusDayEvents.length} ${focusDayEvents.length === 1 ? "item" : "items"} scheduled`
+                  : "No visits or bookings on this day"}
+              </p>
+              {isSameDay(focusDate, today) ? (
+                <span className="rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
+                  Today
+                </span>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-4">
+              <CalendarDayEventCards events={focusDayEvents} />
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {/* Booking drawer */}
@@ -517,102 +900,10 @@ export function CalendarBoard() {
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="flex flex-col gap-4 p-5">
-            {selectedDayEvents.length > 0 ? (
-              selectedDayEvents.map((event) => {
-                const { request } = event;
-                const title = requestTitle(request);
-                const timeLabel = eventTimeLabel(request, event.date);
-                const assignee = request.assignedTo;
-
-                const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
-                const sourceTone =
-                  event.source === "bookings"
-                    ? "bg-primary/10 text-primary border border-primary/25"
-                    : "bg-green-50 text-green-700 border border-green-200";
-
-                return (
-                  <article
-                    key={event.key}
-                    className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding transition-all hover:border-primary hover:shadow-md"
-                  >
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
-                        >
-                          {sourceLabel}
-                        </span>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
-                        >
-                          {STATUS_LABELS[request.status]}
-                        </span>
-                      </div>
-                      <span className="shrink-0 font-numeric font-bold text-on-surface">
-                        {timeLabel}
-                      </span>
-                    </div>
-                    <h4 className="font-display text-lg font-bold text-on-surface">
-                      {title}
-                    </h4>
-                    <p className="mt-1 font-body text-sm text-on-surface-variant">
-                      {formatAddress(request.address)} · Ref{" "}
-                      {formatInspectionVisitReference(request.id)}
-                    </p>
-                    <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                      {request.customer.fullName}
-                    </p>
-
-                    <div className="mt-4 flex items-center justify-between gap-3">
-                      {assignee ? (
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex h-8 w-8 shrink-0 overflow-hidden rounded-full border border-outline-variant/60 bg-surface-container">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={staffAvatarUrl({
-                                id: assignee.uid,
-                                email: assignee.email ?? assignee.name,
-                                fullName: assignee.name,
-                              })}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                          </span>
-                          <div className="min-w-0">
-                            <span className="block truncate font-body text-sm font-bold text-on-surface">
-                              {assignee.name}
-                            </span>
-                            <span className="rounded bg-slate-700 px-2 py-0.5 font-body text-[10px] font-semibold uppercase text-white">
-                              {assignee.type === "owner" ? "Owner" : "Staff"}
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="font-body text-[12px] font-semibold text-amber-700">
-                          Unassigned
-                        </span>
-                      )}
-                      <Link
-                        href={`/dashboard/inspection-visits?request=${request.id}`}
-                        className="shrink-0 font-body text-[13px] font-semibold text-primary hover:underline"
-                        onClick={closeBookingDrawer}
-                      >
-                        Open
-                      </Link>
-                    </div>
-                  </article>
-                );
-              })
-            ) : (
-              <div className="rounded-xl border border-dashed border-outline-variant px-4 py-10 text-center">
-                <span className="material-symbols-outlined text-[36px] text-outline-variant">
-                  event_busy
-                </span>
-                <p className="mt-3 font-body text-[14px] text-on-surface-variant">
-                  Nothing on this day yet.
-                </p>
-              </div>
-            )}
+              <CalendarDayEventCards
+                events={selectedDayEvents}
+                onOpenLink={closeBookingDrawer}
+              />
             </div>
           </div>
         </aside>
