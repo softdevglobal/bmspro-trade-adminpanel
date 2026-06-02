@@ -27,6 +27,10 @@ import {
   sendOwnerMobilePush,
 } from "@/lib/notifications/push";
 import { FieldValue } from "firebase-admin/firestore";
+import {
+  notifyBusinessNotificationsChanged,
+  notifyCustomerNotificationsChanged,
+} from "@/lib/notifications/realtime-hub";
 
 const MAX_BATCH = 400;
 
@@ -101,6 +105,12 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
       emailHighlight: input.emailHighlight,
       emailHighlightLabel: input.emailHighlightLabel,
     });
+  }
+
+  if (input.audience === "business" && input.businessId) {
+    notifyBusinessNotificationsChanged(input.businessId);
+  } else if (input.audience === "customer" && input.customerId) {
+    notifyCustomerNotificationsChanged(input.customerId);
   }
 }
 
@@ -301,6 +311,13 @@ export async function notifyCustomerOfStatusChange(
       type = "request_completed";
       title = `Visit completed with ${business}`;
       body = `${headline} is marked complete. Thanks for booking through BMS Pro Trade.`;
+      emailDetails = [{ label: "Service", value: headline }];
+      break;
+    }
+    case "awaiting_decision": {
+      type = "request_proposed";
+      title = `${business} is waiting to hear from you`;
+      body = `Your quotation for ${headline} is with you for review. Contact ${business} when you are ready to proceed.`;
       emailDetails = [{ label: "Service", value: headline }];
       break;
     }
@@ -554,6 +571,11 @@ export async function markNotificationRead(
   if (!snap.exists) return false;
   if (!ownsNotification(snap.data() ?? {}, guard)) return false;
   await ref.update({ read: true });
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
+  }
   return true;
 }
 
@@ -618,6 +640,12 @@ export async function markAllNotificationsRead(
     }
     await batch.commit();
   }
+
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
+  }
 }
 
 export async function deleteNotification(
@@ -629,6 +657,11 @@ export async function deleteNotification(
   if (!snap.exists) return false;
   if (!ownsNotification(snap.data() ?? {}, guard)) return false;
   await ref.delete();
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
+  }
   return true;
 }
 
@@ -653,5 +686,11 @@ export async function deleteAllNotifications(
       batch.delete(adminDb.collection(collection).doc(id));
     }
     await batch.commit();
+  }
+
+  if (guard.audience === "business") {
+    notifyBusinessNotificationsChanged(guard.businessId);
+  } else {
+    notifyCustomerNotificationsChanged(guard.customerId);
   }
 }

@@ -275,14 +275,28 @@ function businessDocument(
 /** Reads a small profile (name + logo) for the current owner's business. */
 export async function getBusinessProfile(
   businessId: string,
-): Promise<{ businessName: string | null; logoUrl: string | null } | null> {
+): Promise<{
+  businessName: string | null;
+  logoUrl: string | null;
+  bookingSlug: string | null;
+  bookingPath: string | null;
+} | null> {
   const snap = await adminDb.collection("businesses").doc(businessId).get();
   if (!snap.exists) return null;
   const data = snap.data() ?? {};
+  const slug =
+    typeof data.bookingSlug === "string" ? data.bookingSlug : null;
   return {
     businessName:
       typeof data.businessName === "string" ? data.businessName : null,
     logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+    bookingSlug: slug,
+    bookingPath:
+      typeof data.bookingPath === "string"
+        ? data.bookingPath
+        : slug
+          ? `/booknow/${slug}`
+          : null,
   };
 }
 

@@ -1,3 +1,4 @@
+import { parseBookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   REQUEST_STATUSES,
@@ -113,6 +114,10 @@ export function mapInspectionDoc(
     customer: parseCustomer(data.customer),
     customerId: typeof data.customerId === "string" ? data.customerId : null,
     createdSource: parseCreatedSource(data.createdSource),
+    requestCode:
+      typeof data.requestCode === "string" && data.requestCode.trim()
+        ? data.requestCode.trim()
+        : null,
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),
@@ -141,6 +146,30 @@ export function mapInspectionDoc(
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
     quotation: parseInspectionQuotation(data.quotation),
+    bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+    bookingCode:
+      typeof data.bookingCode === "string" && data.bookingCode.trim()
+        ? data.bookingCode.trim()
+        : null,
+    bookingStatus: (() => {
+      const parsed = parseBookingStatus(data.bookingStatus);
+      if (parsed) return parsed;
+      if (typeof data.bookingId === "string" && data.bookingId.trim()) {
+        return "scheduled";
+      }
+      if (data.status === "awaiting_decision") {
+        return "awaiting";
+      }
+      return null;
+    })(),
+    bookingStatusAt: toMillis(data.bookingStatusAt),
+    estimatedDurationMinutes:
+      typeof data.estimatedDurationMinutes === "number" &&
+      Number.isFinite(data.estimatedDurationMinutes) &&
+      data.estimatedDurationMinutes > 0
+        ? Math.round(data.estimatedDurationMinutes)
+        : null,
+    bookingConfirmedAt: toMillis(data.bookingConfirmedAt),
   };
 }
 

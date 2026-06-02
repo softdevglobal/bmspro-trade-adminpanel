@@ -1,9 +1,10 @@
 import "server-only";
 
+import { formatAddress } from "@/lib/inspection/types";
 import {
-  formatAddress,
-  formatInspectionVisitReference,
-} from "@/lib/inspection/types";
+  displayInspectionRequestCode,
+  displayQuotationCode,
+} from "@/lib/reference-codes";
 import {
   PDFDocument,
   PDFFont,
@@ -89,7 +90,11 @@ function fitText(
  */
 export async function generateQuotationPdf(
   quotation: QuotationDetail,
-  options: { businessName?: string | null; logoUrl?: string | null } = {},
+  options: {
+    businessName?: string | null;
+    logoUrl?: string | null;
+    inspectionRequestCode?: string | null;
+  } = {},
 ): Promise<Buffer> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -156,18 +161,29 @@ export async function generateQuotationPdf(
     size: 12,
     color: rgb(0.82, 0.88, 1),
   });
-  const refText = `Ref: ${formatInspectionVisitReference(quotation.inspectionRequestId)}`;
+  const quotationRef = displayQuotationCode(quotation);
   drawText(
-    refText,
-    PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(refText, 10),
+    quotationRef,
+    PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(quotationRef, 10),
     PAGE_HEIGHT - 44,
     { size: 10, color: rgb(0.82, 0.88, 1) },
+  );
+  const visitRef = displayInspectionRequestCode({
+    id: quotation.inspectionRequestId,
+    requestCode: options.inspectionRequestCode ?? null,
+  });
+  const visitRefText = `Visit ${visitRef}`;
+  drawText(
+    visitRefText,
+    PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(visitRefText, 9),
+    PAGE_HEIGHT - 58,
+    { size: 9, color: rgb(0.82, 0.88, 1) },
   );
   const dateText = formatDate(quotation.createdAt) || formatDate(Date.now());
   drawText(
     dateText,
     PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(dateText, 10),
-    PAGE_HEIGHT - 60,
+    PAGE_HEIGHT - 72,
     { size: 10, color: rgb(0.82, 0.88, 1) },
   );
 

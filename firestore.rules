@@ -160,6 +160,57 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    function ownsStaffBooking() {
+      return isBusinessStaff()
+        && resource.data.businessId == request.auth.token.businessId
+        && resource.data.assignedTo is map
+        && resource.data.assignedTo.uid == request.auth.uid;
+    }
+
+    function ownsCustomerBooking() {
+      return isSignedIn()
+        && (
+          resource.data.customerId == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && resource.data.customer is map
+            && resource.data.customer.email == request.auth.token.email
+          )
+        );
+    }
+
+    function ownsSalonBooking() {
+      return isSignedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    function canReadTradeBooking() {
+      return resource.data.businessId is string
+        && resource.data.inspectionRequestId is string
+        && (
+          (isBusinessOwner()
+              && resource.data.businessId == request.auth.token.businessId)
+          || userOwnsBusiness(resource.data.businessId)
+          || ownsStaffBooking()
+          || ownsCustomerBooking()
+        );
+    }
+
+    // Trade job bookings (from inspection visits) + legacy salon bookings (ownerUid).
+    match /bookings/{bookingId} {
+      allow read: if isSuperAdmin()
+        || ownsSalonBooking()
+        || canReadTradeBooking();
+      allow create, update, delete: if false;
+    }
+
+    match /quotations/{quotationId} {
+      allow read: if isSuperAdmin()
+        || (isBusinessOwner()
+            && resource.data.businessId == request.auth.token.businessId)
+        || userOwnsBusiness(resource.data.businessId);
+      allow create, update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();

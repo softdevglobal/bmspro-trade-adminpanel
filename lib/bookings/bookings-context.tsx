@@ -1,8 +1,8 @@
 "use client";
 
+import { fetchBusinessBookings } from "@/lib/bookings/api-client";
+import type { BookingDetail } from "@/lib/bookings/types";
 import { useAuth } from "@/lib/auth/auth-context";
-import { fetchBusinessInspectionRequests } from "@/lib/inspection/api-client";
-import type { InspectionRequestDetail } from "@/lib/inspection/types";
 import { usePollingFetch } from "@/lib/data/use-polling-fetch";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
@@ -13,30 +13,28 @@ import {
   type ReactNode,
 } from "react";
 
-const INSPECTION_ROUTES = [
-  "/dashboard/inspection-visits",
-  "/dashboard/customers",
+const BOOKING_ROUTES = [
+  "/dashboard/bookings",
   "/dashboard/calendar",
 ] as const;
 
-function needsInspectionFeed(pathname: string | null): boolean {
+function needsBookingsFeed(pathname: string | null): boolean {
   if (!pathname) return false;
-  return INSPECTION_ROUTES.some(
+  return BOOKING_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 }
 
-type InspectionRequestsValue = {
-  requests: InspectionRequestDetail[];
+type BookingsValue = {
+  bookings: BookingDetail[];
   loading: boolean;
   error: string | null;
 };
 
-const InspectionRequestsContext =
-  createContext<InspectionRequestsValue | null>(null);
+const BookingsContext = createContext<BookingsValue | null>(null);
 
-/** Polls inspection_requests via API (no Firestore snapshot listener). */
-export function InspectionRequestsProvider({ children }: { children: ReactNode }) {
+/** Polls bookings via API (no Firestore snapshot listener). */
+export function BookingsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
@@ -45,7 +43,7 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
     role === "business_owner" &&
     Boolean(businessId) &&
     Boolean(user) &&
-    needsInspectionFeed(pathname) &&
+    needsBookingsFeed(pathname) &&
     pageVisible;
 
   const { data, loading, error } = usePollingFetch({
@@ -54,13 +52,13 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
     fetcher: async () => {
       if (!user) return [];
       const token = await user.getIdToken();
-      return fetchBusinessInspectionRequests(token);
+      return fetchBusinessBookings(token);
     },
   });
 
   const value = useMemo(
     () => ({
-      requests: data ?? [],
+      bookings: data ?? [],
       loading: enabled ? loading : false,
       error,
     }),
@@ -68,18 +66,14 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
   );
 
   return (
-    <InspectionRequestsContext.Provider value={value}>
-      {children}
-    </InspectionRequestsContext.Provider>
+    <BookingsContext.Provider value={value}>{children}</BookingsContext.Provider>
   );
 }
 
-export function useInspectionRequests(): InspectionRequestsValue {
-  const context = useContext(InspectionRequestsContext);
+export function useBookings(): BookingsValue {
+  const context = useContext(BookingsContext);
   if (!context) {
-    throw new Error(
-      "useInspectionRequests must be used within InspectionRequestsProvider",
-    );
+    throw new Error("useBookings must be used within BookingsProvider");
   }
   return context;
 }

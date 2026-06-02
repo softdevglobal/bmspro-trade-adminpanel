@@ -25,6 +25,7 @@ const STATUS_TONE: Record<InspectionRequestStatus, string> = {
   pending: "bg-amber-50 text-amber-700 border-amber-200",
   owner_proposed: "bg-violet-50 text-violet-700 border-violet-200",
   scheduled: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  awaiting_decision: "bg-orange-50 text-orange-800 border-orange-200",
   cancelled: "bg-stone-100 text-stone-600 border-stone-200",
   completed: "bg-sky-50 text-sky-700 border-sky-200",
 };
