@@ -3,6 +3,7 @@ import { applyOwnerAction, applyAssignedEndVisit, applyStaffStart } from "@/lib/
 import {
   isClockTime,
   isFutureOrTodayDate,
+  isIsoDate,
   isTimeRange,
   type InspectionAssignment,
   type InspectionSlot,
@@ -57,6 +58,34 @@ function parseSlot(raw: unknown): InspectionSlot | null {
   if (!isFutureOrTodayDate(date)) return null;
   if (!isTimeRange(timeRange)) return null;
   return { date, timeRange };
+}
+
+function parseBookingSlot(raw: unknown): InspectionSlot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const date = typeof item.date === "string" ? item.date.trim() : "";
+  const timeRange = item.timeRange;
+  if (!isIsoDate(date)) return null;
+  if (!isTimeRange(timeRange)) return null;
+  return { date, timeRange };
+}
+
+function parseEstimatedMinutes(
+  raw: unknown,
+): { ok: true; minutes: number } | { ok: false; error: string } {
+  const value =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string"
+        ? Number.parseInt(raw, 10)
+        : NaN;
+  if (!Number.isFinite(value) || value < 15 || value > 24 * 60) {
+    return {
+      ok: false,
+      error: "Enter estimated work time between 15 minutes and 24 hours.",
+    };
+  }
+  return { ok: true, minutes: Math.round(value) };
 }
 
 /** Validates a visit time window. `endTime` must be after `startTime`. */
@@ -420,6 +449,59 @@ export async function PATCH(
   if (action === "complete") {
     const result = await applyOwnerAction(id, auth.businessId, {
       type: "complete",
+      note,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  if (action === "convert_to_booking") {
+    const slot = parseBookingSlot(payload.slot);
+    if (!slot) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid job date and time range." },
+        { status: 400 },
+      );
+    }
+    const window = parseWindow(payload);
+    if (!window.ok) {
+      return NextResponse.json(
+        { ok: false, error: window.error },
+        { status: 400 },
+      );
+    }
+    const duration = parseEstimatedMinutes(payload.estimatedDurationMinutes);
+    if (!duration.ok) {
+      return NextResponse.json(
+        { ok: false, error: duration.error },
+        { status: 400 },
+      );
+    }
+    const result = await applyOwnerAction(id, auth.businessId, {
+      type: "convert_to_booking",
+      slot,
+      startTime: window.startTime,
+      endTime: window.endTime,
+      estimatedDurationMinutes: duration.minutes,
+      note,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  if (action === "mark_awaiting_decision") {
+    const result = await applyOwnerAction(id, auth.businessId, {
+      type: "mark_awaiting_decision",
       note,
     });
     if (!result.ok) {

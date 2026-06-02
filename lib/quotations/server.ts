@@ -1,12 +1,17 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import {
+  parseBookingStatus,
+  type BookingStatus,
+} from "@/lib/bookings/types";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
   type InspectionAddress,
   type InspectionCustomer,
 } from "@/lib/inspection/types";
+import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const QUOTATION_COLLECTION = "quotations";
@@ -24,6 +29,7 @@ export type QuotationAddition = {
 
 export type QuotationDetail = {
   id: string;
+  quotationCode: string | null;
   businessId: string;
   inspectionRequestId: string;
   serviceTitle: string;
@@ -39,6 +45,9 @@ export type QuotationDetail = {
   imageUrls: string[];
   pdfUrl: string | null;
   status: "draft" | "sent";
+  bookingId: string | null;
+  bookingCode: string | null;
+  bookingStatus: BookingStatus | null;
   createdBy: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -167,6 +176,10 @@ function mapQuotationDoc(
 
   return {
     id,
+    quotationCode:
+      typeof data.quotationCode === "string" && data.quotationCode.trim()
+        ? data.quotationCode.trim()
+        : null,
     businessId: typeof data.businessId === "string" ? data.businessId : "",
     inspectionRequestId:
       typeof data.inspectionRequestId === "string"
@@ -204,6 +217,19 @@ function mapQuotationDoc(
         ? data.pdfUrl.trim()
         : null,
     status: data.status === "sent" ? "sent" : "draft",
+    bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+    bookingCode:
+      typeof data.bookingCode === "string" && data.bookingCode.trim()
+        ? data.bookingCode.trim()
+        : null,
+    bookingStatus: (() => {
+      const parsed = parseBookingStatus(data.bookingStatus);
+      if (parsed) return parsed;
+      if (typeof data.bookingId === "string" && data.bookingId.trim()) {
+        return "scheduled";
+      }
+      return null;
+    })(),
     createdBy: typeof data.createdBy === "string" ? data.createdBy : "",
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
@@ -356,8 +382,16 @@ export async function createQuotationForInspection(
       : computedFinal;
   const imageUrls = parseImageUrls(input.imageUrls);
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
+  const quotationCode = buildQuotationCodeForInspection({
+    id: inspectionId,
+    requestCode:
+      typeof requestData.requestCode === "string"
+        ? requestData.requestCode
+        : null,
+  });
 
   await ref.set({
+    quotationCode,
     businessId,
     inspectionRequestId: inspectionId,
     serviceTitle: requestHeadline(requestData),
@@ -398,6 +432,10 @@ export async function createQuotationForInspection(
     pdfBytes = await generateQuotationPdf(quotation, {
       businessName: businessBranding.businessName,
       logoUrl: businessBranding.logoUrl,
+      inspectionRequestCode:
+        typeof requestData.requestCode === "string"
+          ? requestData.requestCode
+          : null,
     });
     const uploaded = await uploadQuotationPdf(pdfBytes, {
       businessId,
@@ -426,6 +464,7 @@ export async function createQuotationForInspection(
       {
         quotation: {
           id: ref.id,
+          quotationCode,
           finalPriceAud,
           subtotalAud,
           additionsTotalAud,
@@ -499,14 +538,39 @@ export async function listQuotationsForInspection(
   const id = inspectionRequestId.trim();
   if (!id) return [];
 
-  const snap = await adminDb
-    .collection(QUOTATION_COLLECTION)
-    .where("businessId", "==", businessId)
-    .where("inspectionRequestId", "==", id)
-    .get();
+  const [snap, inspectionSnap] = await Promise.all([
+    adminDb
+      .collection(QUOTATION_COLLECTION)
+      .where("businessId", "==", businessId)
+      .where("inspectionRequestId", "==", id)
+      .get(),
+    adminDb.collection("inspection_requests").doc(id).get(),
+  ]);
+
+  const inspectionData = inspectionSnap.data() ?? {};
+  const fallbackBookingId =
+    typeof inspectionData.bookingId === "string" ? inspectionData.bookingId : null;
+  const fallbackBookingCode =
+    typeof inspectionData.bookingCode === "string"
+      ? inspectionData.bookingCode
+      : null;
+  const fallbackBookingStatus =
+    parseBookingStatus(inspectionData.bookingStatus) ??
+    (fallbackBookingId ? ("scheduled" as const) : null);
 
   return snap.docs
-    .map((doc) => mapQuotationDoc(doc.id, doc.data() ?? {}))
+    .map((doc) => {
+      const quotation = mapQuotationDoc(doc.id, doc.data() ?? {});
+      if (!quotation.bookingId && fallbackBookingId) {
+        return {
+          ...quotation,
+          bookingId: fallbackBookingId,
+          bookingCode: quotation.bookingCode ?? fallbackBookingCode,
+          bookingStatus: quotation.bookingStatus ?? fallbackBookingStatus,
+        };
+      }
+      return quotation;
+    })
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 

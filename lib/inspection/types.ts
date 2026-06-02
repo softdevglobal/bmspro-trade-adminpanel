@@ -5,7 +5,9 @@
  * triage them in /dashboard/inspection-visits.
  */
 
+import type { BookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
+import { legacyInspectionReferenceFromId } from "@/lib/reference-codes";
 
 export const INSPECTION_COLLECTION = "inspection_requests";
 
@@ -29,6 +31,7 @@ export const REQUEST_STATUSES = [
   "pending",
   "owner_proposed",
   "scheduled",
+  "awaiting_decision",
   "cancelled",
   "completed",
 ] as const;
@@ -38,9 +41,17 @@ export const STATUS_LABELS: Record<InspectionRequestStatus, string> = {
   pending: "Pending review",
   owner_proposed: "Awaiting customer",
   scheduled: "Scheduled",
+  awaiting_decision: "Awaiting decision",
   cancelled: "Cancelled",
   completed: "Completed",
 };
+
+/** Morning vs afternoon from a 24h start time (for job booking slots). */
+export function timeRangeFromStartTime(startTime: string): InspectionTimeRange {
+  const hour = Number.parseInt(startTime.split(":")[0] ?? "", 10);
+  if (!Number.isFinite(hour)) return "morning";
+  return hour < 12 ? "morning" : "afternoon";
+}
 
 /** Where a new inspection_requests document was created. */
 export const INSPECTION_CREATED_SOURCES = [
@@ -129,6 +140,8 @@ export type InspectionRequestDetail = {
   customerId: string | null;
   /** Set on create; null on older documents. */
   createdSource: InspectionRequestCreatedSource | null;
+  /** Human-readable code, e.g. `INS-REQ 4K7H2M9P`. Null on older documents. */
+  requestCode: string | null;
   address: InspectionAddress;
   preferredSlots: InspectionSlot[];
   ownerProposedSlots: InspectionSlot[];
@@ -146,11 +159,22 @@ export type InspectionRequestDetail = {
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */
   quotation: InspectionQuotationSummary | null;
+  /** Linked job booking document id (`bookings` collection). */
+  bookingId: string | null;
+  /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
+  bookingCode: string | null;
+  /** Mirrored from `bookings.status` when a job booking exists. */
+  bookingStatus: BookingStatus | null;
+  /** @deprecated Job duration lives on `bookings`; kept for older documents. */
+  estimatedDurationMinutes: number | null;
+  /** Millis when a job booking was created from this visit. */
+  bookingConfirmedAt: number | null;
 };
 
 /** Quotation summary stored on inspection_requests after a quote is created. */
 export type InspectionQuotationSummary = {
   id: string;
+  quotationCode: string | null;
   pdfUrl: string | null;
   finalPriceAud: number | null;
   subtotalAud: number | null;
@@ -172,8 +196,14 @@ export function parseInspectionQuotation(
 
   const pdfUrlRaw = typeof item.pdfUrl === "string" ? item.pdfUrl.trim() : "";
 
+  const quotationCode =
+    typeof item.quotationCode === "string" && item.quotationCode.trim()
+      ? item.quotationCode.trim()
+      : null;
+
   return {
     id,
+    quotationCode,
     pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
     finalPriceAud: readPrice(item.finalPriceAud),
     subtotalAud: readPrice(item.subtotalAud),
@@ -398,13 +428,11 @@ export function formatSlotDate(date: string): string {
   });
 }
 
-/** Short, human-friendly reference code derived from an inspection visit id. */
+/** @deprecated Prefer `displayInspectionRequestCode` from `@/lib/reference-codes`. */
 export function formatInspectionVisitReference(
   inspectionRequestId: string,
 ): string {
-  const id = inspectionRequestId.trim();
-  if (!id) return "—";
-  return id.slice(0, 8).toUpperCase();
+  return legacyInspectionReferenceFromId(inspectionRequestId);
 }
 
 export function formatAddress(address: InspectionAddress): string {

@@ -23,6 +23,8 @@ import {
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
+import { createBookingFromInspection } from "@/lib/bookings/server";
+import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 
 type ServiceLookup = {
@@ -100,10 +102,12 @@ export async function createInspectionRequest(
 
   const ref = adminDb.collection(INSPECTION_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
+  const requestCode = await allocateInspectionRequestCode();
 
   await ref.set({
     id: ref.id,
     businessId,
+    requestCode,
     status: "pending" satisfies InspectionRequestStatus,
     requestType: input.requestType,
     serviceId: input.serviceId,
@@ -173,7 +177,16 @@ type OwnerAction =
   | { type: "propose"; slots: InspectionSlot[]; note?: string }
   | { type: "assign"; assignment: InspectionAssignment }
   | { type: "cancel"; note?: string }
-  | { type: "complete"; note?: string };
+  | { type: "complete"; note?: string }
+  | {
+      type: "convert_to_booking";
+      slot: InspectionSlot;
+      startTime: string;
+      endTime: string;
+      estimatedDurationMinutes: number;
+      note?: string;
+    }
+  | { type: "mark_awaiting_decision"; note?: string };
 
 export async function applyOwnerAction(
   id: string,
@@ -244,6 +257,48 @@ export async function applyOwnerAction(
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "complete") {
     updates.status = "completed" satisfies InspectionRequestStatus;
+    if (typeof action.note === "string") updates.ownerNote = action.note;
+  } else if (action.type === "convert_to_booking") {
+    const created = await createBookingFromInspection({
+      inspectionRequestId: id,
+      businessId,
+      slot: action.slot,
+      startTime: action.startTime,
+      endTime: action.endTime,
+      estimatedDurationMinutes: action.estimatedDurationMinutes,
+      note: action.note,
+    });
+    if (!created.ok) {
+      return {
+        ok: false,
+        status: created.status,
+        error: created.error,
+      };
+    }
+    const summary = await loadBusinessSummary(businessId);
+    await notifyCustomerOfStatusChange(
+      created.request,
+      "scheduled",
+      summary,
+    );
+    return { ok: true, request: created.request };
+  } else if (action.type === "mark_awaiting_decision") {
+    if (current.status !== "completed") {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          "Only completed visits with a quotation can be marked awaiting decision.",
+      };
+    }
+    if (!current.quotation) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Send a quotation before marking awaiting decision.",
+      };
+    }
+    updates.status = "awaiting_decision" satisfies InspectionRequestStatus;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   }
 

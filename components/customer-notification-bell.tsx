@@ -7,10 +7,12 @@ import {
   NOTIFICATION_STATUS_TONE,
 } from "@/lib/notifications/types";
 import {
+  accountBookingFocusPath,
   accountPath,
   parseBooknowSlug,
   recallBookingSlug,
 } from "@/lib/customer/booking-routes";
+import type { NotificationRecord } from "@/lib/notifications/types";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -50,12 +52,19 @@ export function CustomerNotificationBell() {
     ? accountPath(fallbackSlug, "notifications")
     : "/account?tab=notifications";
 
-  function openNotification(slug: string | null) {
+  function openNotification(note: NotificationRecord) {
     setOpen(false);
-    const target = slug ?? fallbackSlug;
-    if (target) {
-      router.push(accountPath(target, "requests"));
-    }
+    const target = note.bookingSlug ?? fallbackSlug;
+    if (!target) return;
+    const scope =
+      note.status === "completed" || note.status === "cancelled"
+        ? "history"
+        : "active";
+    router.push(
+      note.requestId
+        ? accountBookingFocusPath(target, note.requestId, scope)
+        : accountPath(target, scope === "history" ? "bookings" : "requests"),
+    );
   }
 
   const [open, setOpen] = useState(false);
@@ -160,7 +169,7 @@ export function CustomerNotificationBell() {
                   >
                     <button
                       type="button"
-                      onClick={() => openNotification(note.bookingSlug)}
+                      onClick={() => openNotification(note)}
                       className="flex min-w-0 flex-1 gap-2 px-3 py-2.5 text-left transition-colors hover:bg-stone-50"
                     >
                       <span

@@ -9,6 +9,12 @@ import {
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import {
+  BOOKING_STATUS_LABELS,
+  BOOKING_STATUS_TONE,
+  type BookingDetail,
+  type BookingStatus,
+} from "@/lib/bookings/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import {
@@ -23,11 +29,17 @@ import {
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
   TIME_RANGES,
+  timeRangeFromStartTime,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   type InspectionSlot,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
+import { InspectionRequestCode } from "@/components/inspection-request-code";
+import {
+  displayBookingCode,
+  displayQuotationCode,
+} from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -53,7 +65,7 @@ function CreatedSourcePill({
         : "dashboard";
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
-      <span className="material-symbols-outlined text-[14px] text-primary">
+      <span className="material-symbols-outlined text-[12px] leading-none text-primary">
         {icon}
       </span>
       {label}
@@ -72,6 +84,16 @@ function staffAvatarUrl(member: {
 
 type StatusFilter = "all" | InspectionRequestStatus;
 
+type DrawerMode =
+  | "review"
+  | "accept"
+  | "set_time"
+  | "propose"
+  | "assign"
+  | "cancel"
+  | "convert_booking"
+  | "awaiting_decision";
+
 const STATUS_TONE: Record<InspectionRequestStatus, string> = {
   pending:
     "bg-amber-50 text-amber-700 border border-amber-200",
@@ -79,6 +101,8 @@ const STATUS_TONE: Record<InspectionRequestStatus, string> = {
     "bg-violet-50 text-violet-700 border border-violet-200",
   scheduled:
     "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  awaiting_decision:
+    "bg-orange-50 text-orange-800 border border-orange-200",
   cancelled:
     "bg-stone-100 text-stone-600 border border-stone-200",
   completed:
@@ -94,9 +118,32 @@ const FILTER_TABS: { id: StatusFilter; label: string; shortLabel: string }[] = [
     shortLabel: "Awaiting",
   },
   { id: "scheduled", label: "Scheduled", shortLabel: "Scheduled" },
+  {
+    id: "awaiting_decision",
+    label: "Awaiting decision",
+    shortLabel: "Decision",
+  },
   { id: "completed", label: "Completed", shortLabel: "Done" },
   { id: "cancelled", label: "Cancelled", shortLabel: "Cancelled" },
 ];
+
+function BookingStatusPill({ status }: { status: BookingStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${BOOKING_STATUS_TONE[status]}`}
+    >
+      {BOOKING_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
+  return (
+    !!request.quotation &&
+    !request.bookingId &&
+    (request.status === "completed" || request.status === "awaiting_decision")
+  );
+}
 
 export function InspectionVisitsBoard() {
   const { user, status: authStatus } = useAuth();
@@ -111,6 +158,7 @@ export function InspectionVisitsBoard() {
   );
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [drawerOpenMode, setDrawerOpenMode] = useState<DrawerMode | null>(null);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
 
@@ -133,6 +181,7 @@ export function InspectionVisitsBoard() {
       pending: 0,
       owner_proposed: 0,
       scheduled: 0,
+      awaiting_decision: 0,
       cancelled: 0,
       completed: 0,
     };
@@ -219,7 +268,7 @@ export function InspectionVisitsBoard() {
             onClick={() => setAddModalOpen(true)}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
           >
-            <span className="material-symbols-outlined text-[16px]">add</span>
+            <span className="material-symbols-outlined text-[14px] leading-none">add</span>
             Add Inspection
           </button>
           <button
@@ -227,7 +276,7 @@ export function InspectionVisitsBoard() {
             onClick={() => void reloadStaff()}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container sm:w-auto"
           >
-            <span className="material-symbols-outlined text-[16px]">refresh</span>
+            <span className="material-symbols-outlined text-[14px] leading-none">refresh</span>
             Refresh
           </button>
         </div>
@@ -252,7 +301,18 @@ export function InspectionVisitsBoard() {
             <li key={req.id}>
               <RequestCard
                 request={req}
-                onOpen={() => setSelectedId(req.id)}
+                onOpen={() => {
+                  setDrawerOpenMode(null);
+                  setSelectedId(req.id);
+                }}
+                onCreateBooking={() => {
+                  setDrawerOpenMode("convert_booking");
+                  setSelectedId(req.id);
+                }}
+                onAwaitingDecision={() => {
+                  setDrawerOpenMode("awaiting_decision");
+                  setSelectedId(req.id);
+                }}
               />
             </li>
           ))}
@@ -262,7 +322,12 @@ export function InspectionVisitsBoard() {
       <RequestDetailDrawer
         request={selected}
         staff={staff}
-        onClose={() => setSelectedId(null)}
+        initialMode={drawerOpenMode}
+        onInitialModeConsumed={() => setDrawerOpenMode(null)}
+        onClose={() => {
+          setSelectedId(null);
+          setDrawerOpenMode(null);
+        }}
         onUpdated={handleUpdated}
       />
 
@@ -313,9 +378,13 @@ function EmptyState({ filter }: { filter: StatusFilter }) {
 function RequestCard({
   request,
   onOpen,
+  onCreateBooking,
+  onAwaitingDecision,
 }: {
   request: InspectionRequestDetail;
   onOpen: () => void;
+  onCreateBooking: () => void;
+  onAwaitingDecision: () => void;
 }) {
   const title =
     request.requestType === "existing_service"
@@ -344,12 +413,21 @@ function RequestCard({
     request.scheduledStartTime,
     request.scheduledEndTime,
   );
+  const showPostQuoteActions = canFollowUpAfterQuotation(request);
+  const hasLinkedBooking = Boolean(request.bookingId);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="group flex w-full min-w-0 max-w-full flex-col gap-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-3 text-left shadow-sm transition-all hover:border-primary/30 hover:shadow-md sm:p-5 sm:hover:-translate-y-0.5"
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="group flex w-full min-w-0 max-w-full cursor-pointer flex-col gap-3 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-3 text-left shadow-sm transition-all hover:border-primary/30 hover:shadow-md sm:p-5 sm:hover:-translate-y-0.5"
     >
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0 flex-1">
@@ -360,7 +438,7 @@ function RequestCard({
               {STATUS_LABELS[request.status]}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
-              <span className="material-symbols-outlined text-[14px] text-primary">
+              <span className="material-symbols-outlined text-[12px] leading-none text-primary">
                 {request.requestType === "existing_service"
                   ? "format_list_bulleted"
                   : "request_quote"}
@@ -372,6 +450,12 @@ function RequestCard({
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
             {title}
           </h4>
+          <p className="mt-1">
+            <InspectionRequestCode
+              request={request}
+              className="inline-flex items-baseline gap-px font-mono text-[11px] font-semibold text-on-surface-variant"
+            />
+          </p>
           <p className="mt-0.5 truncate font-body text-[13px] text-on-surface-variant">
             {request.customer.fullName} · {request.customer.phone}
           </p>
@@ -392,8 +476,10 @@ function RequestCard({
 
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
         {showScheduledOnly && request.scheduledSlot ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-            <span className="material-symbols-outlined text-[14px]">
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200"
+          >
+            <span className="material-symbols-outlined text-[12px] leading-none">
               event_available
             </span>
             {formatSlotDate(request.scheduledSlot.date)} ·{" "}
@@ -411,7 +497,7 @@ function RequestCard({
             ))}
             {request.scheduledSlot ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                <span className="material-symbols-outlined text-[14px]">
+                <span className="material-symbols-outlined text-[12px] leading-none">
                   event_available
                 </span>
                 Scheduled · {formatSlotDate(request.scheduledSlot.date)} ·{" "}
@@ -420,18 +506,82 @@ function RequestCard({
             ) : null}
           </>
         )}
-        {request.assignedTo ? (
-          <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary ring-1 ring-primary/15 sm:ml-auto">
-            <span className="material-symbols-outlined text-[14px]">
-              {request.assignedTo.type === "owner" ? "verified_user" : "person"}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:ml-auto">
+          {request.assignedTo ? (
+            <span
+              className="inline-flex max-w-full shrink-0 items-center gap-1 font-body text-[11px] text-on-surface-variant"
+              aria-label={
+                request.assignedTo.type === "owner"
+                  ? "Assigned to you"
+                  : `Assigned to ${request.assignedTo.name}`
+              }
+            >
+              <span className="material-symbols-outlined text-[12px] leading-none text-primary">
+                {request.assignedTo.type === "owner"
+                  ? "verified_user"
+                  : "person"}
+              </span>
+              <span className="truncate font-semibold text-primary">
+                {request.assignedTo.type === "owner"
+                  ? "Assigned to you"
+                  : `Assigned to ${request.assignedTo.name}`}
+              </span>
             </span>
-            {request.assignedTo.type === "owner"
-              ? "Assigned to you"
-              : `Assigned to ${request.assignedTo.name}`}
-          </span>
-        ) : null}
+          ) : null}
+          {hasLinkedBooking ? (
+            <>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
+                <span className="material-symbols-outlined text-[12px] leading-none">
+                  assignment
+                </span>
+                {displayBookingCode({
+                  id: request.bookingId ?? "",
+                  bookingCode: request.bookingCode,
+                })}
+              </span>
+              {request.bookingStatus ? (
+                <BookingStatusPill status={request.bookingStatus} />
+              ) : null}
+            </>
+          ) : null}
+          {showPostQuoteActions ? (
+            <div
+              className={`flex shrink-0 items-center gap-1.5 ${
+                request.assignedTo || hasLinkedBooking
+                  ? "border-l border-outline-variant/50 pl-2"
+                  : ""
+              }`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                title="Create booking"
+                onClick={onCreateBooking}
+                className="inline-flex h-7 items-center gap-0.5 rounded-lg bg-primary px-2.5 font-body text-[11px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.98]"
+              >
+                <span className="material-symbols-outlined text-[12px] leading-none">
+                  assignment
+                </span>
+                Book
+              </button>
+              {request.status === "completed" ? (
+                <button
+                  type="button"
+                  title="Awaiting decision"
+                  onClick={onAwaitingDecision}
+                  className="inline-flex h-7 items-center gap-0.5 rounded-lg border border-orange-300 bg-orange-50 px-2.5 font-body text-[11px] font-semibold text-orange-800 transition-colors hover:bg-orange-100 active:scale-[0.98]"
+                >
+                  <span className="material-symbols-outlined text-[12px] leading-none">
+                    pending_actions
+                  </span>
+                  Awaiting
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -450,7 +600,7 @@ function SlotPill({
           : "border border-violet-200 bg-violet-50 text-violet-700"
       }`}
     >
-      <span className="material-symbols-outlined shrink-0 text-[14px] text-primary">
+      <span className="material-symbols-outlined shrink-0 text-[12px] leading-none text-primary">
         event
       </span>
       <span className="truncate">
@@ -464,22 +614,18 @@ function SlotPill({
  * Detail drawer + actions
  * ========================================================================== */
 
-type DrawerMode =
-  | "review"
-  | "accept"
-  | "set_time"
-  | "propose"
-  | "assign"
-  | "cancel";
-
 function RequestDetailDrawer({
   request,
   staff,
+  initialMode,
+  onInitialModeConsumed,
   onClose,
   onUpdated,
 }: {
   request: InspectionRequestDetail | null;
   staff: StaffSummary[];
+  initialMode: DrawerMode | null;
+  onInitialModeConsumed: () => void;
   onClose: () => void;
   onUpdated: (next: InspectionRequestDetail) => void;
 }) {
@@ -508,9 +654,11 @@ function RequestDetailDrawer({
             className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
             <DetailDrawerContent
-              key={request.id}
+              key={`${request.id}-${initialMode ?? "review"}`}
               request={request}
               staff={staff}
+              initialMode={initialMode}
+              onInitialModeConsumed={onInitialModeConsumed}
               onClose={onClose}
               onUpdated={onUpdated}
             />
@@ -550,9 +698,9 @@ function DrawerFooterAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-body text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${styles}`}
+      className={`inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 font-body text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${styles}`}
     >
-      <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      <span className="material-symbols-outlined text-[15px] leading-none">{icon}</span>
       {label}
     </button>
   );
@@ -567,6 +715,8 @@ function DrawerReviewFooter({
   onAssign,
   onComplete,
   onCancel,
+  onCreateBooking,
+  onAwaitingDecision,
 }: {
   request: InspectionRequestDetail;
   submitting: boolean;
@@ -576,8 +726,11 @@ function DrawerReviewFooter({
   onAssign: () => void;
   onComplete: () => void;
   onCancel: () => void;
+  onCreateBooking: () => void;
+  onAwaitingDecision: () => void;
 }) {
   const [pdfOpen, setPdfOpen] = useState(false);
+  const followUp = canFollowUpAfterQuotation(request);
 
   if (request.quotation) {
     const headline =
@@ -591,13 +744,13 @@ function DrawerReviewFooter({
       .toLowerCase() || "bmspro"}.pdf`;
 
     return (
-      <div className="border-t border-outline-variant/40 pt-4">
+      <div className="space-y-2 border-t border-outline-variant/40 pt-3">
         {pdfUrl ? (
           <>
             <DrawerFooterAction
               icon="picture_as_pdf"
-              label="View"
-              variant="primary"
+              label="View quotation"
+              variant={followUp ? "secondary" : "primary"}
               onClick={() => setPdfOpen(true)}
               disabled={submitting}
             />
@@ -614,6 +767,25 @@ function DrawerReviewFooter({
             Quotation sent — PDF is not available yet.
           </p>
         )}
+        {followUp ? (
+          <>
+            <DrawerFooterAction
+              icon="assignment"
+              label="Create booking"
+              variant="primary"
+              onClick={onCreateBooking}
+              disabled={submitting}
+            />
+            {request.status === "completed" ? (
+              <DrawerFooterAction
+                icon="pending_actions"
+                label="Awaiting decision"
+                onClick={onAwaitingDecision}
+                disabled={submitting}
+              />
+            ) : null}
+          </>
+        ) : null}
       </div>
     );
   }
@@ -748,16 +920,20 @@ function CompactRequestSummary({
 function DetailDrawerContent({
   request,
   staff,
+  initialMode,
+  onInitialModeConsumed,
   onClose,
   onUpdated,
 }: {
   request: InspectionRequestDetail;
   staff: StaffSummary[];
+  initialMode: DrawerMode | null;
+  onInitialModeConsumed: () => void;
   onClose: () => void;
   onUpdated: (next: InspectionRequestDetail) => void;
 }) {
   const { user } = useAuth();
-  const [mode, setMode] = useState<DrawerMode>("review");
+  const [mode, setMode] = useState<DrawerMode>(initialMode ?? "review");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -781,6 +957,33 @@ function DetailDrawerContent({
   // Assign-form state
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
   const [staffId, setStaffId] = useState<string>("");
+
+  const [bookingSlot, setBookingSlot] = useState<InspectionSlot>({
+    date: "",
+    timeRange: "morning",
+  });
+  const [bookingDayPage, setBookingDayPage] = useState(0);
+  const [bookingStartTime, setBookingStartTime] = useState("10:00");
+  const [bookingEndTime, setBookingEndTime] = useState("11:00");
+  const [bookingEstimateMinutes, setBookingEstimateMinutes] = useState(120);
+  const [bookingNote, setBookingNote] = useState("");
+  const [awaitingNote, setAwaitingNote] = useState("");
+
+  useEffect(() => {
+    if (!initialMode || initialMode === "review") return;
+    setMode(initialMode);
+    if (initialMode === "convert_booking") {
+      const minDate = bookingMinDateFromRequest(request);
+      const timeRange = request.scheduledSlot?.timeRange ?? "morning";
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
+      setBookingSlot({ date: minDate, timeRange });
+      setBookingDayPage(0);
+      setBookingStartTime(request.scheduledStartTime ?? defaults.start);
+      setBookingEndTime(request.scheduledEndTime ?? defaults.end);
+      setBookingNote("");
+    }
+    onInitialModeConsumed();
+  }, [initialMode, onInitialModeConsumed, request.id]);
 
   const hasVisitWindow =
     !!request.scheduledStartTime || !!request.scheduledEndTime;
@@ -880,7 +1083,8 @@ function DetailDrawerContent({
   }
 
   const isClosed =
-    request.status === "cancelled" || request.status === "completed";
+    request.status === "cancelled" ||
+    (request.status === "completed" && !canFollowUpAfterQuotation(request));
 
   useEffect(() => {
     if (mode === "review") return;
@@ -902,17 +1106,33 @@ function DetailDrawerContent({
       if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
       if (request.scheduledEndTime) setAcceptEndTime(request.scheduledEndTime);
     }
+    if (nextMode === "convert_booking") {
+      const minDate = bookingMinDateFromRequest(request);
+      const timeRange = request.scheduledSlot?.timeRange ?? "morning";
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
+      setBookingSlot({ date: minDate, timeRange });
+      setBookingDayPage(0);
+      setBookingStartTime(request.scheduledStartTime ?? defaults.start);
+      setBookingEndTime(request.scheduledEndTime ?? defaults.end);
+      setBookingNote("");
+    }
     setMode(nextMode);
   }
 
   return (
     <>
-      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant/40 px-4 py-3 sm:px-5 sm:py-4">
+      <header className="flex shrink-0 items-start justify-between gap-2 border-b border-outline-variant/40 px-4 py-2.5 sm:px-5 sm:py-3">
         <div className="min-w-0">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Inspection request
           </p>
-          <h3 className="mt-1 truncate font-display text-[18px] font-semibold text-on-surface">
+          <p className="mt-0.5">
+            <InspectionRequestCode
+              request={request}
+              className="inline-flex items-baseline gap-px font-mono text-[12px] font-semibold text-primary"
+            />
+          </p>
+          <h3 className="mt-0.5 truncate font-display text-[17px] font-semibold leading-snug text-on-surface">
             {request.requestType === "existing_service"
               ? request.serviceName ?? "Existing service"
               : request.customRequest?.title ?? "Custom quotation request"}
@@ -924,6 +1144,9 @@ function DetailDrawerContent({
               {STATUS_LABELS[request.status]}
             </span>
             <CreatedSourcePill source={request.createdSource} />
+            {request.bookingId && request.bookingStatus ? (
+              <BookingStatusPill status={request.bookingStatus} />
+            ) : null}
           </div>
         </div>
         <button
@@ -938,7 +1161,7 @@ function DetailDrawerContent({
 
       <div
         ref={scrollRef}
-        className="min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 sm:space-y-5 sm:px-5 sm:py-5"
+        className="min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-4 py-3 sm:space-y-3 sm:px-5"
       >
         {inActionMode ? (
           <CompactRequestSummary
@@ -967,7 +1190,7 @@ function DetailDrawerContent({
             />
             {request.assignedTo ? <AssignmentSummary request={request} /> : null}
             {request.ownerNote ? (
-              <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-4 py-3">
+              <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
                 <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
                   {request.status === "cancelled"
                     ? "Cancellation note"
@@ -979,6 +1202,10 @@ function DetailDrawerContent({
               </div>
             ) : null}
             <QuotationSection requestId={request.id} />
+            <BookingDetailsSection
+              bookingId={request.bookingId}
+              bookingCode={request.bookingCode}
+            />
           </>
         )}
 
@@ -1126,9 +1353,70 @@ function DetailDrawerContent({
             }}
           />
         ) : null}
+
+        {mode === "convert_booking" ? (
+          <ConvertToBookingForm
+            minBookingDate={bookingMinDateFromRequest(request)}
+            slot={bookingSlot}
+            dayPage={bookingDayPage}
+            onDayPageChange={setBookingDayPage}
+            onSlotChange={setBookingSlot}
+            startTime={bookingStartTime}
+            endTime={bookingEndTime}
+            onStartTimeChange={setBookingStartTime}
+            onEndTimeChange={setBookingEndTime}
+            estimatedMinutes={bookingEstimateMinutes}
+            onEstimatedMinutesChange={setBookingEstimateMinutes}
+            note={bookingNote}
+            onNoteChange={setBookingNote}
+            disabled={submitting}
+            onCancel={() => setMode("review")}
+            onSubmit={() => {
+              if (!bookingSlot.date) {
+                setActionError("Choose a date for the job.");
+                return;
+              }
+              if (!bookingStartTime || !bookingEndTime) {
+                setActionError("Set a start and end time for the job.");
+                return;
+              }
+              if (bookingStartTime >= bookingEndTime) {
+                setActionError("The end time must be after the start time.");
+                return;
+              }
+              void callAction({
+                action: "convert_to_booking",
+                slot: {
+                  date: bookingSlot.date,
+                  timeRange: timeRangeFromStartTime(bookingStartTime),
+                },
+                startTime: bookingStartTime,
+                endTime: bookingEndTime,
+                estimatedDurationMinutes: bookingEstimateMinutes,
+                note: bookingNote.trim() || undefined,
+              });
+            }}
+          />
+        ) : null}
+
+        {mode === "awaiting_decision" ? (
+          <AwaitingDecisionForm
+            note={awaitingNote}
+            disabled={submitting}
+            onNoteChange={setAwaitingNote}
+            onCancel={() => setMode("review")}
+            onSubmit={() => {
+              void callAction({
+                action: "mark_awaiting_decision",
+                note: awaitingNote.trim() || undefined,
+              });
+            }}
+          />
+        ) : null}
         </div>
 
-        {(!isClosed || request.quotation) && mode === "review" ? (
+        {mode === "review" &&
+        (!isClosed || canFollowUpAfterQuotation(request)) ? (
           <DrawerReviewFooter
             request={request}
             submitting={submitting}
@@ -1138,6 +1426,8 @@ function DetailDrawerContent({
             onAssign={() => openAction("assign")}
             onComplete={() => void callAction({ action: "complete" })}
             onCancel={() => openAction("cancel")}
+            onCreateBooking={() => openAction("convert_booking")}
+            onAwaitingDecision={() => openAction("awaiting_decision")}
           />
         ) : null}
       </div>
@@ -1151,6 +1441,10 @@ function DetailDrawerContent({
 
 type QuotationView = {
   id: string;
+  quotationCode: string | null;
+  bookingId: string | null;
+  bookingCode: string | null;
+  bookingStatus: BookingStatus | null;
   serviceTitle: string;
   lineItems: { name: string; priceAud: number }[];
   additions: { name: string; priceAud: number }[];
@@ -1214,11 +1508,11 @@ function QuotationSection({ requestId }: { requestId: string }) {
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+      <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
           Quotation
         </p>
-        <p className="mt-2 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
+        <p className="mt-1.5 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
           <span className="material-symbols-outlined animate-spin text-[18px]">
             progress_activity
           </span>
@@ -1230,7 +1524,7 @@ function QuotationSection({ requestId }: { requestId: string }) {
 
   if (error) {
     return (
-      <section className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+      <section className="rounded-xl border border-rose-200 bg-rose-50 p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-rose-700">
           Quotation
         </p>
@@ -1244,11 +1538,11 @@ function QuotationSection({ requestId }: { requestId: string }) {
   }
 
   return (
-    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
         Quotation{quotations.length > 1 ? "s" : ""}
       </p>
-      <div className="mt-3 space-y-4">
+      <div className="mt-2 space-y-2">
         {quotations.map((quotation) => (
           <QuotationCard key={quotation.id} quotation={quotation} />
         ))}
@@ -1269,7 +1563,23 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
     <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-display text-[14px] font-semibold text-on-surface">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-mono text-[11px] font-semibold tracking-wide text-primary">
+              {displayQuotationCode(quotation)}
+            </p>
+            {quotation.bookingId ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary">
+                {displayBookingCode({
+                  id: quotation.bookingId,
+                  bookingCode: quotation.bookingCode,
+                })}
+              </span>
+            ) : null}
+            {quotation.bookingStatus ? (
+              <BookingStatusPill status={quotation.bookingStatus} />
+            ) : null}
+          </div>
+          <p className="mt-1 truncate font-display text-[14px] font-semibold text-on-surface">
             {title}
           </p>
           {quotation.createdAt ? (
@@ -1382,6 +1692,172 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
   );
 }
 
+function formatEstimatedMinutes(minutes: number | null): string | null {
+  if (minutes == null || minutes <= 0) return null;
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  if (rem === 0) return `${hours} hr`;
+  return `${hours} hr ${rem} min`;
+}
+
+/** Job booking linked to this visit (shown below quotation). */
+function BookingDetailsSection({
+  bookingId,
+  bookingCode,
+}: {
+  bookingId: string | null;
+  bookingCode: string | null;
+}) {
+  const { user } = useAuth();
+  const [booking, setBooking] = useState<BookingDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!bookingId || !user) {
+      setBooking(null);
+      setError(null);
+      return;
+    }
+
+    const authedUser = user;
+    let active = true;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = await authedUser.getIdToken();
+        const response = await fetch(`/api/bookings/${bookingId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const data = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          booking?: BookingDetail;
+        };
+        if (!response.ok || !data.ok || !data.booking) {
+          throw new Error(data.error ?? "Could not load booking.");
+        }
+        if (active) setBooking(data.booking);
+      } catch (err) {
+        if (active) {
+          setBooking(null);
+          setError(
+            err instanceof Error ? err.message : "Could not load booking.",
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [bookingId, user]);
+
+  if (!bookingId) return null;
+
+  if (loading) {
+    return (
+      <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+          Booking
+        </p>
+        <p className="mt-1.5 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
+          <span className="material-symbols-outlined animate-spin text-[16px]">
+            progress_activity
+          </span>
+          Loading…
+        </p>
+      </section>
+    );
+  }
+
+  if (error || !booking) {
+    return (
+      <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+          Booking
+        </p>
+        {bookingCode ? (
+          <p className="mt-1 font-mono text-[12px] font-semibold text-primary">
+            {displayBookingCode({
+              id: bookingId,
+              bookingCode,
+            })}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+            {error}
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
+  const visitWindow = formatVisitWindow(
+    booking.scheduledStartTime,
+    booking.scheduledEndTime,
+  );
+  const estimate = formatEstimatedMinutes(booking.estimatedDurationMinutes);
+
+  return (
+    <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+      <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+        Booking
+      </p>
+      <div className="mt-2 rounded-xl border border-primary/20 bg-surface-container-lowest p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
+            {displayBookingCode(booking)}
+          </span>
+          <BookingStatusPill status={booking.status} />
+        </div>
+
+        {booking.scheduledSlot ? (
+          <div className="mt-3 space-y-2">
+            <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold text-on-surface">
+              <span className="material-symbols-outlined text-[16px] text-primary">
+                event
+              </span>
+              {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+              {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
+            </p>
+            {visitWindow ? (
+              <p className="flex items-center gap-1.5 font-body text-[12px] font-semibold text-emerald-800">
+                <span className="material-symbols-outlined text-[14px] text-emerald-700">
+                  schedule
+                </span>
+                {visitWindow}
+              </p>
+            ) : null}
+            {estimate ? (
+              <p className="flex items-center gap-1.5 font-body text-[12px] text-on-surface-variant">
+                <span className="material-symbols-outlined text-[14px] text-primary">
+                  timelapse
+                </span>
+                Estimated {estimate} on site
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {booking.ownerNote ? (
+          <p className="mt-3 border-t border-outline-variant/40 pt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
+            <span className="font-semibold text-on-surface">Note: </span>
+            {booking.ownerNote}
+          </p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function CustomerSection({ request }: { request: InspectionRequestDetail }) {
   const phoneHref = request.customer.phone
     ? `tel:${request.customer.phone}`
@@ -1391,17 +1867,17 @@ function CustomerSection({ request }: { request: InspectionRequestDetail }) {
     : null;
 
   return (
-    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
         Customer
       </p>
-      <p className="mt-1 font-display text-[15px] font-semibold text-on-surface">
+      <p className="mt-0.5 font-display text-[15px] font-semibold text-on-surface">
         {request.customer.fullName}
       </p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
         <a
           href={phoneHref ?? "#"}
-          className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface transition-colors hover:bg-surface-container"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-low px-2.5 py-1.5 font-body text-[13px] text-on-surface transition-colors hover:bg-surface-container"
         >
           <span className="material-symbols-outlined text-[16px] text-primary">
             call
@@ -1410,7 +1886,7 @@ function CustomerSection({ request }: { request: InspectionRequestDetail }) {
         </a>
         <a
           href={emailHref ?? "#"}
-          className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface transition-colors hover:bg-surface-container"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-low px-2.5 py-1.5 font-body text-[13px] text-on-surface transition-colors hover:bg-surface-container"
         >
           <span className="material-symbols-outlined text-[16px] text-primary">
             mail
@@ -1418,7 +1894,7 @@ function CustomerSection({ request }: { request: InspectionRequestDetail }) {
           <span className="truncate">{request.customer.email}</span>
         </a>
       </div>
-      <p className="mt-3 inline-flex items-start gap-2 font-body text-[13px] text-on-surface">
+      <p className="mt-2 inline-flex items-start gap-1.5 font-body text-[13px] leading-snug text-on-surface">
         <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[16px] text-primary">
           location_on
         </span>
@@ -1435,15 +1911,15 @@ function RequestDetailsSection({
 }) {
   if (request.requestType === "existing_service") {
     return (
-      <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+      <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
           Service requested
         </p>
-        <p className="mt-1 font-display text-[15px] font-semibold text-on-surface">
+        <p className="mt-0.5 font-display text-[15px] font-semibold text-on-surface">
           {request.serviceName ?? "—"}
         </p>
         {request.serviceBusinessType ? (
-          <p className="font-body text-[12px] text-on-surface-variant">
+          <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
             {request.serviceBusinessType}
           </p>
         ) : null}
@@ -1452,15 +1928,15 @@ function RequestDetailsSection({
   }
 
   return (
-    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
         Custom quote request
       </p>
-      <p className="mt-1 font-display text-[15px] font-semibold text-on-surface">
+      <p className="mt-0.5 font-display text-[15px] font-semibold text-on-surface">
         {request.customRequest?.title ?? "—"}
       </p>
       {request.customRequest?.description ? (
-        <p className="mt-2 whitespace-pre-line font-body text-[13px] leading-relaxed text-on-surface-variant">
+        <p className="mt-1.5 whitespace-pre-line font-body text-[13px] leading-relaxed text-on-surface-variant">
           {request.customRequest.description}
         </p>
       ) : null}
@@ -1498,11 +1974,11 @@ function InspectionSlotsList({
         : "text-on-surface-variant";
 
   return (
-    <ul className="mt-2 space-y-2">
+    <ul className="mt-1.5 space-y-1.5">
       {slots.map((slot, index) => (
         <li
           key={`${slot.date}-${slot.timeRange}-${index}`}
-          className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 shadow-sm ${cardClass}`}
+          className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 shadow-sm ${cardClass}`}
         >
           {slots.length > 1 ? (
             <span
@@ -1558,12 +2034,12 @@ function CustomerExtrasSection({
   if (!request.customerNotes && !budgetLabel) return null;
 
   return (
-    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
         Customer notes &amp; budget
       </p>
       {request.customerNotes ? (
-        <p className="mt-2 whitespace-pre-line font-body text-[13px] leading-relaxed text-on-surface">
+        <p className="mt-1.5 whitespace-pre-line font-body text-[13px] leading-relaxed text-on-surface">
           {request.customerNotes}
         </p>
       ) : null}
@@ -1597,7 +2073,7 @@ function SlotsOverview({
   inlineVisitTime?: InlineVisitTimeControl;
 }) {
   return (
-    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
         Customer&apos;s preferred dates
       </p>
@@ -1605,7 +2081,7 @@ function SlotsOverview({
 
       {request.ownerProposedSlots.length > 0 ? (
         <>
-          <p className="mt-4 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+          <p className="mt-2.5 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Your proposed dates
           </p>
           <InspectionSlotsList
@@ -1644,7 +2120,7 @@ function ScheduledVisitSection({
 
   return (
     <>
-      <p className="mt-4 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+      <p className="mt-2.5 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
         Scheduled visit
       </p>
       <InspectionSlotsList
@@ -1712,11 +2188,11 @@ function AssignmentSummary({
   const assigned = request.assignedTo;
   if (!assigned) return null;
   return (
-    <section className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+    <section className="rounded-xl border border-primary/20 bg-primary/5 p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
         Inspector assigned
       </p>
-      <p className="mt-1 font-display text-[15px] font-semibold text-on-surface">
+      <p className="mt-0.5 font-display text-[15px] font-semibold text-on-surface">
         {assigned.name}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
@@ -1738,6 +2214,22 @@ function minutesFromMidnight(clock: string): number {
   if (!isClockTime(clock)) return 0;
   const [h, m] = clock.split(":").map(Number);
   return h * 60 + m;
+}
+
+const JOB_TIME_START_HOUR = 6;
+const JOB_TIME_END_HOUR = 23;
+
+/** 15-minute slots for a full job day (bookings), 6:00am–11:45pm. */
+function jobTimeOptions(): { value: string; label: string }[] {
+  const options: { value: string; label: string }[] = [];
+  for (let hour = JOB_TIME_START_HOUR; hour <= JOB_TIME_END_HOUR; hour += 1) {
+    for (let minute = 0; minute < 60; minute += VISIT_TIME_STEP_MINUTES) {
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      const label = formatClockTime(value);
+      if (label) options.push({ value, label });
+    }
+  }
+  return options;
 }
 
 /** 15-minute options within morning (8–12) or afternoon (12–17). */
@@ -1770,6 +2262,7 @@ function VisitTimeRangeFields({
   startTime,
   endTime,
   timeRange,
+  fullDay = false,
   disabled,
   onStartTimeChange,
   onEndTimeChange,
@@ -1777,11 +2270,16 @@ function VisitTimeRangeFields({
   startTime: string;
   endTime: string;
   timeRange: InspectionTimeRange | null;
+  /** Job bookings: full day (6am–11:45pm), not morning/afternoon visit windows. */
+  fullDay?: boolean;
   disabled: boolean;
   onStartTimeChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
 }) {
-  const options = useMemo(() => visitTimeOptions(timeRange), [timeRange]);
+  const options = useMemo(
+    () => (fullDay ? jobTimeOptions() : visitTimeOptions(timeRange)),
+    [timeRange, fullDay],
+  );
   const startValid = isClockTime(startTime);
   const endValid = isClockTime(endTime);
 
@@ -1792,14 +2290,14 @@ function VisitTimeRangeFields({
   }, [options, startTime, startValid]);
 
   useEffect(() => {
-    if (!timeRange) return;
+    if (fullDay || !timeRange) return;
     const opts = visitTimeOptions(timeRange);
     if (!opts.some((o) => o.value === startTime)) {
       const defaults = DEFAULT_VISIT_WINDOW[timeRange];
       onStartTimeChange(defaults.start);
       onEndTimeChange(defaults.end);
     }
-  }, [timeRange, startTime, onStartTimeChange, onEndTimeChange]);
+  }, [fullDay, timeRange, startTime, onStartTimeChange, onEndTimeChange]);
 
   useEffect(() => {
     if (!startValid || !endValid) return;
@@ -1948,6 +2446,195 @@ function SetTimeForm({
       <FormActions
         confirmLabel="Save visit time"
         confirmIcon="schedule"
+        disabled={disabled}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
+    </section>
+  );
+}
+
+const JOB_ESTIMATE_MINUTES = [60, 90, 120, 180, 240, 360] as const;
+
+/** Earliest selectable job day: inspection visit date (inclusive), then later days only. */
+function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
+  const scheduled = request.scheduledSlot?.date?.trim();
+  if (scheduled) return scheduled;
+  const preferredDates = request.preferredSlots
+    .map((slot) => slot.date?.trim())
+    .filter((date): date is string => Boolean(date))
+    .sort();
+  if (preferredDates.length > 0) return preferredDates[0];
+  return todayIso();
+}
+
+function ConvertToBookingForm({
+  minBookingDate,
+  slot,
+  dayPage,
+  onDayPageChange,
+  onSlotChange,
+  startTime,
+  endTime,
+  onStartTimeChange,
+  onEndTimeChange,
+  estimatedMinutes,
+  onEstimatedMinutesChange,
+  note,
+  onNoteChange,
+  disabled,
+  onCancel,
+  onSubmit,
+}: {
+  minBookingDate: string;
+  slot: InspectionSlot;
+  dayPage: number;
+  onDayPageChange: (page: number) => void;
+  onSlotChange: (slot: InspectionSlot) => void;
+  startTime: string;
+  endTime: string;
+  onStartTimeChange: (value: string) => void;
+  onEndTimeChange: (value: string) => void;
+  estimatedMinutes: number;
+  onEstimatedMinutesChange: (minutes: number) => void;
+  note: string;
+  onNoteChange: (value: string) => void;
+  disabled: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const minDate = minBookingDate;
+
+  function selectDate(iso: string) {
+    onSlotChange({ ...slot, date: iso });
+  }
+
+  return (
+    <section className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+      <h4 className="font-display text-[15px] font-semibold text-on-surface">
+        Create booking
+      </h4>
+      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+        Schedule the job after the customer accepted your quotation (or when
+        they confirmed by phone).
+      </p>
+
+      <div className="mt-4">
+        <SlotDayPicker
+          selectedIso={slot.date}
+          minDate={minDate}
+          dayPage={dayPage}
+          onDayPageChange={onDayPageChange}
+          onSelect={selectDate}
+          disabled={disabled}
+          dayStripLayout="fit"
+        />
+      </div>
+
+      <label className="mt-4 block">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Job time
+        </span>
+        <div className="mt-1">
+          <VisitTimeRangeFields
+            startTime={startTime}
+            endTime={endTime}
+            timeRange={null}
+            fullDay
+            disabled={disabled || !slot.date}
+            onStartTimeChange={onStartTimeChange}
+            onEndTimeChange={onEndTimeChange}
+          />
+        </div>
+      </label>
+
+      <label className="mt-4 block">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Estimated time on site
+        </span>
+        <select
+          value={estimatedMinutes}
+          disabled={disabled}
+          onChange={(event) =>
+            onEstimatedMinutesChange(Number.parseInt(event.target.value, 10))
+          }
+          className="mt-1 w-full rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60"
+        >
+          {JOB_ESTIMATE_MINUTES.map((mins) => (
+            <option key={mins} value={mins}>
+              {mins < 60
+                ? `${mins} minutes`
+                : mins % 60 === 0
+                  ? `${mins / 60} hours`
+                  : `${Math.floor(mins / 60)} hr ${mins % 60} min`}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="mt-3 block">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Note for customer (optional)
+        </span>
+        <textarea
+          value={note}
+          onChange={(event) => onNoteChange(event.target.value)}
+          rows={2}
+          maxLength={500}
+          placeholder="e.g. Please ensure access to the meter box."
+          className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+        />
+      </label>
+
+      <FormActions
+        confirmLabel="Save booking"
+        confirmIcon="assignment"
+        disabled={disabled}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
+    </section>
+  );
+}
+
+function AwaitingDecisionForm({
+  note,
+  onNoteChange,
+  disabled,
+  onCancel,
+  onSubmit,
+}: {
+  note: string;
+  onNoteChange: (value: string) => void;
+  disabled: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="rounded-xl border border-orange-200 bg-orange-50/80 p-4">
+      <h4 className="font-display text-[15px] font-semibold text-on-surface">
+        Awaiting decision
+      </h4>
+      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+        Use when the customer is reviewing the quotation and will get back to
+        you later (e.g. after referring the quote).
+      </p>
+      <label className="mt-4 block">
+        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Internal note (optional)
+        </span>
+        <textarea
+          value={note}
+          onChange={(event) => onNoteChange(event.target.value)}
+          rows={2}
+          maxLength={500}
+          placeholder="e.g. Customer will call back after discussing with partner."
+          className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+        />
+      </label>
+      <FormActions
+        confirmLabel="Save"
+        confirmIcon="pending_actions"
         disabled={disabled}
         onCancel={onCancel}
         onSubmit={onSubmit}

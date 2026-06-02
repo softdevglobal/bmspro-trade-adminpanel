@@ -1,11 +1,10 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { db } from "@/lib/firebase/client";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
-import { doc, onSnapshot } from "firebase/firestore";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -57,15 +56,59 @@ function writeProfileCache(businessId: string, profile: BusinessProfileLite): vo
 
 const BusinessProfileContext = createContext<BusinessProfileLite | null>(null);
 
-/** One Firestore listener for the business doc (sidebar + header share this). */
+/** Loads business profile via API on demand (no Firestore listener). */
 export function BusinessProfileProvider({ children }: { children: ReactNode }) {
-  const { role, businessId } = useAuth();
+  const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
   const [profile, setProfile] = useState<BusinessProfileLite | null>(() =>
     businessId && role === "business_owner"
       ? readProfileCache(businessId)
       : null,
   );
+
+  const loadProfile = useCallback(async () => {
+    if (role !== "business_owner" || !businessId || !user) {
+      setProfile(null);
+      return;
+    }
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/business/profile", {
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const body = (await response.json()) as {
+        ok: boolean;
+        profile?: {
+          businessName: string | null;
+          logoUrl: string | null;
+          bookingSlug?: string | null;
+          bookingPath?: string | null;
+        };
+      };
+      if (!response.ok || !body.ok || !body.profile) return;
+
+      const slug =
+        typeof body.profile.bookingSlug === "string"
+          ? body.profile.bookingSlug
+          : null;
+      const next: BusinessProfileLite = {
+        businessName: body.profile.businessName,
+        logoUrl: body.profile.logoUrl,
+        bookingSlug: slug,
+        bookingPath:
+          typeof body.profile.bookingPath === "string"
+            ? body.profile.bookingPath
+            : slug
+              ? `/booknow/${slug}`
+              : null,
+      };
+      writeProfileCache(businessId, next);
+      setProfile(next);
+    } catch {
+      /* keep cached profile */
+    }
+  }, [role, businessId, user]);
 
   useEffect(() => {
     if (role !== "business_owner" || !businessId) {
@@ -77,33 +120,17 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
     const cached = readProfileCache(businessId);
     if (cached) setProfile(cached);
 
-    const ref = doc(db, "businesses", businessId);
-    const unsubscribe = onSnapshot(ref, (snap) => {
-      const data = snap.data();
-      if (!data) {
-        setProfile(null);
-        return;
-      }
-      const slug =
-        typeof data.bookingSlug === "string" ? data.bookingSlug : null;
-      const next: BusinessProfileLite = {
-        businessName:
-          typeof data.businessName === "string" ? data.businessName : null,
-        logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
-        bookingSlug: slug,
-        bookingPath:
-          typeof data.bookingPath === "string"
-            ? data.bookingPath
-            : slug
-              ? `/booknow/${slug}`
-              : null,
-      };
-      writeProfileCache(businessId, next);
-      setProfile(next);
-    });
+    void loadProfile();
 
-    return () => unsubscribe();
-  }, [role, businessId, pageVisible]);
+    const onFocus = () => void loadProfile();
+    window.addEventListener("focus", onFocus);
+    const interval = window.setInterval(() => void loadProfile(), 300_000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(interval);
+    };
+  }, [role, businessId, pageVisible, loadProfile]);
 
   const value = useMemo(() => profile, [profile]);
 

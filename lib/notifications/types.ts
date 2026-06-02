@@ -54,6 +54,7 @@ export const NOTIFICATION_STATUS_ICON: Record<
   pending: "hourglass_top",
   owner_proposed: "edit_calendar",
   scheduled: "event_available",
+  awaiting_decision: "pending_actions",
   cancelled: "event_busy",
   completed: "check_circle",
 };
@@ -65,6 +66,7 @@ export const NOTIFICATION_STATUS_TONE: Record<
   pending: "text-amber-600",
   owner_proposed: "text-violet-600",
   scheduled: "text-emerald-600",
+  awaiting_decision: "text-orange-600",
   cancelled: "text-rose-600",
   completed: "text-primary",
 };
