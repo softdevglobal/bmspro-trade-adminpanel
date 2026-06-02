@@ -301,8 +301,10 @@ export async function applyOwnerAction(
         error: "Send a quotation before marking awaiting decision.",
       };
     }
+    const bookingStatusAt = FieldValue.serverTimestamp();
     updates.status = "awaiting_decision" satisfies InspectionRequestStatus;
-    updates.bookingStatus = "await";
+    updates.bookingStatus = "awaiting";
+    updates.bookingStatusAt = bookingStatusAt;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   }
 
@@ -310,7 +312,13 @@ export async function applyOwnerAction(
 
   if (action.type === "mark_awaiting_decision") {
     try {
-      await mirrorBookingToQuotations(id, { bookingStatus: "await" });
+      const bookingStatusAt = updates.bookingStatusAt as ReturnType<
+        typeof FieldValue.serverTimestamp
+      >;
+      await mirrorBookingToQuotations(id, {
+        bookingStatus: "awaiting",
+        bookingStatusAt,
+      });
     } catch (error) {
       console.error("quotation bookingStatus mirror failed:", error);
     }

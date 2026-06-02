@@ -141,6 +141,7 @@ export async function createBookingFromInspection(
     bookingId: bookingRef.id,
     bookingCode,
     bookingStatus: "scheduled",
+    bookingStatusAt: now,
     bookingConfirmedAt: now,
     updatedAt: now,
   };
@@ -167,6 +168,7 @@ export async function createBookingFromInspection(
     bookingId: bookingRef.id,
     bookingCode,
     bookingStatus: "scheduled",
+    bookingStatusAt: now,
   });
 
   return {
@@ -181,6 +183,7 @@ export async function mirrorBookingToQuotations(
   inspectionRequestId: string,
   fields: {
     bookingStatus: BookingStatus;
+    bookingStatusAt?: ReturnType<typeof FieldValue.serverTimestamp>;
     bookingId?: string | null;
     bookingCode?: string | null;
   },
@@ -191,8 +194,12 @@ export async function mirrorBookingToQuotations(
     .get();
   if (snap.empty) return;
 
+  const statusAt =
+    fields.bookingStatusAt ?? FieldValue.serverTimestamp();
+
   const update: Record<string, unknown> = {
     bookingStatus: fields.bookingStatus,
+    bookingStatusAt: statusAt,
     updatedAt: FieldValue.serverTimestamp(),
   };
   if (fields.bookingId) update.bookingId = fields.bookingId;

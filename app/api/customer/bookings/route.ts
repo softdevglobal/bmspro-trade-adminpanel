@@ -165,10 +165,11 @@ function mapBookingDoc(
         return "scheduled";
       }
       if (data.status === "awaiting_decision") {
-        return "await";
+        return "awaiting";
       }
       return null;
     })(),
+    bookingStatusAt: toMillis(data.bookingStatusAt),
     estimatedDurationMinutes:
       typeof data.estimatedDurationMinutes === "number" &&
       Number.isFinite(data.estimatedDurationMinutes) &&

@@ -10,7 +10,7 @@ import type {
 export const BOOKING_COLLECTION = "bookings";
 
 export const BOOKING_STATUSES = [
-  "await",
+  "awaiting",
   "scheduled",
   "cancelled",
   "completed",
@@ -18,14 +18,14 @@ export const BOOKING_STATUSES = [
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
-  await: "Awaiting booking",
+  awaiting: "Awaiting booking",
   scheduled: "Scheduled",
   cancelled: "Cancelled",
   completed: "Completed",
 };
 
 export const BOOKING_STATUS_TONE: Record<BookingStatus, string> = {
-  await:
+  awaiting:
     "bg-orange-50 text-orange-800 border border-orange-200",
   scheduled:
     "bg-emerald-50 text-emerald-700 border border-emerald-200",
@@ -35,10 +35,9 @@ export const BOOKING_STATUS_TONE: Record<BookingStatus, string> = {
 };
 
 export function parseBookingStatus(raw: unknown): BookingStatus | null {
-  if (
-    typeof raw === "string" &&
-    (BOOKING_STATUSES as readonly string[]).includes(raw)
-  ) {
+  if (typeof raw !== "string") return null;
+  if (raw === "await") return "awaiting";
+  if ((BOOKING_STATUSES as readonly string[]).includes(raw)) {
     return raw as BookingStatus;
   }
   return null;

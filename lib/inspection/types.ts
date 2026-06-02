@@ -163,8 +163,10 @@ export type InspectionRequestDetail = {
   bookingId: string | null;
   /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
   bookingCode: string | null;
-  /** Mirrored from `bookings.status` when a job booking exists. */
+  /** Booking follow-up state (e.g. awaiting customer decision before a job exists). */
   bookingStatus: BookingStatus | null;
+  /** When `bookingStatus` was last set or changed. */
+  bookingStatusAt: number | null;
   /** @deprecated Job duration lives on `bookings`; kept for older documents. */
   estimatedDurationMinutes: number | null;
   /** Millis when a job booking was created from this visit. */
