@@ -24,6 +24,30 @@ service cloud.firestore {
         );
     }
 
+    function signedInUserDocExists() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDocData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userIsOwnerRole() {
+      return signedInUserDocExists()
+        && userDocData().role in [
+          'owner',
+          'admin',
+          'business_owner',
+          'salon_owner'
+        ];
+    }
+
+    function userOwnsBusiness(businessId) {
+      return userIsOwnerRole()
+        && userDocData().businessId == businessId;
+    }
+
     function ownsBusiness(businessId) {
       return isBusinessOwner() && request.auth.token.businessId == businessId;
     }
@@ -36,8 +60,23 @@ service cloud.firestore {
 
     // Business owners read their workspace; super admins read all.
     match /businesses/{businessId} {
-      allow read: if isSuperAdmin() || ownsBusiness(businessId);
+      allow read: if isSuperAdmin()
+        || ownsBusiness(businessId)
+        || (signedInUserDocExists() && resource.data.ownerUid == request.auth.uid);
       allow create, update, delete: if false;
+    }
+
+    function isBusinessStaff() {
+      return isSignedIn()
+        && request.auth.token.businessId is string
+        && request.auth.token.role == 'staff';
+    }
+
+    function ownsStaffInspection() {
+      return isBusinessStaff()
+        && resource.data.businessId == request.auth.token.businessId
+        && resource.data.assignedTo is map
+        && resource.data.assignedTo.uid == request.auth.uid;
     }
 
     match /users/{uid} {
@@ -64,8 +103,9 @@ service cloud.firestore {
     }
 
     function ownsBusinessNotification() {
-      return isBusinessOwner()
-        && resource.data.businessId == request.auth.token.businessId;
+      return (isBusinessOwner()
+          && resource.data.businessId == request.auth.token.businessId)
+        || userOwnsBusiness(resource.data.businessId);
     }
 
     function notificationReadOnlyUpdate() {
@@ -114,6 +154,8 @@ service cloud.firestore {
       allow read: if isSuperAdmin()
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
+        || userOwnsBusiness(resource.data.businessId)
+        || ownsStaffInspection()
         || ownsCustomerInspection();
       allow create, update, delete: if false;
     }

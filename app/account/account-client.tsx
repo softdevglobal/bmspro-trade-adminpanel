@@ -23,6 +23,7 @@ import {
   CustomerBookingShell,
   CustomerShellPanel,
 } from "@/components/customer-booking-shell";
+import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import Link from "next/link";
 import {
   accountPath,
@@ -86,6 +87,82 @@ function slotTimeIcon(timeRange: InspectionTimeRange): string {
 function requestTypeLabel(booking: CustomerBooking): string {
   if (booking.requestType === "custom_quote") return "Custom quote";
   return "Existing service";
+}
+
+function quotationPdfFilename(title: string): string {
+  const safe = title
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return `quotation-${safe || "bmspro"}.pdf`;
+}
+
+function QuotationPdfActions({
+  pdfUrl,
+  title,
+}: {
+  pdfUrl: string;
+  title: string;
+}) {
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function downloadPdf() {
+    setDownloading(true);
+    try {
+      const response = await fetch(pdfUrl);
+      if (!response.ok) throw new Error("Could not download PDF.");
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = quotationPdfFilename(title);
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(pdfUrl, "_blank", "noopener,noreferrer");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const actionClass =
+    "inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 font-body text-[13px] font-bold transition-colors";
+
+  return (
+    <>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={() => setViewerOpen(true)}
+          className={`${actionClass} bg-primary text-white shadow-sm hover:bg-primary/90`}
+        >
+          <span className="material-symbols-outlined text-[18px]">
+            picture_as_pdf
+          </span>
+          View PDF
+        </button>
+        <button
+          type="button"
+          disabled={downloading}
+          onClick={() => void downloadPdf()}
+          className={`${actionClass} border border-primary/25 bg-white text-primary shadow-sm hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          <span className="material-symbols-outlined text-[18px]">
+            {downloading ? "progress_activity" : "download"}
+          </span>
+          {downloading ? "Downloading…" : "Download PDF"}
+        </button>
+      </div>
+      <QuotationPdfViewerModal
+        open={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        pdfUrl={pdfUrl}
+        title={title}
+        downloadFilename={quotationPdfFilename(title)}
+      />
+    </>
+  );
 }
 
 export function AccountClient({
@@ -988,6 +1065,17 @@ function BookingCard({
           </div>
         ) : null}
 
+        {booking.quotation?.pdfUrl && !expanded ? (
+          <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-primary">
+              <span className="material-symbols-outlined text-[16px]">
+                picture_as_pdf
+              </span>
+              Quotation ready — expand to view or download
+            </p>
+          </div>
+        ) : null}
+
         {booking.status === "owner_proposed" &&
         booking.ownerProposedSlots.length > 0 &&
         !expanded ? (
@@ -1024,6 +1112,35 @@ function BookingCard({
               startTime={booking.scheduledStartTime}
               endTime={booking.scheduledEndTime}
             />
+          ) : null}
+
+          {booking.quotation?.pdfUrl ? (
+            <section className="rounded-xl border border-primary/20 bg-white p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <span className="material-symbols-outlined text-[22px]">
+                    picture_as_pdf
+                  </span>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wider text-primary">
+                    Your quotation
+                  </p>
+                  {formatBudgetAud(booking.quotation.finalPriceAud) ? (
+                    <p className="mt-1 font-display text-[20px] font-semibold text-on-surface">
+                      {formatBudgetAud(booking.quotation.finalPriceAud)}
+                    </p>
+                  ) : null}
+                  <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                    View or download the full quotation PDF from your visit.
+                  </p>
+                  <QuotationPdfActions
+                    pdfUrl={booking.quotation.pdfUrl}
+                    title={headline}
+                  />
+                </div>
+              </div>
+            </section>
           ) : null}
 
           <BookingDetailRow

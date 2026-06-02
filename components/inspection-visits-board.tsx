@@ -7,6 +7,7 @@ import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
+import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
@@ -551,6 +552,47 @@ function DrawerReviewFooter({
   onComplete: () => void;
   onCancel: () => void;
 }) {
+  const [pdfOpen, setPdfOpen] = useState(false);
+
+  if (request.quotation) {
+    const headline =
+      request.requestType === "existing_service"
+        ? request.serviceName ?? "Quotation"
+        : request.customRequest?.title ?? "Quotation";
+    const pdfUrl = request.quotation.pdfUrl;
+    const downloadFilename = `quotation-${headline
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "bmspro"}.pdf`;
+
+    return (
+      <div className="border-t border-outline-variant/40 pt-4">
+        {pdfUrl ? (
+          <>
+            <DrawerFooterAction
+              icon="picture_as_pdf"
+              label="View"
+              variant="primary"
+              onClick={() => setPdfOpen(true)}
+              disabled={submitting}
+            />
+            <QuotationPdfViewerModal
+              open={pdfOpen}
+              onClose={() => setPdfOpen(false)}
+              pdfUrl={pdfUrl}
+              title={headline}
+              downloadFilename={downloadFilename}
+            />
+          </>
+        ) : (
+          <p className="rounded-xl border border-outline-variant/60 bg-surface-container-low px-3 py-2.5 font-body text-[13px] text-on-surface-variant">
+            Quotation sent — PDF is not available yet.
+          </p>
+        )}
+      </div>
+    );
+  }
+
   const hasVisitWindow =
     !!request.scheduledStartTime || !!request.scheduledEndTime;
 
@@ -721,6 +763,7 @@ function DetailDrawerContent({
     request.status === "scheduled" &&
     !!request.scheduledSlot &&
     !hasVisitWindow &&
+    !request.quotation &&
     mode === "review";
 
   useEffect(() => {
@@ -907,6 +950,7 @@ function DetailDrawerContent({
                 </p>
               </div>
             ) : null}
+            <QuotationSection requestId={request.id} />
           </>
         )}
 
@@ -1056,7 +1100,7 @@ function DetailDrawerContent({
         ) : null}
         </div>
 
-        {!isClosed && mode === "review" ? (
+        {(!isClosed || request.quotation) && mode === "review" ? (
           <DrawerReviewFooter
             request={request}
             submitting={submitting}
@@ -1076,6 +1120,239 @@ function DetailDrawerContent({
 /* ==========================================================================
  * Drawer subsections
  * ========================================================================== */
+
+type QuotationView = {
+  id: string;
+  serviceTitle: string;
+  lineItems: { name: string; priceAud: number }[];
+  additions: { name: string; priceAud: number }[];
+  subtotalAud: number;
+  additionsTotalAud: number;
+  finalPriceAud: number;
+  notes: string | null;
+  validUntil: string | null;
+  imageUrls: string[];
+  pdfUrl: string | null;
+  createdAt: number | null;
+};
+
+function formatAud(value: number): string {
+  return `Aus $${value.toFixed(2)}`;
+}
+
+/** Loads and displays quotations created for this inspection request. */
+function QuotationSection({ requestId }: { requestId: string }) {
+  const { user } = useAuth();
+  const [quotations, setQuotations] = useState<QuotationView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      if (!user) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(
+          `/api/quotations?inspectionRequestId=${encodeURIComponent(requestId)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const data = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          quotations?: QuotationView[];
+        };
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error ?? "Could not load quotations.");
+        }
+        if (active) setQuotations(data.quotations ?? []);
+      } catch (err) {
+        if (active) {
+          setError(
+            err instanceof Error ? err.message : "Could not load quotations.",
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [requestId, user]);
+
+  if (loading) {
+    return (
+      <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+          Quotation
+        </p>
+        <p className="mt-2 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
+          <span className="material-symbols-outlined animate-spin text-[18px]">
+            progress_activity
+          </span>
+          Loading…
+        </p>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-rose-700">
+          Quotation
+        </p>
+        <p className="mt-1 font-body text-[13px] text-rose-700">{error}</p>
+      </section>
+    );
+  }
+
+  if (quotations.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+      <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+        Quotation{quotations.length > 1 ? "s" : ""}
+      </p>
+      <div className="mt-3 space-y-4">
+        {quotations.map((quotation) => (
+          <QuotationCard key={quotation.id} quotation={quotation} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function QuotationCard({ quotation }: { quotation: QuotationView }) {
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const title = quotation.serviceTitle || "Quotation";
+  const downloadFilename = `quotation-${title
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "bmspro"}.pdf`;
+
+  return (
+    <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-display text-[14px] font-semibold text-on-surface">
+            {title}
+          </p>
+          {quotation.createdAt ? (
+            <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
+              {new Date(quotation.createdAt).toLocaleDateString(undefined, {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+            </p>
+          ) : null}
+        </div>
+        {quotation.pdfUrl ? (
+          <button
+            type="button"
+            onClick={() => setPdfOpen(true)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-body text-[12px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[16px]">
+              picture_as_pdf
+            </span>
+            View PDF
+          </button>
+        ) : null}
+      </div>
+
+      <ul className="mt-3 space-y-1.5">
+        {quotation.lineItems.map((item, index) => (
+          <li
+            key={`item-${index}`}
+            className="flex items-center justify-between gap-3 font-body text-[13px]"
+          >
+            <span className="min-w-0 truncate text-on-surface">{item.name}</span>
+            <span className="shrink-0 text-on-surface-variant">
+              {formatAud(item.priceAud)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-2 flex items-center justify-between gap-3 border-t border-outline-variant/50 pt-2 font-body text-[12px] font-semibold text-on-surface-variant">
+        <span>Total item price</span>
+        <span>{formatAud(quotation.subtotalAud)}</span>
+      </div>
+
+      {quotation.additions.length > 0 ? (
+        <ul className="mt-2 space-y-1.5">
+          {quotation.additions.map((item, index) => (
+            <li
+              key={`add-${index}`}
+              className="flex items-center justify-between gap-3 font-body text-[13px]"
+            >
+              <span className="min-w-0 truncate text-on-surface">
+                + {item.name}
+              </span>
+              <span className="shrink-0 text-on-surface-variant">
+                {formatAud(item.priceAud)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-primary/10 px-3 py-2">
+        <span className="font-body text-[12px] font-bold uppercase tracking-wider text-primary">
+          Final price
+        </span>
+        <span className="font-display text-[16px] font-bold text-primary">
+          {formatAud(quotation.finalPriceAud)}
+        </span>
+      </div>
+
+      {quotation.notes ? (
+        <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+          {quotation.notes}
+        </p>
+      ) : null}
+
+      {quotation.imageUrls.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {quotation.imageUrls.map((url, index) => (
+            <a
+              key={`photo-${index}`}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block h-16 w-16 overflow-hidden rounded-lg border border-outline-variant/60"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt={`Quotation photo ${index + 1}`}
+                className="h-full w-full object-cover"
+              />
+            </a>
+          ))}
+        </div>
+      ) : null}
+
+      {quotation.pdfUrl ? (
+        <QuotationPdfViewerModal
+          open={pdfOpen}
+          onClose={() => setPdfOpen(false)}
+          pdfUrl={quotation.pdfUrl}
+          title={title}
+          downloadFilename={downloadFilename}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 function CustomerSection({ request }: { request: InspectionRequestDetail }) {
   const phoneHref = request.customer.phone

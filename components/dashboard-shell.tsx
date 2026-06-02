@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 
 const PAGE_ICONS: Record<string, string> = {
   Dashboard: "dashboard",
+  Calendar: "calendar_month",
   Bookings: "assignment",
   "Inspection visits": "event_available",
   Team: "groups",

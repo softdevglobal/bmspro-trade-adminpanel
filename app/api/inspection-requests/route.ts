@@ -60,7 +60,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ ok: true, requests });
 }
 
-/** Creates an inspection request on behalf of a customer (owner dashboard). */
+/** Owner-authenticated create (mobile app / dashboard walk-in). */
 export async function POST(request: Request) {
   const auth = await requireBusinessOwner(request);
   if (!auth.ok) {

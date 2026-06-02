@@ -1,5 +1,5 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { applyOwnerAction } from "@/lib/inspection/server";
+import { applyOwnerAction, applyAssignedEndVisit, applyStaffStart } from "@/lib/inspection/server";
 import {
   isClockTime,
   isFutureOrTodayDate,
@@ -125,18 +125,77 @@ async function resolveOwnerAssignment(
   };
 }
 
+async function requireAssignedInspector(request: Request, requestId: string) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer (.+)$/);
+  if (!match) {
+    return {
+      ok: false as const,
+      status: 401,
+      error: "Missing authorization header.",
+    };
+  }
+
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const businessId =
+      typeof decoded.businessId === "string" ? decoded.businessId : null;
+    const role = decoded.role;
+    if (
+      !businessId ||
+      (role !== "staff" && role !== "owner" && role !== "admin")
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "You do not have permission to start this visit.",
+      };
+    }
+
+    const snap = await adminDb
+      .collection("inspection_requests")
+      .doc(requestId)
+      .get();
+    if (!snap.exists) {
+      return {
+        ok: false as const,
+        status: 404,
+        error: "Request not found.",
+      };
+    }
+
+    const data = snap.data();
+    const assigned = data?.assignedTo as { uid?: string } | null;
+    if (
+      !data ||
+      data.businessId !== businessId ||
+      assigned?.uid !== decoded.uid
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "This visit is not assigned to you.",
+      };
+    }
+
+    return {
+      ok: true as const,
+      uid: decoded.uid,
+      businessId,
+    };
+  } catch {
+    return {
+      ok: false as const,
+      status: 401,
+      error: "Invalid or expired session.",
+    };
+  }
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireBusinessOwner(request);
-  if (!auth.ok) {
-    return NextResponse.json(
-      { ok: false, error: auth.error },
-      { status: auth.status },
-    );
-  }
-
   const { id } = await context.params;
   if (!id) {
     return NextResponse.json(
@@ -164,6 +223,61 @@ export async function PATCH(
 
   const payload = body as Record<string, unknown>;
   const action = typeof payload.action === "string" ? payload.action : "";
+
+  if (action === "start") {
+    const inspectorAuth = await requireAssignedInspector(request, id);
+    if (!inspectorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: inspectorAuth.error },
+        { status: inspectorAuth.status },
+      );
+    }
+
+    const result = await applyStaffStart(
+      id,
+      inspectorAuth.businessId,
+      inspectorAuth.uid,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  if (action === "end_visit") {
+    const inspectorAuth = await requireAssignedInspector(request, id);
+    if (!inspectorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: inspectorAuth.error },
+        { status: inspectorAuth.status },
+      );
+    }
+
+    const result = await applyAssignedEndVisit(
+      id,
+      inspectorAuth.businessId,
+      inspectorAuth.uid,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  const auth = await requireBusinessOwner(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
 
   if (action === "accept") {

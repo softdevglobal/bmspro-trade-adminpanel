@@ -17,6 +17,7 @@ import {
 const INSPECTION_ROUTES = [
   "/dashboard/inspection-visits",
   "/dashboard/customers",
+  "/dashboard/calendar",
 ] as const;
 
 function needsInspectionFeed(pathname: string | null): boolean {

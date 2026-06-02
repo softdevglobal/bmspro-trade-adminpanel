@@ -20,6 +20,7 @@ import {
   notifyCustomerOfAssignment,
   notifyCustomerOfNewRequest,
   notifyCustomerOfStatusChange,
+  notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -253,6 +254,124 @@ export async function applyOwnerAction(
   }
 
   return { ok: true, request };
+}
+
+export async function applyStaffStart(
+  id: string,
+  businessId: string,
+  inspectorUid: string,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const current = snap.data();
+  if (!current || current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (current.status !== "scheduled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only scheduled visits can be started.",
+    };
+  }
+
+  const assigned = current.assignedTo as { uid?: string } | null;
+  if (!assigned?.uid || assigned.uid !== inspectorUid) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This visit is not assigned to you.",
+    };
+  }
+
+  if (current.visitStartedAt) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This visit has already been started.",
+    };
+  }
+
+  await ref.update({
+    visitStartedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const after = await ref.get();
+  const request = mapInspectionDoc(ref.id, after.data() ?? {});
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfVisitOnTheWay(request, summary);
+
+  return { ok: true, request };
+}
+
+export async function applyAssignedEndVisit(
+  id: string,
+  businessId: string,
+  inspectorUid: string,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const current = snap.data();
+  if (!current || current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (current.status !== "scheduled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only scheduled visits can be ended.",
+    };
+  }
+
+  if (!current.visitStartedAt) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Start the visit before ending it.",
+    };
+  }
+
+  const assigned = current.assignedTo as { uid?: string } | null;
+  if (!assigned?.uid || assigned.uid !== inspectorUid) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This visit is not assigned to you.",
+    };
+  }
+
+  if (current.visitEndedAt) {
+    const after = await ref.get();
+    return {
+      ok: true,
+      request: mapInspectionDoc(ref.id, after.data() ?? {}),
+    };
+  }
+
+  await ref.update({
+    visitEndedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const after = await ref.get();
+  return { ok: true, request: mapInspectionDoc(ref.id, after.data() ?? {}) };
 }
 
 /**

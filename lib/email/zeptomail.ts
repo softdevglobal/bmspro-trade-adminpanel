@@ -51,6 +51,13 @@ function getClient(token: string): SendMailClient | null {
   return client;
 }
 
+/** A file to attach to the email. `content` must be base64-encoded. */
+export type EmailAttachment = {
+  content: string;
+  mimeType: string;
+  name: string;
+};
+
 export type SendEmailInput = {
   /** Which sender mailbox to send from. Defaults to the system mailbox. */
   sender?: EmailSender;
@@ -59,6 +66,7 @@ export type SendEmailInput = {
   subject: string;
   htmlBody: string;
   replyTo?: string | null;
+  attachments?: EmailAttachment[];
 };
 
 /**
@@ -97,6 +105,14 @@ export async function sendEmail(input: SendEmailInput): Promise<boolean> {
 
   try {
     const replyTo = input.replyTo?.trim();
+    const attachments =
+      input.attachments && input.attachments.length > 0
+        ? input.attachments.map((file) => ({
+            content: file.content,
+            mime_type: file.mimeType,
+            name: file.name,
+          }))
+        : null;
     await client.sendMail({
       from: { address: config.fromAddress, name: config.fromName },
       to: [
@@ -112,6 +128,7 @@ export async function sendEmail(input: SendEmailInput): Promise<boolean> {
       ...(replyTo
         ? { reply_to: [{ address: replyTo, name: replyTo }] }
         : {}),
+      ...(attachments ? { attachments } : {}),
     });
     console.log("[email] sent OK", {
       sender,

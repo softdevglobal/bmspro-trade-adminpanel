@@ -109,6 +109,12 @@ body {
   font-optical-sizing: auto;
 }
 
+/* Saira renders plain zeros (Bitter/Finlandica use a dotted zero). */
+.font-numeric {
+  font-family: var(--font-saira), sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
 .material-symbols-outlined {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
   vertical-align: middle;

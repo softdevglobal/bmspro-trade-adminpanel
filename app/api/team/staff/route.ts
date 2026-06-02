@@ -393,6 +393,7 @@ export async function POST(request: Request) {
       canget_qutaion: parsed.value.canget_qutaion,
       status: "active",
       isActive: true,
+      mustChangePassword: true,
       createdByUid: auth.uid,
       createdByEmail: auth.email ?? null,
       createdAt: now,
