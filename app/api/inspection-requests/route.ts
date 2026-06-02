@@ -1,4 +1,5 @@
-import { adminAuth } from "@/lib/firebase/admin";
+import { ensureCustomerAccount } from "@/lib/customer/server";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   createInspectionRequest,
   listInspectionRequests,
@@ -84,12 +85,45 @@ export async function POST(request: Request) {
     return NextResponse.json(parsed, { status: 400 });
   }
 
+  // Auto-create (or reuse) a customer account so they receive the inspection
+  // updates and can sign in with the default password.
+  let customerId: string | null = null;
+  try {
+    const businessSnap = await adminDb
+      .collection("businesses")
+      .doc(auth.businessId)
+      .get();
+    const businessData = businessSnap.data() ?? {};
+    const account = await ensureCustomerAccount({
+      email: parsed.value.customer.email,
+      fullName: parsed.value.customer.fullName,
+      phone: parsed.value.customer.phone,
+      businessId: auth.businessId,
+      businessName:
+        typeof businessData.businessName === "string"
+          ? businessData.businessName
+          : null,
+      bookingSlug:
+        typeof businessData.bookingSlug === "string"
+          ? businessData.bookingSlug
+          : null,
+      logoUrl:
+        typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
+    });
+    customerId = account.uid;
+  } catch (error) {
+    console.error("[inspection] customer account creation failed:", error);
+  }
+
   const result = await createInspectionRequest(auth.businessId, parsed.value, {
-    customerId: null,
+    customerId,
   });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, request: result.request });
+  return NextResponse.json(
+    { ok: true, requestId: result.request.id, request: result.request },
+    { status: 201 },
+  );
 }

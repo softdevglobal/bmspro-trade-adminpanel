@@ -1,0 +1,1096 @@
+"use client";
+
+import {
+  SlotDayPicker,
+  buildBlockedComboSet,
+  slotComboKey,
+  todayIso,
+} from "@/components/booking-slot-date-picker";
+import { useAuth } from "@/lib/auth/auth-context";
+import type {
+  InspectionRequestType,
+  InspectionSlot,
+  InspectionTimeRange,
+} from "@/lib/inspection/types";
+import { TIME_RANGES } from "@/lib/inspection/types";
+import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import { iconForBusinessType } from "@/lib/onboarding/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  onCreated?: (requestId: string) => void;
+};
+
+type ServiceAddress = {
+  street: string;
+  suburb: string;
+  state: string;
+  postcode: string;
+};
+
+const STEPS = [
+  {
+    title: "What do you need?",
+    subtitle:
+      "Choose an existing service or describe a custom job for a quote.",
+  },
+  {
+    title: "Service address",
+    subtitle: "Where should the inspector visit?",
+  },
+  {
+    title: "Preferred dates & times",
+    subtitle:
+      "Pick up to 3 date and time options. You can confirm one later.",
+  },
+  {
+    title: "Contact details",
+    subtitle:
+      "Customer contact info for confirming the visit and day-of communication.",
+  },
+] as const;
+
+const EMPTY_ADDRESS: ServiceAddress = {
+  street: "",
+  suburb: "",
+  state: "",
+  postcode: "",
+};
+
+const INPUT_CLASS =
+  "mt-1 w-full min-w-0 rounded-xl border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10";
+
+const LABEL_CLASS =
+  "font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant";
+
+const TIME_OPTIONS: {
+  id: InspectionTimeRange;
+  label: string;
+  hint: string;
+  icon: string;
+}[] = [
+  { id: "morning", label: "Morning", hint: "8am – 12pm", icon: "wb_twilight" },
+  { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
+];
+
+function isAddressComplete(address: ServiceAddress): boolean {
+  return (
+    address.street.trim().length >= 3 &&
+    address.suburb.trim().length >= 2 &&
+    address.state.trim().length >= 2 &&
+    address.postcode.trim().length >= 4
+  );
+}
+
+function normalizeBudgetInput(value: string): string {
+  let cleaned = value.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot !== -1) {
+    cleaned =
+      cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
+  }
+  const [whole, frac = ""] = cleaned.split(".");
+  return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
+}
+
+function StepHeader({
+  step,
+  title,
+  hint,
+}: {
+  step: number;
+  title: string;
+  hint?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-on-surface font-body text-[12px] font-bold text-surface">
+        {step}
+      </span>
+      <h3 className="font-display text-[15px] font-semibold text-on-surface">
+        {title}
+      </h3>
+      {hint ? (
+        <span className="font-body text-[11px] text-on-surface-variant">
+          {hint}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function RequestTypeCard({
+  icon,
+  label,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: string;
+  label: string;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onSelect}
+      disabled={disabled}
+      className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+        selected
+          ? "border-primary bg-surface-container-lowest shadow-sm ring-1 ring-primary/20"
+          : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          selected
+            ? "bg-primary text-on-primary"
+            : "bg-primary/10 text-primary"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-body text-[14px] font-semibold text-on-surface">
+          {label}
+        </span>
+        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
+          {description}
+        </span>
+      </span>
+      {selected ? (
+        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
+          check_circle
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function PreferredSlotRow({
+  slot,
+  index,
+  minDate,
+  allSlots,
+  onDateChange,
+  onTimeChange,
+  onRemove,
+  canRemove,
+}: {
+  slot: InspectionSlot;
+  index: number;
+  minDate: string;
+  allSlots: InspectionSlot[];
+  onDateChange: (iso: string) => void;
+  onTimeChange: (range: InspectionTimeRange) => void;
+  onRemove: () => void;
+  canRemove: boolean;
+}) {
+  const [dayPage, setDayPage] = useState(0);
+
+  const blockedCombos = useMemo(() => {
+    const set = new Set<string>();
+    allSlots.forEach((entry, idx) => {
+      if (idx !== index && entry.date) {
+        set.add(slotComboKey(entry.date, entry.timeRange));
+      }
+    });
+    return set;
+  }, [allSlots, index]);
+
+  function selectDate(iso: string) {
+    onDateChange(iso);
+    if (blockedCombos.has(slotComboKey(iso, slot.timeRange))) {
+      for (const range of TIME_RANGES) {
+        if (!blockedCombos.has(slotComboKey(iso, range))) {
+          onTimeChange(range);
+          return;
+        }
+      }
+    }
+  }
+
+  return (
+    <li className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <span className="material-symbols-outlined text-[14px]">event</span>
+          </span>
+          Option {index + 1}
+        </span>
+        {canRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+            Remove
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-3">
+        <SlotDayPicker
+          selectedIso={slot.date}
+          minDate={minDate}
+          dayPage={dayPage}
+          onDayPageChange={setDayPage}
+          onSelect={selectDate}
+          blockedCombos={blockedCombos}
+          dayStripLayout="fit"
+        />
+      </div>
+
+      <div className="mt-4">
+        <span className={LABEL_CLASS}>Pick a time window</span>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {TIME_OPTIONS.map((option) => {
+            const checked = slot.timeRange === option.id;
+            const disabled =
+              !slot.date ||
+              blockedCombos.has(slotComboKey(slot.date, option.id));
+            return (
+              <button
+                type="button"
+                key={option.id}
+                disabled={disabled}
+                onClick={() => onTimeChange(option.id)}
+                className={`relative flex min-h-[4.5rem] flex-col justify-between rounded-2xl border px-3 py-2.5 text-left transition-all ${
+                  disabled
+                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
+                    : checked
+                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                      : "border-outline-variant/60 bg-white hover:border-primary/40"
+                }`}
+              >
+                <span
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
+                    checked
+                      ? "bg-primary text-on-primary shadow-sm"
+                      : "bg-surface-container text-on-surface-variant"
+                  }`}
+                >
+                  <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                    {option.icon}
+                  </span>
+                </span>
+                <span>
+                  <span
+                    className={`block font-body text-[14px] font-bold ${
+                      checked ? "text-primary" : "text-on-surface"
+                    }`}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="font-body text-[11px] text-on-surface-variant">
+                    {option.hint}
+                  </span>
+                </span>
+                {checked ? (
+                  <span className="absolute right-2 top-2 material-symbols-outlined material-symbols-filled text-[18px] text-primary">
+                    check_circle
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        {!slot.date ? (
+          <p className="mt-2 font-body text-[12px] text-on-surface-variant">
+            Choose a day above, then pick morning or afternoon.
+          </p>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+function createInitialForm() {
+  return {
+    requestType: "custom_quote" as InspectionRequestType,
+    selectedServiceId: null as string | null,
+    customTitle: "",
+    customDescription: "",
+    customerNotes: "",
+    budgetAud: "",
+    address: { ...EMPTY_ADDRESS },
+    preferredSlots: [{ date: "", timeRange: "morning" as InspectionTimeRange }],
+    customer: { fullName: "", email: "", phone: "" },
+  };
+}
+
+export function AddInspectionModal({ open, onClose, onCreated }: Props) {
+  const { user } = useAuth();
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState(createInitialForm);
+  const [services, setServices] = useState<BusinessServiceDetail[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const activeServices = useMemo(
+    () => services.filter((service) => service.isActive),
+    [services],
+  );
+
+  const minDate = useMemo(() => todayIso(), []);
+
+  const reset = useCallback(() => {
+    setStep(1);
+    setForm(createInitialForm());
+    setError(null);
+    setSubmitting(false);
+    setSuccess(false);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    reset();
+    onClose();
+  }, [onClose, reset]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !submitting) handleClose();
+    }
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, submitting, handleClose]);
+
+  useEffect(() => {
+    if (!open || !user) return;
+
+    let cancelled = false;
+    setServicesLoading(true);
+
+    void (async () => {
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch("/api/services", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = (await response.json()) as {
+          ok?: boolean;
+          services?: BusinessServiceDetail[];
+        };
+        if (!cancelled && response.ok && data.ok && data.services) {
+          setServices(data.services);
+          if (data.services.some((service) => service.isActive)) {
+            setForm((prev) => ({
+              ...prev,
+              requestType: "existing_service",
+            }));
+          }
+        }
+      } catch {
+        /* non-fatal — custom quote still works */
+      } finally {
+        if (!cancelled) setServicesLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user]);
+
+  const step1Valid =
+    form.requestType === "existing_service"
+      ? form.selectedServiceId !== null
+      : form.customTitle.trim().length >= 3 &&
+        form.customDescription.trim().length >= 10;
+
+  const step2Valid = isAddressComplete(form.address);
+
+  const step3Valid =
+    form.preferredSlots.length > 0 &&
+    form.preferredSlots.every((slot) => slot.date.trim().length > 0) &&
+    new Set(
+      form.preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`),
+    ).size === form.preferredSlots.length;
+
+  const step4Valid =
+    form.customer.fullName.trim().length >= 2 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customer.email.trim()) &&
+    form.customer.phone.replace(/\D/g, "").length > 0;
+
+  const canContinue =
+    (step === 1 && step1Valid) ||
+    (step === 2 && step2Valid) ||
+    (step === 3 && step3Valid) ||
+    (step === 4 && step4Valid);
+
+  function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
+    setForm((prev) => ({
+      ...prev,
+      address: { ...prev.address, [key]: value },
+    }));
+    setError(null);
+  }
+
+  function updateCustomer(
+    field: "fullName" | "email" | "phone",
+    value: string,
+  ) {
+    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    setForm((prev) => ({
+      ...prev,
+      customer: { ...prev.customer, [field]: next },
+    }));
+    setError(null);
+  }
+
+  function handleSlotDateChange(index: number, iso: string) {
+    setForm((prev) => {
+      const taken = buildBlockedComboSet(
+        prev.preferredSlots.filter((_, idx) => idx !== index),
+      );
+      return {
+        ...prev,
+        preferredSlots: prev.preferredSlots.map((slot, idx) => {
+          if (idx !== index) return slot;
+          let timeRange = slot.timeRange;
+          if (iso && taken.has(slotComboKey(iso, timeRange))) {
+            const alt: InspectionTimeRange =
+              timeRange === "morning" ? "afternoon" : "morning";
+            if (!taken.has(slotComboKey(iso, alt))) timeRange = alt;
+          }
+          return { date: iso, timeRange };
+        }),
+      };
+    });
+    setError(null);
+  }
+
+  function updateSlotTime(index: number, timeRange: InspectionTimeRange) {
+    setForm((prev) => ({
+      ...prev,
+      preferredSlots: prev.preferredSlots.map((slot, idx) =>
+        idx === index ? { ...slot, timeRange } : slot,
+      ),
+    }));
+    setError(null);
+  }
+
+  function addSlot() {
+    setForm((prev) => {
+      if (prev.preferredSlots.length >= 3) return prev;
+      return {
+        ...prev,
+        preferredSlots: [
+          ...prev.preferredSlots,
+          { date: "", timeRange: "morning" as InspectionTimeRange },
+        ],
+      };
+    });
+  }
+
+  function removeSlot(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      preferredSlots:
+        prev.preferredSlots.length === 1
+          ? prev.preferredSlots
+          : prev.preferredSlots.filter((_, idx) => idx !== index),
+    }));
+  }
+
+  function goNext() {
+    if (!canContinue) {
+      if (step === 1) setError("Complete the job details to continue.");
+      else if (step === 2) setError("Enter a complete service address.");
+      else if (step === 3) setError("Pick at least one date and time window.");
+      else setError("Enter valid customer contact details.");
+      return;
+    }
+    setError(null);
+    if (step < STEPS.length) setStep(step + 1);
+  }
+
+  function goBack() {
+    setError(null);
+    if (step > 1) setStep(step - 1);
+  }
+
+  async function submit() {
+    if (!user || !step4Valid) {
+      setError("Enter valid customer contact details.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/inspection-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          requestType: form.requestType,
+          serviceId:
+            form.requestType === "existing_service"
+              ? form.selectedServiceId
+              : null,
+          customRequest:
+            form.requestType === "custom_quote"
+              ? {
+                  title: form.customTitle.trim(),
+                  description: form.customDescription.trim(),
+                }
+              : null,
+          customer: {
+            fullName: form.customer.fullName.trim(),
+            email: form.customer.email.trim().toLowerCase(),
+            phone: form.customer.phone,
+          },
+          address: form.address,
+          preferredSlots: form.preferredSlots,
+          customerNotes: form.customerNotes.trim() || null,
+          budgetAud: form.budgetAud.trim() || null,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        requestId?: string;
+      };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not create inspection request.");
+      }
+
+      setSuccess(true);
+      onCreated?.(payload.requestId ?? "");
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Could not create inspection request.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!open) return null;
+
+  const current = STEPS[step - 1];
+  const progressPercent = Math.round((step / STEPS.length) * 100);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden overscroll-contain p-0 sm:items-center sm:p-4">
+      <button
+        type="button"
+        aria-label="Close add inspection"
+        onClick={handleClose}
+        disabled={submitting}
+        className="absolute inset-0 bg-on-background/50 backdrop-blur-sm"
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-inspection-title"
+        className="relative z-10 grid h-[94dvh] max-h-[94dvh] w-full max-w-3xl grid-rows-[auto_1fr_auto] overflow-hidden rounded-t-2xl border border-outline-variant bg-background shadow-2xl sm:h-[min(92dvh,calc(100dvh-2rem))] sm:max-h-[min(92dvh,calc(100dvh-2rem))] sm:rounded-2xl"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-outline-variant bg-surface/90 px-5 py-4 backdrop-blur-md sm:px-6">
+          <div className="min-w-0 flex-1">
+            <p className="font-body text-[12px] font-semibold uppercase tracking-wider text-primary">
+              Step {step} of {STEPS.length}
+            </p>
+            <h2
+              id="add-inspection-title"
+              className="font-display text-headline-sm font-semibold text-on-surface"
+            >
+              Add inspection
+            </h2>
+            <p className="mt-1 font-body text-body-md text-on-surface-variant">
+              {current.subtitle}
+            </p>
+            <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant sm:max-w-md">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={submitting}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-low disabled:opacity-50"
+            aria-label="Close"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </header>
+
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
+          {success ? (
+            <div className="flex flex-col items-center py-10 text-center">
+              <span className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <span className="material-symbols-outlined material-symbols-filled text-[32px]">
+                  check_circle
+                </span>
+              </span>
+              <h3 className="mt-4 font-display text-headline-sm font-semibold text-on-surface">
+                Inspection request created
+              </h3>
+              <p className="mt-2 max-w-sm font-body text-body-md text-on-surface-variant">
+                The request is now on your board. You can review it, assign an
+                inspector, and confirm a visit time.
+              </p>
+            </div>
+          ) : (
+            <>
+              {error ? (
+                <div className="mb-5 flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
+                  <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
+                    error
+                  </span>
+                  <span>{error}</span>
+                </div>
+              ) : null}
+
+              {step === 1 ? (
+                <div className="space-y-4">
+                  <StepHeader step={1} title={current.title} />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <RequestTypeCard
+                      icon="format_list_bulleted"
+                      label="Request an existing service"
+                      description="Pick from the services this business offers."
+                      selected={form.requestType === "existing_service"}
+                      disabled={servicesLoading || activeServices.length === 0}
+                      onSelect={() => {
+                        setForm((prev) => ({
+                          ...prev,
+                          requestType: "existing_service",
+                        }));
+                        setError(null);
+                      }}
+                    />
+                    <RequestTypeCard
+                      icon="request_quote"
+                      label="Custom quotation request"
+                      description="Describe the work and we'll inspect and quote."
+                      selected={form.requestType === "custom_quote"}
+                      onSelect={() => {
+                        setForm((prev) => ({
+                          ...prev,
+                          requestType: "custom_quote",
+                        }));
+                        setError(null);
+                      }}
+                    />
+                  </div>
+
+                  {form.requestType === "existing_service" ? (
+                    activeServices.length > 0 ? (
+                      <ul className="overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
+                        {activeServices.map((service, index) => {
+                          const selected =
+                            form.selectedServiceId === service.id;
+                          return (
+                            <li
+                              key={service.id}
+                              className={
+                                index > 0
+                                  ? "border-t border-outline-variant/40"
+                                  : ""
+                              }
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    selectedServiceId:
+                                      prev.selectedServiceId === service.id
+                                        ? null
+                                        : service.id,
+                                  }));
+                                  setError(null);
+                                }}
+                                className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
+                                  selected
+                                    ? "bg-primary/5"
+                                    : "hover:bg-surface-container"
+                                }`}
+                              >
+                                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
+                                  {service.imageUrl ? (
+                                    <img
+                                      src={service.imageUrl}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center">
+                                      <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
+                                        {iconForBusinessType(service.businessType)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block font-body text-[14px] font-semibold text-on-surface">
+                                    {service.name}
+                                  </span>
+                                  <span className="font-body text-[12px] text-on-surface-variant">
+                                    {service.businessType}
+                                  </span>
+                                </span>
+                                {selected ? (
+                                  <span className="material-symbols-outlined material-symbols-filled text-[20px] text-primary">
+                                    check_circle
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="font-body text-body-md text-on-surface-variant">
+                        No active services yet — use a custom quotation request.
+                      </p>
+                    )
+                  ) : (
+                    <div className="grid gap-3">
+                      <label className="block">
+                        <span className={LABEL_CLASS}>Job title</span>
+                        <input
+                          type="text"
+                          value={form.customTitle}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              customTitle: event.target.value,
+                            }));
+                            setError(null);
+                          }}
+                          placeholder="e.g. Replace kitchen tap and check leak"
+                          className={INPUT_CLASS}
+                          maxLength={120}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={LABEL_CLASS}>What needs doing?</span>
+                        <textarea
+                          value={form.customDescription}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              customDescription: event.target.value,
+                            }));
+                            setError(null);
+                          }}
+                          rows={4}
+                          placeholder="Tell us the scope, materials involved, urgency, etc."
+                          className={`${INPUT_CLASS} resize-y`}
+                          maxLength={1500}
+                        />
+                        <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                          At least 10 characters so the team can size up the
+                          visit.
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                    <p className={LABEL_CLASS}>Additional details</p>
+                    <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                      Optional — helps the team prepare for the visit or quote.
+                    </p>
+                    <div className="mt-3 grid gap-3">
+                      <label className="block">
+                        <span className={LABEL_CLASS}>Notes</span>
+                        <textarea
+                          value={form.customerNotes}
+                          onChange={(event) => {
+                            setForm((prev) => ({
+                              ...prev,
+                              customerNotes: event.target.value,
+                            }));
+                            setError(null);
+                          }}
+                          rows={3}
+                          placeholder="Access instructions, urgency, materials, anything else we should know…"
+                          className={`${INPUT_CLASS} resize-y`}
+                          maxLength={2000}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={LABEL_CLASS}>Budget</span>
+                        <div className="relative mt-1">
+                          <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 font-body text-[14px] font-semibold text-on-surface">
+                            Aus $
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={form.budgetAud}
+                            onChange={(event) => {
+                              setForm((prev) => ({
+                                ...prev,
+                                budgetAud: normalizeBudgetInput(
+                                  event.target.value,
+                                ),
+                              }));
+                              setError(null);
+                            }}
+                            placeholder="e.g. 2500"
+                            className={`${INPUT_CLASS} mt-0 pl-[3.65rem] pr-3`}
+                            maxLength={12}
+                          />
+                        </div>
+                        <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                          Rough amount the customer has in mind (optional).
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {step === 2 ? (
+                <div className="space-y-4">
+                  <StepHeader
+                    step={2}
+                    title={current.title}
+                    hint="Required"
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block sm:col-span-2">
+                      <span className={LABEL_CLASS}>Street address</span>
+                      <input
+                        type="text"
+                        value={form.address.street}
+                        onChange={(event) =>
+                          updateAddress("street", event.target.value)
+                        }
+                        placeholder="e.g. 12 Main Street"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Suburb</span>
+                      <input
+                        type="text"
+                        value={form.address.suburb}
+                        onChange={(event) =>
+                          updateAddress("suburb", event.target.value)
+                        }
+                        placeholder="e.g. Surry Hills"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={LABEL_CLASS}>State</span>
+                      <input
+                        type="text"
+                        value={form.address.state}
+                        onChange={(event) =>
+                          updateAddress("state", event.target.value)
+                        }
+                        placeholder="e.g. NSW"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                    <label className="block sm:col-span-2 sm:max-w-[12rem]">
+                      <span className={LABEL_CLASS}>Postcode</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={form.address.postcode}
+                        onChange={(event) =>
+                          updateAddress("postcode", event.target.value)
+                        }
+                        placeholder="e.g. 2000"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+
+              {step === 3 ? (
+                <div className="space-y-4">
+                  <StepHeader
+                    step={3}
+                    title={current.title}
+                    hint={`${form.preferredSlots.length} of 3`}
+                  />
+                  <ul className="space-y-3">
+                    {form.preferredSlots.map((slot, index) => (
+                      <PreferredSlotRow
+                        key={index}
+                        slot={slot}
+                        index={index}
+                        minDate={minDate}
+                        allSlots={form.preferredSlots}
+                        onDateChange={(iso) => handleSlotDateChange(index, iso)}
+                        onTimeChange={(range) => updateSlotTime(index, range)}
+                        onRemove={() => removeSlot(index)}
+                        canRemove={form.preferredSlots.length > 1}
+                      />
+                    ))}
+                  </ul>
+                  {form.preferredSlots.length < 3 ? (
+                    <button
+                      type="button"
+                      onClick={addSlot}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-outline-variant px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        add
+                      </span>
+                      Add another date
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {step === 4 ? (
+                <div className="space-y-4">
+                  <StepHeader
+                    step={4}
+                    title={current.title}
+                    hint="Required"
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block sm:col-span-2">
+                      <span className={LABEL_CLASS}>Full name</span>
+                      <input
+                        type="text"
+                        value={form.customer.fullName}
+                        onChange={(event) =>
+                          updateCustomer("fullName", event.target.value)
+                        }
+                        placeholder="e.g. Alex Thompson"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Mobile number</span>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        value={form.customer.phone}
+                        onChange={(event) =>
+                          updateCustomer("phone", event.target.value)
+                        }
+                        placeholder="0400000000"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Email</span>
+                      <input
+                        type="email"
+                        value={form.customer.email}
+                        onChange={(event) =>
+                          updateCustomer("email", event.target.value)
+                        }
+                        placeholder="you@example.com"
+                        autoComplete="off"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-outline-variant bg-background px-5 py-4 shadow-[0_-8px_24px_rgba(0,42,150,0.08)] sm:px-6">
+          {success ? (
+            <button
+              type="button"
+              onClick={handleClose}
+              className="ml-auto flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary"
+            >
+              Done
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={step === 1 ? handleClose : goBack}
+                disabled={submitting}
+                className="rounded-lg border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-50"
+              >
+                {step === 1 ? "Cancel" : "Back"}
+              </button>
+
+              {step < STEPS.length ? (
+                <button
+                  type="button"
+                  onClick={goNext}
+                  className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary"
+                >
+                  Continue
+                  <span className="material-symbols-outlined text-[18px]">
+                    arrow_forward
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void submit()}
+                  disabled={submitting || !step4Valid}
+                  className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
+                >
+                  {submitting ? (
+                    <>
+                      <span className="material-symbols-outlined animate-spin text-[18px]">
+                        progress_activity
+                      </span>
+                      Creating…
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">
+                        add
+                      </span>
+                      Create inspection
+                    </>
+                  )}
+                </button>
+              )}
+            </>
+          )}
+        </footer>
+      </div>
+    </div>
+  );
+}

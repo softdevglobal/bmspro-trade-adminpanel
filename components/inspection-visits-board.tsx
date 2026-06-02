@@ -6,6 +6,7 @@ import {
   slotComboKey,
   todayIso,
 } from "@/components/booking-slot-date-picker";
+import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
@@ -87,6 +88,7 @@ export function InspectionVisitsBoard() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
   useEffect(() => {
     setRequestsLocal(requests);
@@ -187,14 +189,24 @@ export function InspectionVisitsBoard() {
           ))}
         </div>
 
-        <button
-          type="button"
-          onClick={() => void reloadStaff()}
-          className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container sm:w-auto"
-        >
-          <span className="material-symbols-outlined text-[16px]">refresh</span>
-          Refresh
-        </button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setAddModalOpen(true)}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
+          >
+            <span className="material-symbols-outlined text-[16px]">add</span>
+            Add Inspection
+          </button>
+          <button
+            type="button"
+            onClick={() => void reloadStaff()}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container sm:w-auto"
+          >
+            <span className="material-symbols-outlined text-[16px]">refresh</span>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {loadError ? (
@@ -228,6 +240,14 @@ export function InspectionVisitsBoard() {
         staff={staff}
         onClose={() => setSelectedId(null)}
         onUpdated={handleUpdated}
+      />
+
+      <AddInspectionModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={(requestId) => {
+          if (requestId) setSelectedId(requestId);
+        }}
       />
     </div>
   );
