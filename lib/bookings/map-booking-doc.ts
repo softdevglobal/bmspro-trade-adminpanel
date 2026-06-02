@@ -1,16 +1,17 @@
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
-  REQUEST_STATUSES,
+  BOOKING_STATUSES,
+  type BookingDetail,
+  type BookingStatus,
+} from "@/lib/bookings/types";
+import {
   isClockTime,
   isRequestType,
   isTimeRange,
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
-  type InspectionRequestDetail,
-  type InspectionRequestStatus,
   type InspectionSlot,
-  parseCreatedSource,
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
 
@@ -39,18 +40,13 @@ function parseCustomer(raw: unknown): InspectionCustomer {
   };
 }
 
-function parseSlots(raw: unknown): InspectionSlot[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
-      const item = entry as Record<string, unknown>;
-      const date = typeof item.date === "string" ? item.date : null;
-      const timeRange = item.timeRange;
-      if (!date || !isTimeRange(timeRange)) return null;
-      return { date, timeRange } satisfies InspectionSlot;
-    })
-    .filter((slot): slot is InspectionSlot => slot !== null);
+function parseSlot(raw: unknown): InspectionSlot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const date = typeof item.date === "string" ? item.date : null;
+  const timeRange = item.timeRange;
+  if (!date || !isTimeRange(timeRange)) return null;
+  return { date, timeRange };
 }
 
 function parseAssignment(raw: unknown): InspectionAssignment | null {
@@ -64,36 +60,32 @@ function parseAssignment(raw: unknown): InspectionAssignment | null {
   return { type, uid, name, email };
 }
 
-function parseStatus(raw: unknown): InspectionRequestStatus {
-  if (typeof raw !== "string") return "pending";
-  return REQUEST_STATUSES.includes(raw as InspectionRequestStatus)
-    ? (raw as InspectionRequestStatus)
-    : "pending";
+function parseStatus(raw: unknown): BookingStatus {
+  if (typeof raw !== "string") return "scheduled";
+  return BOOKING_STATUSES.includes(raw as BookingStatus)
+    ? (raw as BookingStatus)
+    : "scheduled";
 }
 
-/** Maps a Firestore inspection_requests document for API and client listeners. */
-export function mapInspectionDoc(
+export function mapBookingDoc(
   id: string,
   data: Record<string, unknown>,
-): InspectionRequestDetail {
+): BookingDetail {
   const requestType = isRequestType(data.requestType)
     ? data.requestType
     : "existing_service";
 
-  const customRequestRaw = data.customRequest;
+  const customRequestRaw = data.customRequest as Record<string, unknown> | null;
   const customRequest =
     customRequestRaw && typeof customRequestRaw === "object"
       ? {
           title:
-            typeof (customRequestRaw as Record<string, unknown>).title ===
-            "string"
-              ? ((customRequestRaw as Record<string, unknown>).title as string)
+            typeof customRequestRaw.title === "string"
+              ? customRequestRaw.title
               : "",
           description:
-            typeof (customRequestRaw as Record<string, unknown>).description ===
-            "string"
-              ? ((customRequestRaw as Record<string, unknown>)
-                  .description as string)
+            typeof customRequestRaw.description === "string"
+              ? customRequestRaw.description
               : "",
         }
       : null;
@@ -101,6 +93,21 @@ export function mapInspectionDoc(
   return {
     id,
     businessId: typeof data.businessId === "string" ? data.businessId : "",
+    bookingCode:
+      typeof data.bookingCode === "string" && data.bookingCode.trim()
+        ? data.bookingCode.trim()
+        : null,
+    inspectionRequestId:
+      typeof data.inspectionRequestId === "string"
+        ? data.inspectionRequestId
+        : "",
+    inspectionRequestCode:
+      typeof data.inspectionRequestCode === "string" &&
+      data.inspectionRequestCode.trim()
+        ? data.inspectionRequestCode.trim()
+        : null,
+    quotationId:
+      typeof data.quotationId === "string" ? data.quotationId : null,
     status: parseStatus(data.status),
     requestType,
     serviceId: typeof data.serviceId === "string" ? data.serviceId : null,
@@ -112,56 +119,28 @@ export function mapInspectionDoc(
     customRequest,
     customer: parseCustomer(data.customer),
     customerId: typeof data.customerId === "string" ? data.customerId : null,
-    createdSource: parseCreatedSource(data.createdSource),
-    requestCode:
-      typeof data.requestCode === "string" && data.requestCode.trim()
-        ? data.requestCode.trim()
-        : null,
     address: parseAddress(data.address),
-    preferredSlots: parseSlots(data.preferredSlots),
-    ownerProposedSlots: parseSlots(data.ownerProposedSlots),
-    scheduledSlot: (() => {
-      const slots = parseSlots([data.scheduledSlot]);
-      return slots[0] ?? null;
-    })(),
+    scheduledSlot: parseSlot(data.scheduledSlot),
     scheduledStartTime: isClockTime(data.scheduledStartTime)
       ? data.scheduledStartTime
       : null,
     scheduledEndTime: isClockTime(data.scheduledEndTime)
       ? data.scheduledEndTime
       : null,
-    assignedTo: parseAssignment(data.assignedTo),
-    ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
-    customerNotes:
-      typeof data.customerNotes === "string" && data.customerNotes.trim()
-        ? data.customerNotes.trim()
-        : null,
-    budgetAud:
-      typeof data.budgetAud === "number" && Number.isFinite(data.budgetAud)
-        ? data.budgetAud
-        : null,
-    createdAt: toMillis(data.createdAt),
-    updatedAt: toMillis(data.updatedAt),
-    visitStartedAt: toMillis(data.visitStartedAt),
-    visitEndedAt: toMillis(data.visitEndedAt),
-    quotation: parseInspectionQuotation(data.quotation),
-    bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
-    bookingCode:
-      typeof data.bookingCode === "string" && data.bookingCode.trim()
-        ? data.bookingCode.trim()
-        : null,
     estimatedDurationMinutes:
       typeof data.estimatedDurationMinutes === "number" &&
       Number.isFinite(data.estimatedDurationMinutes) &&
       data.estimatedDurationMinutes > 0
         ? Math.round(data.estimatedDurationMinutes)
         : null,
-    bookingConfirmedAt: toMillis(data.bookingConfirmedAt),
+    assignedTo: parseAssignment(data.assignedTo),
+    ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
+    quotation: parseInspectionQuotation(data.quotation),
+    createdAt: toMillis(data.createdAt),
+    updatedAt: toMillis(data.updatedAt),
   };
 }
 
-export function sortInspectionRequestsNewestFirst(
-  records: InspectionRequestDetail[],
-): InspectionRequestDetail[] {
+export function sortBookingsNewestFirst(records: BookingDetail[]): BookingDetail[] {
   return [...records].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }

@@ -47,6 +47,7 @@ const STATUS_TONE: Record<InspectionRequestStatus, string> = {
   pending: "border-amber-200 bg-amber-50 text-amber-800",
   owner_proposed: "border-violet-200 bg-violet-50 text-violet-800",
   scheduled: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  awaiting_decision: "border-orange-200 bg-orange-50 text-orange-800",
   cancelled: "border-stone-200 bg-stone-50 text-stone-700",
   completed: "border-primary/30 bg-primary/10 text-primary",
 };
@@ -55,6 +56,7 @@ const ACTIVE_STATUSES: InspectionRequestStatus[] = [
   "pending",
   "owner_proposed",
   "scheduled",
+  "awaiting_decision",
 ];
 const HISTORY_STATUSES: InspectionRequestStatus[] = ["completed", "cancelled"];
 
@@ -62,6 +64,7 @@ const STATUS_ICON: Record<InspectionRequestStatus, string> = {
   pending: "hourglass_top",
   owner_proposed: "swap_horiz",
   scheduled: "event_available",
+  awaiting_decision: "pending_actions",
   cancelled: "cancel",
   completed: "check_circle",
 };

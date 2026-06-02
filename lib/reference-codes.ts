@@ -2,6 +2,7 @@
 
 export const INSPECTION_REQUEST_CODE_PREFIX = "INS-REQ";
 export const QUOTATION_CODE_PREFIX = "QT";
+export const BOOKING_CODE_PREFIX = "BK";
 
 /** Shared random suffix length for visit + quotation on the same request. */
 export const REFERENCE_CODE_SEGMENT_LENGTH = 9;
@@ -27,6 +28,14 @@ export function buildInspectionRequestCodeFromSegment(segment: string): string {
 
 export function buildQuotationCodeFromSegment(segment: string): string {
   return `${QUOTATION_CODE_PREFIX} ${segment}`;
+}
+
+export function buildBookingCodeFromSegment(segment: string): string {
+  return `${BOOKING_CODE_PREFIX} ${segment}`;
+}
+
+export function buildBookingCode(): string {
+  return buildBookingCodeFromSegment(randomSegment());
 }
 
 export function buildInspectionRequestCode(): string {
@@ -91,6 +100,35 @@ export function displayInspectionRequestCode(request: {
   const code = request.requestCode?.trim();
   if (code) return normalizeInspectionRequestCodeDisplay(code);
   return legacyInspectionReferenceFromId(request.id);
+}
+
+export type InspectionRequestCodeParts = {
+  prefix: string;
+  segment: string | null;
+};
+
+/** Splits `INS-REQ` and the 9-char id for tighter UI spacing between them. */
+export function inspectionRequestCodeParts(request: {
+  id: string;
+  requestCode?: string | null;
+}): InspectionRequestCodeParts {
+  const code = displayInspectionRequestCode(request);
+  const match = code.match(/^(INS-REQ)\s+(\S+)$/i);
+  if (match) {
+    return { prefix: "INS-REQ", segment: match[2]! };
+  }
+  return { prefix: code, segment: null };
+}
+
+export function displayBookingCode(booking: {
+  id: string;
+  bookingCode?: string | null;
+}): string {
+  const code = booking.bookingCode?.trim();
+  if (code) return code;
+  const id = booking.id.trim();
+  if (!id) return "—";
+  return buildBookingCodeFromSegment(legacySegmentFromInspectionId(id));
 }
 
 export function displayQuotationCode(quotation: {

@@ -1,6 +1,13 @@
-import type {
-  InspectionRequestDetail,
-  InspectionRequestStatus,
+import type { BookingDetail } from "@/lib/bookings/types";
+import { BOOKING_STATUS_LABELS } from "@/lib/bookings/types";
+import {
+  displayBookingCode,
+  displayInspectionRequestCode,
+} from "@/lib/reference-codes";
+import {
+  STATUS_LABELS,
+  type InspectionRequestDetail,
+  type InspectionRequestStatus,
 } from "@/lib/inspection/types";
 
 export type CalendarSource = "inspection_visits" | "bookings";
@@ -10,11 +17,12 @@ export type DotColor = "primary" | "error" | "amber-500" | "green-500";
 export type CalendarEvent = {
   key: string;
   requestId: string;
-  request: InspectionRequestDetail;
   date: string;
   /** Bookings = blue; inspection visits = green. */
   source: CalendarSource;
   dotColor: DotColor;
+  request?: InspectionRequestDetail;
+  booking?: BookingDetail;
 };
 
 export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
@@ -69,21 +77,94 @@ export function dotColorForCalendarSource(source: CalendarSource): DotColor {
   return source === "bookings" ? "primary" : "green-500";
 }
 
-/** All `inspection_requests` rows are inspection visits on the calendar (green). */
+/** Inspection visits only (job bookings use the `bookings` collection). */
 export function calendarSourceForRequest(
   _request: InspectionRequestDetail,
 ): CalendarSource {
   return "inspection_visits";
 }
 
-/** Only confirmed visits (scheduled/completed with a slot) appear on the calendar. */
+/** Only scheduled inspection visits appear on the calendar (not completed/pending). */
 export function datesForRequestOnCalendar(
   request: InspectionRequestDetail,
 ): string[] {
-  if (request.status !== "scheduled" && request.status !== "completed") {
-    return [];
-  }
+  if (request.status !== "scheduled") return [];
   return request.scheduledSlot?.date ? [request.scheduledSlot.date] : [];
+}
+
+export function datesForBookingOnCalendar(booking: BookingDetail): string[] {
+  if (booking.status !== "scheduled") return [];
+  return booking.scheduledSlot?.date ? [booking.scheduledSlot.date] : [];
+}
+
+export function bookingTitle(booking: BookingDetail): string {
+  return booking.requestType === "existing_service"
+    ? booking.serviceName ?? "Existing service"
+    : booking.customRequest?.title ?? "Custom quotation request";
+}
+
+export const BOOKING_CALENDAR_STATUS_TONE: Record<
+  BookingDetail["status"],
+  string
+> = {
+  scheduled: "bg-primary/10 text-primary border border-primary/25",
+  cancelled: "bg-stone-100 text-stone-600 border border-stone-200",
+  completed: "bg-sky-50 text-sky-700 border border-sky-200",
+};
+
+export type CalendarCardView = {
+  title: string;
+  address: InspectionRequestDetail["address"];
+  customerName: string;
+  reference: string;
+  statusLabel: string;
+  statusToneClass: string;
+  assignedTo: InspectionRequestDetail["assignedTo"];
+  scheduledStartTime: string | null;
+  scheduledEndTime: string | null;
+  scheduledSlot: InspectionRequestDetail["scheduledSlot"];
+  ownerProposedSlots: InspectionRequestDetail["ownerProposedSlots"];
+  preferredSlots: InspectionRequestDetail["preferredSlots"];
+  openHref: string;
+};
+
+export function calendarCardView(event: CalendarEvent): CalendarCardView | null {
+  if (event.booking) {
+    const booking = event.booking;
+    return {
+      title: bookingTitle(booking),
+      address: booking.address,
+      customerName: booking.customer.fullName,
+      reference: displayBookingCode(booking),
+      statusLabel: BOOKING_STATUS_LABELS[booking.status],
+      statusToneClass: BOOKING_CALENDAR_STATUS_TONE[booking.status],
+      assignedTo: booking.assignedTo,
+      scheduledStartTime: booking.scheduledStartTime,
+      scheduledEndTime: booking.scheduledEndTime,
+      scheduledSlot: booking.scheduledSlot,
+      ownerProposedSlots: [],
+      preferredSlots: [],
+      openHref: `/dashboard/inspection-visits?request=${encodeURIComponent(booking.inspectionRequestId)}`,
+    };
+  }
+
+  if (!event.request) return null;
+  const request = event.request;
+  return {
+    title: requestTitle(request),
+    address: request.address,
+    customerName: request.customer.fullName,
+    reference: displayInspectionRequestCode(request),
+    statusLabel: STATUS_LABELS[request.status],
+    statusToneClass: CALENDAR_STATUS_TONE[request.status],
+    assignedTo: request.assignedTo,
+    scheduledStartTime: request.scheduledStartTime,
+    scheduledEndTime: request.scheduledEndTime,
+    scheduledSlot: request.scheduledSlot,
+    ownerProposedSlots: request.ownerProposedSlots,
+    preferredSlots: request.preferredSlots,
+    openHref: `/dashboard/inspection-visits?request=${encodeURIComponent(request.id)}`,
+  };
 }
 
 export function matchesCalendarSource(
@@ -211,7 +292,21 @@ export function matchesCalendarFilters(
   );
 }
 
-export function buildCalendarEvents(
+function matchesBookingCalendarFilters(
+  booking: BookingDetail,
+  filters: CalendarFilters,
+): boolean {
+  return (
+    matchesAssigneeFilter(booking as unknown as InspectionRequestDetail, filters.assignee) &&
+    matchesServiceFilter(booking as unknown as InspectionRequestDetail, filters.serviceKeys) &&
+    matchesServiceAreaFilter(
+      booking as unknown as InspectionRequestDetail,
+      filters.serviceAreas,
+    )
+  );
+}
+
+export function buildInspectionCalendarEvents(
   requests: InspectionRequestDetail[],
   filters: CalendarFilters,
   sourceFilter?: CalendarSource,
@@ -244,12 +339,57 @@ export function buildCalendarEvents(
   return events;
 }
 
-/** Month grid: all requests with a visible date, coloured by origin. */
+export function buildBookingCalendarEvents(
+  bookings: BookingDetail[],
+  filters: CalendarFilters,
+  sourceFilter?: CalendarSource,
+): CalendarEvent[] {
+  const source: CalendarSource = "bookings";
+  if (sourceFilter && sourceFilter !== source) return [];
+
+  const events: CalendarEvent[] = [];
+
+  for (const booking of bookings) {
+    if (!matchesBookingCalendarFilters(booking, filters)) continue;
+
+    const dates = datesForBookingOnCalendar(booking);
+    if (dates.length === 0) continue;
+
+    const dotColor = dotColorForCalendarSource(source);
+
+    for (const date of dates) {
+      events.push({
+        key: `${source}-${booking.id}-${date}`,
+        requestId: booking.id,
+        booking,
+        date,
+        source,
+        dotColor,
+      });
+    }
+  }
+
+  return events;
+}
+
+export function buildCalendarEvents(
+  requests: InspectionRequestDetail[],
+  filters: CalendarFilters,
+  sourceFilter?: CalendarSource,
+): CalendarEvent[] {
+  return buildInspectionCalendarEvents(requests, filters, sourceFilter);
+}
+
+/** Month grid: inspection visits + job bookings. */
 export function buildMonthGridCalendarEvents(
   requests: InspectionRequestDetail[],
   filters: CalendarFilters,
+  bookings: BookingDetail[] = [],
 ): CalendarEvent[] {
-  return buildCalendarEvents(requests, filters);
+  return [
+    ...buildInspectionCalendarEvents(requests, filters),
+    ...buildBookingCalendarEvents(bookings, filters),
+  ];
 }
 
 export function groupEventsByDate(
@@ -268,8 +408,9 @@ export function computeCombinedCalendarStats(
   requests: InspectionRequestDetail[],
   todayIso: string,
   filters: CalendarFilters,
+  bookings: BookingDetail[] = [],
 ): CalendarStat[] {
-  const allEvents = buildMonthGridCalendarEvents(requests, filters);
+  const allEvents = buildMonthGridCalendarEvents(requests, filters, bookings);
   const todayRequestIds = new Set(
     allEvents
       .filter((event) => event.date === todayIso)
@@ -455,6 +596,8 @@ export const CALENDAR_STATUS_TONE: Record<InspectionRequestStatus, string> = {
   pending: "bg-amber-50 text-amber-700 border border-amber-200",
   owner_proposed: "bg-violet-50 text-violet-700 border border-violet-200",
   scheduled: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  awaiting_decision:
+    "bg-orange-50 text-orange-800 border border-orange-200",
   cancelled: "bg-stone-100 text-stone-600 border border-stone-200",
   completed: "bg-sky-50 text-sky-700 border border-sky-200",
 };

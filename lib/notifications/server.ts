@@ -362,6 +362,13 @@ export async function notifyCustomerOfStatusChange(
       emailDetails = [{ label: "Service", value: headline }];
       break;
     }
+    case "awaiting_decision": {
+      type = "request_proposed";
+      title = `${business} is waiting to hear from you`;
+      body = `Your quotation for ${headline} is with you for review. Contact ${business} when you are ready to proceed.`;
+      emailDetails = [{ label: "Service", value: headline }];
+      break;
+    }
     default:
       return;
   }

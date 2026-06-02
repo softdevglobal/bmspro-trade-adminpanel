@@ -30,6 +30,7 @@ export const REQUEST_STATUSES = [
   "pending",
   "owner_proposed",
   "scheduled",
+  "awaiting_decision",
   "cancelled",
   "completed",
 ] as const;
@@ -39,9 +40,17 @@ export const STATUS_LABELS: Record<InspectionRequestStatus, string> = {
   pending: "Pending review",
   owner_proposed: "Awaiting customer",
   scheduled: "Scheduled",
+  awaiting_decision: "Awaiting decision",
   cancelled: "Cancelled",
   completed: "Completed",
 };
+
+/** Morning vs afternoon from a 24h start time (for job booking slots). */
+export function timeRangeFromStartTime(startTime: string): InspectionTimeRange {
+  const hour = Number.parseInt(startTime.split(":")[0] ?? "", 10);
+  if (!Number.isFinite(hour)) return "morning";
+  return hour < 12 ? "morning" : "afternoon";
+}
 
 /** Where a new inspection_requests document was created. */
 export const INSPECTION_CREATED_SOURCES = [
@@ -149,6 +158,14 @@ export type InspectionRequestDetail = {
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */
   quotation: InspectionQuotationSummary | null;
+  /** Linked job booking document id (`bookings` collection). */
+  bookingId: string | null;
+  /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
+  bookingCode: string | null;
+  /** @deprecated Job duration lives on `bookings`; kept for older documents. */
+  estimatedDurationMinutes: number | null;
+  /** Millis when a job booking was created from this visit. */
+  bookingConfirmedAt: number | null;
 };
 
 /** Quotation summary stored on inspection_requests after a quote is created. */

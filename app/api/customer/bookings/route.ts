@@ -152,6 +152,18 @@ function mapBookingDoc(
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
     quotation: parseInspectionQuotation(data.quotation),
+    bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
+    bookingCode:
+      typeof data.bookingCode === "string" && data.bookingCode.trim()
+        ? data.bookingCode.trim()
+        : null,
+    estimatedDurationMinutes:
+      typeof data.estimatedDurationMinutes === "number" &&
+      Number.isFinite(data.estimatedDurationMinutes) &&
+      data.estimatedDurationMinutes > 0
+        ? Math.round(data.estimatedDurationMinutes)
+        : null,
+    bookingConfirmedAt: toMillis(data.bookingConfirmedAt),
   };
 }
 

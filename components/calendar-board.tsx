@@ -2,26 +2,27 @@
 
 import {
   formatAddress,
-  STATUS_LABELS,
   TIME_RANGE_SHORT_LABELS,
   formatVisitWindow,
 } from "@/lib/inspection/types";
-import { displayInspectionRequestCode } from "@/lib/reference-codes";
+import { useBookings } from "@/lib/bookings/use-bookings";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
+  bookingTitle,
   buildMonthGridCalendarEvents,
+  calendarCardView,
   CALENDAR_SOURCE_CARD_CLASS,
+  requestTitle,
   CALENDAR_SOURCE_LABELS,
-  CALENDAR_STATUS_TONE,
   computeCombinedCalendarStats,
   CUSTOM_SERVICE_KEY,
   DOT_CLASS,
   emptyCalendarFilters,
   groupEventsByDate,
   isoDateFromParts,
-  requestTitle,
   toIsoDateLocal,
   type CalendarEvent,
+  type CalendarCardView,
   type CalendarFilters,
   type CalendarStatusFilterKey,
 } from "@/lib/calendar/events";
@@ -176,10 +177,11 @@ function CalendarDayEventCards({
   return (
     <>
       {events.map((event) => {
-        const { request } = event;
-        const title = requestTitle(request);
-        const timeLabel = eventTimeLabel(request, event.date);
-        const assignee = request.assignedTo;
+        const card = calendarCardView(event);
+        if (!card) return null;
+
+        const timeLabel = eventTimeLabel(card, event.date);
+        const assignee = card.assignedTo;
         const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
         const sourceTone =
           event.source === "bookings"
@@ -199,9 +201,9 @@ function CalendarDayEventCards({
                   {sourceLabel}
                 </span>
                 <span
-                  className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
+                  className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${card.statusToneClass}`}
                 >
-                  {STATUS_LABELS[request.status]}
+                  {card.statusLabel}
                 </span>
               </div>
 
@@ -210,19 +212,19 @@ function CalendarDayEventCards({
               </p>
 
               <h4 className="font-display text-lg font-bold leading-snug text-on-surface">
-                {title}
+                {card.title}
               </h4>
 
               <CalendarDetailRow label="Address">
-                {formatAddress(request.address)}
+                {formatAddress(card.address)}
               </CalendarDetailRow>
 
               <CalendarDetailRow label="Reference" mono>
-                {displayInspectionRequestCode(request)}
+                {card.reference}
               </CalendarDetailRow>
 
               <CalendarDetailRow label="Customer">
-                {request.customer.fullName}
+                {card.customerName}
               </CalendarDetailRow>
 
               {assignee ? (
@@ -253,7 +255,7 @@ function CalendarDayEventCards({
               ) : null}
 
               <Link
-                href={`/dashboard/inspection-visits?request=${request.id}`}
+                href={card.openHref}
                 className="inline-flex w-fit font-body text-[14px] font-semibold text-primary hover:underline"
                 onClick={onOpenLink}
               >
@@ -267,23 +269,26 @@ function CalendarDayEventCards({
   );
 }
 
-function eventTimeLabel(
-  request: import("@/lib/inspection/types").InspectionRequestDetail,
-  date: string,
-): string {
-  if (request.scheduledSlot?.date === date) {
+function calendarEventTitle(event: CalendarEvent): string {
+  if (event.booking) return bookingTitle(event.booking);
+  if (event.request) return requestTitle(event.request);
+  return "—";
+}
+
+function eventTimeLabel(card: CalendarCardView, date: string): string {
+  if (card.scheduledSlot?.date === date) {
     const window = formatVisitWindow(
-      request.scheduledStartTime,
-      request.scheduledEndTime,
+      card.scheduledStartTime,
+      card.scheduledEndTime,
     );
     if (window) return window;
-    return TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange];
+    return TIME_RANGE_SHORT_LABELS[card.scheduledSlot.timeRange];
   }
 
-  const proposed = request.ownerProposedSlots.find((slot) => slot.date === date);
+  const proposed = card.ownerProposedSlots.find((slot) => slot.date === date);
   if (proposed) return TIME_RANGE_SHORT_LABELS[proposed.timeRange];
 
-  const preferred = request.preferredSlots.find((slot) => slot.date === date);
+  const preferred = card.preferredSlots.find((slot) => slot.date === date);
   if (preferred) return TIME_RANGE_SHORT_LABELS[preferred.timeRange];
 
   return "Time TBC";
@@ -296,6 +301,11 @@ export function CalendarBoard() {
     loading: requestsLoading,
     error: requestsError,
   } = useInspectionRequests();
+  const {
+    bookings,
+    loading: bookingsLoading,
+    error: bookingsError,
+  } = useBookings();
   const { staff, loading: staffLoading } = useBusinessStaffSummary();
   const today = useMemo(() => normalizeDate(new Date()), []);
   const todayIso = useMemo(() => toIsoDateLocal(today), [today]);
@@ -326,8 +336,8 @@ export function CalendarBoard() {
   }, [user?.uid]);
 
   const monthGridEvents = useMemo(
-    () => buildMonthGridCalendarEvents(requests, filters),
-    [requests, filters],
+    () => buildMonthGridCalendarEvents(requests, filters, bookings),
+    [requests, filters, bookings],
   );
 
   const monthEventsByDate = useMemo(
@@ -336,8 +346,8 @@ export function CalendarBoard() {
   );
 
   const stats = useMemo(
-    () => computeCombinedCalendarStats(requests, todayIso, filters),
-    [requests, todayIso, filters],
+    () => computeCombinedCalendarStats(requests, todayIso, filters, bookings),
+    [requests, todayIso, filters, bookings],
   );
 
   const unassignedCount = stats[1]?.value ?? 0;
@@ -778,7 +788,7 @@ export function CalendarBoard() {
                                 : "border-green-200 bg-green-50 text-green-800"
                             }`}
                           >
-                            {requestTitle(event.request)}
+                            {calendarEventTitle(event)}
                           </button>
                         ))}
                       </div>
@@ -851,7 +861,7 @@ export function CalendarBoard() {
                                   : "border-green-200 bg-green-50 text-green-800"
                               }`}
                             >
-                              {requestTitle(event.request)}
+                              {calendarEventTitle(event)}
                             </button>
                           ))
                         )}
