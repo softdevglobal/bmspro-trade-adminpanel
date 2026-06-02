@@ -8,7 +8,7 @@ import type { QuotationDetail } from "@/lib/quotations/server";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 function formatAud(value: number | null): string {
   if (value == null) return "—";
@@ -305,48 +305,41 @@ export function QuotationsBoard() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError(null);
-      try {
-        const token = await user.getIdToken();
-        const response = await fetch("/api/quotations", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-        const data = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          quotations?: QuotationDetail[];
-        };
-        if (!response.ok || !data.ok) {
-          throw new Error(data.error ?? "Could not load quotations.");
-        }
-        if (active) setQuotations(data.quotations ?? []);
-      } catch (err) {
-        if (active) {
-          setError(
-            err instanceof Error ? err.message : "Could not load quotations.",
-          );
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
     }
 
-    void load();
-    return () => {
-      active = false;
-    };
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/quotations", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        quotations?: QuotationDetail[];
+      };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not load quotations.");
+      }
+      setQuotations(data.quotations ?? []);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load quotations.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const selected = useMemo(
     () => quotations.find((quotation) => quotation.id === selectedId) ?? null,
@@ -379,36 +372,56 @@ export function QuotationsBoard() {
 
   if (quotations.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-6 py-14 text-center sm:rounded-2xl sm:py-16">
-        <span className="material-symbols-outlined text-[40px] text-outline-variant">
-          request_quote
-        </span>
-        <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
-          No quotations yet
-        </p>
-        <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
-          Quotations appear here after you send one from a completed inspection
-          visit.
-        </p>
-        <Link
-          href="/dashboard/inspection-visits"
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
-        >
-          <span className="material-symbols-outlined text-[20px]">
-            event_available
+      <>
+        <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-6 py-14 text-center sm:rounded-2xl sm:py-16">
+          <span className="material-symbols-outlined text-[40px] text-outline-variant">
+            request_quote
           </span>
-          Inspection visits
-        </Link>
-      </div>
+          <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
+            No quotations yet
+          </p>
+          <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
+            Create a quotation directly here, or send one from a completed
+            inspection visit.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/dashboard/quotations/new"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+            >
+              <span className="material-symbols-outlined text-[20px]">add</span>
+              New quotation
+            </Link>
+            <Link
+              href="/dashboard/inspection-visits"
+              className="inline-flex items-center gap-2 rounded-xl border border-outline-variant px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                event_available
+              </span>
+              Inspection visits
+            </Link>
+          </div>
+        </div>
+      </>
     );
   }
 
   return (
     <>
-      <p className="mb-3 font-body text-[12px] text-on-surface-variant">
-        {quotations.length} quotation{quotations.length === 1 ? "" : "s"} · tap
-        a card to open the side preview
-      </p>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="font-body text-[12px] text-on-surface-variant">
+          {quotations.length} quotation{quotations.length === 1 ? "" : "s"} · tap
+          a card to open the side preview
+        </p>
+        <Link
+          href="/dashboard/quotations/new"
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+        >
+          <span className="material-symbols-outlined text-[18px]">add</span>
+          New quotation
+        </Link>
+      </div>
       <ul className="space-y-3">
         {quotations.map((quotation) => (
           <li key={quotation.id}>

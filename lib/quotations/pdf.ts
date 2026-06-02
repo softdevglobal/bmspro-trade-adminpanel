@@ -1,10 +1,14 @@
 import "server-only";
 
-import { formatAddress } from "@/lib/inspection/types";
 import {
-  displayInspectionRequestCode,
-  displayQuotationCode,
-} from "@/lib/reference-codes";
+  computeDocumentTotals,
+  formatQuoteDate,
+  formatQuoteMoney,
+  type QuotationDocumentData,
+  type QuotationDocumentLineItem,
+} from "@/lib/quotations/document";
+import type { QuotationDetail } from "@/lib/quotations/server";
+import { displayQuotationCode } from "@/lib/reference-codes";
 import {
   PDFDocument,
   PDFFont,
@@ -13,33 +17,23 @@ import {
   StandardFonts,
   rgb,
 } from "pdf-lib";
-import type { QuotationDetail } from "@/lib/quotations/server";
 
-const BRAND = rgb(0.043, 0.2, 0.627); // #0b33a0-ish
-const TEXT = rgb(0.12, 0.16, 0.2);
-const MUTED = rgb(0.39, 0.45, 0.52);
-const BORDER = rgb(0.9, 0.91, 0.94);
-const LIGHT = rgb(0.93, 0.96, 1);
-
-const PAGE_WIDTH = 595.28; // A4 portrait
+const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
-const MARGIN = 48;
+const MARGIN = 44;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
-function money(value: number): string {
-  return `Aus $${value.toFixed(2)}`;
-}
+const BRAND = rgb(0.043, 0.2, 0.627);
+const BRAND_SOFT = rgb(0.93, 0.96, 1);
+const TEXT = rgb(0.12, 0.14, 0.18);
+const MUTED = rgb(0.42, 0.46, 0.52);
+const BORDER = rgb(0.82, 0.84, 0.88);
+const HEADER_BG = rgb(0.94, 0.95, 0.97);
+const ROW_ALT = rgb(0.98, 0.985, 1);
+const TOTAL_BAR = rgb(0.1, 0.12, 0.16);
+const WHITE = rgb(1, 1, 1);
 
-function formatDate(value: number | null): string {
-  if (!value) return "";
-  return new Date(value).toLocaleDateString("en-AU", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-const LOGO_BOX = 44;
+const LOGO_MAX = 72;
 
 async function embedLogoFromUrl(
   doc: PDFDocument,
@@ -50,9 +44,7 @@ async function embedLogoFromUrl(
     if (!res.ok) return null;
     const bytes = await res.arrayBuffer();
     const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
-    if (contentType.includes("png")) {
-      return doc.embedPng(bytes);
-    }
+    if (contentType.includes("png")) return doc.embedPng(bytes);
     if (contentType.includes("jpeg") || contentType.includes("jpg")) {
       return doc.embedJpg(bytes);
     }
@@ -66,7 +58,6 @@ async function embedLogoFromUrl(
   }
 }
 
-/** Truncates text to fit within maxWidth for the given font/size. */
 function fitText(
   text: string,
   font: PDFFont,
@@ -84,274 +75,590 @@ function fitText(
   return `${result}…`;
 }
 
+function wrapText(
+  text: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number,
+): string[] {
+  const words = text.trim().split(/\s+/);
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) > maxWidth) {
+      if (line) lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function lineItemsFromQuotation(
+  quotation: QuotationDetail,
+  defaultGst: number,
+): QuotationDocumentLineItem[] {
+  return quotation.lineItems.map((item) => ({
+    code: item.code ?? null,
+    name: item.name,
+    description: item.description ?? null,
+    quantity: item.quantity ?? 1,
+    rateAud: item.rateAud ?? item.priceAud,
+    gstPercent: item.gstPercent ?? defaultGst,
+    amountAud: item.priceAud,
+  }));
+}
+
+export function buildQuotationDocumentFromDetail(
+  quotation: QuotationDetail,
+  branding: {
+    businessName?: string | null;
+    logoUrl?: string | null;
+    businessAddress?: string | null;
+    businessEmail?: string | null;
+    businessPhone?: string | null;
+    bookingSlug?: string | null;
+    bookingPath?: string | null;
+    abn?: string | null;
+    registeredForGst?: boolean;
+    gstPercentage?: number | null;
+  },
+): QuotationDocumentData {
+  const gstPercentage = branding.registeredForGst
+    ? (branding.gstPercentage ?? 10)
+    : 0;
+  const lineItems = lineItemsFromQuotation(quotation, gstPercentage);
+  const discountAud = quotation.discountAud ?? 0;
+  const totals = computeDocumentTotals({ lineItems, discountAud });
+
+  const quoteDate = quotation.createdAt
+    ? formatQuoteDate(
+        new Date(quotation.createdAt).toISOString().slice(0, 10),
+      )
+    : formatQuoteDate(new Date().toISOString().slice(0, 10));
+
+  return {
+    quoteNo: displayQuotationCode(quotation),
+    quoteDate,
+    validUntil: quotation.validUntil,
+    customer: quotation.customer,
+    customerAddress: quotation.address,
+    lineItems,
+    subtotalAud: totals.subtotalAud,
+    discountAud,
+    gstAud: totals.gstAud,
+    totalAud: quotation.finalPriceAud || totals.totalAud,
+    paymentInstructions: quotation.paymentInstructions,
+    notes: quotation.notes,
+    business: {
+      businessName: branding.businessName?.trim() || "Business",
+      logoUrl: branding.logoUrl ?? null,
+      address: branding.businessAddress ?? null,
+      email: branding.businessEmail ?? null,
+      phone: branding.businessPhone ?? null,
+      abn: branding.abn ?? null,
+      registeredForGst: Boolean(branding.registeredForGst),
+      gstPercentage,
+    },
+  };
+}
+
 /**
- * Renders a branded, single (or multi) page A4 quotation PDF and returns the
- * raw bytes.
+ * Renders a polished A4 quotation PDF and returns the raw bytes.
  */
 export async function generateQuotationPdf(
   quotation: QuotationDetail,
   options: {
     businessName?: string | null;
     logoUrl?: string | null;
+    businessAddress?: string | null;
+    businessEmail?: string | null;
+    businessPhone?: string | null;
+    bookingSlug?: string | null;
+    bookingPath?: string | null;
+    abn?: string | null;
+    registeredForGst?: boolean;
+    gstPercentage?: number | null;
     inspectionRequestCode?: string | null;
   } = {},
 ): Promise<Buffer> {
+  const data = buildQuotationDocumentFromDetail(quotation, options);
+
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontNumeric = await doc.embedFont(StandardFonts.TimesRoman);
+  const fontNumericBold = await doc.embedFont(StandardFonts.TimesRomanBold);
 
   let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   let y = PAGE_HEIGHT;
 
-  const brandName = options.businessName?.trim() || "BMS Pro Trade";
-  const logoUrl =
-    options.logoUrl && /^https?:\/\//.test(options.logoUrl.trim())
-      ? options.logoUrl.trim()
+  const logoImage =
+    data.business.logoUrl &&
+    /^https?:\/\//.test(data.business.logoUrl.trim())
+      ? await embedLogoFromUrl(doc, data.business.logoUrl)
       : null;
-  const logoImage = logoUrl ? await embedLogoFromUrl(doc, logoUrl) : null;
-
-  const ensureSpace = (needed: number) => {
-    if (y - needed < MARGIN) {
-      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      y = PAGE_HEIGHT - MARGIN;
-    }
-  };
 
   const drawText = (
     text: string,
     x: number,
     yPos: number,
-    opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {},
+    opts: {
+      size?: number;
+      bold?: boolean;
+      color?: ReturnType<typeof rgb>;
+      maxWidth?: number;
+    } = {},
   ) => {
-    page.drawText(text, {
+    const size = opts.size ?? 10;
+    const useFont = opts.bold ? fontBold : font;
+    const content = opts.maxWidth
+      ? fitText(text, useFont, size, opts.maxWidth)
+      : text;
+    page.drawText(content, {
       x,
       y: yPos,
-      size: opts.size ?? 11,
-      font: opts.bold ? fontBold : font,
+      size,
+      font: useFont,
       color: opts.color ?? TEXT,
     });
   };
 
-  // Header band
-  const headerHeight = 96;
+  const textWidth = (text: string, size: number, bold = false) =>
+    (bold ? fontBold : font).widthOfTextAtSize(text, size);
+
+  const numericWidth = (text: string, size: number, bold = false) =>
+    (bold ? fontNumericBold : fontNumeric).widthOfTextAtSize(text, size);
+
+  const drawNumber = (
+    text: string,
+    x: number,
+    yPos: number,
+    opts: {
+      size?: number;
+      bold?: boolean;
+      color?: ReturnType<typeof rgb>;
+    } = {},
+  ) => {
+    const size = opts.size ?? 10;
+    const useFont = opts.bold ? fontNumericBold : fontNumeric;
+    page.drawText(text, {
+      x,
+      y: yPos,
+      size,
+      font: useFont,
+      color: opts.color ?? TEXT,
+    });
+  };
+
+  const drawNumberRight = (
+    text: string,
+    rightX: number,
+    yPos: number,
+    opts: {
+      size?: number;
+      bold?: boolean;
+      color?: ReturnType<typeof rgb>;
+    } = {},
+  ) => {
+    const size = opts.size ?? 10;
+    const bold = opts.bold ?? false;
+    drawNumber(text, rightX - numericWidth(text, size, bold), yPos, opts);
+  };
+
+  const drawAbnLine = (abn: string, yPos: number) => {
+    const prefix = "ABN: ";
+    const size = 9;
+    drawText(prefix, MARGIN, yPos, { size, color: MUTED });
+    drawNumber(abn, MARGIN + textWidth(prefix, size), yPos, {
+      size,
+      color: MUTED,
+    });
+  };
+
+  const ensureSpace = (needed: number) => {
+    if (y - needed < MARGIN + 72) {
+      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+      y = PAGE_HEIGHT - MARGIN;
+    }
+  };
+
+  // ── Top brand accent ──
   page.drawRectangle({
     x: 0,
-    y: PAGE_HEIGHT - headerHeight,
+    y: PAGE_HEIGHT - 5,
     width: PAGE_WIDTH,
-    height: headerHeight,
+    height: 5,
     color: BRAND,
   });
+  y = PAGE_HEIGHT - 28;
 
-  const brandTextX = logoImage ? MARGIN + LOGO_BOX + 12 : MARGIN;
+  // ── Header: title left, logo right ──
+  const headerBottom = y - 88;
   if (logoImage) {
-    page.drawImage(logoImage, {
-      x: MARGIN,
-      y: PAGE_HEIGHT - headerHeight + (headerHeight - LOGO_BOX) / 2,
-      width: LOGO_BOX,
-      height: LOGO_BOX,
-    });
-  }
-
-  drawText(brandName, brandTextX, PAGE_HEIGHT - 44, {
-    size: 20,
-    bold: true,
-    color: rgb(1, 1, 1),
-  });
-  drawText("QUOTATION", brandTextX, PAGE_HEIGHT - 68, {
-    size: 12,
-    color: rgb(0.82, 0.88, 1),
-  });
-  const quotationRef = displayQuotationCode(quotation);
-  drawText(
-    quotationRef,
-    PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(quotationRef, 10),
-    PAGE_HEIGHT - 44,
-    { size: 10, color: rgb(0.82, 0.88, 1) },
-  );
-  const visitRef = displayInspectionRequestCode({
-    id: quotation.inspectionRequestId,
-    requestCode: options.inspectionRequestCode ?? null,
-  });
-  const visitRefText = `Visit ${visitRef}`;
-  drawText(
-    visitRefText,
-    PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(visitRefText, 9),
-    PAGE_HEIGHT - 58,
-    { size: 9, color: rgb(0.82, 0.88, 1) },
-  );
-  const dateText = formatDate(quotation.createdAt) || formatDate(Date.now());
-  drawText(
-    dateText,
-    PAGE_WIDTH - MARGIN - font.widthOfTextAtSize(dateText, 10),
-    PAGE_HEIGHT - 72,
-    { size: 10, color: rgb(0.82, 0.88, 1) },
-  );
-
-  y = PAGE_HEIGHT - headerHeight - 28;
-
-  // Customer / service block
-  drawText("BILLED TO", MARGIN, y, { size: 9, bold: true, color: MUTED });
-  drawText("SERVICE", PAGE_WIDTH / 2, y, { size: 9, bold: true, color: MUTED });
-  y -= 16;
-  drawText(quotation.customer.fullName || "—", MARGIN, y, {
-    size: 12,
-    bold: true,
-  });
-  drawText(
-    fitText(quotation.serviceTitle || "Quotation", font, 12, CONTENT_WIDTH / 2 - 10),
-    PAGE_WIDTH / 2,
-    y,
-    { size: 12, bold: true },
-  );
-  y -= 15;
-  if (quotation.customer.email) {
-    drawText(quotation.customer.email, MARGIN, y, { size: 10, color: MUTED });
-  }
-  const addressText = formatAddress(quotation.address);
-  if (addressText) {
-    drawText(
-      fitText(addressText, font, 10, CONTENT_WIDTH / 2 - 10),
-      PAGE_WIDTH / 2,
-      y,
-      { size: 10, color: MUTED },
+    const scale = Math.min(
+      LOGO_MAX / logoImage.width,
+      LOGO_MAX / logoImage.height,
     );
-  }
-  y -= 14;
-  if (quotation.customer.phone) {
-    drawText(quotation.customer.phone, MARGIN, y, { size: 10, color: MUTED });
-  }
-  y -= 26;
-
-  // Table header
-  const priceColX = PAGE_WIDTH - MARGIN - 90;
-  const rowHeight = 26;
-
-  const drawTableHeader = (heading: string) => {
-    ensureSpace(rowHeight + 10);
-    page.drawRectangle({
-      x: MARGIN,
-      y: y - rowHeight + 8,
-      width: CONTENT_WIDTH,
-      height: rowHeight,
-      color: LIGHT,
+    const w = logoImage.width * scale;
+    const h = logoImage.height * scale;
+    page.drawImage(logoImage, {
+      x: PAGE_WIDTH - MARGIN - w,
+      y: y - h + 6,
+      width: w,
+      height: h,
     });
-    drawText(heading, MARGIN + 10, y - 8, {
-      size: 9,
-      bold: true,
-      color: BRAND,
-    });
-    drawText("AMOUNT", priceColX, y - 8, {
-      size: 9,
-      bold: true,
-      color: BRAND,
-    });
-    y -= rowHeight + 4;
-  };
-
-  const drawRow = (label: string, value: string, bold = false) => {
-    ensureSpace(rowHeight);
-    drawText(fitText(label, bold ? fontBold : font, 11, priceColX - MARGIN - 20), MARGIN + 10, y - 6, {
-      size: 11,
-      bold,
-    });
-    drawText(value, priceColX, y - 6, { size: 11, bold });
-    y -= rowHeight - 4;
-    page.drawLine({
-      start: { x: MARGIN, y: y + 6 },
-      end: { x: PAGE_WIDTH - MARGIN, y: y + 6 },
-      thickness: 0.5,
-      color: BORDER,
-    });
-    y -= 4;
-  };
-
-  drawTableHeader("LINE ITEMS");
-  for (const item of quotation.lineItems) {
-    drawRow(item.name, money(item.priceAud));
-  }
-  drawRow("Total item price", money(quotation.subtotalAud), true);
-
-  if (quotation.additions.length > 0) {
-    y -= 8;
-    drawTableHeader("ADDITIONS");
-    for (const addition of quotation.additions) {
-      drawRow(addition.name, money(addition.priceAud));
-    }
-    drawRow("Additions total", money(quotation.additionsTotalAud), true);
   }
 
-  // Final price callout
-  y -= 14;
-  ensureSpace(56);
-  const calloutHeight = 48;
+  drawText("Quote", MARGIN, y, { size: 30, bold: true, color: BRAND });
+  y -= 28;
+  drawText(data.business.businessName, MARGIN, y, {
+    size: 14,
+    bold: true,
+    color: TEXT,
+  });
+  y = Math.min(y - 28, headerBottom);
+
+  // ── Customer card ──
+  ensureSpace(72);
+  const cardH = 58;
   page.drawRectangle({
     x: MARGIN,
-    y: y - calloutHeight + 12,
+    y: y - cardH,
     width: CONTENT_WIDTH,
-    height: calloutHeight,
+    height: cardH,
+    color: BRAND_SOFT,
+    borderColor: BORDER,
+    borderWidth: 0.5,
+  });
+  page.drawRectangle({
+    x: MARGIN,
+    y: y - cardH,
+    width: 4,
+    height: cardH,
     color: BRAND,
   });
-  drawText("FINAL PRICE", MARGIN + 14, y - 6, {
-    size: 10,
-    bold: true,
-    color: rgb(0.82, 0.88, 1),
-  });
-  const finalText = money(quotation.finalPriceAud);
-  drawText(
-    finalText,
-    PAGE_WIDTH - MARGIN - 14 - fontBold.widthOfTextAtSize(finalText, 18),
-    y - 12,
-    { size: 18, bold: true, color: rgb(1, 1, 1) },
-  );
-  y -= calloutHeight + 18;
 
-  if (quotation.validUntil) {
-    drawText(`Valid until: ${quotation.validUntil}`, MARGIN, y, {
+  drawText("For:", MARGIN + 14, y - 18, { size: 9, bold: true, color: MUTED });
+  let cardY = y - 32;
+  if (data.customer.fullName) {
+    drawText(data.customer.fullName, MARGIN + 46, cardY, {
+      size: 11,
+      bold: true,
+    });
+    cardY -= 14;
+  }
+  if (data.customer.email) {
+    drawText(data.customer.email, MARGIN + 46, cardY, {
       size: 10,
       color: MUTED,
     });
-    y -= 18;
+    cardY -= 13;
+  }
+  if (data.customer.phone) {
+    drawNumber(data.customer.phone, MARGIN + 46, cardY, {
+      size: 10,
+      color: MUTED,
+    });
+  }
+  y -= cardH + 16;
+
+  // ── Quote meta bar ──
+  ensureSpace(28);
+  page.drawRectangle({
+    x: MARGIN,
+    y: y - 20,
+    width: CONTENT_WIDTH,
+    height: 22,
+    color: HEADER_BG,
+    borderColor: BORDER,
+    borderWidth: 0.5,
+  });
+  drawText(`Quote No:  ${data.quoteNo}`, MARGIN + 10, y - 6, {
+    size: 9,
+    bold: true,
+  });
+  const dateSize = 9;
+  const datePrefix = "Date:  ";
+  const prefixW = fontBold.widthOfTextAtSize(datePrefix, dateSize);
+  const valueW = fontNumeric.widthOfTextAtSize(data.quoteDate, dateSize);
+  const dateX = PAGE_WIDTH - MARGIN - 10 - prefixW - valueW;
+  drawText(datePrefix, dateX, y - 6, { size: dateSize, bold: true });
+  drawNumber(data.quoteDate, dateX + prefixW, y - 6, { size: dateSize });
+  y -= 34;
+
+  // ── Table layout ──
+  const cols = {
+    code: { x: MARGIN, w: 54 },
+    desc: { x: MARGIN + 54, w: 198 },
+    qty: { x: MARGIN + 252, w: 44 },
+    rate: { x: MARGIN + 296, w: 58 },
+    gst: { x: MARGIN + 354, w: 36 },
+    amount: { x: MARGIN + 390, w: CONTENT_WIDTH - 390 },
+  };
+  const rowH = 22;
+
+  const drawTableHeader = () => {
+    ensureSpace(rowH + 8);
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - rowH + 4,
+      width: CONTENT_WIDTH,
+      height: rowH,
+      color: HEADER_BG,
+      borderColor: BORDER,
+      borderWidth: 0.75,
+    });
+    const hy = y - 13;
+    drawText("Code", cols.code.x + 4, hy, { size: 7.5, bold: true, color: MUTED });
+    drawText("Description", cols.desc.x + 4, hy, {
+      size: 7.5,
+      bold: true,
+      color: MUTED,
+    });
+    drawText("Quantity", cols.qty.x + 2, hy, { size: 7.5, bold: true, color: MUTED });
+    drawText("Rate", cols.rate.x + 2, hy, { size: 7.5, bold: true, color: MUTED });
+    drawText("GST", cols.gst.x + 2, hy, { size: 7.5, bold: true, color: MUTED });
+    drawText("Amount", cols.amount.x + 2, hy, {
+      size: 7.5,
+      bold: true,
+      color: MUTED,
+    });
+    y -= rowH + 2;
+  };
+
+  drawTableHeader();
+
+  data.lineItems.forEach((item, index) => {
+    ensureSpace(rowH + 4);
+    if (index % 2 === 1) {
+      page.drawRectangle({
+        x: MARGIN,
+        y: y - rowH + 4,
+        width: CONTENT_WIDTH,
+        height: rowH,
+        color: ROW_ALT,
+      });
+    }
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - rowH + 4,
+      width: CONTENT_WIDTH,
+      height: rowH,
+      borderColor: BORDER,
+      borderWidth: 0.5,
+    });
+
+    const ry = y - 13;
+    const desc =
+      item.description && item.description !== item.name
+        ? `${item.name} — ${item.description}`
+        : item.name;
+
+    drawText(item.code ?? "—", cols.code.x + 4, ry, {
+      size: 8,
+      maxWidth: cols.code.w - 8,
+      color: MUTED,
+    });
+    drawText(desc, cols.desc.x + 4, ry, {
+      size: 8.5,
+      maxWidth: cols.desc.w - 8,
+    });
+    drawNumber(String(item.quantity), cols.qty.x + 2, ry, { size: 8.5 });
+    drawNumber(formatQuoteMoney(item.rateAud), cols.rate.x + 2, ry, {
+      size: 8.5,
+    });
+    drawNumber(
+      item.gstPercent > 0 ? `${item.gstPercent}%` : "—",
+      cols.gst.x + 2,
+      ry,
+      { size: 8.5 },
+    );
+    const amt = formatQuoteMoney(item.amountAud);
+    drawNumberRight(amt, cols.amount.x + cols.amount.w - 6, ry, {
+      size: 8.5,
+      bold: true,
+    });
+    y -= rowH;
+  });
+
+  // Parts subtotal
+  y -= 6;
+  ensureSpace(24);
+  page.drawLine({
+    start: { x: MARGIN + cols.desc.x - MARGIN, y: y + 8 },
+    end: { x: PAGE_WIDTH - MARGIN, y: y + 8 },
+    thickness: 1,
+    color: BORDER,
+  });
+  const partsVal = formatQuoteMoney(data.subtotalAud);
+  drawText("Parts Subtotal", cols.desc.x, y - 4, { size: 10, bold: true });
+  drawNumberRight(partsVal, PAGE_WIDTH - MARGIN, y - 4, {
+    size: 10,
+    bold: true,
+  });
+  y -= 28;
+
+  // Payment details box
+  if (data.paymentInstructions?.trim()) {
+    ensureSpace(48);
+    const payLines = wrapText(data.paymentInstructions.trim(), font, 10, CONTENT_WIDTH - 24);
+    const boxH = 22 + payLines.length * 13;
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - boxH,
+      width: CONTENT_WIDTH,
+      height: boxH,
+      color: BRAND_SOFT,
+      borderColor: BORDER,
+      borderWidth: 0.5,
+    });
+    drawText("Payment Details", MARGIN + 12, y - 16, {
+      size: 11,
+      bold: true,
+      color: BRAND,
+    });
+    let py = y - 32;
+    for (const line of payLines) {
+      drawText(line, MARGIN + 12, py, { size: 10 });
+      py -= 13;
+    }
+    y -= boxH + 16;
   }
 
-  if (quotation.notes && quotation.notes.trim()) {
+  // Totals panel (right)
+  const panelW = 220;
+  const panelX = PAGE_WIDTH - MARGIN - panelW;
+  const totalRows =
+    2 +
+    (data.discountAud > 0 ? 1 : 0) +
+    (data.gstAud > 0 ? 1 : 0);
+  const panelH = 16 + totalRows * 18 + 32;
+  ensureSpace(panelH + 8);
+
+  page.drawRectangle({
+    x: panelX,
+    y: y - panelH,
+    width: panelW,
+    height: panelH,
+    borderColor: BORDER,
+    borderWidth: 0.75,
+  });
+
+  let ty = y - 18;
+  const drawPanelRow = (label: string, value: string, bold = false) => {
+    drawText(label, panelX + 12, ty, { size: 9.5, bold, color: MUTED });
+    drawNumberRight(value, panelX + panelW - 12, ty, { size: 9.5, bold });
+    ty -= 18;
+  };
+
+  drawPanelRow("Subtotal", formatQuoteMoney(data.subtotalAud));
+  if (data.discountAud > 0) {
+    drawPanelRow("Discount", `−${formatQuoteMoney(data.discountAud)}`);
+  }
+  if (data.gstAud > 0) {
+    const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;
+    drawText(gstLabel, panelX + 12, ty, {
+      size: 8.5,
+      color: MUTED,
+      maxWidth: panelW - 80,
+    });
+    const gstVal = formatQuoteMoney(data.gstAud);
+    drawNumberRight(gstVal, panelX + panelW - 12, ty, {
+      size: 9.5,
+      bold: true,
+    });
+    ty -= 18;
+  }
+
+  // Final total bar
+  ty -= 4;
+  page.drawRectangle({
+    x: panelX,
+    y: ty - 22,
+    width: panelW,
+    height: 28,
+    color: TOTAL_BAR,
+  });
+  const totalLabel = "Total";
+  const totalVal = formatQuoteMoney(data.totalAud);
+  drawText(totalLabel, panelX + 12, ty - 8, {
+    size: 11,
+    bold: true,
+    color: WHITE,
+  });
+  drawNumberRight(totalVal, panelX + panelW - 12, ty - 9, {
+    size: 12,
+    bold: true,
+    color: WHITE,
+  });
+  y -= panelH + 20;
+
+  // Notes
+  if (data.notes?.trim()) {
     ensureSpace(40);
-    drawText("NOTES", MARGIN, y, { size: 9, bold: true, color: MUTED });
-    y -= 15;
-    const words = quotation.notes.trim().split(/\s+/);
-    let line = "";
-    const maxWidth = CONTENT_WIDTH;
-    for (const word of words) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate, 10) > maxWidth) {
-        ensureSpace(16);
-        drawText(line, MARGIN, y, { size: 10, color: TEXT });
-        y -= 14;
-        line = word;
-      } else {
-        line = candidate;
-      }
+    drawText("Notes", MARGIN, y, { size: 11, bold: true, color: BRAND });
+    y -= 14;
+    page.drawLine({
+      start: { x: MARGIN, y: y + 4 },
+      end: { x: MARGIN + 48, y: y + 4 },
+      thickness: 2,
+      color: BRAND,
+    });
+    y -= 10;
+    for (const line of wrapText(data.notes.trim(), font, 10, CONTENT_WIDTH)) {
+      ensureSpace(14);
+      drawText(line, MARGIN, y, { size: 10, color: MUTED });
+      y -= 13;
     }
-    if (line) {
-      ensureSpace(16);
-      drawText(line, MARGIN, y, { size: 10, color: TEXT });
-      y -= 14;
-    }
+    y -= 8;
   }
 
   // Footer
-  drawFooter(page, font, brandName);
+  const footerLines: { text: string; kind: "text" | "phone" | "abn" }[] = [];
+  if (data.business.address) {
+    footerLines.push({ text: data.business.address, kind: "text" });
+  }
+  if (data.business.email) {
+    footerLines.push({ text: data.business.email, kind: "text" });
+  }
+  if (data.business.phone) {
+    footerLines.push({ text: data.business.phone, kind: "phone" });
+  }
+  if (data.business.abn) {
+    footerLines.push({ text: data.business.abn, kind: "abn" });
+  }
 
-  const bytes = await doc.save();
-  return Buffer.from(bytes);
-}
+  const footerBlockH = footerLines.length * 12 + 20;
+  let footerY = MARGIN + footerBlockH;
 
-function drawFooter(page: PDFPage, font: PDFFont, brandName: string) {
-  const text = `${brandName} · powered by BMS Pro Trade`;
-  page.drawText(text, {
-    x: MARGIN,
-    y: 28,
+  page.drawLine({
+    start: { x: MARGIN, y: footerY + 8 },
+    end: { x: PAGE_WIDTH - MARGIN, y: footerY + 8 },
+    thickness: 0.75,
+    color: BORDER,
+  });
+  footerY -= 4;
+
+  for (const line of footerLines) {
+    if (line.kind === "abn") {
+      drawAbnLine(line.text, footerY);
+    } else if (line.kind === "phone") {
+      drawNumber(line.text, MARGIN, footerY, { size: 9, color: MUTED });
+    } else {
+      drawText(line.text, MARGIN, footerY, { size: 9, color: MUTED });
+    }
+    footerY -= 12;
+  }
+
+  drawNumberRight("1 / 1", PAGE_WIDTH - MARGIN, MARGIN, {
     size: 9,
-    font,
     color: MUTED,
   });
+
+  return Buffer.from(await doc.save());
 }

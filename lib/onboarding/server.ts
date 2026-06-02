@@ -281,6 +281,10 @@ export type BusinessProfile = {
   bookingPath: string | null;
   registeredForGst: boolean;
   gstPercentage: number | null;
+  businessAddress: string | null;
+  businessEmail: string | null;
+  businessPhone: string | null;
+  abn: string | null;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -312,6 +316,13 @@ export async function getBusinessProfile(
           : null,
     registeredForGst,
     gstPercentage: registeredForGst ? (parsedGst ?? 10) : null,
+    businessAddress:
+      typeof data.businessAddress === "string" ? data.businessAddress : null,
+    businessEmail:
+      typeof data.businessEmail === "string" ? data.businessEmail : null,
+    businessPhone:
+      typeof data.businessPhone === "string" ? data.businessPhone : null,
+    abn: typeof data.abn === "string" ? data.abn : null,
   };
 }
 

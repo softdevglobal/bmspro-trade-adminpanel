@@ -6,7 +6,7 @@ export default function QuotationsPage() {
   return (
     <DashboardShell
       title="Quotations"
-      subtitle="Quotes sent to customers from completed inspection visits."
+      subtitle="Create and manage quotes sent to customers."
       icon="request_quote"
     >
       <BusinessOwnerGuard>

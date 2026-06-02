@@ -180,12 +180,14 @@ export function BookingMonthCalendar({
   minDate,
   onSelect,
   blockedCombos,
+  className = "",
 }: {
   selectedIso: string;
   minDate: string;
   onSelect: (iso: string) => void;
   /** Date+time combos that cannot be chosen (e.g. customer's original picks). */
   blockedCombos?: Set<string>;
+  className?: string;
 }) {
   const initialView = selectedIso
     ? new Date(`${selectedIso}T12:00:00`)
@@ -230,7 +232,9 @@ export function BookingMonthCalendar({
   const weekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
 
   return (
-    <div className="mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-2 shadow-sm">
+    <div
+      className={`mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-3 shadow-sm ${className}`}
+    >
       <div className="flex items-center justify-between gap-1">
         <button
           type="button"
@@ -270,7 +274,7 @@ export function BookingMonthCalendar({
         {gridCells.map((cell, index) => {
           if (!cell) {
             return (
-              <span key={`empty-${index}`} className="h-7" aria-hidden />
+              <span key={`empty-${index}`} className="h-8" aria-hidden />
             );
           }
 
@@ -287,7 +291,7 @@ export function BookingMonthCalendar({
               type="button"
               disabled={disabled}
               onClick={() => onSelect(cell.iso)}
-              className={`flex h-7 w-full items-center justify-center rounded-md font-body text-[11px] font-semibold leading-none transition-colors ${
+              className={`flex h-8 w-full items-center justify-center rounded-md font-body text-[12px] font-semibold leading-none transition-colors ${
                 disabled
                   ? "cursor-not-allowed text-stone-300"
                   : selected

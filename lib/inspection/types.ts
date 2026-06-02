@@ -58,6 +58,7 @@ export const INSPECTION_CREATED_SOURCES = [
   "booking_engine",
   "owner_dashboard",
   "owner_mobile",
+  "quotation_direct",
 ] as const;
 export type InspectionRequestCreatedSource =
   (typeof INSPECTION_CREATED_SOURCES)[number];
@@ -69,6 +70,7 @@ export const CREATED_SOURCE_LABELS: Record<
   booking_engine: "Booking engine",
   owner_dashboard: "Admin panel",
   owner_mobile: "Mobile app",
+  quotation_direct: "Quotation",
 };
 
 export function isCreatedSource(

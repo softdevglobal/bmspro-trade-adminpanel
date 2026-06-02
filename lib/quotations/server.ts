@@ -8,10 +8,14 @@ import {
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
+  INSPECTION_COLLECTION,
   type InspectionAddress,
+  type InspectionAssignment,
   type InspectionCustomer,
 } from "@/lib/inspection/types";
 import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
+import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+import { ensureCustomerAccount } from "@/lib/customer/server";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const QUOTATION_COLLECTION = "quotations";
@@ -19,12 +23,24 @@ export const QUOTATION_COLLECTION = "quotations";
 export type QuotationLineItem = {
   name: string;
   priceAud: number;
+  code?: string | null;
+  description?: string | null;
+  quantity?: number | null;
+  rateAud?: number | null;
+  gstPercent?: number | null;
 };
 
 /** Extra charges (e.g. labour, call-out fee) added on top of item subtotal. */
 export type QuotationAddition = {
   name: string;
   priceAud: number;
+};
+
+export type QuotationDepositRequest = {
+  mode: "percent" | "fixed";
+  percent: number;
+  amountAud: number;
+  dueDate: string;
 };
 
 export type QuotationDetail = {
@@ -41,6 +57,9 @@ export type QuotationDetail = {
   additionsTotalAud: number;
   finalPriceAud: number;
   notes: string | null;
+  paymentInstructions: string | null;
+  discountAud: number;
+  depositRequest: QuotationDepositRequest | null;
   validUntil: string | null;
   imageUrls: string[];
   pdfUrl: string | null;
@@ -76,6 +95,43 @@ function parseImageUrls(raw: unknown): string[] {
     .slice(0, 10);
 }
 
+function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as Record<string, unknown>;
+  const mode = data.mode === "fixed" ? "fixed" : data.mode === "percent" ? "percent" : null;
+  const amountAud =
+    typeof data.amountAud === "number" && Number.isFinite(data.amountAud)
+      ? data.amountAud
+      : null;
+  const dueDate =
+    typeof data.dueDate === "string" && data.dueDate.trim()
+      ? data.dueDate.trim()
+      : null;
+  if (!mode || amountAud == null || amountAud <= 0 || !dueDate) return null;
+  const percent =
+    typeof data.percent === "number" && Number.isFinite(data.percent)
+      ? Math.min(100, Math.max(0, data.percent))
+      : 0;
+  return { mode, percent, amountAud, dueDate };
+}
+
+function depositPaymentNote(deposit: QuotationDepositRequest): string {
+  const amount = deposit.amountAud.toLocaleString("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const [y, m, d] = deposit.dueDate.split("-");
+  const due =
+    y && m && d
+      ? `${d.padStart(2, "0")}/${m.padStart(2, "0")}/${y}`
+      : deposit.dueDate;
+  const basis =
+    deposit.mode === "percent" && deposit.percent > 0
+      ? `${deposit.percent}% deposit`
+      : "Deposit";
+  return `${basis}: $${amount} due by ${due}.`;
+}
+
 function mapQuotationDoc(
   id: string,
   data: Record<string, unknown>,
@@ -98,9 +154,21 @@ function mapQuotationDoc(
             ? item.amountAud
             : null;
       if (!name || priceAud == null || priceAud < 0) return null;
-      return { name, priceAud };
+      const readOptionalString = (value: unknown): string | undefined =>
+        typeof value === "string" && value.trim() ? value.trim() : undefined;
+      const readOptionalNumber = (value: unknown): number | undefined =>
+        typeof value === "number" && Number.isFinite(value) ? value : undefined;
+      return {
+        name,
+        priceAud,
+        code: readOptionalString(item.code),
+        description: readOptionalString(item.description),
+        quantity: readOptionalNumber(item.quantity),
+        rateAud: readOptionalNumber(item.rateAud),
+        gstPercent: readOptionalNumber(item.gstPercent),
+      };
     })
-    .filter((item): item is QuotationLineItem => item !== null);
+    .filter((item) => item !== null) as QuotationLineItem[];
 
   const additionsRaw = Array.isArray(data.additions) ? data.additions : [];
   const additions = additionsRaw
@@ -209,6 +277,15 @@ function mapQuotationDoc(
           ? data.subtotalAud
           : 0,
     notes: typeof data.notes === "string" ? data.notes : null,
+    paymentInstructions:
+      typeof data.paymentInstructions === "string"
+        ? data.paymentInstructions
+        : null,
+    discountAud:
+      typeof data.discountAud === "number" && Number.isFinite(data.discountAud)
+        ? Math.max(0, data.discountAud)
+        : 0,
+    depositRequest: parseDepositRequest(data.depositRequest),
     validUntil:
       typeof data.validUntil === "string" ? data.validUntil : null,
     imageUrls: parseImageUrls(data.imageUrls),
@@ -270,7 +347,19 @@ function parseLineItems(raw: unknown): QuotationLineItem[] | null {
           ? item.amountAud
           : null;
     if (!name || priceAud == null || priceAud < 0) return null;
-    items.push({ name, priceAud });
+    const readOptionalString = (value: unknown): string | undefined =>
+      typeof value === "string" && value.trim() ? value.trim() : undefined;
+    const readOptionalNumber = (value: unknown): number | undefined =>
+      typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    items.push({
+      name,
+      priceAud,
+      code: readOptionalString(item.code),
+      description: readOptionalString(item.description),
+      quantity: readOptionalNumber(item.quantity),
+      rateAud: readOptionalNumber(item.rateAud),
+      gstPercent: readOptionalNumber(item.gstPercent),
+    });
   }
   return items;
 }
@@ -296,7 +385,14 @@ function parseAdditions(raw: unknown): QuotationAddition[] {
 type QuotationBusinessBranding = {
   businessName: string | null;
   bookingSlug: string | null;
+  bookingPath: string | null;
   logoUrl: string | null;
+  businessAddress: string | null;
+  businessEmail: string | null;
+  businessPhone: string | null;
+  abn: string | null;
+  registeredForGst: boolean;
+  gstPercentage: number | null;
 };
 
 async function loadQuotationBusinessBranding(
@@ -305,20 +401,57 @@ async function loadQuotationBusinessBranding(
   try {
     const businessSnap = await adminDb.collection("businesses").doc(businessId).get();
     const businessData = businessSnap.data() ?? {};
+    const registeredForGst = Boolean(businessData.registeredForGst);
+    const gstRaw = businessData.gstPercentage;
+    const gstPercentage =
+      typeof gstRaw === "number" && Number.isFinite(gstRaw) ? gstRaw : 10;
+    const slug =
+      typeof businessData.bookingSlug === "string"
+        ? businessData.bookingSlug
+        : null;
     return {
       businessName:
         typeof businessData.businessName === "string"
           ? businessData.businessName
           : null,
-      bookingSlug:
-        typeof businessData.bookingSlug === "string"
-          ? businessData.bookingSlug
-          : null,
+      bookingSlug: slug,
+      bookingPath:
+        typeof businessData.bookingPath === "string"
+          ? businessData.bookingPath
+          : slug
+            ? `/booknow/${slug}`
+            : null,
       logoUrl:
         typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
+      businessAddress:
+        typeof businessData.businessAddress === "string"
+          ? businessData.businessAddress
+          : null,
+      businessEmail:
+        typeof businessData.businessEmail === "string"
+          ? businessData.businessEmail
+          : null,
+      businessPhone:
+        typeof businessData.businessPhone === "string"
+          ? businessData.businessPhone
+          : null,
+      abn: typeof businessData.abn === "string" ? businessData.abn : null,
+      registeredForGst,
+      gstPercentage: registeredForGst ? gstPercentage : null,
     };
   } catch {
-    return { businessName: null, bookingSlug: null, logoUrl: null };
+    return {
+      businessName: null,
+      bookingSlug: null,
+      bookingPath: null,
+      logoUrl: null,
+      businessAddress: null,
+      businessEmail: null,
+      businessPhone: null,
+      abn: null,
+      registeredForGst: false,
+      gstPercentage: null,
+    };
   }
 }
 
@@ -432,6 +565,14 @@ export async function createQuotationForInspection(
     pdfBytes = await generateQuotationPdf(quotation, {
       businessName: businessBranding.businessName,
       logoUrl: businessBranding.logoUrl,
+      businessAddress: businessBranding.businessAddress,
+      businessEmail: businessBranding.businessEmail,
+      businessPhone: businessBranding.businessPhone,
+      bookingSlug: businessBranding.bookingSlug,
+      bookingPath: businessBranding.bookingPath,
+      abn: businessBranding.abn,
+      registeredForGst: businessBranding.registeredForGst,
+      gstPercentage: businessBranding.gstPercentage,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
           ? requestData.requestCode
@@ -514,8 +655,13 @@ export async function createQuotationForInspection(
 
   // Auto-save line items to the business item catalog for future reuse.
   try {
-    const { upsertCatalogItems } = await import("@/lib/items/server");
-    await upsertCatalogItems(businessId, createdBy, lineItems);
+    const { catalogInputFromQuotationLineItem, upsertCatalogItems } =
+      await import("@/lib/items/server");
+    await upsertCatalogItems(
+      businessId,
+      createdBy,
+      lineItems.map(catalogInputFromQuotationLineItem),
+    );
   } catch {
     /* catalog auto-save is best-effort */
   }
@@ -526,6 +672,356 @@ export async function createQuotationForInspection(
     pdfBytes,
     businessBranding,
   );
+
+  return { ok: true, quotation };
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export type StandaloneQuotationInput = {
+  customer: { fullName: string; email: string; phone: string };
+  address: InspectionAddress;
+  title: string;
+  description?: string | null;
+  lineItems: QuotationLineItem[];
+  additions?: QuotationAddition[];
+  finalPriceAud?: number | null;
+  notes?: string | null;
+  paymentInstructions?: string | null;
+  discountAud?: number | null;
+  validUntil?: string | null;
+  imageUrls?: string[];
+  depositRequest?: unknown;
+};
+
+function parseStandaloneCustomer(
+  raw: StandaloneQuotationInput["customer"],
+): { ok: true; value: InspectionCustomer } | { ok: false; error: string } {
+  const fullName = (raw?.fullName ?? "").trim();
+  const email = (raw?.email ?? "").trim().toLowerCase();
+  const phone = (raw?.phone ?? "").replace(/\D/g, "");
+  if (fullName.length < 2) {
+    return { ok: false, error: "Customer name is required." };
+  }
+  if (!EMAIL_REGEX.test(email)) {
+    return { ok: false, error: "Enter a valid customer email address." };
+  }
+  if (phone.length < 6) {
+    return { ok: false, error: "Enter a valid customer mobile number." };
+  }
+  return { ok: true, value: { fullName, email, phone } };
+}
+
+function parseStandaloneAddress(
+  raw: InspectionAddress,
+): { ok: true; value: InspectionAddress } | { ok: false; error: string } {
+  const address: InspectionAddress = {
+    street: (raw?.street ?? "").trim(),
+    suburb: (raw?.suburb ?? "").trim(),
+    state: (raw?.state ?? "").trim(),
+    postcode: (raw?.postcode ?? "").trim(),
+  };
+  if (
+    address.street.length < 3 ||
+    address.suburb.length < 2 ||
+    address.state.length < 2 ||
+    address.postcode.length < 3
+  ) {
+    return { ok: false, error: "Enter a complete service address." };
+  }
+  return { ok: true, value: address };
+}
+
+async function resolveOwnerAssignment(
+  uid: string,
+): Promise<InspectionAssignment> {
+  let name = "Business owner";
+  let email: string | null = null;
+  try {
+    const snap = await adminDb.collection("users").doc(uid).get();
+    const data = snap.exists ? snap.data() ?? {} : {};
+    if (typeof data.fullName === "string" && data.fullName.trim()) {
+      name = data.fullName.trim();
+    }
+    if (typeof data.email === "string" && data.email.trim()) {
+      email = data.email.trim();
+    }
+  } catch {
+    /* fall back to defaults */
+  }
+  return { type: "owner", uid, name, email };
+}
+
+/**
+ * Creates a quotation directly (without an existing inspection visit). This
+ * also creates a matching `inspection_requests` document that is already
+ * marked complete, tagged with the `quotation_direct` source, so the quote
+ * shows up in both the Quotations and Inspection visits boards.
+ */
+export async function createStandaloneQuotation(
+  businessId: string,
+  createdBy: string,
+  input: StandaloneQuotationInput,
+): Promise<
+  | { ok: true; quotation: QuotationDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const customerParsed = parseStandaloneCustomer(input.customer);
+  if (!customerParsed.ok) {
+    return { ok: false, status: 400, error: customerParsed.error };
+  }
+
+  const addressParsed = parseStandaloneAddress(input.address);
+  if (!addressParsed.ok) {
+    return { ok: false, status: 400, error: addressParsed.error };
+  }
+
+  const title = (input.title ?? "").trim();
+  if (title.length < 3) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Add a title for this quotation.",
+    };
+  }
+
+  const lineItems = parseLineItems(input.lineItems);
+  if (!lineItems || lineItems.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Add at least one line item with a name and price.",
+    };
+  }
+
+  const customer = customerParsed.value;
+  const address = addressParsed.value;
+  const description =
+    typeof input.description === "string" && input.description.trim()
+      ? input.description.trim()
+      : "";
+
+  const additions = parseAdditions(input.additions);
+  const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
+  const additionsTotalAud = additions.reduce(
+    (sum, item) => sum + item.priceAud,
+    0,
+  );
+  const discountAud =
+    typeof input.discountAud === "number" &&
+    Number.isFinite(input.discountAud) &&
+    input.discountAud >= 0
+      ? input.discountAud
+      : 0;
+  const computedFinal = Math.max(
+    0,
+    subtotalAud + additionsTotalAud - discountAud,
+  );
+  const finalPriceAud =
+    typeof input.finalPriceAud === "number" &&
+    Number.isFinite(input.finalPriceAud) &&
+    input.finalPriceAud >= 0
+      ? input.finalPriceAud
+      : computedFinal;
+  const imageUrls = parseImageUrls(input.imageUrls);
+
+  const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
+  const basePaymentInstructions =
+    typeof input.paymentInstructions === "string" &&
+    input.paymentInstructions.trim()
+      ? input.paymentInstructions.trim()
+      : null;
+  const paymentInstructions = depositRequest
+    ? basePaymentInstructions
+      ? `${basePaymentInstructions}\n\n${depositPaymentNote(depositRequest)}`
+      : depositPaymentNote(depositRequest)
+    : basePaymentInstructions;
+
+  const businessBranding = await loadQuotationBusinessBranding(businessId);
+
+  // Auto-create (or reuse) a customer account so they receive the quotation.
+  let customerId: string | null = null;
+  try {
+    const account = await ensureCustomerAccount({
+      email: customer.email,
+      fullName: customer.fullName,
+      phone: customer.phone,
+      businessId,
+      businessName: businessBranding.businessName,
+      bookingSlug: businessBranding.bookingSlug,
+      logoUrl: businessBranding.logoUrl,
+    });
+    customerId = account.uid;
+  } catch (error) {
+    console.error("[quotation] customer account creation failed:", error);
+  }
+
+  const now = FieldValue.serverTimestamp();
+  const ownerAssignment = await resolveOwnerAssignment(createdBy);
+
+  // 1. Create the completed inspection visit record (source: quotation_direct).
+  const inspectionRef = adminDb.collection(INSPECTION_COLLECTION).doc();
+  const requestCode = await allocateInspectionRequestCode();
+  await inspectionRef.set({
+    id: inspectionRef.id,
+    businessId,
+    requestCode,
+    status: "completed",
+    requestType: "custom_quote",
+    serviceId: null,
+    serviceName: null,
+    serviceBusinessType: null,
+    customRequest: { title, description },
+    customer,
+    customerId,
+    createdSource: "quotation_direct",
+    address,
+    preferredSlots: [],
+    ownerProposedSlots: [],
+    scheduledSlot: null,
+    scheduledStartTime: null,
+    scheduledEndTime: null,
+    assignedTo: ownerAssignment,
+    ownerNote: null,
+    customerNotes:
+      typeof input.notes === "string" && input.notes.trim()
+        ? input.notes.trim()
+        : null,
+    budgetAud: finalPriceAud,
+    createdAt: now,
+    updatedAt: now,
+    visitStartedAt: now,
+    visitEndedAt: now,
+  });
+
+  // 2. Create the quotation document linked to that inspection visit.
+  const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
+  const quotationCode = buildQuotationCodeForInspection({
+    id: inspectionRef.id,
+    requestCode,
+  });
+
+  await ref.set({
+    quotationCode,
+    businessId,
+    inspectionRequestId: inspectionRef.id,
+    serviceTitle: title,
+    customer,
+    address,
+    lineItems,
+    additions,
+    subtotalAud,
+    additionsTotalAud,
+    finalPriceAud,
+    imageUrls,
+    notes:
+      typeof input.notes === "string" && input.notes.trim()
+        ? input.notes.trim()
+        : null,
+    paymentInstructions,
+    discountAud,
+    depositRequest,
+    validUntil:
+      typeof input.validUntil === "string" && input.validUntil.trim()
+        ? input.validUntil.trim()
+        : null,
+    status: "draft",
+    createdBy,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const saved = await ref.get();
+  let quotation = mapQuotationDoc(ref.id, saved.data() ?? {});
+
+  // 3. Generate a branded PDF, upload it, and persist its URL.
+  let pdfBytes: Buffer | null = null;
+  try {
+    const { generateQuotationPdf } = await import("@/lib/quotations/pdf");
+    const { uploadQuotationPdf } = await import(
+      "@/lib/onboarding/services/upload"
+    );
+    pdfBytes = await generateQuotationPdf(quotation, {
+      businessName: businessBranding.businessName,
+      logoUrl: businessBranding.logoUrl,
+      businessAddress: businessBranding.businessAddress,
+      businessEmail: businessBranding.businessEmail,
+      businessPhone: businessBranding.businessPhone,
+      bookingSlug: businessBranding.bookingSlug,
+      bookingPath: businessBranding.bookingPath,
+      abn: businessBranding.abn,
+      registeredForGst: businessBranding.registeredForGst,
+      gstPercentage: businessBranding.gstPercentage,
+      inspectionRequestCode: requestCode,
+    });
+    const uploaded = await uploadQuotationPdf(pdfBytes, {
+      businessId,
+      inspectionRequestId: inspectionRef.id,
+      quotationId: ref.id,
+    });
+    if (uploaded.ok) {
+      await ref.set(
+        { pdfUrl: uploaded.url, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      quotation = { ...quotation, pdfUrl: uploaded.url };
+    }
+  } catch (error) {
+    console.error("standalone quotation PDF generation failed:", error);
+  }
+
+  // 4. Mirror the quotation summary onto the inspection visit and mark sent.
+  try {
+    await inspectionRef.set(
+      {
+        quotation: {
+          id: ref.id,
+          quotationCode,
+          finalPriceAud,
+          subtotalAud,
+          additionsTotalAud,
+          pdfUrl: quotation.pdfUrl ?? null,
+          status: "sent",
+          createdAt: FieldValue.serverTimestamp(),
+        },
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    await ref.set(
+      { status: "sent", updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+    quotation = { ...quotation, status: "sent" };
+  } catch (error) {
+    console.error("standalone quotation mirror to inspection failed:", error);
+  }
+
+  // 5. Auto-save line items to the catalog for future reuse.
+  try {
+    const { catalogInputFromQuotationLineItem, upsertCatalogItems } =
+      await import("@/lib/items/server");
+    await upsertCatalogItems(
+      businessId,
+      createdBy,
+      lineItems.map(catalogInputFromQuotationLineItem),
+    );
+  } catch {
+    /* catalog auto-save is best-effort */
+  }
+
+  // 6. Email the customer their quotation.
+  try {
+    const after = await inspectionRef.get();
+    await sendQuotationCreatedEmail(
+      after.data() ?? {},
+      quotation,
+      pdfBytes,
+      businessBranding,
+    );
+  } catch (error) {
+    console.error("standalone quotation email failed:", error);
+  }
 
   return { ok: true, quotation };
 }
