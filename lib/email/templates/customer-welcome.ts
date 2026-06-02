@@ -25,6 +25,7 @@ export type CustomerWelcomeEmailInput = {
   logoUrl?: string | null;
   /** Temporary password, only for accounts created by the business. */
   temporaryPassword?: string | null;
+  context?: "quotation" | "inspection" | null;
 };
 
 /**
@@ -50,6 +51,13 @@ export async function sendCustomerWelcomeEmail(
     details.unshift({ label: "Booking with", value: input.businessName });
   }
 
+  const portalLine =
+    input.context === "quotation"
+      ? "view quotations, request visits, and track your jobs"
+      : input.context === "inspection"
+        ? "track your inspection visits and proposed times"
+        : "request inspection visits, track proposed times, and see confirmed visit details";
+
   const html = renderEmail({
     eyebrow: "Account created",
     tone: "brand",
@@ -60,8 +68,8 @@ export async function sendCustomerWelcomeEmail(
     title: "Your customer account is ready",
     greetingName: firstName(input.fullName),
     body: input.temporaryPassword
-      ? `${business} created a BMS Pro Trade account for you so you can track your inspection visit. Sign in with the credentials below, then change your password from your account.\n\nYou can request inspection visits, track proposed times, and see confirmed visit details.`
-      : `Thanks for joining BMS Pro Trade. You can now request inspection visits, track proposed times, and see confirmed visit details with ${business}.\n\nSign in anytime with the email you used to register.`,
+      ? `${business} created a BMS Pro Trade account for you so you can ${portalLine}. Sign in with the credentials below, then change your password from your account.`
+      : `Thanks for joining BMS Pro Trade. You can now ${portalLine} with ${business}.\n\nSign in anytime with the email you used to register.`,
     details,
     loginCredentials: input.temporaryPassword
       ? {

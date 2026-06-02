@@ -63,12 +63,16 @@ export function DashboardShell({
   title,
   subtitle,
   icon,
+  hidePageHeader,
+  fullBleed,
   children,
 }: {
   title: string;
   subtitle?: string;
   /** Material Symbols name; inferred from page title when omitted. */
   icon?: string;
+  hidePageHeader?: boolean;
+  fullBleed?: boolean;
   children: React.ReactNode;
 }) {
   const { user, role } = useAuth();
@@ -200,12 +204,20 @@ export function DashboardShell({
           </div>
         </header>
 
-        <main className="mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden px-3 pb-4 pt-[calc(3.5rem+1rem)] sm:max-w-container-max sm:pb-gutter sm:pt-[calc(4rem+1rem)] sm:px-gutter lg:px-3 lg:py-4 lg:pt-4">
-          <DashboardPageHeader
-            title={title}
-            subtitle={subtitle}
-            icon={iconForPageTitle(title, icon)}
-          />
+        <main
+          className={`mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden ${
+            fullBleed
+              ? "flex flex-col px-0 pb-0 pt-[calc(3.5rem+0px)] sm:pt-[calc(4rem+0px)] lg:pt-0"
+              : "px-3 pb-4 pt-[calc(3.5rem+1rem)] sm:max-w-container-max sm:pb-gutter sm:pt-[calc(4rem+1rem)] sm:px-gutter lg:px-3 lg:py-4 lg:pt-4"
+          }`}
+        >
+          {!hidePageHeader ? (
+            <DashboardPageHeader
+              title={title}
+              subtitle={subtitle}
+              icon={iconForPageTitle(title, icon)}
+            />
+          ) : null}
           {children}
         </main>
       </div>
