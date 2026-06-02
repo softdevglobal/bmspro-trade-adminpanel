@@ -3,6 +3,8 @@ import "server-only";
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
+import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
   formatAddress,
@@ -11,6 +13,15 @@ import {
   formatVisitWindow,
   type InspectionAddress,
 } from "@/lib/inspection/types";
+
+function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
+  if (!url?.trim()) return null;
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const base = appBaseUrl();
+  if (base && trimmed.startsWith("/")) return `${base}${trimmed}`;
+  return null;
+}
 
 export type QuotationSentEmailInput = {
   customerEmail: string;
@@ -94,6 +105,10 @@ export async function sendQuotationSentEmail(
     const html = renderEmail({
       eyebrow: "Quotation",
       tone: "brand",
+      headerAlign: "center",
+      headerHeadline: "BMS Pro Trade",
+      platformLogoUrl: platformBrandLogoDataUri(),
+      bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
       title: `Quotation for ${input.serviceTitle}`,
       greetingName: firstName(input.customerFullName),
       body: `Thank you for your visit with ${businessLabel}. Here is your quotation summary from the inspection. A PDF copy is attached for your records.`,
@@ -106,7 +121,7 @@ export async function sendQuotationSentEmail(
         input.notes?.trim() ||
         "We will follow up if any changes are needed before work begins.",
       businessName: input.businessName,
-      logoUrl: input.logoUrl,
+      logoUrl: null,
     });
 
     const subjectBusiness = input.businessName?.trim();
