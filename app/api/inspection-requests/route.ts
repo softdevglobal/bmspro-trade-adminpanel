@@ -4,10 +4,23 @@ import {
   createInspectionRequest,
   listInspectionRequests,
 } from "@/lib/inspection/server";
-import { parseInspectionRequestInput } from "@/lib/inspection/types";
+import {
+  isCreatedSource,
+  parseInspectionRequestInput,
+  type InspectionRequestCreatedSource,
+} from "@/lib/inspection/types";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+function resolveOwnerCreatedSource(
+  request: Request,
+): InspectionRequestCreatedSource {
+  const header = request.headers.get("x-inspection-created-source")?.trim();
+  return isCreatedSource(header) && header === "owner_mobile"
+    ? "owner_mobile"
+    : "owner_dashboard";
+}
 
 async function requireBusinessOwner(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -117,6 +130,7 @@ export async function POST(request: Request) {
 
   const result = await createInspectionRequest(auth.businessId, parsed.value, {
     customerId,
+    createdSource: resolveOwnerCreatedSource(request),
   });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });

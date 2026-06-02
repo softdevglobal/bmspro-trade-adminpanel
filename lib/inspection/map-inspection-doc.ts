@@ -10,6 +10,7 @@ import {
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   type InspectionSlot,
+  parseCreatedSource,
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
 
@@ -111,6 +112,7 @@ export function mapInspectionDoc(
     customRequest,
     customer: parseCustomer(data.customer),
     customerId: typeof data.customerId === "string" ? data.customerId : null,
+    createdSource: parseCreatedSource(data.createdSource),
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),

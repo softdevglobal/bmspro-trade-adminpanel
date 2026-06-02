@@ -18,6 +18,7 @@ import {
   formatSlotDate,
   formatVisitWindow,
   isClockTime,
+  CREATED_SOURCE_LABELS,
   STATUS_LABELS,
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
@@ -36,6 +37,29 @@ type StaffSummary = {
   email: string;
   staffType: string;
 };
+
+function CreatedSourcePill({
+  source,
+}: {
+  source: InspectionRequestDetail["createdSource"];
+}) {
+  if (!source) return null;
+  const label = CREATED_SOURCE_LABELS[source];
+  const icon =
+    source === "booking_engine"
+      ? "language"
+      : source === "owner_mobile"
+        ? "smartphone"
+        : "dashboard";
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
+      <span className="material-symbols-outlined text-[14px] text-primary">
+        {icon}
+      </span>
+      {label}
+    </span>
+  );
+}
 
 function staffAvatarUrl(member: {
   id: string;
@@ -343,6 +367,7 @@ function RequestCard({
               </span>
               {subtitle}
             </span>
+            <CreatedSourcePill source={request.createdSource} />
           </div>
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
             {title}
@@ -892,11 +917,14 @@ function DetailDrawerContent({
               ? request.serviceName ?? "Existing service"
               : request.customRequest?.title ?? "Custom quotation request"}
           </h3>
-          <span
-            className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-[11px] font-bold uppercase tracking-wider ${STATUS_TONE[request.status]}`}
-          >
-            {STATUS_LABELS[request.status]}
-          </span>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-[11px] font-bold uppercase tracking-wider ${STATUS_TONE[request.status]}`}
+            >
+              {STATUS_LABELS[request.status]}
+            </span>
+            <CreatedSourcePill source={request.createdSource} />
+          </div>
         </div>
         <button
           type="button"
