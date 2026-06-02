@@ -12,7 +12,7 @@ import {
   type TenantSource,
   type TenantStatus,
 } from "@/lib/onboarding/types";
-import { sendOwnerWelcomeEmail } from "@/lib/email/account-emails";
+import { sendOwnerWelcomeEmail } from "@/lib/email/templates";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 /**

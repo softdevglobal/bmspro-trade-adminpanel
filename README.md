@@ -10,7 +10,7 @@ A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super
 | Auto customer + default password `00001111` | Step 4 contact in modal | `ensureCustomerAccount()` in `lib/customer/server.ts` | [§5 customers](#customersuid), [§8 POST](#get--post-apiinspection-requests) |
 | Public booking / inspection request | `components/booking-engine.tsx` | `POST /api/booking/inspection-request` | [§8 booking](#post-apibookinginspection-request) |
 | Custom admin password reset | `components/forgot-password-modal.tsx` | `POST /api/auth/send-reset-code`, `reset-password` | [§7](#7-how-password-reset-works) |
-| Email HTML templates | — | `lib/email/templates.ts` + `account-emails.ts` | [§6 — Where templates live](#where-email-templates-live) |
+| Email HTML templates | — | `lib/email/layout.ts` + `lib/email/templates/*` | [§6 — Where templates live](#where-email-templates-live) |
 | Staff **Can get quotation** | `components/team-staff-form.tsx` | `users.canget_qutaion` via `/api/team/staff` | [§5 users](#usersuid) |
 | Brand logo / favicon | `sidebar.tsx`, `app/login/page.tsx` | `public/bms_pro_blue.jpeg`, `app/icon.jpg` | [§3](#3-folder-structure) |
 
@@ -163,8 +163,8 @@ bmspro-trade-adminpanel/
 │   └── ...
 ├── lib/                          # All shared server + client logic (see §10)
 │   └── email/                    # Transactional email (see §6 — Email templates)
-│       ├── templates.ts          # Shared HTML layout: renderEmail()
-│       ├── account-emails.ts     # Welcome + password reset senders
+│       ├── layout.ts             # Shared HTML shell: renderEmail()
+│       ├── templates/            # One file per email (owner-welcome, customer-welcome, …)
 │       └── zeptomail.ts          # ZeptoMail API transport
 ├── public/
 │   └── bms_pro_blue.jpeg         # Brand logo (served at /bms_pro_blue.jpeg)
@@ -645,24 +645,24 @@ There are **no separate `.html` or React email files**. All HTML is built in Typ
 
 | File | Role | What to edit |
 |---|---|---|
-| **`lib/email/templates.ts`** | **Master layout** — single shared design for every email | Header gradient, logo band, body typography, detail tables, highlight callout, login-credentials card, CTA button, footer. Export: `renderEmail(content)`, `renderCustomerEmail()` (alias) |
-| **`lib/email/account-emails.ts`** | **Account / auth copy** — fills `renderEmail()` per use case | Subject lines, eyebrow, title, body text, `details` rows, `loginCredentials` for staff/customer welcome |
+| **`lib/email/layout.ts`** | **Master layout** — single shared design for every email | Header gradient, logo band, body typography, detail tables, highlight callout, login-credentials card, CTA button, footer. Export: `renderEmail(content)`, `renderCustomerEmail()` (alias) |
+| **`lib/email/templates/*.ts`** | **One file per email** — copy + `send*` function | e.g. `owner-welcome.ts`, `customer-welcome.ts`, `inspection-customer-notification.ts`, `quotation-sent.ts` |
 | **`lib/email/zeptomail.ts`** | **Transport only** — no HTML | `sendEmail({ sender, to, subject, htmlBody })` → ZeptoMail API |
-| **`lib/notifications/server.ts`** | **Inspection lifecycle copy** — customer notification emails | `EMAIL_PRESENTATION` (tone per type), `sendCustomerNotificationEmail()` builds `renderEmail()` from notification title/body |
 
-**Layout vs copy:** Change **look and feel** in `templates.ts`. Change **wording or which fields appear** in `account-emails.ts` or `notifications/server.ts`.
+**Layout vs copy:** Change **look and feel** in `layout.ts`. Change **wording or which fields appear** in the matching file under `lib/email/templates/`.
 
 ### Which file sends which email
 
 | Email | Template builder | Sender function | ZeptoMail sender | Triggered from |
 |---|---|---|---|---|
-| Business owner welcome | `account-emails.ts` | `sendOwnerWelcomeEmail` | `system` | `lib/onboarding/server.ts` (tenant create) |
-| Customer welcome (book-now signup) | `account-emails.ts` | `sendCustomerWelcomeEmail` | `system` | `lib/customer/server.ts` (`updateCustomerProfile`) |
-| Customer welcome (owner Add Inspection, password `00001111`) | `account-emails.ts` | `sendCustomerWelcomeEmail` + `temporaryPassword` | `system` | `lib/customer/server.ts` (`ensureCustomerAccount`) |
-| Staff welcome + temp password | `account-emails.ts` | `sendStaffWelcomeEmail` | `system` | `app/api/team/staff/route.ts` (POST) |
-| Admin password reset 6-digit code | `account-emails.ts` | `sendPasswordResetCodeEmail` | `system` | `app/api/auth/send-reset-code/route.ts` |
-| Inspection request received (customer) | `notifications/server.ts` | `notifyCustomerOfNewRequest` → `sendCustomerNotificationEmail` | `request` | `lib/inspection/server.ts` (`createInspectionRequest`) |
-| Visit confirmed / proposed / assigned / cancelled / completed (customer) | `notifications/server.ts` | `notifyCustomerOfStatusChange`, `notifyCustomerOfAssignment`, etc. | `request` | `lib/inspection/server.ts` (`applyOwnerAction`, etc.) |
+| Business owner welcome | `templates/owner-welcome.ts` | `sendOwnerWelcomeEmail` | `system` | `lib/onboarding/server.ts` (tenant create) |
+| Customer welcome (book-now signup) | `templates/customer-welcome.ts` | `sendCustomerWelcomeEmail` | `system` | `lib/customer/server.ts` (`updateCustomerProfile`) |
+| Customer welcome (owner Add Inspection, password `00001111`) | `templates/customer-welcome.ts` | `sendCustomerWelcomeEmail` + `temporaryPassword` | `system` | `lib/customer/server.ts` (`ensureCustomerAccount`) |
+| Staff welcome + temp password | `templates/staff-welcome.ts` | `sendStaffWelcomeEmail` | `system` | `app/api/team/staff/route.ts` (POST) |
+| Admin password reset 6-digit code | `templates/password-reset-code.ts` | `sendPasswordResetCodeEmail` | `system` | `app/api/auth/send-reset-code/route.ts` |
+| Inspection request received (customer) | `templates/inspection-customer-notification.ts` | `notifyCustomerOfNewRequest` → `sendInspectionCustomerNotificationEmail` | `request` | `lib/inspection/server.ts` (`createInspectionRequest`) |
+| Visit confirmed / proposed / assigned / cancelled / completed (customer) | `templates/inspection-customer-notification.ts` | `notifyCustomerOfStatusChange`, etc. | `request` | `lib/inspection/server.ts` (`applyOwnerAction`, etc.) |
+| Quotation sent (customer) | `templates/quotation-sent.ts` | `sendQuotationSentEmail` | `request` | `lib/quotations/server.ts` |
 
 > **Business owners** get inspection updates as **in-app** `business_notifications` only (no email in `notifications/server.ts`). **Customers** get Firestore notifications **and** a matching email when `customerEmail` is set.
 
@@ -670,8 +670,9 @@ There are **no separate `.html` or React email files**. All HTML is built in Typ
 
 ```
 Caller (API route or lib/server.ts)
-  → build copy + call renderEmail({ ... })     [lib/email/templates.ts]
-  → sendEmail({ htmlBody, sender, to, ... })   [lib/email/zeptomail.ts]
+  → send* in lib/email/templates/<name>.ts
+      → renderEmail({ ... })                   [lib/email/layout.ts]
+      → sendEmail({ htmlBody, sender, to, ... }) [lib/email/zeptomail.ts]
       → SendMailClient (zeptomail npm package)
           → ZeptoMail REST API → delivered to recipient
 ```
@@ -685,16 +686,18 @@ Caller (API route or lib/server.ts)
 
 ### Email functions
 
-**File:** `lib/email/account-emails.ts`
+**Import:** `@/lib/email/templates`
 
-| Function | Description |
-|---|---|
-| `sendOwnerWelcomeEmail(input)` | Sends welcome email when a business owner is onboarded |
-| `sendCustomerWelcomeEmail(input)` | Sends welcome to a new customer. When `temporaryPassword` is set (owner-created account), includes a login-credentials card (email + password) |
-| `sendStaffWelcomeEmail(input)` | Sends welcome + temp password to a new staff member |
-| `sendPasswordResetCodeEmail(input)` | Sends the 6-digit password reset code |
+| Function | File | Description |
+|---|---|---|
+| `sendOwnerWelcomeEmail(input)` | `owner-welcome.ts` | Sends welcome email when a business owner is onboarded |
+| `sendCustomerWelcomeEmail(input)` | `customer-welcome.ts` | Sends welcome to a new customer. When `temporaryPassword` is set (owner-created account), includes a login-credentials card (email + password) |
+| `sendStaffWelcomeEmail(input)` | `staff-welcome.ts` | Sends welcome + temp password to a new staff member |
+| `sendPasswordResetCodeEmail(input)` | `password-reset-code.ts` | Sends the 6-digit password reset code |
+| `sendInspectionCustomerNotificationEmail(input)` | `inspection-customer-notification.ts` | Customer inspection lifecycle emails |
+| `sendQuotationSentEmail(input)` | `quotation-sent.ts` | Quotation summary + optional PDF |
 
-### HTML template system (`lib/email/templates.ts`)
+### HTML template system (`lib/email/layout.ts`)
 
 **Exports:** `renderEmail`, `renderCustomerEmail`, types `EmailTemplateContent`, `EmailDetailRow`, `EmailTone`.
 
@@ -841,7 +844,7 @@ Stage 5 — Done
 | `components/login-form.tsx` | "Forgot password?" button; modal rendered outside `<form>` tag to avoid nesting |
 | `app/api/auth/send-reset-code/route.ts` | Generates + stores + emails the 6-digit code |
 | `app/api/auth/reset-password/route.ts` | Verifies code + updates password via Firebase Admin SDK |
-| `lib/email/account-emails.ts` | `sendPasswordResetCodeEmail()` |
+| `lib/email/templates/password-reset-code.ts` | `sendPasswordResetCodeEmail()` |
 
 ### Notes for developers
 
@@ -2145,8 +2148,8 @@ Anonymous (public self-signup)
 
 | File | Purpose |
 |---|---|
-| **`templates.ts`** | **Master HTML template** — `renderEmail()` layout (header, body, details table, highlight, login card, CTA, footer). Edit design here. |
-| **`account-emails.ts`** | Welcome + reset **copy** — calls `renderEmail` then `sendEmail` for owners, customers, staff, password codes. |
+| **`layout.ts`** | **Master HTML template** — `renderEmail()` layout (header, body, details table, highlight, login card, CTA, footer). Edit design here. |
+| **`templates/*.ts`** | **Per-email copy + senders** — one file per transactional email. |
 | **`zeptomail.ts`** | ZeptoMail transport — `sendEmail()` only; reads `ZEPTOMAIL_*` env vars. |
 
 Inspection update emails are **not** in `lib/email/`; their copy and `renderEmail()` calls live in **`lib/notifications/server.ts`** (`EMAIL_PRESENTATION`, `sendCustomerNotificationEmail`).
@@ -2326,8 +2329,8 @@ Next.js App Router
   │     ├── inspection/server.ts    → createInspectionRequest + owner actions
   │     ├── notifications/server.ts → in-app + customer inspection emails
   │     └── email/
-  │           templates.ts          → renderEmail() HTML layout
-  │           account-emails.ts     → welcome + reset senders
+  │           layout.ts             → renderEmail() HTML layout
+  │           templates/*.ts        → one file per email + send*
   │           zeptomail.ts            → ZeptoMail transport
   │
   └── components/

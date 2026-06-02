@@ -1,4 +1,4 @@
-import { sendPasswordResetCodeEmail } from "@/lib/email/account-emails";
+import { sendPasswordResetCodeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
