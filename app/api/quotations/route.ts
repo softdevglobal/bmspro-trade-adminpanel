@@ -1,6 +1,7 @@
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
+  listBusinessQuotations,
   listQuotationsForInspection,
 } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
@@ -128,11 +129,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const inspectionRequestId =
     url.searchParams.get("inspectionRequestId")?.trim() ?? "";
+
   if (!inspectionRequestId) {
-    return NextResponse.json(
-      { ok: false, error: "Missing inspectionRequestId." },
-      { status: 400 },
-    );
+    const quotations = await listBusinessQuotations(auth.businessId);
+    return NextResponse.json({ ok: true, quotations });
   }
 
   const quotations = await listQuotationsForInspection(

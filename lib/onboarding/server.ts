@@ -235,6 +235,7 @@ function businessDocument(
     abn: value.abn || null,
     businessStructure: value.businessStructure,
     registeredForGst: value.registeredForGst,
+    gstPercentage: value.registeredForGst ? 10 : null,
     businessAddress: value.businessAddress || null,
     state: value.state,
     postcode: value.postcode,
@@ -272,20 +273,32 @@ function businessDocument(
   };
 }
 
-/** Reads a small profile (name + logo) for the current owner's business. */
-export async function getBusinessProfile(
-  businessId: string,
-): Promise<{
+/** Reads a small profile for the current owner's business. */
+export type BusinessProfile = {
   businessName: string | null;
   logoUrl: string | null;
   bookingSlug: string | null;
   bookingPath: string | null;
-} | null> {
+  registeredForGst: boolean;
+  gstPercentage: number | null;
+};
+
+function parseGstPercentage(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  if (raw < 0 || raw > 100) return null;
+  return Math.round(raw * 100) / 100;
+}
+
+export async function getBusinessProfile(
+  businessId: string,
+): Promise<BusinessProfile | null> {
   const snap = await adminDb.collection("businesses").doc(businessId).get();
   if (!snap.exists) return null;
   const data = snap.data() ?? {};
   const slug =
     typeof data.bookingSlug === "string" ? data.bookingSlug : null;
+  const registeredForGst = Boolean(data.registeredForGst);
+  const parsedGst = parseGstPercentage(data.gstPercentage);
   return {
     businessName:
       typeof data.businessName === "string" ? data.businessName : null,
@@ -297,7 +310,40 @@ export async function getBusinessProfile(
         : slug
           ? `/booknow/${slug}`
           : null,
+    registeredForGst,
+    gstPercentage: registeredForGst ? (parsedGst ?? 10) : null,
   };
+}
+
+/** Updates editable business profile fields for the settings page. */
+export async function updateBusinessProfile(
+  businessId: string,
+  updates: {
+    logoUrl?: string | null;
+    registeredForGst?: boolean;
+    gstPercentage?: number | null;
+  },
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  if ("logoUrl" in updates) {
+    payload.logoUrl = updates.logoUrl;
+  }
+
+  if ("registeredForGst" in updates) {
+    payload.registeredForGst = updates.registeredForGst;
+    if (updates.registeredForGst === false) {
+      payload.gstPercentage = null;
+    }
+  }
+
+  if ("gstPercentage" in updates) {
+    payload.gstPercentage = updates.gstPercentage;
+  }
+
+  await adminDb.collection("businesses").doc(businessId).update(payload);
 }
 
 /** Updates (or clears) the logo on a business document. */
@@ -305,10 +351,7 @@ export async function updateBusinessLogo(
   businessId: string,
   logoUrl: string | null,
 ): Promise<void> {
-  await adminDb.collection("businesses").doc(businessId).update({
-    logoUrl: logoUrl,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  await updateBusinessProfile(businessId, { logoUrl });
 }
 
 export async function registerSelfSignupTenant(

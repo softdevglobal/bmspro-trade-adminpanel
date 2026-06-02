@@ -574,6 +574,24 @@ export async function listQuotationsForInspection(
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
+export const QUOTATION_LIST_LIMIT = 80;
+
+/** Lists all quotations for a business (newest first). */
+export async function listBusinessQuotations(
+  businessId: string,
+): Promise<QuotationDetail[]> {
+  const snapshot = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .where("businessId", "==", businessId)
+    .orderBy("createdAt", "desc")
+    .limit(QUOTATION_LIST_LIMIT)
+    .get();
+
+  return snapshot.docs.map((doc) =>
+    mapQuotationDoc(doc.id, doc.data() ?? {}),
+  );
+}
+
 async function sendQuotationCreatedEmail(
   requestData: Record<string, unknown>,
   quotation: QuotationDetail,

@@ -8,6 +8,7 @@ import {
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { INSPECTION_COLLECTION } from "@/lib/inspection/types";
 import type {
+  InspectionAssignment,
   InspectionRequestDetail,
   InspectionSlot,
 } from "@/lib/inspection/types";
@@ -130,7 +131,7 @@ export async function createBookingFromInspection(
     scheduledStartTime: input.startTime,
     scheduledEndTime: input.endTime,
     estimatedDurationMinutes: input.estimatedDurationMinutes,
-    assignedTo: current.assignedTo,
+    assignedTo: null,
     ownerNote: typeof input.note === "string" ? input.note : null,
     quotation: current.quotation,
     createdAt: now,
@@ -194,4 +195,43 @@ async function mirrorBookingToQuotations(
     });
   }
   await batch.commit();
+}
+
+export async function assignBusinessBooking(
+  businessId: string,
+  bookingId: string,
+  assignment: InspectionAssignment,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 403, error: "Booking not found." };
+  }
+
+  if (current.status !== "scheduled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only scheduled bookings can be assigned.",
+    };
+  }
+
+  await ref.update({
+    assignedTo: assignment,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+  };
 }
