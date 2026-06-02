@@ -12,8 +12,13 @@ import {
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
+  type InspectionRequestType,
 } from "@/lib/inspection/types";
-import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
+import { COLLECTIONS } from "@/lib/onboarding/services/collections";
+import {
+  buildQuotationCodeForInspection,
+  displayQuotationCode,
+} from "@/lib/reference-codes";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { ensureCustomerAccount } from "@/lib/customer/server";
 import { FieldValue } from "firebase-admin/firestore";
@@ -28,12 +33,6 @@ export type QuotationLineItem = {
   quantity?: number | null;
   rateAud?: number | null;
   gstPercent?: number | null;
-};
-
-/** Extra charges (e.g. labour, call-out fee) added on top of item subtotal. */
-export type QuotationAddition = {
-  name: string;
-  priceAud: number;
 };
 
 export type QuotationDepositRequest = {
@@ -52,10 +51,10 @@ export type QuotationDetail = {
   customer: InspectionCustomer;
   address: InspectionAddress;
   lineItems: QuotationLineItem[];
-  additions: QuotationAddition[];
   subtotalAud: number;
-  additionsTotalAud: number;
   finalPriceAud: number;
+  /** Amount still owed after any deposit (equals finalPriceAud when no deposit). */
+  balanceDueAud: number;
   notes: string | null;
   paymentInstructions: string | null;
   termsAndConditions: string | null;
@@ -76,7 +75,6 @@ export type QuotationDetail = {
 export type CreateQuotationInput = {
   inspectionRequestId: string;
   lineItems: QuotationLineItem[];
-  additions?: QuotationAddition[];
   finalPriceAud?: number | null;
   notes?: string | null;
   validUntil?: string | null;
@@ -114,6 +112,28 @@ function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
       ? Math.min(100, Math.max(0, data.percent))
       : 0;
   return { mode, percent, amountAud, dueDate };
+}
+
+function computeBalanceDueAud(
+  finalPriceAud: number,
+  depositRequest: QuotationDepositRequest | null,
+): number {
+  if (!depositRequest || depositRequest.amountAud <= 0) {
+    return Math.max(0, Math.round(finalPriceAud * 100) / 100);
+  }
+  const depositPaid = Math.min(depositRequest.amountAud, finalPriceAud);
+  return Math.max(0, Math.round((finalPriceAud - depositPaid) * 100) / 100);
+}
+
+/** Persisted when a quote is sent and no job booking exists yet. */
+function awaitingBookingFields(): {
+  bookingStatus: "awaiting";
+  bookingStatusAt: FieldValue;
+} {
+  return {
+    bookingStatus: "awaiting",
+    bookingStatusAt: FieldValue.serverTimestamp(),
+  };
 }
 
 function depositPaymentNote(deposit: QuotationDepositRequest): string {
@@ -170,21 +190,6 @@ function mapQuotationDoc(
       };
     })
     .filter((item) => item !== null) as QuotationLineItem[];
-
-  const additionsRaw = Array.isArray(data.additions) ? data.additions : [];
-  const additions = additionsRaw
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
-      const item = entry as Record<string, unknown>;
-      const name = typeof item.name === "string" ? item.name.trim() : "";
-      const priceAud =
-        typeof item.priceAud === "number" && Number.isFinite(item.priceAud)
-          ? item.priceAud
-          : null;
-      if (!name || priceAud == null || priceAud < 0) return null;
-      return { name, priceAud };
-    })
-    .filter((item): item is QuotationAddition => item !== null);
 
   const customerRaw = data.customer;
   const customer =
@@ -243,6 +248,21 @@ function mapQuotationDoc(
     return null;
   };
 
+  const depositRequest = parseDepositRequest(data.depositRequest);
+  const finalPriceAud =
+    typeof data.finalPriceAud === "number" &&
+    Number.isFinite(data.finalPriceAud)
+      ? data.finalPriceAud
+      : typeof data.subtotalAud === "number" &&
+          Number.isFinite(data.subtotalAud)
+        ? data.subtotalAud
+        : 0;
+  const balanceDueAud =
+    typeof data.balanceDueAud === "number" &&
+    Number.isFinite(data.balanceDueAud)
+      ? Math.max(0, data.balanceDueAud)
+      : computeBalanceDueAud(finalPriceAud, depositRequest);
+
   return {
     id,
     quotationCode:
@@ -259,24 +279,12 @@ function mapQuotationDoc(
     customer,
     address,
     lineItems,
-    additions,
     subtotalAud:
       typeof data.subtotalAud === "number" && Number.isFinite(data.subtotalAud)
         ? data.subtotalAud
         : 0,
-    additionsTotalAud:
-      typeof data.additionsTotalAud === "number" &&
-      Number.isFinite(data.additionsTotalAud)
-        ? data.additionsTotalAud
-        : additions.reduce((sum, item) => sum + item.priceAud, 0),
-    finalPriceAud:
-      typeof data.finalPriceAud === "number" &&
-      Number.isFinite(data.finalPriceAud)
-        ? data.finalPriceAud
-        : typeof data.subtotalAud === "number" &&
-            Number.isFinite(data.subtotalAud)
-          ? data.subtotalAud
-          : 0,
+    finalPriceAud,
+    balanceDueAud,
     notes: typeof data.notes === "string" ? data.notes : null,
     paymentInstructions:
       typeof data.paymentInstructions === "string"
@@ -290,7 +298,7 @@ function mapQuotationDoc(
       typeof data.discountAud === "number" && Number.isFinite(data.discountAud)
         ? Math.max(0, data.discountAud)
         : 0,
-    depositRequest: parseDepositRequest(data.depositRequest),
+    depositRequest,
     validUntil:
       typeof data.validUntil === "string" ? data.validUntil : null,
     imageUrls: parseImageUrls(data.imageUrls),
@@ -309,6 +317,9 @@ function mapQuotationDoc(
       if (parsed) return parsed;
       if (typeof data.bookingId === "string" && data.bookingId.trim()) {
         return "scheduled";
+      }
+      if (data.status === "sent") {
+        return "awaiting";
       }
       return null;
     })(),
@@ -383,24 +394,6 @@ function serializeLineItemForFirestore(item: QuotationLineItem) {
 
 function serializeLineItemsForFirestore(items: QuotationLineItem[]) {
   return items.map(serializeLineItemForFirestore);
-}
-
-/** Parses optional additions (extra charges). Invalid rows are dropped. */
-function parseAdditions(raw: unknown): QuotationAddition[] {
-  if (!Array.isArray(raw)) return [];
-  const additions: QuotationAddition[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const item = entry as Record<string, unknown>;
-    const name = typeof item.name === "string" ? item.name.trim() : "";
-    const priceAud =
-      typeof item.priceAud === "number" && Number.isFinite(item.priceAud)
-        ? item.priceAud
-        : null;
-    if (!name || priceAud == null || priceAud < 0) continue;
-    additions.push({ name, priceAud });
-  }
-  return additions;
 }
 
 type QuotationBusinessBranding = {
@@ -521,13 +514,8 @@ export async function createQuotationForInspection(
     };
   }
 
-  const additions = parseAdditions(input.additions);
   const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
-  const additionsTotalAud = additions.reduce(
-    (sum, item) => sum + item.priceAud,
-    0,
-  );
-  const computedFinal = subtotalAud + additionsTotalAud;
+  const computedFinal = subtotalAud;
   const finalPriceAud =
     typeof input.finalPriceAud === "number" &&
     Number.isFinite(input.finalPriceAud) &&
@@ -535,6 +523,7 @@ export async function createQuotationForInspection(
       ? input.finalPriceAud
       : computedFinal;
   const imageUrls = parseImageUrls(input.imageUrls);
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud, null);
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
   const quotationCode = buildQuotationCodeForInspection({
     id: inspectionId,
@@ -552,10 +541,9 @@ export async function createQuotationForInspection(
     customer: requestData.customer ?? {},
     address: requestData.address ?? {},
     lineItems: serializeLineItemsForFirestore(lineItems),
-    additions,
     subtotalAud,
-    additionsTotalAud,
     finalPriceAud,
+    balanceDueAud,
     imageUrls,
     notes:
       typeof input.notes === "string" && input.notes.trim()
@@ -629,11 +617,12 @@ export async function createQuotationForInspection(
           quotationCode,
           finalPriceAud,
           subtotalAud,
-          additionsTotalAud,
+          balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
           status: "sent",
           createdAt: FieldValue.serverTimestamp(),
         },
+        ...awaitingBookingFields(),
         ...(shouldComplete ? { status: "completed" as const } : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
@@ -641,10 +630,14 @@ export async function createQuotationForInspection(
     );
 
     await ref.set(
-      { status: "sent", updatedAt: FieldValue.serverTimestamp() },
+      {
+        status: "sent",
+        ...awaitingBookingFields(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
       { merge: true },
     );
-    quotation = { ...quotation, status: "sent" };
+    quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
 
     if (shouldComplete) {
       const after = await requestSnap.ref.get();
@@ -687,12 +680,7 @@ export async function createQuotationForInspection(
     /* catalog auto-save is best-effort */
   }
 
-  await sendQuotationCreatedEmail(
-    requestData,
-    quotation,
-    pdfBytes,
-    businessBranding,
-  );
+  await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
 
   return { ok: true, quotation };
 }
@@ -702,10 +690,12 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export type StandaloneQuotationInput = {
   customer: { fullName: string; email: string; phone: string };
   address: InspectionAddress;
-  title: string;
+  title?: string;
   description?: string | null;
+  requestType?: InspectionRequestType;
+  serviceId?: string | null;
+  customRequest?: { title: string; description: string } | null;
   lineItems: QuotationLineItem[];
-  additions?: QuotationAddition[];
   finalPriceAud?: number | null;
   notes?: string | null;
   paymentInstructions?: string | null;
@@ -715,6 +705,36 @@ export type StandaloneQuotationInput = {
   imageUrls?: string[];
   depositRequest?: unknown;
 };
+
+type ServiceLookup = { name: string; businessType: string };
+
+async function lookupBusinessService(
+  businessId: string,
+  serviceId: string,
+): Promise<ServiceLookup | null> {
+  const snap = await adminDb
+    .collection(COLLECTIONS.SERVICES)
+    .doc(serviceId)
+    .get();
+  if (!snap.exists) return null;
+  const data = snap.data();
+  if (!data || data.businessId !== businessId) return null;
+
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const businessType =
+    typeof data.businessType === "string"
+      ? data.businessType
+      : typeof data.category === "string"
+        ? data.category
+        : "";
+  return name ? { name, businessType } : null;
+}
+
+function parseStandaloneRequestType(
+  raw: unknown,
+): InspectionRequestType {
+  return raw === "existing_service" ? "existing_service" : "custom_quote";
+}
 
 function parseStandaloneCustomer(
   raw: StandaloneQuotationInput["customer"],
@@ -798,8 +818,67 @@ export async function createStandaloneQuotation(
     return { ok: false, status: 400, error: addressParsed.error };
   }
 
-  const title = (input.title ?? "").trim();
-  if (title.length < 3) {
+  const requestType = parseStandaloneRequestType(input.requestType);
+
+  let serviceId: string | null = null;
+  let serviceName: string | null = null;
+  let serviceBusinessType: string | null = null;
+  let customRequest: { title: string; description: string } | null = null;
+  let quotationTitle = (input.title ?? "").trim();
+
+  if (requestType === "existing_service") {
+    const sid =
+      typeof input.serviceId === "string" ? input.serviceId.trim() : "";
+    if (!sid) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Select a service from the list.",
+      };
+    }
+    const service = await lookupBusinessService(businessId, sid);
+    if (!service) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Selected service is no longer available.",
+      };
+    }
+    serviceId = sid;
+    serviceName = service.name;
+    serviceBusinessType = service.businessType;
+    quotationTitle = service.name;
+  } else {
+    const cr = input.customRequest;
+    const customTitle =
+      typeof cr?.title === "string" && cr.title.trim()
+        ? cr.title.trim()
+        : quotationTitle;
+    const customDescription =
+      typeof cr?.description === "string" && cr.description.trim()
+        ? cr.description.trim()
+        : typeof input.description === "string"
+          ? input.description.trim()
+          : "";
+    if (customTitle.length < 3) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Add a job title (at least 3 characters).",
+      };
+    }
+    if (customDescription.length < 10) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Describe the work needed (at least 10 characters).",
+      };
+    }
+    customRequest = { title: customTitle, description: customDescription };
+    quotationTitle = customTitle;
+  }
+
+  if (quotationTitle.length < 3) {
     return {
       ok: false,
       status: 400,
@@ -819,26 +898,20 @@ export async function createStandaloneQuotation(
   const customer = customerParsed.value;
   const address = addressParsed.value;
   const description =
-    typeof input.description === "string" && input.description.trim()
-      ? input.description.trim()
-      : "";
+    requestType === "custom_quote" && customRequest
+      ? customRequest.description
+      : typeof input.description === "string" && input.description.trim()
+        ? input.description.trim()
+        : "";
 
-  const additions = parseAdditions(input.additions);
   const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
-  const additionsTotalAud = additions.reduce(
-    (sum, item) => sum + item.priceAud,
-    0,
-  );
   const discountAud =
     typeof input.discountAud === "number" &&
     Number.isFinite(input.discountAud) &&
     input.discountAud >= 0
       ? input.discountAud
       : 0;
-  const computedFinal = Math.max(
-    0,
-    subtotalAud + additionsTotalAud - discountAud,
-  );
+  const computedFinal = Math.max(0, subtotalAud - discountAud);
   const finalPriceAud =
     typeof input.finalPriceAud === "number" &&
     Number.isFinite(input.finalPriceAud) &&
@@ -848,6 +921,7 @@ export async function createStandaloneQuotation(
   const imageUrls = parseImageUrls(input.imageUrls);
 
   const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud, depositRequest);
   const baseTerms =
     typeof input.termsAndConditions === "string" &&
     input.termsAndConditions.trim()
@@ -861,7 +935,7 @@ export async function createStandaloneQuotation(
 
   const businessBranding = await loadQuotationBusinessBranding(businessId);
 
-  // Auto-create (or reuse) a customer account so they receive the quotation.
+  // Auto-create (or reuse) a customer portal account, then email welcome + quotation.
   let customerId: string | null = null;
   try {
     const account = await ensureCustomerAccount({
@@ -872,6 +946,7 @@ export async function createStandaloneQuotation(
       businessName: businessBranding.businessName,
       bookingSlug: businessBranding.bookingSlug,
       logoUrl: businessBranding.logoUrl,
+      context: "quotation",
     });
     customerId = account.uid;
   } catch (error) {
@@ -889,11 +964,11 @@ export async function createStandaloneQuotation(
     businessId,
     requestCode,
     status: "completed",
-    requestType: "custom_quote",
-    serviceId: null,
-    serviceName: null,
-    serviceBusinessType: null,
-    customRequest: { title, description },
+    requestType,
+    serviceId,
+    serviceName,
+    serviceBusinessType,
+    customRequest,
     customer,
     customerId,
     createdSource: "quotation_direct",
@@ -927,14 +1002,13 @@ export async function createStandaloneQuotation(
     quotationCode,
     businessId,
     inspectionRequestId: inspectionRef.id,
-    serviceTitle: title,
+    serviceTitle: quotationTitle,
     customer,
     address,
     lineItems: serializeLineItemsForFirestore(lineItems),
-    additions,
     subtotalAud,
-    additionsTotalAud,
     finalPriceAud,
+    balanceDueAud,
     imageUrls,
     notes:
       typeof input.notes === "string" && input.notes.trim()
@@ -1002,20 +1076,25 @@ export async function createStandaloneQuotation(
           quotationCode,
           finalPriceAud,
           subtotalAud,
-          additionsTotalAud,
+          balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
           status: "sent",
           createdAt: FieldValue.serverTimestamp(),
         },
+        ...awaitingBookingFields(),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
     await ref.set(
-      { status: "sent", updatedAt: FieldValue.serverTimestamp() },
+      {
+        status: "sent",
+        ...awaitingBookingFields(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
       { merge: true },
     );
-    quotation = { ...quotation, status: "sent" };
+    quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
   } catch (error) {
     console.error("standalone quotation mirror to inspection failed:", error);
   }
@@ -1033,15 +1112,9 @@ export async function createStandaloneQuotation(
     /* catalog auto-save is best-effort */
   }
 
-  // 6. Email the customer their quotation.
+  // 6. Email the customer their quotation PDF.
   try {
-    const after = await inspectionRef.get();
-    await sendQuotationCreatedEmail(
-      after.data() ?? {},
-      quotation,
-      pdfBytes,
-      businessBranding,
-    );
+    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
   } catch (error) {
     console.error("standalone quotation email failed:", error);
   }
@@ -1075,7 +1148,11 @@ export async function listQuotationsForInspection(
       : null;
   const fallbackBookingStatus =
     parseBookingStatus(inspectionData.bookingStatus) ??
-    (fallbackBookingId ? ("scheduled" as const) : null);
+    (fallbackBookingId
+      ? ("scheduled" as const)
+      : inspectionData.quotation
+        ? ("awaiting" as const)
+        : null);
 
   return snap.docs
     .map((doc) => {
@@ -1112,11 +1189,12 @@ export async function listBusinessQuotations(
 }
 
 async function sendQuotationCreatedEmail(
-  requestData: Record<string, unknown>,
   quotation: QuotationDetail,
   pdfBytes: Buffer | null,
   businessBranding: QuotationBusinessBranding,
 ): Promise<void> {
+  if (!pdfBytes?.length) return;
+
   const customer = quotation.customer;
   const email = customer.email?.trim();
   if (!email) return;
@@ -1125,39 +1203,22 @@ async function sendQuotationCreatedEmail(
     "@/lib/email/templates/quotation-sent"
   );
 
-  const scheduledSlot = requestData.scheduledSlot as
-    | { date?: string; timeRange?: string }
-    | null
-    | undefined;
-
   const { businessName, bookingSlug, logoUrl } = businessBranding;
+  const quoteCode = displayQuotationCode(quotation);
 
   await sendQuotationSentEmail({
     customerEmail: email,
     customerFullName: customer.fullName,
+    quoteNo: quoteCode,
     serviceTitle: quotation.serviceTitle,
-    inspectionRequestId: quotation.inspectionRequestId,
-    address: quotation.address,
-    scheduledSlot,
-    scheduledStartTime:
-      typeof requestData.scheduledStartTime === "string"
-        ? requestData.scheduledStartTime
-        : null,
-    scheduledEndTime:
-      typeof requestData.scheduledEndTime === "string"
-        ? requestData.scheduledEndTime
-        : null,
-    lineItems: quotation.lineItems,
-    additions: quotation.additions,
-    subtotalAud: quotation.subtotalAud,
-    finalPriceAud: quotation.finalPriceAud,
-    notes: quotation.notes,
+    validUntil: quotation.validUntil,
+    totalAud: quotation.finalPriceAud,
+    depositRequest: quotation.depositRequest,
+    balanceDueAud: quotation.balanceDueAud,
     businessName,
     bookingSlug,
     logoUrl,
     pdfBytes,
-    pdfFileName: `quotation-${quotation.serviceTitle || "bmspro"}.pdf`
-      .replace(/[^a-z0-9.\-]+/gi, "-")
-      .toLowerCase(),
+    pdfFileName: `${quoteCode || "quotation"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });
 }

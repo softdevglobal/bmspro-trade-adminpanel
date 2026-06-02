@@ -1449,9 +1449,7 @@ type QuotationView = {
   bookingStatus: BookingStatus | null;
   serviceTitle: string;
   lineItems: { name: string; priceAud: number }[];
-  additions: { name: string; priceAud: number }[];
   subtotalAud: number;
-  additionsTotalAud: number;
   finalPriceAud: number;
   notes: string | null;
   validUntil: string | null;
@@ -1626,24 +1624,6 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
         <span>Total item price</span>
         <span>{formatAud(quotation.subtotalAud)}</span>
       </div>
-
-      {quotation.additions.length > 0 ? (
-        <ul className="mt-2 space-y-1.5">
-          {quotation.additions.map((item, index) => (
-            <li
-              key={`add-${index}`}
-              className="flex items-center justify-between gap-3 font-body text-[13px]"
-            >
-              <span className="min-w-0 truncate text-on-surface">
-                + {item.name}
-              </span>
-              <span className="shrink-0 text-on-surface-variant">
-                {formatAud(item.priceAud)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-primary/10 px-3 py-2">
         <span className="font-body text-[12px] font-bold uppercase tracking-wider text-primary">

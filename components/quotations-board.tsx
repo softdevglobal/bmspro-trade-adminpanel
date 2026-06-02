@@ -198,29 +198,6 @@ function QuotationPreviewContent({
             <span>Subtotal</span>
             <span className="font-numeric">{formatAud(quotation.subtotalAud)}</span>
           </div>
-          {quotation.additions.length > 0 ? (
-            <>
-              <ul className="mt-3 space-y-1.5">
-                {quotation.additions.map((item, index) => (
-                  <li
-                    key={`${item.name}-${index}`}
-                    className="flex items-center justify-between gap-3 font-body text-[13px]"
-                  >
-                    <span className="text-on-surface">{item.name}</span>
-                    <span className="font-numeric shrink-0 font-semibold text-on-surface">
-                      {formatAud(item.priceAud)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-2 flex items-center justify-between border-t border-outline-variant/40 pt-2 font-body text-[13px] font-semibold">
-                <span>Additions</span>
-                <span className="font-numeric">
-                  {formatAud(quotation.additionsTotalAud)}
-                </span>
-              </div>
-            </>
-          ) : null}
           <div className="mt-3 flex items-center justify-between rounded-lg bg-primary/5 px-3 py-2 font-body text-[14px] font-bold text-primary">
             <span>Final price</span>
             <span className="font-numeric">{formatAud(quotation.finalPriceAud)}</span>

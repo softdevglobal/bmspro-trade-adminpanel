@@ -29,11 +29,20 @@ export type QuotationDocumentBusiness = {
   gstPercentage: number;
 };
 
+export type QuotationDocumentDeposit = {
+  amountAud: number;
+  dueDate: string;
+  balanceDueAud: number;
+  mode: "percent" | "fixed";
+  percent: number;
+};
+
 /** Shared view-model for quotation PDF generation and the admin preview. */
 export type QuotationDocumentData = {
   quoteNo: string;
   quoteDate: string;
   validUntil: string | null;
+  serviceTitle: string | null;
   customer: QuotationDocumentCustomer;
   customerAddress: InspectionAddress;
   lineItems: QuotationDocumentLineItem[];
@@ -41,11 +50,81 @@ export type QuotationDocumentData = {
   discountAud: number;
   gstAud: number;
   totalAud: number;
+  deposit: QuotationDocumentDeposit | null;
   termsAndConditions: string | null;
   paymentInstructions: string | null;
   notes: string | null;
   business: QuotationDocumentBusiness;
 };
+
+export function buildQuotationDocumentDeposit(
+  totalAud: number,
+  deposit:
+    | {
+        amountAud: number;
+        dueDate: string;
+        mode?: "percent" | "fixed";
+        percent?: number;
+      }
+    | null
+    | undefined,
+): QuotationDocumentDeposit | null {
+  if (!deposit || deposit.amountAud <= 0 || !deposit.dueDate.trim()) {
+    return null;
+  }
+  const amountAud = Math.min(
+    Math.round(deposit.amountAud * 100) / 100,
+    Math.max(0, totalAud),
+  );
+  if (amountAud <= 0) return null;
+  return {
+    amountAud,
+    dueDate: deposit.dueDate.trim(),
+    balanceDueAud: Math.max(
+      0,
+      Math.round((totalAud - amountAud) * 100) / 100,
+    ),
+    mode: deposit.mode === "percent" ? "percent" : "fixed",
+    percent:
+      typeof deposit.percent === "number" && Number.isFinite(deposit.percent)
+        ? deposit.percent
+        : 0,
+  };
+}
+
+export function formatDepositSummary(deposit: QuotationDocumentDeposit): string {
+  const due = formatQuoteDate(deposit.dueDate);
+  if (deposit.mode === "percent" && deposit.percent > 0) {
+    return `${deposit.percent}% deposit · due ${due}`;
+  }
+  return `Due ${due}`;
+}
+
+/** True when a stored attachment URL points to a PDF file. */
+export function isPdfAttachmentUrl(url: string): boolean {
+  const normalized = url.trim().toLowerCase();
+  return (
+    normalized.includes(".pdf?") ||
+    normalized.endsWith(".pdf") ||
+    normalized.includes("%2fpdf%3f") ||
+    normalized.includes("/pdf?")
+  );
+}
+
+/** Best-effort display name from a Firebase Storage attachment URL. */
+export function attachmentDisplayName(url: string): string {
+  try {
+    const decoded = decodeURIComponent(url);
+    const match = decoded.match(/\/([^/?]+)\?/);
+    if (match?.[1]) {
+      const name = match[1].replace(/^\d+-[a-f0-9-]+\./i, "");
+      return name || "Attachment";
+    }
+  } catch {
+    /* fall through */
+  }
+  return isPdfAttachmentUrl(url) ? "Document.pdf" : "Photo";
+}
 
 export function formatQuoteMoney(value: number): string {
   return `$${value.toLocaleString("en-AU", {

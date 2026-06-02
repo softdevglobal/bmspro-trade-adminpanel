@@ -107,8 +107,32 @@ export async function POST(request: Request) {
       title: typeof payload.title === "string" ? payload.title : "",
       description:
         typeof payload.description === "string" ? payload.description : null,
+      requestType:
+        payload.requestType === "existing_service" ||
+        payload.requestType === "custom_quote"
+          ? payload.requestType
+          : undefined,
+      serviceId:
+        typeof payload.serviceId === "string" ? payload.serviceId : null,
+      customRequest:
+        payload.customRequest &&
+        typeof payload.customRequest === "object" &&
+        !Array.isArray(payload.customRequest)
+          ? {
+              title:
+                typeof (payload.customRequest as { title?: unknown }).title ===
+                "string"
+                  ? (payload.customRequest as { title: string }).title
+                  : "",
+              description:
+                typeof (payload.customRequest as { description?: unknown })
+                  .description === "string"
+                  ? (payload.customRequest as { description: string })
+                      .description
+                  : "",
+            }
+          : null,
       lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
-      additions: Array.isArray(payload.additions) ? payload.additions : [],
       finalPriceAud:
         typeof payload.finalPriceAud === "number" &&
         Number.isFinite(payload.finalPriceAud)
@@ -147,7 +171,6 @@ export async function POST(request: Request) {
       ? payload.inspectionRequestId
       : "";
   const lineItems = payload.lineItems;
-  const additions = payload.additions;
   const finalPriceAud =
     typeof payload.finalPriceAud === "number" &&
     Number.isFinite(payload.finalPriceAud)
@@ -164,7 +187,6 @@ export async function POST(request: Request) {
     {
       inspectionRequestId,
       lineItems: Array.isArray(lineItems) ? lineItems : [],
-      additions: Array.isArray(additions) ? additions : [],
       finalPriceAud,
       notes,
       validUntil,

@@ -2,6 +2,8 @@
 
 import {
   formatQuoteMoney,
+  formatQuoteDate,
+  formatDepositSummary,
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
 
@@ -112,6 +114,20 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
           </div>
         </div>
 
+        {document.serviceTitle ? (
+          <div className="relative mt-4 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px]">
+            <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
+            <div className="px-5 py-3 pl-6">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
+                Service
+              </p>
+              <p className="mt-1 text-[13px] font-bold text-[#1e2430]">
+                {document.serviceTitle}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         {/* Meta bar */}
         <div className="relative mt-4 overflow-hidden rounded border border-[#c5cfe0] bg-white/75 px-3 py-2.5 text-[11px] font-bold backdrop-blur-[1px]">
           <div className="absolute inset-x-0 top-0 h-0.5 bg-[#0b33a0]/12" />
@@ -127,6 +143,14 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
               </span>
             </span>
           </div>
+          {document.validUntil ? (
+            <p className="mt-1.5 font-normal text-[#6b7280]">
+              Valid until:{" "}
+              <span className="font-medium text-[#1e2430]">
+                {formatQuoteDate(document.validUntil)}
+              </span>
+            </p>
+          ) : null}
         </div>
 
         {/* Line items table */}
@@ -215,21 +239,25 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
           </div>
         ) : null}
 
-        {/* Terms and conditions */}
-        {document.termsAndConditions?.trim() ? (
-          <div className="relative mt-7 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 p-4 shadow-sm backdrop-blur-[1px]">
-            <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
-            <p className="text-[13px] font-bold text-[#0b33a0]">
-              Terms and conditions
-            </p>
-            <p className="mt-2 whitespace-pre-line text-[12px] leading-relaxed text-[#1e2430]">
-              {document.termsAndConditions.trim()}
-            </p>
-          </div>
-        ) : null}
+        {/* Terms + totals */}
+        <div
+          className={`mt-7 ${document.termsAndConditions?.trim() ? "flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between" : ""}`}
+        >
+          {document.termsAndConditions?.trim() ? (
+            <div className="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 p-4 shadow-sm backdrop-blur-[1px]">
+              <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
+              <p className="text-[13px] font-bold text-[#0b33a0]">
+                Terms and conditions
+              </p>
+              <p className="mt-2 whitespace-pre-line text-[12px] leading-relaxed text-[#1e2430]">
+                {document.termsAndConditions.trim()}
+              </p>
+            </div>
+          ) : null}
 
-        {/* Totals panel */}
-        <div className="mt-8 ml-auto w-full max-w-[240px] overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px]">
+          <div
+            className={`w-full max-w-[240px] shrink-0 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px] ${document.termsAndConditions?.trim() ? "sm:ml-2" : "mt-8 ml-auto"}`}
+          >
           <div className="space-y-2 px-4 py-3 text-[12px]">
             <div className="flex justify-between gap-4 text-[#6b7280]">
               <span>Subtotal</span>
@@ -265,6 +293,30 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
             <span className="font-numeric text-[15px] font-bold text-white">
               {formatQuoteMoney(document.totalAud)}
             </span>
+          </div>
+          {document.deposit ? (
+            <>
+              <div className="space-y-0.5 border-t border-[#c5d0e0] px-4 py-3 text-[12px]">
+                <div className="flex justify-between gap-4 text-[#6b7280]">
+                  <span>Deposit due</span>
+                  <span className="font-numeric font-medium text-[#1e2430]">
+                    {formatQuoteMoney(document.deposit.amountAud)}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#9ca3af]">
+                  {formatDepositSummary(document.deposit)}
+                </p>
+              </div>
+              <div className="flex items-center justify-between bg-[#0b33a0] px-4 py-3">
+                <span className="text-[13px] font-bold text-white">
+                  Balance due
+                </span>
+                <span className="font-numeric text-[15px] font-bold text-white">
+                  {formatQuoteMoney(document.deposit.balanceDueAud)}
+                </span>
+              </div>
+            </>
+          ) : null}
           </div>
         </div>
 

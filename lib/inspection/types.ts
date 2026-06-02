@@ -165,8 +165,10 @@ export type InspectionRequestDetail = {
   bookingId: string | null;
   /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
   bookingCode: string | null;
-  /** Mirrored from `bookings.status` when a job booking exists. */
+  /** Quote sent, no job yet (`awaiting`), or mirrored from `bookings.status`. */
   bookingStatus: BookingStatus | null;
+  /** Millis when `bookingStatus` was last set (e.g. quote sent → awaiting). */
+  bookingStatusAt: number | null;
   /** @deprecated Job duration lives on `bookings`; kept for older documents. */
   estimatedDurationMinutes: number | null;
   /** Millis when a job booking was created from this visit. */
@@ -180,7 +182,7 @@ export type InspectionQuotationSummary = {
   pdfUrl: string | null;
   finalPriceAud: number | null;
   subtotalAud: number | null;
-  additionsTotalAud: number | null;
+  balanceDueAud: number | null;
   status: string | null;
   createdAt: number | null;
 };
@@ -209,7 +211,7 @@ export function parseInspectionQuotation(
     pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
     finalPriceAud: readPrice(item.finalPriceAud),
     subtotalAud: readPrice(item.subtotalAud),
-    additionsTotalAud: readPrice(item.additionsTotalAud),
+    balanceDueAud: readPrice(item.balanceDueAud),
     status: typeof item.status === "string" ? item.status : null,
     createdAt: toMillis(item.createdAt),
   };

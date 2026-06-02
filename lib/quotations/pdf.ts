@@ -5,6 +5,8 @@ import {
   formatQuoteDate,
   formatQuoteMoney,
   resolveQuotationTerms,
+  buildQuotationDocumentDeposit,
+  formatDepositSummary,
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
@@ -34,6 +36,17 @@ const TOTAL_BAR = rgb(0.1, 0.12, 0.16);
 const WHITE = rgb(1, 1, 1);
 
 const LOGO_MAX = 72;
+
+/** StandardFonts use WinAnsi — replace common Unicode punctuation. */
+function pdfSafeText(text: string): string {
+  return text
+    .replace(/\u2212/g, "-")
+    .replace(/\u2013/g, "-")
+    .replace(/\u2014/g, "-")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\u2026/g, "...");
+}
 
 function lerpColor(
   a: { r: number; g: number; b: number },
@@ -167,15 +180,16 @@ function fitText(
   size: number,
   maxWidth: number,
 ): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
-  let result = text;
+  const safe = pdfSafeText(text);
+  if (font.widthOfTextAtSize(safe, size) <= maxWidth) return safe;
+  let result = safe;
   while (
     result.length > 1 &&
-    font.widthOfTextAtSize(`${result}…`, size) > maxWidth
+    font.widthOfTextAtSize(`${result}...`, size) > maxWidth
   ) {
     result = result.slice(0, -1);
   }
-  return `${result}…`;
+  return `${result}...`;
 }
 
 function wrapText(
@@ -184,7 +198,7 @@ function wrapText(
   size: number,
   maxWidth: number,
 ): string[] {
-  const words = text.trim().split(/\s+/);
+  const words = pdfSafeText(text).trim().split(/\s+/);
   if (words.length === 0) return [];
   const lines: string[] = [];
   let line = "";
@@ -244,17 +258,23 @@ export function buildQuotationDocumentFromDetail(
       )
     : formatQuoteDate(new Date().toISOString().slice(0, 10));
 
+  const totalAud = quotation.finalPriceAud || totals.totalAud;
+
   return {
     quoteNo: displayQuotationCode(quotation),
     quoteDate,
     validUntil: quotation.validUntil,
+    serviceTitle: quotation.serviceTitle?.trim()
+      ? quotation.serviceTitle.trim()
+      : null,
     customer: quotation.customer,
     customerAddress: quotation.address,
     lineItems,
     subtotalAud: totals.subtotalAud,
     discountAud,
     gstAud: totals.gstAud,
-    totalAud: quotation.finalPriceAud || totals.totalAud,
+    totalAud,
+    deposit: buildQuotationDocumentDeposit(totalAud, quotation.depositRequest),
     termsAndConditions: resolveQuotationTerms(quotation),
     paymentInstructions: null,
     notes: quotation.notes?.trim() ? quotation.notes.trim() : null,
@@ -321,9 +341,10 @@ export async function generateQuotationPdf(
   ) => {
     const size = opts.size ?? 10;
     const useFont = opts.bold ? fontBold : font;
+    const safe = pdfSafeText(text);
     const content = opts.maxWidth
-      ? fitText(text, useFont, size, opts.maxWidth)
-      : text;
+      ? fitText(safe, useFont, size, opts.maxWidth)
+      : safe;
     page.drawText(content, {
       x,
       y: yPos,
@@ -334,10 +355,13 @@ export async function generateQuotationPdf(
   };
 
   const textWidth = (text: string, size: number, bold = false) =>
-    (bold ? fontBold : font).widthOfTextAtSize(text, size);
+    (bold ? fontBold : font).widthOfTextAtSize(pdfSafeText(text), size);
 
   const numericWidth = (text: string, size: number, bold = false) =>
-    (bold ? fontNumericBold : fontNumeric).widthOfTextAtSize(text, size);
+    (bold ? fontNumericBold : fontNumeric).widthOfTextAtSize(
+      pdfSafeText(text),
+      size,
+    );
 
   const drawNumber = (
     text: string,
@@ -351,7 +375,7 @@ export async function generateQuotationPdf(
   ) => {
     const size = opts.size ?? 10;
     const useFont = opts.bold ? fontNumericBold : fontNumeric;
-    page.drawText(text, {
+    page.drawText(pdfSafeText(text), {
       x,
       y: yPos,
       size,
@@ -374,6 +398,23 @@ export async function generateQuotationPdf(
     const bold = opts.bold ?? false;
     drawNumber(text, rightX - numericWidth(text, size, bold), yPos, opts);
   };
+
+  const drawTextRight = (
+    text: string,
+    rightX: number,
+    yPos: number,
+    opts: {
+      size?: number;
+      bold?: boolean;
+      color?: ReturnType<typeof rgb>;
+    } = {},
+  ) => {
+    const size = opts.size ?? 10;
+    const bold = opts.bold ?? false;
+    drawText(text, rightX - textWidth(text, size, bold), yPos, opts);
+  };
+
+  const colRight = (col: { x: number; w: number }) => col.x + col.w - 6;
 
   const drawAbnLine = (abn: string, yPos: number) => {
     const prefix = "ABN: ";
@@ -429,7 +470,11 @@ export async function generateQuotationPdf(
 
   // ── Customer card ──
   ensureSpace(72);
-  const cardH = 58;
+  const customerLines =
+    (data.customer.fullName ? 1 : 0) +
+    (data.customer.email ? 1 : 0) +
+    (data.customer.phone ? 1 : 0);
+  const cardH = Math.max(58, 28 + customerLines * 14);
   page.drawRectangle({
     x: MARGIN,
     y: y - cardH,
@@ -448,37 +493,71 @@ export async function generateQuotationPdf(
     color: BRAND,
   });
 
-  drawText("For:", MARGIN + 14, y - 18, { size: 9, bold: true, color: MUTED });
+  drawText("For:", MARGIN + 14, y - 18, { size: 8, bold: true, color: MUTED });
   let cardY = y - 32;
   if (data.customer.fullName) {
-    drawText(data.customer.fullName, MARGIN + 46, cardY, {
+    drawText(data.customer.fullName, MARGIN + 14, cardY, {
       size: 11,
       bold: true,
     });
     cardY -= 14;
   }
   if (data.customer.email) {
-    drawText(data.customer.email, MARGIN + 46, cardY, {
+    drawText(data.customer.email, MARGIN + 14, cardY, {
       size: 10,
       color: MUTED,
     });
     cardY -= 13;
   }
   if (data.customer.phone) {
-    drawNumber(data.customer.phone, MARGIN + 46, cardY, {
+    drawNumber(data.customer.phone, MARGIN + 14, cardY, {
       size: 10,
       color: MUTED,
     });
   }
   y -= cardH + 16;
 
+  // ── Service strip ──
+  if (data.serviceTitle) {
+    ensureSpace(40);
+    const serviceH = 34;
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - serviceH,
+      width: CONTENT_WIDTH,
+      height: serviceH,
+      color: WHITE,
+      opacity: 0.88,
+      borderColor: rgb(0.78, 0.84, 0.92),
+      borderWidth: 0.75,
+    });
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - serviceH,
+      width: 4,
+      height: serviceH,
+      color: BRAND,
+    });
+    drawText("Service", MARGIN + 14, y - 12, {
+      size: 8,
+      bold: true,
+      color: MUTED,
+    });
+    drawText(data.serviceTitle, MARGIN + 14, y - 26, {
+      size: 10.5,
+      bold: true,
+    });
+    y -= serviceH + 10;
+  }
+
   // ── Quote meta bar ──
-  ensureSpace(28);
+  ensureSpace(data.validUntil ? 36 : 28);
+  const metaH = data.validUntil ? 30 : 22;
   page.drawRectangle({
     x: MARGIN,
-    y: y - 20,
+    y: y - metaH,
     width: CONTENT_WIDTH,
-    height: 22,
+    height: metaH,
     color: WHITE,
     opacity: 0.78,
     borderColor: rgb(0.78, 0.84, 0.92),
@@ -486,24 +565,35 @@ export async function generateQuotationPdf(
   });
   page.drawRectangle({
     x: MARGIN,
-    y: y - 20,
+    y: y - metaH,
     width: CONTENT_WIDTH,
     height: 3,
     color: BRAND,
     opacity: 0.12,
   });
-  drawText(`Quote No:  ${data.quoteNo}`, MARGIN + 10, y - 6, {
+  drawText(`Quote No:  ${data.quoteNo}`, MARGIN + 10, y - 14, {
     size: 9,
     bold: true,
   });
+  if (data.validUntil) {
+    drawText(
+      `Valid until:  ${formatQuoteDate(data.validUntil)}`,
+      MARGIN + 10,
+      y - 26,
+      { size: 8.5, color: MUTED },
+    );
+  }
   const dateSize = 9;
   const datePrefix = "Date:  ";
   const prefixW = fontBold.widthOfTextAtSize(datePrefix, dateSize);
-  const valueW = fontNumeric.widthOfTextAtSize(data.quoteDate, dateSize);
+  const valueW = fontNumeric.widthOfTextAtSize(
+    pdfSafeText(data.quoteDate),
+    dateSize,
+  );
   const dateX = PAGE_WIDTH - MARGIN - 10 - prefixW - valueW;
-  drawText(datePrefix, dateX, y - 6, { size: dateSize, bold: true });
-  drawNumber(data.quoteDate, dateX + prefixW, y - 6, { size: dateSize });
-  y -= 34;
+  drawText(datePrefix, dateX, y - 14, { size: dateSize, bold: true });
+  drawNumber(data.quoteDate, dateX + prefixW, y - 14, { size: dateSize });
+  y -= data.validUntil ? 42 : 34;
 
   // ── Table layout ──
   const cols = {
@@ -543,10 +633,22 @@ export async function generateQuotationPdf(
       bold: true,
       color: MUTED,
     });
-    drawText("Quantity", cols.qty.x + 2, hy, { size: 7.5, bold: true, color: MUTED });
-    drawText("Rate", cols.rate.x + 2, hy, { size: 7.5, bold: true, color: MUTED });
-    drawText("GST", cols.gst.x + 2, hy, { size: 7.5, bold: true, color: MUTED });
-    drawText("Amount", cols.amount.x + 2, hy, {
+    drawTextRight("Quantity", colRight(cols.qty), hy, {
+      size: 7.5,
+      bold: true,
+      color: MUTED,
+    });
+    drawTextRight("Rate", colRight(cols.rate), hy, {
+      size: 7.5,
+      bold: true,
+      color: MUTED,
+    });
+    drawTextRight("GST", colRight(cols.gst), hy, {
+      size: 7.5,
+      bold: true,
+      color: MUTED,
+    });
+    drawTextRight("Amount", colRight(cols.amount), hy, {
       size: 7.5,
       bold: true,
       color: MUTED,
@@ -589,10 +691,10 @@ export async function generateQuotationPdf(
     const ry = y - 13;
     const desc =
       item.description && item.description !== item.name
-        ? `${item.name} — ${item.description}`
+        ? `${item.name} - ${item.description}`
         : item.name;
 
-    drawText(item.code ?? "—", cols.code.x + 4, ry, {
+    drawText(item.code ?? "-", cols.code.x + 4, ry, {
       size: 8,
       maxWidth: cols.code.w - 8,
       color: MUTED,
@@ -601,18 +703,20 @@ export async function generateQuotationPdf(
       size: 8.5,
       maxWidth: cols.desc.w - 8,
     });
-    drawNumber(String(item.quantity), cols.qty.x + 2, ry, { size: 8.5 });
-    drawNumber(formatQuoteMoney(item.rateAud), cols.rate.x + 2, ry, {
+    drawNumberRight(String(item.quantity), colRight(cols.qty), ry, {
       size: 8.5,
     });
-    drawNumber(
-      item.gstPercent > 0 ? `${item.gstPercent}%` : "—",
-      cols.gst.x + 2,
+    drawNumberRight(formatQuoteMoney(item.rateAud), colRight(cols.rate), ry, {
+      size: 8.5,
+    });
+    drawNumberRight(
+      item.gstPercent > 0 ? `${item.gstPercent}%` : "-",
+      colRight(cols.gst),
       ry,
       { size: 8.5 },
     );
     const amt = formatQuoteMoney(item.amountAud);
-    drawNumberRight(amt, cols.amount.x + cols.amount.w - 6, ry, {
+    drawNumberRight(amt, colRight(cols.amount), ry, {
       size: 8.5,
       bold: true,
     });
@@ -636,21 +740,133 @@ export async function generateQuotationPdf(
   });
   y -= 28;
 
-  // Terms and conditions
-  if (data.termsAndConditions?.trim()) {
-    ensureSpace(48);
-    const termsLines = wrapText(
-      data.termsAndConditions.trim(),
-      font,
-      10,
-      CONTENT_WIDTH - 24,
-    );
-    const boxH = 22 + termsLines.length * 13;
+  const panelW = 240;
+  const panelX = PAGE_WIDTH - MARGIN - panelW;
+  const sectionGap = 14;
+
+  const computeTotalsPanelHeight = (): number => {
+    let h = 18; // top inset
+    h += 18; // subtotal
+    if (data.discountAud > 0) h += 18;
+    if (data.gstAud > 0) h += 18;
+    h += 4 + 28; // spacer + total bar
+    if (data.deposit) {
+      h += 18 + 12 + 16 + 28; // deposit row, due line, spacer, balance bar
+    }
+    h += 10; // bottom padding
+    return h;
+  };
+
+  const panelH = computeTotalsPanelHeight();
+
+  const drawTotalsPanel = (panelTopY: number) => {
+    page.drawRectangle({
+      x: panelX,
+      y: panelTopY - panelH,
+      width: panelW,
+      height: panelH,
+      color: WHITE,
+      opacity: 0.9,
+      borderColor: rgb(0.78, 0.84, 0.92),
+      borderWidth: 0.75,
+    });
+
+    let ty = panelTopY - 18;
+    const drawPanelRow = (label: string, value: string, bold = false) => {
+      drawText(label, panelX + 12, ty, { size: 9.5, bold, color: MUTED });
+      drawNumberRight(value, panelX + panelW - 12, ty, { size: 9.5, bold });
+      ty -= 18;
+    };
+
+    drawPanelRow("Subtotal", formatQuoteMoney(data.subtotalAud));
+    if (data.discountAud > 0) {
+      drawPanelRow("Discount", `-${formatQuoteMoney(data.discountAud)}`);
+    }
+    if (data.gstAud > 0) {
+      const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;
+      drawText(gstLabel, panelX + 12, ty, {
+        size: 8.5,
+        color: MUTED,
+        maxWidth: panelW - 80,
+      });
+      drawNumberRight(formatQuoteMoney(data.gstAud), panelX + panelW - 12, ty, {
+        size: 9.5,
+        bold: true,
+      });
+      ty -= 18;
+    }
+
+    ty -= 4;
+    page.drawRectangle({
+      x: panelX,
+      y: ty - 22,
+      width: panelW,
+      height: 28,
+      color: TOTAL_BAR,
+    });
+    drawText("Total", panelX + 12, ty - 8, {
+      size: 11,
+      bold: true,
+      color: WHITE,
+    });
+    drawNumberRight(formatQuoteMoney(data.totalAud), panelX + panelW - 12, ty - 9, {
+      size: 12,
+      bold: true,
+      color: WHITE,
+    });
+    ty -= 30;
+
+    if (data.deposit) {
+      drawText("Deposit due", panelX + 12, ty, { size: 9.5, color: MUTED });
+      drawNumberRight(
+        formatQuoteMoney(data.deposit.amountAud),
+        panelX + panelW - 12,
+        ty,
+        { size: 9.5, bold: true },
+      );
+      ty -= 12;
+      drawText(formatDepositSummary(data.deposit), panelX + 12, ty, {
+        size: 7.5,
+        color: MUTED,
+        maxWidth: panelW - 24,
+      });
+      ty -= 16;
+      page.drawRectangle({
+        x: panelX,
+        y: ty - 22,
+        width: panelW,
+        height: 28,
+        color: BRAND,
+      });
+      drawText("Balance due", panelX + 12, ty - 8, {
+        size: 11,
+        bold: true,
+        color: WHITE,
+      });
+      drawNumberRight(
+        formatQuoteMoney(data.deposit.balanceDueAud),
+        panelX + panelW - 12,
+        ty - 9,
+        { size: 12, bold: true, color: WHITE },
+      );
+    }
+  };
+
+  const termsText = data.termsAndConditions?.trim();
+  if (termsText) {
+    const termsLines = wrapText(termsText, font, 10, CONTENT_WIDTH - 24);
+    const termsBoxH = 22 + termsLines.length * 13;
+    const sectionTopY = y;
+    const termsW = CONTENT_WIDTH - panelW - sectionGap;
+    const sectionH = Math.max(termsBoxH, panelH);
+
+    ensureSpace(sectionH + 16);
+
     page.drawRectangle({
       x: MARGIN,
-      y: y - boxH,
-      width: CONTENT_WIDTH,
-      height: boxH,
+      y: sectionTopY - termsBoxH,
+      width: termsW,
+      height: termsBoxH,
       color: WHITE,
       opacity: 0.88,
       borderColor: rgb(0.78, 0.84, 0.92),
@@ -658,93 +874,29 @@ export async function generateQuotationPdf(
     });
     page.drawRectangle({
       x: MARGIN,
-      y: y - boxH,
+      y: sectionTopY - termsBoxH,
       width: 4,
-      height: boxH,
+      height: termsBoxH,
       color: BRAND,
     });
-    drawText("Terms and conditions", MARGIN + 12, y - 16, {
+    drawText("Terms and conditions", MARGIN + 12, sectionTopY - 16, {
       size: 11,
       bold: true,
       color: BRAND,
     });
-    let ty = y - 32;
+    let termsY = sectionTopY - 32;
     for (const line of termsLines) {
-      drawText(line, MARGIN + 12, ty, { size: 10 });
-      ty -= 13;
+      drawText(line, MARGIN + 12, termsY, { size: 10, maxWidth: termsW - 24 });
+      termsY -= 13;
     }
-    y -= boxH + 16;
+
+    drawTotalsPanel(sectionTopY);
+    y = sectionTopY - sectionH - 20;
+  } else {
+    ensureSpace(panelH + 8);
+    drawTotalsPanel(y);
+    y -= panelH + 20;
   }
-
-  // Totals panel (right)
-  const panelW = 220;
-  const panelX = PAGE_WIDTH - MARGIN - panelW;
-  const totalRows =
-    2 +
-    (data.discountAud > 0 ? 1 : 0) +
-    (data.gstAud > 0 ? 1 : 0);
-  const panelH = 16 + totalRows * 18 + 32;
-  ensureSpace(panelH + 8);
-
-  page.drawRectangle({
-    x: panelX,
-    y: y - panelH,
-    width: panelW,
-    height: panelH,
-    color: WHITE,
-    opacity: 0.9,
-    borderColor: rgb(0.78, 0.84, 0.92),
-    borderWidth: 0.75,
-  });
-
-  let ty = y - 18;
-  const drawPanelRow = (label: string, value: string, bold = false) => {
-    drawText(label, panelX + 12, ty, { size: 9.5, bold, color: MUTED });
-    drawNumberRight(value, panelX + panelW - 12, ty, { size: 9.5, bold });
-    ty -= 18;
-  };
-
-  drawPanelRow("Subtotal", formatQuoteMoney(data.subtotalAud));
-  if (data.discountAud > 0) {
-    drawPanelRow("Discount", `−${formatQuoteMoney(data.discountAud)}`);
-  }
-  if (data.gstAud > 0) {
-    const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;
-    drawText(gstLabel, panelX + 12, ty, {
-      size: 8.5,
-      color: MUTED,
-      maxWidth: panelW - 80,
-    });
-    const gstVal = formatQuoteMoney(data.gstAud);
-    drawNumberRight(gstVal, panelX + panelW - 12, ty, {
-      size: 9.5,
-      bold: true,
-    });
-    ty -= 18;
-  }
-
-  // Final total bar
-  ty -= 4;
-  page.drawRectangle({
-    x: panelX,
-    y: ty - 22,
-    width: panelW,
-    height: 28,
-    color: TOTAL_BAR,
-  });
-  const totalLabel = "Total";
-  const totalVal = formatQuoteMoney(data.totalAud);
-  drawText(totalLabel, panelX + 12, ty - 8, {
-    size: 11,
-    bold: true,
-    color: WHITE,
-  });
-  drawNumberRight(totalVal, panelX + panelW - 12, ty - 9, {
-    size: 12,
-    bold: true,
-    color: WHITE,
-  });
-  y -= panelH + 20;
 
   if (data.notes?.trim()) {
     ensureSpace(40);

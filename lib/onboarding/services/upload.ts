@@ -10,8 +10,11 @@ import { getStorageBucketName } from "@/lib/firebase/admin";
 import { getStorage } from "firebase-admin/storage";
 import { randomUUID } from "crypto";
 
-/** Maximum allowed upload size (5 MB). */
+/** Maximum allowed image upload size (5 MB). */
 const MAX_BYTES = 5 * 1024 * 1024;
+
+/** Maximum allowed PDF upload size (10 MB). */
+const PDF_MAX_BYTES = 10 * 1024 * 1024;
 
 /** MIME types accepted for service images. */
 const ALLOWED_TYPES = new Set([
@@ -72,6 +75,65 @@ function resolveImageContentType(
   }
 
   return null;
+}
+
+/** Resolves a trusted PDF MIME type when clients send octet-stream or omit it. */
+function resolvePdfContentType(
+  reportedType: string,
+  filename: string,
+  file: Buffer,
+): string | null {
+  const normalized = reportedType.trim().toLowerCase();
+  if (normalized === "application/pdf") return normalized;
+
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "pdf") return "application/pdf";
+
+  if (file.length >= 5 && file.subarray(0, 5).toString("ascii") === "%PDF-") {
+    return "application/pdf";
+  }
+
+  return null;
+}
+
+async function saveQuotationFileToStorage(
+  file: Buffer,
+  contentType: string,
+  ext: string,
+  options: {
+    businessId: string;
+    uid: string;
+    inspectionRequestId?: string;
+  },
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const bucket = getStorage().bucket(bucketName);
+  const requestPart = options.inspectionRequestId?.trim() || "general";
+  const path = `quotations/${options.businessId}/${requestPart}/${options.uid}/${Date.now()}-${randomUUID()}.${ext}`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType,
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+        },
+      },
+    });
+
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, imageUrl };
+  } catch (error) {
+    console.error("saveQuotationFileToStorage failed:", error);
+    return { ok: false, error: "Could not upload file." };
+  }
 }
 
 /**
@@ -191,8 +253,44 @@ export async function uploadBusinessLogo(
 }
 
 /**
- * Uploads a quotation attachment image to Firebase Storage.
+ * Uploads a quotation attachment (image or PDF) to Firebase Storage.
  */
+export async function uploadQuotationAttachment(
+  file: Buffer,
+  contentType: string,
+  options: {
+    businessId: string;
+    uid: string;
+    inspectionRequestId?: string;
+    filename?: string;
+  },
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  const filename = options.filename ?? "";
+
+  const imageType = resolveImageContentType(contentType, filename, file);
+  if (imageType) {
+    if (file.length > MAX_BYTES) {
+      return { ok: false, error: "Image must be 5 MB or smaller." };
+    }
+    const ext = imageType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+    return saveQuotationFileToStorage(file, imageType, ext, options);
+  }
+
+  const pdfType = resolvePdfContentType(contentType, filename, file);
+  if (pdfType) {
+    if (file.length > PDF_MAX_BYTES) {
+      return { ok: false, error: "PDF must be 10 MB or smaller." };
+    }
+    return saveQuotationFileToStorage(file, pdfType, "pdf", options);
+  }
+
+  return {
+    ok: false,
+    error: "Unsupported file type. Use JPEG, PNG, WebP, GIF, or PDF.",
+  };
+}
+
+/** @deprecated Use uploadQuotationAttachment — kept for existing callers. */
 export async function uploadQuotationImage(
   file: Buffer,
   contentType: string,
@@ -203,52 +301,7 @@ export async function uploadQuotationImage(
     filename?: string;
   },
 ): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
-  const resolved = resolveImageContentType(
-    contentType,
-    options.filename ?? "",
-    file,
-  );
-  if (!resolved) {
-    return {
-      ok: false,
-      error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF.",
-    };
-  }
-  contentType = resolved;
-
-  if (file.length > MAX_BYTES) {
-    return { ok: false, error: "Image must be 5 MB or smaller." };
-  }
-
-  let bucketName: string;
-  try {
-    bucketName = getStorageBucketName();
-  } catch {
-    return { ok: false, error: "Storage bucket is not configured." };
-  }
-
-  const bucket = getStorage().bucket(bucketName);
-  const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
-  const requestPart = options.inspectionRequestId?.trim() || "general";
-  const path = `quotations/${options.businessId}/${requestPart}/${options.uid}/${Date.now()}-${randomUUID()}.${ext}`;
-  const token = randomUUID();
-
-  try {
-    await bucket.file(path).save(file, {
-      metadata: {
-        contentType,
-        metadata: {
-          firebaseStorageDownloadTokens: token,
-        },
-      },
-    });
-
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
-    return { ok: true, imageUrl };
-  } catch (error) {
-    console.error("uploadQuotationImage failed:", error);
-    return { ok: false, error: "Could not upload image." };
-  }
+  return uploadQuotationAttachment(file, contentType, options);
 }
 
 /**

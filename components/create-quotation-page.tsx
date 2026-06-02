@@ -17,13 +17,19 @@ import {
   computeDocumentTotals,
   computeQuotationLineAmounts,
   formatQuoteDate,
+  attachmentDisplayName,
+  isPdfAttachmentUrl,
+  buildQuotationDocumentDeposit,
   type GstPricingMode,
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
 import {
   type InspectionAddress,
   type InspectionRequestDetail,
+  type InspectionRequestType,
 } from "@/lib/inspection/types";
+import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import { iconForBusinessType } from "@/lib/onboarding/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -242,6 +248,58 @@ function SectionLink({
   );
 }
 
+function RequestTypeCard({
+  icon,
+  label,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: string;
+  label: string;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onSelect}
+      disabled={disabled}
+      className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+        selected
+          ? "border-primary bg-surface-container-lowest shadow-sm ring-1 ring-primary/20"
+          : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          selected
+            ? "bg-primary text-on-primary"
+            : "bg-primary/10 text-primary"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-body text-[14px] font-semibold text-on-surface">
+          {label}
+        </span>
+        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
+          {description}
+        </span>
+      </span>
+      {selected ? (
+        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
+          check_circle
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
 export function CreateQuotationPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -263,6 +321,16 @@ export function CreateQuotationPage() {
   const [address, setAddress] = useState<InspectionAddress>({
     ...EMPTY_ADDRESS,
   });
+
+  const [requestType, setRequestType] =
+    useState<InspectionRequestType>("custom_quote");
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+    null,
+  );
+  const [customServiceTitle, setCustomServiceTitle] = useState("");
+  const [customServiceDescription, setCustomServiceDescription] = useState("");
+  const [services, setServices] = useState<BusinessServiceDetail[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
 
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [catalogSuggestField, setCatalogSuggestField] = useState<
@@ -314,6 +382,26 @@ export function CreateQuotationPage() {
       )
       .slice(0, 8);
   }, [customerOptions, customerSearch]);
+
+  const activeServices = useMemo(
+    () => services.filter((service) => service.isActive),
+    [services],
+  );
+
+  const selectedService = useMemo(
+    () =>
+      activeServices.find((service) => service.id === selectedServiceId) ??
+      null,
+    [activeServices, selectedServiceId],
+  );
+
+  const previewServiceTitle = useMemo(() => {
+    if (requestType === "existing_service") {
+      return selectedService?.name ?? null;
+    }
+    const title = customServiceTitle.trim();
+    return title.length >= 3 ? title : null;
+  }, [requestType, selectedService, customServiceTitle]);
 
   const catalogSuggestions = useMemo(() => {
     if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
@@ -465,9 +553,12 @@ export function CreateQuotationPage() {
     void (async () => {
       try {
         const token = await user.getIdToken();
-        const [itemsRes, profileRes] = await Promise.all([
+        const [itemsRes, profileRes, servicesRes] = await Promise.all([
           fetch("/api/items", { headers: { Authorization: `Bearer ${token}` } }),
           fetch("/api/business/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          fetch("/api/services", {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
@@ -511,7 +602,20 @@ export function CreateQuotationPage() {
             setTermsLoaded(true);
           }
         }
+        setServicesLoading(true);
+        const servicesData = (await servicesRes.json()) as {
+          ok?: boolean;
+          services?: BusinessServiceDetail[];
+        };
+        if (servicesRes.ok && servicesData.ok && servicesData.services) {
+          setServices(servicesData.services);
+          if (servicesData.services.some((service) => service.isActive)) {
+            setRequestType("existing_service");
+          }
+        }
+        setServicesLoading(false);
       } catch {
+        setServicesLoading(false);
         /* optional */
       }
     })();
@@ -700,7 +804,7 @@ export function CreateQuotationPage() {
     );
   }
 
-  async function uploadImage(event: ChangeEvent<HTMLInputElement>) {
+  async function uploadAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !user) return;
     setUploadingImage(true);
@@ -720,14 +824,14 @@ export function CreateQuotationPage() {
         imageUrl?: string;
       };
       if (!response.ok || !data.ok || !data.imageUrl) {
-        throw new Error(data.error ?? "Could not upload image.");
+        throw new Error(data.error ?? "Could not upload file.");
       }
       setImageUrls((prev) => [...prev, data.imageUrl!].slice(0, 10));
     } catch (uploadError) {
       setError(
         uploadError instanceof Error
           ? uploadError.message
-          : "Could not upload image.",
+          : "Could not upload file.",
       );
     } finally {
       setUploadingImage(false);
@@ -744,9 +848,27 @@ export function CreateQuotationPage() {
       return "Enter a valid client mobile number.";
     }
     if (address.street.trim().length < 3) return "Enter a complete address.";
+    if (requestType === "existing_service") {
+      if (!selectedServiceId) return "Select a service from the list.";
+    } else {
+      if (customServiceTitle.trim().length < 3) {
+        return "Add a job title (at least 3 characters).";
+      }
+      if (customServiceDescription.trim().length < 10) {
+        return "Describe the work needed (at least 10 characters).";
+      }
+    }
     if (lineItems.length === 0) return "Add at least one line item.";
     return null;
-  }, [customer, address, lineItems]);
+  }, [
+    customer,
+    address,
+    lineItems,
+    requestType,
+    selectedServiceId,
+    customServiceTitle,
+    customServiceDescription,
+  ]);
 
   async function save() {
     if (!user) return;
@@ -762,8 +884,11 @@ export function CreateQuotationPage() {
     try {
       const token = await user.getIdToken();
       const title =
-        lineItems[0]?.name.trim() ||
-        (lineItems.length > 1 ? "Quotation" : "Custom quotation");
+        requestType === "existing_service"
+          ? (selectedService?.name ?? "Quotation")
+          : customServiceTitle.trim() ||
+            lineItems[0]?.name.trim() ||
+            "Custom quotation";
       const response = await fetch("/api/quotations", {
         method: "POST",
         headers: {
@@ -778,6 +903,16 @@ export function CreateQuotationPage() {
             phone: customer.phone,
           },
           address,
+          requestType,
+          serviceId:
+            requestType === "existing_service" ? selectedServiceId : null,
+          customRequest:
+            requestType === "custom_quote"
+              ? {
+                  title: customServiceTitle.trim(),
+                  description: customServiceDescription.trim(),
+                }
+              : null,
           title,
           description: lineItems
             .map((item) =>
@@ -850,6 +985,7 @@ export function CreateQuotationPage() {
       quoteNo: "Draft",
       quoteDate: formatQuoteDate(quotationDate),
       validUntil: dueDate,
+      serviceTitle: previewServiceTitle,
       customer: {
         fullName: customer.fullName.trim(),
         email: customer.email.trim(),
@@ -861,6 +997,7 @@ export function CreateQuotationPage() {
       discountAud: discountAmount,
       gstAud: gstAmount,
       totalAud: total,
+      deposit: buildQuotationDocumentDeposit(total, depositRequest),
       termsAndConditions: termsAndConditions.trim() || null,
       paymentInstructions: null,
       notes: comment.trim() || null,
@@ -878,6 +1015,7 @@ export function CreateQuotationPage() {
   }, [
     quotationDate,
     dueDate,
+    previewServiceTitle,
     customer,
     address,
     documentLineItems,
@@ -885,6 +1023,7 @@ export function CreateQuotationPage() {
     discountAmount,
     gstAmount,
     total,
+    depositRequest,
     termsAndConditions,
     comment,
     businessName,
@@ -1140,6 +1279,149 @@ export function CreateQuotationPage() {
                   </div>
                 </section>
               )}
+
+              {/* Service */}
+              <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                  Service
+                </h2>
+                <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                  Choose an existing service or describe a custom job — same as
+                  an inspection request.
+                </p>
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <RequestTypeCard
+                    icon="format_list_bulleted"
+                    label="Existing service"
+                    description="Pick from the services this business offers."
+                    selected={requestType === "existing_service"}
+                    disabled={servicesLoading || activeServices.length === 0}
+                    onSelect={() => {
+                      setRequestType("existing_service");
+                      setError(null);
+                    }}
+                  />
+                  <RequestTypeCard
+                    icon="request_quote"
+                    label="Custom quote"
+                    description="Describe the work for this quotation."
+                    selected={requestType === "custom_quote"}
+                    onSelect={() => {
+                      setRequestType("custom_quote");
+                      setError(null);
+                    }}
+                  />
+                </div>
+
+                {requestType === "existing_service" ? (
+                  activeServices.length > 0 ? (
+                    <ul className="mt-3 overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
+                      {activeServices.map((service, index) => {
+                        const selected = selectedServiceId === service.id;
+                        return (
+                          <li
+                            key={service.id}
+                            className={
+                              index > 0
+                                ? "border-t border-outline-variant/40"
+                                : ""
+                            }
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedServiceId(
+                                  selectedServiceId === service.id
+                                    ? null
+                                    : service.id,
+                                );
+                                setError(null);
+                              }}
+                              className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
+                                selected
+                                  ? "bg-primary/5"
+                                  : "hover:bg-surface-container"
+                              }`}
+                            >
+                              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
+                                {service.imageUrl ? (
+                                  <img
+                                    src={service.imageUrl}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center">
+                                    <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
+                                      {iconForBusinessType(service.businessType)}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-body text-[14px] font-semibold text-on-surface">
+                                  {service.name}
+                                </span>
+                                <span className="font-body text-[12px] text-on-surface-variant">
+                                  {service.businessType}
+                                </span>
+                              </span>
+                              {selected ? (
+                                <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
+                                  check_circle
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : servicesLoading ? (
+                    <p className="mt-3 font-body text-[13px] text-on-surface-variant">
+                      Loading services…
+                    </p>
+                  ) : (
+                    <p className="mt-3 font-body text-[13px] text-on-surface-variant">
+                      No active services yet — use a custom quote instead.
+                    </p>
+                  )
+                ) : (
+                  <div className="mt-3 grid gap-3">
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Job title</span>
+                      <input
+                        type="text"
+                        value={customServiceTitle}
+                        onChange={(e) => {
+                          setCustomServiceTitle(e.target.value);
+                          setError(null);
+                        }}
+                        placeholder="e.g. Replace kitchen tap and check leak"
+                        className={INPUT_CLASS}
+                        maxLength={120}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={LABEL_CLASS}>What needs doing?</span>
+                      <textarea
+                        value={customServiceDescription}
+                        onChange={(e) => {
+                          setCustomServiceDescription(e.target.value);
+                          setError(null);
+                        }}
+                        rows={4}
+                        placeholder="Tell us the scope, materials involved, urgency, etc."
+                        className={`${INPUT_CLASS} resize-y`}
+                        maxLength={1500}
+                      />
+                      <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+                        At least 10 characters (
+                        {customServiceDescription.trim().length}/10).
+                      </p>
+                    </label>
+                  </div>
+                )}
+              </section>
 
               {/* Items */}
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
@@ -1460,12 +1742,15 @@ export function CreateQuotationPage() {
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
                   Attachments
                 </h2>
+                <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                  Add photos or PDF documents (max 10 files).
+                </p>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf,.pdf"
                   className="hidden"
-                  onChange={(e) => void uploadImage(e)}
+                  onChange={(e) => void uploadAttachment(e)}
                 />
                 <button
                   type="button"
@@ -1474,19 +1759,30 @@ export function CreateQuotationPage() {
                   className="mt-3 inline-flex items-center gap-2 font-body text-[14px] font-semibold text-primary disabled:opacity-50"
                 >
                   <span className="material-symbols-outlined text-[20px]">
-                    photo_camera
+                    attach_file
                   </span>
-                  {uploadingImage ? "Uploading…" : "Add photos"}
+                  {uploadingImage ? "Uploading…" : "Add photos or PDFs"}
                 </button>
                 {imageUrls.length > 0 ? (
                   <ul className="mt-3 flex flex-wrap gap-2">
                     {imageUrls.map((url, index) => (
                       <li key={url} className="relative">
-                        <img
-                          src={url}
-                          alt=""
-                          className="h-16 w-16 rounded-lg border border-outline-variant/60 object-cover"
-                        />
+                        {isPdfAttachmentUrl(url) ? (
+                          <div className="flex h-16 w-28 flex-col items-center justify-center gap-1 rounded-lg border border-outline-variant/60 bg-surface-container-low px-2">
+                            <span className="material-symbols-outlined text-[24px] text-primary">
+                              picture_as_pdf
+                            </span>
+                            <span className="max-w-full truncate font-body text-[9px] text-on-surface-variant">
+                              {attachmentDisplayName(url)}
+                            </span>
+                          </div>
+                        ) : (
+                          <img
+                            src={url}
+                            alt=""
+                            className="h-16 w-16 rounded-lg border border-outline-variant/60 object-cover"
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() =>
@@ -1495,7 +1791,7 @@ export function CreateQuotationPage() {
                             )
                           }
                           className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-on-surface text-surface"
-                          aria-label="Remove photo"
+                          aria-label="Remove attachment"
                         >
                           <span className="material-symbols-outlined text-[14px]">
                             close

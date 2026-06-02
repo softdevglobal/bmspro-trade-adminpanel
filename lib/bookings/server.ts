@@ -142,6 +142,7 @@ export async function createBookingFromInspection(
     bookingId: bookingRef.id,
     bookingCode,
     bookingStatus: "scheduled",
+    bookingStatusAt: now,
     bookingConfirmedAt: now,
     updatedAt: now,
   };
@@ -191,6 +192,7 @@ async function mirrorBookingToQuotations(
       bookingId,
       bookingCode,
       bookingStatus,
+      bookingStatusAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
   }
