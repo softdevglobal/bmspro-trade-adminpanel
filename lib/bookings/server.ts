@@ -165,7 +165,12 @@ export async function createBookingFromInspection(
     inspectionRef.get(),
   ]);
 
-  await mirrorBookingToQuotations(current.id, bookingRef.id, bookingCode, "scheduled");
+  await mirrorBookingToQuotations(current.id, {
+    bookingId: bookingRef.id,
+    bookingCode,
+    bookingStatus: "scheduled",
+    bookingStatusAt: now,
+  });
 
   return {
     ok: true,
@@ -174,11 +179,15 @@ export async function createBookingFromInspection(
   };
 }
 
-async function mirrorBookingToQuotations(
+/** Mirrors booking fields onto all quotations for an inspection visit. */
+export async function mirrorBookingToQuotations(
   inspectionRequestId: string,
-  bookingId: string,
-  bookingCode: string,
-  bookingStatus: BookingStatus,
+  fields: {
+    bookingStatus: BookingStatus;
+    bookingStatusAt?: ReturnType<typeof FieldValue.serverTimestamp>;
+    bookingId?: string | null;
+    bookingCode?: string | null;
+  },
 ): Promise<void> {
   const snap = await adminDb
     .collection(QUOTATION_COLLECTION)
@@ -186,15 +195,20 @@ async function mirrorBookingToQuotations(
     .get();
   if (snap.empty) return;
 
+  const statusAt =
+    fields.bookingStatusAt ?? FieldValue.serverTimestamp();
+
+  const update: Record<string, unknown> = {
+    bookingStatus: fields.bookingStatus,
+    bookingStatusAt: statusAt,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (fields.bookingId) update.bookingId = fields.bookingId;
+  if (fields.bookingCode) update.bookingCode = fields.bookingCode;
+
   const batch = adminDb.batch();
   for (const doc of snap.docs) {
-    batch.update(doc.ref, {
-      bookingId,
-      bookingCode,
-      bookingStatus,
-      bookingStatusAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    batch.update(doc.ref, update);
   }
   await batch.commit();
 }

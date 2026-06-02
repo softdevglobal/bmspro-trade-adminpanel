@@ -23,7 +23,10 @@ import {
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
-import { createBookingFromInspection } from "@/lib/bookings/server";
+import {
+  createBookingFromInspection,
+  mirrorBookingToQuotations,
+} from "@/lib/bookings/server";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -298,11 +301,28 @@ export async function applyOwnerAction(
         error: "Send a quotation before marking awaiting decision.",
       };
     }
+    const bookingStatusAt = FieldValue.serverTimestamp();
     updates.status = "awaiting_decision" satisfies InspectionRequestStatus;
+    updates.bookingStatus = "awaiting";
+    updates.bookingStatusAt = bookingStatusAt;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   }
 
   await ref.update(updates);
+
+  if (action.type === "mark_awaiting_decision") {
+    try {
+      const bookingStatusAt = updates.bookingStatusAt as ReturnType<
+        typeof FieldValue.serverTimestamp
+      >;
+      await mirrorBookingToQuotations(id, {
+        bookingStatus: "awaiting",
+        bookingStatusAt,
+      });
+    } catch (error) {
+      console.error("quotation bookingStatus mirror failed:", error);
+    }
+  }
   const after = await ref.get();
   const request = mapInspectionDoc(ref.id, after.data() ?? {});
 

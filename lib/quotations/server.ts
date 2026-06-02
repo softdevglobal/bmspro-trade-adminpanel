@@ -14,13 +14,14 @@ import {
   type InspectionCustomer,
   type InspectionRequestType,
 } from "@/lib/inspection/types";
+import { ensureCustomerAccount } from "@/lib/customer/server";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
+import { toMillis } from "@/lib/onboarding/services/display";
 import {
   buildQuotationCodeForInspection,
   displayQuotationCode,
 } from "@/lib/reference-codes";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
-import { ensureCustomerAccount } from "@/lib/customer/server";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const QUOTATION_COLLECTION = "quotations";
@@ -67,6 +68,7 @@ export type QuotationDetail = {
   bookingId: string | null;
   bookingCode: string | null;
   bookingStatus: BookingStatus | null;
+  bookingStatusAt: number | null;
   createdBy: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -323,6 +325,7 @@ function mapQuotationDoc(
       }
       return null;
     })(),
+    bookingStatusAt: toMillis(data.bookingStatusAt),
     createdBy: typeof data.createdBy === "string" ? data.createdBy : "",
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
@@ -1152,20 +1155,35 @@ export async function listQuotationsForInspection(
       ? ("scheduled" as const)
       : inspectionData.quotation
         ? ("awaiting" as const)
-        : null);
+        : inspectionData.status === "awaiting_decision"
+          ? ("awaiting" as const)
+          : null);
+  const fallbackBookingStatusAt = toMillis(inspectionData.bookingStatusAt);
 
   return snap.docs
     .map((doc) => {
       const quotation = mapQuotationDoc(doc.id, doc.data() ?? {});
-      if (!quotation.bookingId && fallbackBookingId) {
-        return {
-          ...quotation,
-          bookingId: fallbackBookingId,
-          bookingCode: quotation.bookingCode ?? fallbackBookingCode,
-          bookingStatus: quotation.bookingStatus ?? fallbackBookingStatus,
-        };
-      }
-      return quotation;
+      const needsBookingId = !quotation.bookingId && fallbackBookingId;
+      const needsBookingStatus =
+        fallbackBookingStatus &&
+        (!quotation.bookingStatus || !quotation.bookingStatusAt);
+      if (!needsBookingId && !needsBookingStatus) return quotation;
+      return {
+        ...quotation,
+        ...(needsBookingId
+          ? {
+              bookingId: fallbackBookingId,
+              bookingCode: quotation.bookingCode ?? fallbackBookingCode,
+            }
+          : {}),
+        ...(needsBookingStatus
+          ? {
+              bookingStatus: quotation.bookingStatus ?? fallbackBookingStatus,
+              bookingStatusAt:
+                quotation.bookingStatusAt ?? fallbackBookingStatusAt,
+            }
+          : {}),
+      };
     })
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
