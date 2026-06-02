@@ -46,9 +46,9 @@ const NAV_ITEMS: NavItem[] = [
     businessOwner: true,
   },
   {
-    href: "/dashboard/estimations",
-    label: "Estimations",
-    icon: "calculate",
+    href: "/dashboard/invoices",
+    label: "Invoices",
+    icon: "receipt_long",
     businessOwner: true,
   },
   { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },

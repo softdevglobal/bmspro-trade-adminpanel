@@ -247,12 +247,52 @@ function QuotationPreviewContent({
             />
           </Link>
         </section>
+      </div>
+
+      <footer className="shrink-0 space-y-2 border-t border-outline-variant/60 bg-surface-container-lowest px-4 py-3 sm:px-5">
+        {quotation.status === "sent" ? (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {quotation.bookingId ? (
+              <Link
+                href="/dashboard/bookings"
+                onClick={onClose}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  assignment
+                </span>
+                View scheduled job
+              </Link>
+            ) : (
+              <Link
+                href={`/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=schedule-job`}
+                onClick={onClose}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  event
+                </span>
+                Schedule job
+              </Link>
+            )}
+            <Link
+              href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
+              onClick={onClose}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                receipt_long
+              </span>
+              Issue invoice
+            </Link>
+          </div>
+        ) : null}
 
         {quotation.pdfUrl ? (
           <button
             type="button"
             onClick={() => setPdfOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
           >
             <span className="material-symbols-outlined text-[20px]">
               picture_as_pdf
@@ -260,7 +300,7 @@ function QuotationPreviewContent({
             View quotation PDF
           </button>
         ) : null}
-      </div>
+      </footer>
 
       {quotation.pdfUrl ? (
         <QuotationPdfViewerModal

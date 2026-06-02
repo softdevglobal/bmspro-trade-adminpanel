@@ -162,6 +162,9 @@ export function InspectionVisitsBoard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpenMode, setDrawerOpenMode] = useState<DrawerMode | null>(null);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  const [pendingDrawerMode, setPendingDrawerMode] = useState<DrawerMode | null>(
+    null,
+  );
   const [addModalOpen, setAddModalOpen] = useState(false);
 
   useEffect(() => {
@@ -196,8 +199,13 @@ export function InspectionVisitsBoard() {
   // Open a specific request when arriving from a notification (URL ?request=
   // on first load, or a custom event when already on this page).
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("request");
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("request");
+    const action = params.get("action");
     if (fromUrl) setPendingOpenId(fromUrl);
+    if (action === "schedule-job") {
+      setPendingDrawerMode("convert_booking");
+    }
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<string>).detail;
       if (detail) setPendingOpenId(detail);
@@ -211,9 +219,13 @@ export function InspectionVisitsBoard() {
     if (!pendingOpenId) return;
     if (boardRequests.some((req) => req.id === pendingOpenId)) {
       setSelectedId(pendingOpenId);
+      if (pendingDrawerMode) {
+        setDrawerOpenMode(pendingDrawerMode);
+        setPendingDrawerMode(null);
+      }
       setPendingOpenId(null);
     }
-  }, [pendingOpenId, boardRequests]);
+  }, [pendingOpenId, pendingDrawerMode, boardRequests]);
 
   const selected = useMemo(
     () => boardRequests.find((req) => req.id === selectedId) ?? null,
