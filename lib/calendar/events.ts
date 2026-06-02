@@ -12,7 +12,14 @@ export type CalendarEvent = {
   requestId: string;
   request: InspectionRequestDetail;
   date: string;
+  /** Bookings = blue; inspection visits = green. */
+  source: CalendarSource;
   dotColor: DotColor;
+};
+
+export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
+  bookings: "Booking",
+  inspection_visits: "Inspection visit",
 };
 
 export type CalendarStat = {
@@ -49,38 +56,28 @@ export function requestTitle(request: InspectionRequestDetail): string {
     : request.customRequest?.title ?? "Custom quotation request";
 }
 
-export function dotColorForRequest(
-  request: InspectionRequestDetail,
-): DotColor {
-  if (request.status === "completed") return "green-500";
-  if (request.status === "cancelled") return "error";
-  if (request.status === "pending" || request.status === "owner_proposed") {
-    return "amber-500";
-  }
-  if (request.status === "scheduled" && !request.assignedTo) {
-    return "amber-500";
-  }
-  return "primary";
+/** Calendar dot colour by entry type (not request status). */
+export function dotColorForCalendarSource(source: CalendarSource): DotColor {
+  return source === "bookings" ? "primary" : "green-500";
 }
 
-export function matchesCalendarSource(
-  request: InspectionRequestDetail,
-  source: CalendarSource,
-): boolean {
-  if (request.status === "cancelled") return false;
-  if (source === "inspection_visits") {
-    return request.status === "pending" || request.status === "owner_proposed";
-  }
-  return request.status === "scheduled" || request.status === "completed";
+/**
+ * Colour on the calendar is by data type, not `createdSource` or status.
+ * Everything in `inspection_requests` is an inspection visit (green).
+ * Blue bookings come from a separate appointments collection when wired in.
+ */
+export function calendarSourceForRequest(
+  _request: InspectionRequestDetail,
+): CalendarSource {
+  return "inspection_visits";
 }
 
 export function datesForRequestOnCalendar(
   request: InspectionRequestDetail,
-  source: CalendarSource,
 ): string[] {
-  if (!matchesCalendarSource(request, source)) return [];
+  if (request.status === "cancelled") return [];
 
-  if (source === "bookings") {
+  if (request.status === "scheduled" || request.status === "completed") {
     return request.scheduledSlot?.date ? [request.scheduledSlot.date] : [];
   }
 
@@ -89,6 +86,15 @@ export function datesForRequestOnCalendar(
   }
 
   return request.preferredSlots.map((slot) => slot.date);
+}
+
+export function matchesCalendarSource(
+  request: InspectionRequestDetail,
+  source: CalendarSource,
+): boolean {
+  if (request.status === "cancelled") return false;
+  if (calendarSourceForRequest(request) !== source) return false;
+  return datesForRequestOnCalendar(request).length > 0;
 }
 
 export type AssigneeFilter = {
@@ -209,30 +215,43 @@ export function matchesCalendarFilters(
 
 export function buildCalendarEvents(
   requests: InspectionRequestDetail[],
-  source: CalendarSource,
   filters: CalendarFilters,
+  sourceFilter?: CalendarSource,
 ): CalendarEvent[] {
   const events: CalendarEvent[] = [];
 
   for (const request of requests) {
-    if (!matchesCalendarSource(request, source)) continue;
     if (!matchesCalendarFilters(request, filters)) continue;
 
-    const dates = datesForRequestOnCalendar(request, source);
-    const dotColor = dotColorForRequest(request);
+    const source = calendarSourceForRequest(request);
+    if (sourceFilter && source !== sourceFilter) continue;
+
+    const dates = datesForRequestOnCalendar(request);
+    if (dates.length === 0) continue;
+
+    const dotColor = dotColorForCalendarSource(source);
 
     for (const date of dates) {
       events.push({
-        key: `${request.id}-${date}`,
+        key: `${source}-${request.id}-${date}`,
         requestId: request.id,
         request,
         date,
+        source,
         dotColor,
       });
     }
   }
 
   return events;
+}
+
+/** Month grid: all requests with a visible date, coloured by origin. */
+export function buildMonthGridCalendarEvents(
+  requests: InspectionRequestDetail[],
+  filters: CalendarFilters,
+): CalendarEvent[] {
+  return buildCalendarEvents(requests, filters);
 }
 
 export function groupEventsByDate(
@@ -244,6 +263,88 @@ export function groupEventsByDate(
     grouped[event.date].push(event);
   }
   return grouped;
+}
+
+/** Summary stats across bookings and inspection visits together. */
+export function computeCombinedCalendarStats(
+  requests: InspectionRequestDetail[],
+  todayIso: string,
+  filters: CalendarFilters,
+): CalendarStat[] {
+  const allEvents = buildMonthGridCalendarEvents(requests, filters);
+  const todayRequestIds = new Set(
+    allEvents
+      .filter((event) => event.date === todayIso)
+      .map((event) => event.requestId),
+  );
+
+  const filtered = requests.filter((request) =>
+    matchesCalendarFilters(request, filters),
+  );
+
+  const unassigned = filtered.filter((request) => {
+    if (request.status === "scheduled" && !request.assignedTo) return true;
+    return (
+      (request.status === "pending" || request.status === "owner_proposed") &&
+      !request.assignedTo
+    );
+  }).length;
+
+  const needsReview = filtered.filter(
+    (request) =>
+      request.status === "pending" || request.status === "owner_proposed",
+  ).length;
+
+  const urgent = filtered.filter(
+    (request) => request.status === "pending",
+  ).length;
+
+  const done = filtered.filter(
+    (request) => request.status === "completed",
+  ).length;
+
+  const cancelled = filtered.filter(
+    (request) => request.status === "cancelled",
+  ).length;
+
+  return [
+    {
+      label: "Today",
+      value: todayRequestIds.size,
+      labelClass: "text-outline",
+      valueClass: "text-primary",
+    },
+    {
+      label: "Unassigned",
+      value: unassigned,
+      labelClass: "text-amber-600",
+      valueClass: "text-amber-600",
+    },
+    {
+      label: "Needs Review",
+      value: needsReview,
+      labelClass: "text-amber-500",
+      valueClass: "text-amber-500",
+    },
+    {
+      label: "Urgent",
+      value: urgent,
+      labelClass: "text-error",
+      valueClass: "text-error",
+    },
+    {
+      label: "Done",
+      value: done,
+      labelClass: "text-green-600",
+      valueClass: "text-green-600",
+    },
+    {
+      label: "Cancelled",
+      value: cancelled,
+      labelClass: "text-outline",
+      valueClass: "text-outline",
+    },
+  ];
 }
 
 export function computeCalendarStats(
@@ -258,14 +359,18 @@ export function computeCalendarStats(
       matchesCalendarFilters(request, filters),
   );
 
-  const events = buildCalendarEvents(scoped, source, {
-    ...filters,
-    assignee: {
-      assignedToMe: false,
-      selectedStaffId: null,
-      currentUserId: filters.assignee.currentUserId,
+  const events = buildCalendarEvents(
+    scoped,
+    {
+      ...filters,
+      assignee: {
+        assignedToMe: false,
+        selectedStaffId: null,
+        currentUserId: filters.assignee.currentUserId,
+      },
     },
-  });
+    source,
+  );
 
   const todayEvents = events.filter((event) => event.date === todayIso);
   const todayRequestIds = new Set(todayEvents.map((event) => event.requestId));

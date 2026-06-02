@@ -9,19 +9,18 @@ import {
 } from "@/lib/inspection/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
-  buildCalendarEvents,
+  buildMonthGridCalendarEvents,
+  CALENDAR_SOURCE_LABELS,
   CALENDAR_STATUS_TONE,
-  computeCalendarStats,
+  computeCombinedCalendarStats,
   CUSTOM_SERVICE_KEY,
   DOT_CLASS,
   emptyCalendarFilters,
   groupEventsByDate,
   isoDateFromParts,
   requestTitle,
-  sourceSummaryCounts,
   toIsoDateLocal,
   type CalendarFilters,
-  type CalendarSource,
   type CalendarStatusFilterKey,
 } from "@/lib/calendar/events";
 import { useCalendarFilterOptions } from "@/lib/calendar/use-calendar-filter-options";
@@ -32,35 +31,12 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-const SOURCE_TABS: {
-  id: CalendarSource;
-  label: string;
-  icon: string;
-  jobLabel: string;
-}[] = [
-  {
-    id: "inspection_visits",
-    label: "Inspection visits",
-    icon: "event_available",
-    jobLabel: "Visits",
-  },
-  {
-    id: "bookings",
-    label: "Bookings",
-    icon: "assignment",
-    jobLabel: "Jobs",
-  },
-];
-
 const VIEW_TABS = ["Today", "Week", "Month"] as const;
-
-const TOGGLE_SPRING = { type: "spring", stiffness: 380, damping: 32 } as const;
-
-const SOURCE_TOGGLE_PILL =
-  "pointer-events-none absolute inset-0 rounded-lg bg-primary shadow-md shadow-primary/25";
 
 const VIEW_TOGGLE_PILL =
   "pointer-events-none absolute inset-0 rounded-lg bg-primary shadow-sm shadow-primary/20";
+
+const TOGGLE_SPRING = { type: "spring" as const, stiffness: 500, damping: 35 };
 
 const WEEKDAY_LABELS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
 
@@ -136,8 +112,6 @@ export function CalendarBoard() {
   const { staff, loading: staffLoading } = useBusinessStaffSummary();
   const today = useMemo(() => new Date(), []);
   const todayIso = useMemo(() => toIsoDateLocal(today), [today]);
-  const [calendarSource, setCalendarSource] =
-    useState<CalendarSource>("inspection_visits");
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(today));
   const [viewTab, setViewTab] = useState<(typeof VIEW_TABS)[number]>("Month");
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
@@ -163,44 +137,25 @@ export function CalendarBoard() {
     }));
   }, [user?.uid]);
 
-  const calendarEvents = useMemo(
-    () => buildCalendarEvents(requests, calendarSource, filters),
-    [requests, calendarSource, filters],
+  const monthGridEvents = useMemo(
+    () => buildMonthGridCalendarEvents(requests, filters),
+    [requests, filters],
   );
 
-  const eventsByDate = useMemo(
-    () => groupEventsByDate(calendarEvents),
-    [calendarEvents],
+  const monthEventsByDate = useMemo(
+    () => groupEventsByDate(monthGridEvents),
+    [monthGridEvents],
   );
 
   const stats = useMemo(
-    () => computeCalendarStats(requests, calendarSource, todayIso, filters),
-    [requests, calendarSource, todayIso, filters],
+    () => computeCombinedCalendarStats(requests, todayIso, filters),
+    [requests, todayIso, filters],
   );
 
-  const inspectionSummary = useMemo(
-    () => sourceSummaryCounts(requests, "inspection_visits", todayIso),
-    [requests, todayIso],
-  );
-
-  const bookingsSummary = useMemo(
-    () => sourceSummaryCounts(requests, "bookings", todayIso),
-    [requests, todayIso],
-  );
-
-  const sourceSummaries: Record<
-    CalendarSource,
-    { today: number; unassigned: number }
-  > = {
-    inspection_visits: inspectionSummary,
-    bookings: bookingsSummary,
-  };
-
-  const activeSource = SOURCE_TABS.find((tab) => tab.id === calendarSource)!;
   const unassignedCount = stats[1]?.value ?? 0;
 
   const selectedDayEvents = selectedIsoDate
-    ? (eventsByDate[selectedIsoDate] ?? [])
+    ? (monthEventsByDate[selectedIsoDate] ?? [])
     : [];
 
   const monthLabel = MONTH_FORMAT.format(viewMonth);
@@ -304,72 +259,29 @@ export function CalendarBoard() {
         </div>
       ) : null}
 
-      {/* Main source filter — compact segmented toggle */}
-      <section
-        role="tablist"
-        aria-label="Calendar view"
-        className="grid grid-cols-2 gap-1 rounded-xl border border-outline-variant bg-surface-container-low p-1 sm:inline-grid sm:w-fit sm:min-w-[22rem]"
-      >
-        {SOURCE_TABS.map((tab) => {
-          const active = calendarSource === tab.id;
-          const count = sourceSummaries[tab.id].today;
-
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => {
-                setCalendarSource(tab.id);
-                setBookingDrawerOpen(false);
-                setSelectedIsoDate(null);
-              }}
-              className={`relative z-10 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 font-body text-[13px] font-semibold transition-colors duration-300 ease-out sm:px-4 sm:py-3 ${
-                active
-                  ? "text-on-primary"
-                  : "text-on-surface-variant hover:bg-surface-container-high/60 hover:text-on-surface"
-              }`}
-            >
-              {active ? (
-                <motion.span
-                  layoutId="calendar-source-toggle-pill"
-                  className={SOURCE_TOGGLE_PILL}
-                  transition={TOGGLE_SPRING}
-                />
-              ) : null}
-              <span
-                className={`relative z-10 material-symbols-outlined text-[20px] transition-[font-variation-settings] duration-300 ${
-                  active ? "material-symbols-filled" : ""
-                }`}
-              >
-                {tab.icon}
-              </span>
-              <span className="relative z-10 truncate">{tab.label}</span>
-              {count > 0 ? (
-                <span
-                  className={`relative z-10 font-numeric rounded-full px-1.5 py-0.5 text-[11px] font-bold transition-colors duration-300 ${
-                    active
-                      ? "bg-white/20 text-on-primary"
-                      : "bg-surface-container-highest text-on-surface-variant"
-                  }`}
-                >
-                  {count}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </section>
+      {!requestsLoading && !requestsError && requests.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest p-6 text-center">
+          <p className="font-body text-[14px] font-semibold text-on-surface">
+            No inspection requests yet
+          </p>
+          <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+            Requests from your booking page and owner-created visits will appear
+            on the calendar.
+          </p>
+          <Link
+            href="/dashboard/inspection-visits"
+            className="mt-3 inline-flex items-center gap-1 font-body text-[13px] font-semibold text-primary hover:underline"
+          >
+            Go to Inspection visits
+            <span className="material-symbols-outlined text-[16px]">
+              arrow_forward
+            </span>
+          </Link>
+        </div>
+      ) : null}
 
       {/* Summary row */}
-      <motion.section
-        key={calendarSource}
-        initial={{ opacity: 0.72, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-        className="grid grid-cols-2 gap-2 sm:gap-base md:grid-cols-3 lg:grid-cols-6"
-      >
+      <section className="grid grid-cols-2 gap-2 sm:gap-base md:grid-cols-3 lg:grid-cols-6">
         {stats.map((stat) => (
           <div
             key={stat.label}
@@ -387,7 +299,7 @@ export function CalendarBoard() {
             </span>
           </div>
         ))}
-      </motion.section>
+      </section>
 
       {/* Filters & view tabs */}
       <section className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -481,9 +393,8 @@ export function CalendarBoard() {
           </div>
           <div className="flex flex-wrap items-center gap-4">
             {[
-              { color: "bg-primary", label: "Scheduled" },
-              { color: "bg-amber-500", label: "Pending" },
-              { color: "bg-green-500", label: "Done" },
+              { color: "bg-primary", label: "Bookings" },
+              { color: "bg-green-500", label: "Inspection visits" },
             ].map((item) => (
               <div
                 key={item.label}
@@ -518,7 +429,7 @@ export function CalendarBoard() {
             const isoDate = isoDateFromParts(viewMonth, day);
             const cellDate = new Date(`${isoDate}T12:00:00`);
             const isToday = isSameDay(cellDate, today);
-            const dayEvents = eventsByDate[isoDate] ?? [];
+            const dayEvents = monthEventsByDate[isoDate] ?? [];
 
             return (
               <button
@@ -541,7 +452,8 @@ export function CalendarBoard() {
                   </span>
                   {dayEvents.length > 0 ? (
                     <span className="font-numeric text-[10px] font-bold text-outline-variant group-hover:text-primary">
-                      {dayEvents.length} {activeSource.jobLabel}
+                      {dayEvents.length}{" "}
+                      {dayEvents.length === 1 ? "item" : "items"}
                     </span>
                   ) : null}
                 </div>
@@ -585,12 +497,12 @@ export function CalendarBoard() {
           <div className="flex shrink-0 items-center justify-between border-b border-outline-variant p-5">
             <div>
               <h3 className="font-display text-headline-sm font-bold text-on-surface">
-                {selectedDate ? DAY_FORMAT.format(selectedDate) : activeSource.label}
+                {selectedDate ? DAY_FORMAT.format(selectedDate) : "Calendar"}
               </h3>
               <p className="font-body text-[13px] font-semibold text-on-surface-variant">
                 {selectedDayEvents.length > 0
-                  ? `${selectedDayEvents.length} ${activeSource.jobLabel.toLowerCase()} scheduled`
-                  : `No ${activeSource.label.toLowerCase()} scheduled`}
+                  ? `${selectedDayEvents.length} ${selectedDayEvents.length === 1 ? "item" : "items"} on this day`
+                  : "Nothing scheduled on this day"}
               </p>
             </div>
             <button
@@ -612,17 +524,30 @@ export function CalendarBoard() {
                 const timeLabel = eventTimeLabel(request, event.date);
                 const assignee = request.assignedTo;
 
+                const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
+                const sourceTone =
+                  event.source === "bookings"
+                    ? "bg-primary/10 text-primary border border-primary/25"
+                    : "bg-green-50 text-green-700 border border-green-200";
+
                 return (
                   <article
                     key={event.key}
                     className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding transition-all hover:border-primary hover:shadow-md"
                   >
                     <div className="mb-4 flex items-start justify-between gap-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
-                      >
-                        {STATUS_LABELS[request.status]}
-                      </span>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
+                        >
+                          {sourceLabel}
+                        </span>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_TONE[request.status]}`}
+                        >
+                          {STATUS_LABELS[request.status]}
+                        </span>
+                      </div>
                       <span className="shrink-0 font-numeric font-bold text-on-surface">
                         {timeLabel}
                       </span>
@@ -681,12 +606,10 @@ export function CalendarBoard() {
             ) : (
               <div className="rounded-xl border border-dashed border-outline-variant px-4 py-10 text-center">
                 <span className="material-symbols-outlined text-[36px] text-outline-variant">
-                  {calendarSource === "inspection_visits"
-                    ? "event_available"
-                    : "event_busy"}
+                  event_busy
                 </span>
                 <p className="mt-3 font-body text-[14px] text-on-surface-variant">
-                  No {activeSource.label.toLowerCase()} on this day yet.
+                  Nothing on this day yet.
                 </p>
               </div>
             )}

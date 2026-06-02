@@ -40,6 +40,26 @@ export function accountPath(
   return segment ? `${base}/${segment}` : base;
 }
 
+/** Active or history tab with optional `request` query to open one booking. */
+export function accountBookingFocusPath(
+  slug: string,
+  requestId: string | null | undefined,
+  scope: "active" | "history",
+): string {
+  const tab = scope === "history" ? "bookings" : "requests";
+  const base = accountPath(slug, tab);
+  if (!requestId?.trim()) return base;
+  return `${base}?request=${encodeURIComponent(requestId.trim())}`;
+}
+
+/** @deprecated Use accountBookingFocusPath(slug, requestId, "active"). */
+export function accountRequestsPath(
+  slug: string,
+  requestId?: string | null,
+): string {
+  return accountBookingFocusPath(slug, requestId, "active");
+}
+
 /** Reads the business slug from a /booknow/[slug] URL. */
 export function parseBooknowSlug(pathname: string): string | null {
   const match = pathname.match(/^\/booknow\/([^/]+)/);

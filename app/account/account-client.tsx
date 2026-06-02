@@ -26,15 +26,18 @@ import {
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import Link from "next/link";
 import {
+  accountBookingFocusPath,
   accountPath,
   booknowPath,
   parseLegacyAccountTabQuery,
 } from "@/lib/customer/booking-routes";
+import type { NotificationRecord } from "@/lib/notifications/types";
 import {
   Suspense,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -181,7 +184,17 @@ export function AccountClient({
       <CustomerAccountAccess slug={slug}>
         <CustomerTopNav />
         <CustomerShellPanel>
-          <AuthedAccount tab={tab} slug={slug} />
+          <Suspense
+            fallback={
+              <div className="flex min-h-[160px] items-center justify-center">
+                <span className="material-symbols-outlined animate-spin text-[24px] text-primary">
+                  progress_activity
+                </span>
+              </div>
+            }
+          >
+            <AuthedAccount tab={tab} slug={slug} />
+          </Suspense>
         </CustomerShellPanel>
       </CustomerAccountAccess>
     </CustomerBookingShell>
@@ -243,6 +256,12 @@ function AuthedAccount({
   tab: CustomerAccountTab;
   slug: string;
 }) {
+  const searchParams = useSearchParams();
+  const focusRequestId =
+    tab === "requests" || tab === "bookings"
+      ? searchParams.get("request")?.trim() || null
+      : null;
+
   const titles: Record<CustomerAccountTab, string> = {
     profile: "My profile",
     requests: "My requests",
@@ -266,12 +285,22 @@ function AuthedAccount({
       <div className={tab === "profile" ? "" : "mt-5"}>
         {tab === "profile" ? <ProfileSection slug={slug} /> : null}
         {tab === "requests" ? (
-          <BookingsList scope="active" emptyHint="You have no active requests." />
+          <BookingsList
+            scope="active"
+            emptyHint="You have no active requests."
+            focusRequestId={focusRequestId}
+          />
         ) : null}
         {tab === "bookings" ? (
-          <BookingsList scope="history" emptyHint="No past bookings yet." />
+          <BookingsList
+            scope="history"
+            emptyHint="No past bookings yet."
+            focusRequestId={focusRequestId}
+          />
         ) : null}
-        {tab === "notifications" ? <NotificationsSection /> : null}
+        {tab === "notifications" ? (
+          <NotificationsSection slug={slug} />
+        ) : null}
       </div>
     </>
   );
@@ -613,9 +642,11 @@ function useBookings(): {
 function BookingsList({
   scope,
   emptyHint,
+  focusRequestId = null,
 }: {
   scope: "active" | "history";
   emptyHint: string;
+  focusRequestId?: string | null;
 }) {
   const { bookings, loading, error, reload } = useBookings();
 
@@ -671,7 +702,12 @@ function BookingsList({
   return (
     <div className="space-y-4">
       {filtered.map((booking) => (
-        <BookingCard key={booking.id} booking={booking} onChanged={reload} />
+        <BookingCard
+          key={booking.id}
+          booking={booking}
+          onChanged={reload}
+          focusRequestId={focusRequestId}
+        />
       ))}
     </div>
   );
@@ -941,17 +977,30 @@ function ConfirmedVisitHighlight({
 function BookingCard({
   booking,
   onChanged,
+  focusRequestId = null,
 }: {
   booking: CustomerBooking;
   onChanged: () => void;
+  focusRequestId?: string | null;
 }) {
   const { getIdToken } = useCustomerAuth();
-  const [expanded, setExpanded] = useState(false);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const isFocused = Boolean(focusRequestId && focusRequestId === booking.id);
+  const [expanded, setExpanded] = useState(isFocused);
   const [selectedProposed, setSelectedProposed] = useState<InspectionSlot | null>(
     null,
   );
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isFocused) return;
+    setExpanded(true);
+    const frame = requestAnimationFrame(() => {
+      cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isFocused, booking.id]);
 
   async function acceptProposed() {
     if (!selectedProposed) {
@@ -1005,7 +1054,14 @@ function BookingCard({
     .join(", ");
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-[0_8px_28px_-18px_rgba(0,74,198,0.12)] ring-1 ring-stone-100">
+    <article
+      ref={cardRef}
+      className={`overflow-hidden rounded-2xl border bg-white shadow-[0_8px_28px_-18px_rgba(0,74,198,0.12)] ring-1 ${
+        isFocused
+          ? "border-primary/50 ring-2 ring-primary/25"
+          : "border-stone-200/90 ring-stone-100"
+      }`}
+    >
       <div className="border-l-4 border-l-primary bg-gradient-to-r from-primary/[0.06] via-white to-white p-4 sm:p-5">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
@@ -1264,9 +1320,19 @@ function BookingCard({
   );
 }
 
-function NotificationsSection() {
+function NotificationsSection({ slug }: { slug: string }) {
+  const router = useRouter();
   const { notifications, loading, error, unread, reload, markAllRead, clearOne, clearAll } =
     useCustomerNotifications();
+
+  function openRequest(note: NotificationRecord) {
+    if (!note.requestId) return;
+    const scope =
+      note.status === "completed" || note.status === "cancelled"
+        ? "history"
+        : "active";
+    router.push(accountBookingFocusPath(slug, note.requestId, scope));
+  }
 
   useEffect(() => {
     if (notifications.length === 0) return;
@@ -1340,35 +1406,50 @@ function NotificationsSection() {
         {notifications.map((note) => (
           <li
             key={note.id}
-            className={`group flex gap-3 rounded-2xl border p-3 sm:p-4 ${
+            className={`group flex items-stretch gap-1 rounded-2xl border sm:gap-0 ${
               note.read
                 ? "border-stone-200 bg-white"
                 : "border-primary/30 bg-primary/[0.04]"
             }`}
           >
-            <span
-              className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
-            >
-              {NOTIFICATION_STATUS_ICON[note.status]}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="font-body text-[13px] font-bold text-on-surface">
-                {note.title}
-              </p>
-              <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                {note.body}
-              </p>
-              <p className="mt-1 font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
-                {note.createdAt
-                  ? new Date(note.createdAt).toLocaleString()
-                  : ""}
-              </p>
-            </div>
             <button
               type="button"
-              onClick={() => void clearOne(note.id)}
+              onClick={() => openRequest(note)}
+              className="flex min-w-0 flex-1 gap-3 rounded-2xl p-3 text-left transition-colors hover:bg-stone-50/80 sm:p-4"
+            >
+              <span
+                className={`material-symbols-outlined material-symbols-filled mt-0.5 shrink-0 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+              >
+                {NOTIFICATION_STATUS_ICON[note.status]}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-body text-[13px] font-bold text-on-surface">
+                  {note.title}
+                </span>
+                <span className="mt-1 block font-body text-[12px] text-on-surface-variant">
+                  {note.body}
+                </span>
+                <span className="mt-1 block font-body text-[10px] uppercase tracking-wide text-on-surface-variant">
+                  {note.createdAt
+                    ? new Date(note.createdAt).toLocaleString()
+                    : ""}
+                </span>
+                <span className="mt-2 inline-flex items-center gap-0.5 font-body text-[11px] font-semibold text-primary">
+                  Open request
+                  <span className="material-symbols-outlined text-[14px]">
+                    arrow_forward
+                  </span>
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void clearOne(note.id);
+              }}
               aria-label="Clear notification"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600"
+              className="m-2 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-on-surface-variant transition-colors hover:bg-stone-100 hover:text-rose-600 sm:m-3"
             >
               <span className="material-symbols-outlined text-[16px]">close</span>
             </button>
