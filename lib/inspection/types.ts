@@ -5,6 +5,7 @@
  * triage them in /dashboard/inspection-visits.
  */
 
+import type { BookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import { legacyInspectionReferenceFromId } from "@/lib/reference-codes";
 
@@ -162,6 +163,8 @@ export type InspectionRequestDetail = {
   bookingId: string | null;
   /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
   bookingCode: string | null;
+  /** Mirrored from `bookings.status` when a job booking exists. */
+  bookingStatus: BookingStatus | null;
   /** @deprecated Job duration lives on `bookings`; kept for older documents. */
   estimatedDurationMinutes: number | null;
   /** Millis when a job booking was created from this visit. */

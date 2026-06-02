@@ -9,6 +9,12 @@ import {
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import {
+  BOOKING_STATUS_LABELS,
+  BOOKING_STATUS_TONE,
+  type BookingDetail,
+  type BookingStatus,
+} from "@/lib/bookings/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import {
@@ -59,7 +65,7 @@ function CreatedSourcePill({
         : "dashboard";
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
-      <span className="material-symbols-outlined text-[14px] text-primary">
+      <span className="material-symbols-outlined text-[12px] leading-none text-primary">
         {icon}
       </span>
       {label}
@@ -120,6 +126,16 @@ const FILTER_TABS: { id: StatusFilter; label: string; shortLabel: string }[] = [
   { id: "completed", label: "Completed", shortLabel: "Done" },
   { id: "cancelled", label: "Cancelled", shortLabel: "Cancelled" },
 ];
+
+function BookingStatusPill({ status }: { status: BookingStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${BOOKING_STATUS_TONE[status]}`}
+    >
+      {BOOKING_STATUS_LABELS[status]}
+    </span>
+  );
+}
 
 function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
   return (
@@ -252,7 +268,7 @@ export function InspectionVisitsBoard() {
             onClick={() => setAddModalOpen(true)}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
           >
-            <span className="material-symbols-outlined text-[16px]">add</span>
+            <span className="material-symbols-outlined text-[14px] leading-none">add</span>
             Add Inspection
           </button>
           <button
@@ -260,7 +276,7 @@ export function InspectionVisitsBoard() {
             onClick={() => void reloadStaff()}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container sm:w-auto"
           >
-            <span className="material-symbols-outlined text-[16px]">refresh</span>
+            <span className="material-symbols-outlined text-[14px] leading-none">refresh</span>
             Refresh
           </button>
         </div>
@@ -422,7 +438,7 @@ function RequestCard({
               {STATUS_LABELS[request.status]}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
-              <span className="material-symbols-outlined text-[14px] text-primary">
+              <span className="material-symbols-outlined text-[12px] leading-none text-primary">
                 {request.requestType === "existing_service"
                   ? "format_list_bulleted"
                   : "request_quote"}
@@ -463,7 +479,7 @@ function RequestCard({
           <span
             className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200"
           >
-            <span className="material-symbols-outlined text-[14px]">
+            <span className="material-symbols-outlined text-[12px] leading-none">
               event_available
             </span>
             {formatSlotDate(request.scheduledSlot.date)} ·{" "}
@@ -481,7 +497,7 @@ function RequestCard({
             ))}
             {request.scheduledSlot ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                <span className="material-symbols-outlined text-[14px]">
+                <span className="material-symbols-outlined text-[12px] leading-none">
                   event_available
                 </span>
                 Scheduled · {formatSlotDate(request.scheduledSlot.date)} ·{" "}
@@ -500,7 +516,7 @@ function RequestCard({
                   : `Assigned to ${request.assignedTo.name}`
               }
             >
-              <span className="material-symbols-outlined text-[15px] text-primary">
+              <span className="material-symbols-outlined text-[12px] leading-none text-primary">
                 {request.assignedTo.type === "owner"
                   ? "verified_user"
                   : "person"}
@@ -513,15 +529,20 @@ function RequestCard({
             </span>
           ) : null}
           {hasLinkedBooking ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
-              <span className="material-symbols-outlined text-[14px]">
-                assignment
+            <>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
+                <span className="material-symbols-outlined text-[12px] leading-none">
+                  assignment
+                </span>
+                {displayBookingCode({
+                  id: request.bookingId ?? "",
+                  bookingCode: request.bookingCode,
+                })}
               </span>
-              {displayBookingCode({
-                id: request.bookingId ?? "",
-                bookingCode: request.bookingCode,
-              })}
-            </span>
+              {request.bookingStatus ? (
+                <BookingStatusPill status={request.bookingStatus} />
+              ) : null}
+            </>
           ) : null}
           {showPostQuoteActions ? (
             <div
@@ -536,9 +557,9 @@ function RequestCard({
                 type="button"
                 title="Create booking"
                 onClick={onCreateBooking}
-                className="inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-2.5 font-body text-[11px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.98]"
+                className="inline-flex h-7 items-center gap-0.5 rounded-lg bg-primary px-2.5 font-body text-[11px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.98]"
               >
-                <span className="material-symbols-outlined text-[15px]">
+                <span className="material-symbols-outlined text-[12px] leading-none">
                   assignment
                 </span>
                 Book
@@ -548,9 +569,9 @@ function RequestCard({
                   type="button"
                   title="Awaiting decision"
                   onClick={onAwaitingDecision}
-                  className="inline-flex h-7 items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-2.5 font-body text-[11px] font-semibold text-orange-800 transition-colors hover:bg-orange-100 active:scale-[0.98]"
+                  className="inline-flex h-7 items-center gap-0.5 rounded-lg border border-orange-300 bg-orange-50 px-2.5 font-body text-[11px] font-semibold text-orange-800 transition-colors hover:bg-orange-100 active:scale-[0.98]"
                 >
-                  <span className="material-symbols-outlined text-[15px]">
+                  <span className="material-symbols-outlined text-[12px] leading-none">
                     pending_actions
                   </span>
                   Awaiting
@@ -579,7 +600,7 @@ function SlotPill({
           : "border border-violet-200 bg-violet-50 text-violet-700"
       }`}
     >
-      <span className="material-symbols-outlined shrink-0 text-[14px] text-primary">
+      <span className="material-symbols-outlined shrink-0 text-[12px] leading-none text-primary">
         event
       </span>
       <span className="truncate">
@@ -677,9 +698,9 @@ function DrawerFooterAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-body text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${styles}`}
+      className={`inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 font-body text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${styles}`}
     >
-      <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      <span className="material-symbols-outlined text-[15px] leading-none">{icon}</span>
       {label}
     </button>
   );
@@ -951,6 +972,16 @@ function DetailDrawerContent({
   useEffect(() => {
     if (!initialMode || initialMode === "review") return;
     setMode(initialMode);
+    if (initialMode === "convert_booking") {
+      const minDate = bookingMinDateFromRequest(request);
+      const timeRange = request.scheduledSlot?.timeRange ?? "morning";
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
+      setBookingSlot({ date: minDate, timeRange });
+      setBookingDayPage(0);
+      setBookingStartTime(request.scheduledStartTime ?? defaults.start);
+      setBookingEndTime(request.scheduledEndTime ?? defaults.end);
+      setBookingNote("");
+    }
     onInitialModeConsumed();
   }, [initialMode, onInitialModeConsumed, request.id]);
 
@@ -1075,6 +1106,16 @@ function DetailDrawerContent({
       if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
       if (request.scheduledEndTime) setAcceptEndTime(request.scheduledEndTime);
     }
+    if (nextMode === "convert_booking") {
+      const minDate = bookingMinDateFromRequest(request);
+      const timeRange = request.scheduledSlot?.timeRange ?? "morning";
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
+      setBookingSlot({ date: minDate, timeRange });
+      setBookingDayPage(0);
+      setBookingStartTime(request.scheduledStartTime ?? defaults.start);
+      setBookingEndTime(request.scheduledEndTime ?? defaults.end);
+      setBookingNote("");
+    }
     setMode(nextMode);
   }
 
@@ -1103,6 +1144,9 @@ function DetailDrawerContent({
               {STATUS_LABELS[request.status]}
             </span>
             <CreatedSourcePill source={request.createdSource} />
+            {request.bookingId && request.bookingStatus ? (
+              <BookingStatusPill status={request.bookingStatus} />
+            ) : null}
           </div>
         </div>
         <button
@@ -1158,6 +1202,10 @@ function DetailDrawerContent({
               </div>
             ) : null}
             <QuotationSection requestId={request.id} />
+            <BookingDetailsSection
+              bookingId={request.bookingId}
+              bookingCode={request.bookingCode}
+            />
           </>
         )}
 
@@ -1308,6 +1356,7 @@ function DetailDrawerContent({
 
         {mode === "convert_booking" ? (
           <ConvertToBookingForm
+            minBookingDate={bookingMinDateFromRequest(request)}
             slot={bookingSlot}
             dayPage={bookingDayPage}
             onDayPageChange={setBookingDayPage}
@@ -1393,6 +1442,9 @@ function DetailDrawerContent({
 type QuotationView = {
   id: string;
   quotationCode: string | null;
+  bookingId: string | null;
+  bookingCode: string | null;
+  bookingStatus: BookingStatus | null;
   serviceTitle: string;
   lineItems: { name: string; priceAud: number }[];
   additions: { name: string; priceAud: number }[];
@@ -1511,10 +1563,23 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
     <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-[11px] font-semibold tracking-wide text-primary">
-            {displayQuotationCode(quotation)}
-          </p>
-          <p className="truncate font-display text-[14px] font-semibold text-on-surface">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-mono text-[11px] font-semibold tracking-wide text-primary">
+              {displayQuotationCode(quotation)}
+            </p>
+            {quotation.bookingId ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary">
+                {displayBookingCode({
+                  id: quotation.bookingId,
+                  bookingCode: quotation.bookingCode,
+                })}
+              </span>
+            ) : null}
+            {quotation.bookingStatus ? (
+              <BookingStatusPill status={quotation.bookingStatus} />
+            ) : null}
+          </div>
+          <p className="mt-1 truncate font-display text-[14px] font-semibold text-on-surface">
             {title}
           </p>
           {quotation.createdAt ? (
@@ -1624,6 +1689,172 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
         />
       ) : null}
     </div>
+  );
+}
+
+function formatEstimatedMinutes(minutes: number | null): string | null {
+  if (minutes == null || minutes <= 0) return null;
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  if (rem === 0) return `${hours} hr`;
+  return `${hours} hr ${rem} min`;
+}
+
+/** Job booking linked to this visit (shown below quotation). */
+function BookingDetailsSection({
+  bookingId,
+  bookingCode,
+}: {
+  bookingId: string | null;
+  bookingCode: string | null;
+}) {
+  const { user } = useAuth();
+  const [booking, setBooking] = useState<BookingDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!bookingId || !user) {
+      setBooking(null);
+      setError(null);
+      return;
+    }
+
+    const authedUser = user;
+    let active = true;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = await authedUser.getIdToken();
+        const response = await fetch(`/api/bookings/${bookingId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const data = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          booking?: BookingDetail;
+        };
+        if (!response.ok || !data.ok || !data.booking) {
+          throw new Error(data.error ?? "Could not load booking.");
+        }
+        if (active) setBooking(data.booking);
+      } catch (err) {
+        if (active) {
+          setBooking(null);
+          setError(
+            err instanceof Error ? err.message : "Could not load booking.",
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      active = false;
+    };
+  }, [bookingId, user]);
+
+  if (!bookingId) return null;
+
+  if (loading) {
+    return (
+      <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+          Booking
+        </p>
+        <p className="mt-1.5 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
+          <span className="material-symbols-outlined animate-spin text-[16px]">
+            progress_activity
+          </span>
+          Loading…
+        </p>
+      </section>
+    );
+  }
+
+  if (error || !booking) {
+    return (
+      <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+          Booking
+        </p>
+        {bookingCode ? (
+          <p className="mt-1 font-mono text-[12px] font-semibold text-primary">
+            {displayBookingCode({
+              id: bookingId,
+              bookingCode,
+            })}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+            {error}
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
+  const visitWindow = formatVisitWindow(
+    booking.scheduledStartTime,
+    booking.scheduledEndTime,
+  );
+  const estimate = formatEstimatedMinutes(booking.estimatedDurationMinutes);
+
+  return (
+    <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+      <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+        Booking
+      </p>
+      <div className="mt-2 rounded-xl border border-primary/20 bg-surface-container-lowest p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
+            {displayBookingCode(booking)}
+          </span>
+          <BookingStatusPill status={booking.status} />
+        </div>
+
+        {booking.scheduledSlot ? (
+          <div className="mt-3 space-y-2">
+            <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold text-on-surface">
+              <span className="material-symbols-outlined text-[16px] text-primary">
+                event
+              </span>
+              {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+              {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
+            </p>
+            {visitWindow ? (
+              <p className="flex items-center gap-1.5 font-body text-[12px] font-semibold text-emerald-800">
+                <span className="material-symbols-outlined text-[14px] text-emerald-700">
+                  schedule
+                </span>
+                {visitWindow}
+              </p>
+            ) : null}
+            {estimate ? (
+              <p className="flex items-center gap-1.5 font-body text-[12px] text-on-surface-variant">
+                <span className="material-symbols-outlined text-[14px] text-primary">
+                  timelapse
+                </span>
+                Estimated {estimate} on site
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {booking.ownerNote ? (
+          <p className="mt-3 border-t border-outline-variant/40 pt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
+            <span className="font-semibold text-on-surface">Note: </span>
+            {booking.ownerNote}
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -1985,6 +2216,22 @@ function minutesFromMidnight(clock: string): number {
   return h * 60 + m;
 }
 
+const JOB_TIME_START_HOUR = 6;
+const JOB_TIME_END_HOUR = 23;
+
+/** 15-minute slots for a full job day (bookings), 6:00am–11:45pm. */
+function jobTimeOptions(): { value: string; label: string }[] {
+  const options: { value: string; label: string }[] = [];
+  for (let hour = JOB_TIME_START_HOUR; hour <= JOB_TIME_END_HOUR; hour += 1) {
+    for (let minute = 0; minute < 60; minute += VISIT_TIME_STEP_MINUTES) {
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      const label = formatClockTime(value);
+      if (label) options.push({ value, label });
+    }
+  }
+  return options;
+}
+
 /** 15-minute options within morning (8–12) or afternoon (12–17). */
 function visitTimeOptions(
   timeRange: InspectionTimeRange | null,
@@ -2015,6 +2262,7 @@ function VisitTimeRangeFields({
   startTime,
   endTime,
   timeRange,
+  fullDay = false,
   disabled,
   onStartTimeChange,
   onEndTimeChange,
@@ -2022,11 +2270,16 @@ function VisitTimeRangeFields({
   startTime: string;
   endTime: string;
   timeRange: InspectionTimeRange | null;
+  /** Job bookings: full day (6am–11:45pm), not morning/afternoon visit windows. */
+  fullDay?: boolean;
   disabled: boolean;
   onStartTimeChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
 }) {
-  const options = useMemo(() => visitTimeOptions(timeRange), [timeRange]);
+  const options = useMemo(
+    () => (fullDay ? jobTimeOptions() : visitTimeOptions(timeRange)),
+    [timeRange, fullDay],
+  );
   const startValid = isClockTime(startTime);
   const endValid = isClockTime(endTime);
 
@@ -2037,14 +2290,14 @@ function VisitTimeRangeFields({
   }, [options, startTime, startValid]);
 
   useEffect(() => {
-    if (!timeRange) return;
+    if (fullDay || !timeRange) return;
     const opts = visitTimeOptions(timeRange);
     if (!opts.some((o) => o.value === startTime)) {
       const defaults = DEFAULT_VISIT_WINDOW[timeRange];
       onStartTimeChange(defaults.start);
       onEndTimeChange(defaults.end);
     }
-  }, [timeRange, startTime, onStartTimeChange, onEndTimeChange]);
+  }, [fullDay, timeRange, startTime, onStartTimeChange, onEndTimeChange]);
 
   useEffect(() => {
     if (!startValid || !endValid) return;
@@ -2203,7 +2456,20 @@ function SetTimeForm({
 
 const JOB_ESTIMATE_MINUTES = [60, 90, 120, 180, 240, 360] as const;
 
+/** Earliest selectable job day: inspection visit date (inclusive), then later days only. */
+function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
+  const scheduled = request.scheduledSlot?.date?.trim();
+  if (scheduled) return scheduled;
+  const preferredDates = request.preferredSlots
+    .map((slot) => slot.date?.trim())
+    .filter((date): date is string => Boolean(date))
+    .sort();
+  if (preferredDates.length > 0) return preferredDates[0];
+  return todayIso();
+}
+
 function ConvertToBookingForm({
+  minBookingDate,
   slot,
   dayPage,
   onDayPageChange,
@@ -2220,6 +2486,7 @@ function ConvertToBookingForm({
   onCancel,
   onSubmit,
 }: {
+  minBookingDate: string;
   slot: InspectionSlot;
   dayPage: number;
   onDayPageChange: (page: number) => void;
@@ -2236,7 +2503,7 @@ function ConvertToBookingForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
-  const minDate = todayIso();
+  const minDate = minBookingDate;
 
   function selectDate(iso: string) {
     onSlotChange({ ...slot, date: iso });
@@ -2272,7 +2539,8 @@ function ConvertToBookingForm({
           <VisitTimeRangeFields
             startTime={startTime}
             endTime={endTime}
-            timeRange={slot.date ? slot.timeRange : null}
+            timeRange={null}
+            fullDay
             disabled={disabled || !slot.date}
             onStartTimeChange={onStartTimeChange}
             onEndTimeChange={onEndTimeChange}

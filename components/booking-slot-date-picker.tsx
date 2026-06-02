@@ -129,8 +129,17 @@ export function buildSlotDayOption(date: Date): SlotDayOption {
   };
 }
 
-export function getSlotDayPage(pageIndex: number, pageSize: number): SlotDayOption[] {
-  let cursor = firstBookableDay();
+/** First day on page 0; later pages continue from there (used as booking min date). */
+export function getSlotDayPage(
+  pageIndex: number,
+  pageSize: number,
+  anchorDate?: string,
+): SlotDayOption[] {
+  const anchor = anchorDate?.trim() || todayIso();
+  const parsed = new Date(`${anchor}T12:00:00`);
+  let cursor = Number.isNaN(parsed.getTime())
+    ? firstBookableDay()
+    : atLocalNoon(parsed);
   const toSkip = pageIndex * pageSize;
 
   for (let i = 0; i < toSkip; i += 1) {
@@ -326,8 +335,8 @@ export function SlotDayPicker({
   const fitStrip = dayStripLayout === "fit" || isMobile;
 
   const pageDays = useMemo(
-    () => getSlotDayPage(dayPage, daysPerPage),
-    [dayPage, daysPerPage],
+    () => getSlotDayPage(dayPage, daysPerPage, minDate),
+    [dayPage, daysPerPage, minDate],
   );
 
   const offPageSelection = useMemo(() => {
@@ -355,6 +364,7 @@ export function SlotDayPicker({
     const selected = selectedIso === day.iso;
     const dayBlocked =
       blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
+    const tooEarly = isBeforeMinDate(day.iso, minDate);
     const relativeLabel = day.isToday
       ? "Today"
       : day.isTomorrow
@@ -364,11 +374,13 @@ export function SlotDayPicker({
       <button
         key={day.iso}
         type="button"
-        disabled={disabled || dayBlocked}
+        disabled={disabled || dayBlocked || tooEarly}
         title={
           dayBlocked
             ? "Customer already offered both morning and afternoon on this day"
-            : undefined
+            : tooEarly
+              ? "Choose the inspection day or later"
+              : undefined
         }
         onClick={() => onSelect(day.iso)}
         className={`flex min-h-[5.5rem] flex-col items-center justify-between rounded-2xl border py-2 text-center transition-all disabled:cursor-not-allowed ${

@@ -1,3 +1,4 @@
+import { parseBookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   REQUEST_STATUSES,
@@ -150,6 +151,14 @@ export function mapInspectionDoc(
       typeof data.bookingCode === "string" && data.bookingCode.trim()
         ? data.bookingCode.trim()
         : null,
+    bookingStatus: (() => {
+      const parsed = parseBookingStatus(data.bookingStatus);
+      if (parsed) return parsed;
+      if (typeof data.bookingId === "string" && data.bookingId.trim()) {
+        return "scheduled";
+      }
+      return null;
+    })(),
     estimatedDurationMinutes:
       typeof data.estimatedDurationMinutes === "number" &&
       Number.isFinite(data.estimatedDurationMinutes) &&

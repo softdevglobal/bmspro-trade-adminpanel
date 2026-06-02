@@ -1,3 +1,4 @@
+import { parseBookingStatus } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { authenticateCustomerRequest } from "@/lib/customer/server";
 import {
@@ -157,6 +158,14 @@ function mapBookingDoc(
       typeof data.bookingCode === "string" && data.bookingCode.trim()
         ? data.bookingCode.trim()
         : null,
+    bookingStatus: (() => {
+      const parsed = parseBookingStatus(data.bookingStatus);
+      if (parsed) return parsed;
+      if (typeof data.bookingId === "string" && data.bookingId.trim()) {
+        return "scheduled";
+      }
+      return null;
+    })(),
     estimatedDurationMinutes:
       typeof data.estimatedDurationMinutes === "number" &&
       Number.isFinite(data.estimatedDurationMinutes) &&

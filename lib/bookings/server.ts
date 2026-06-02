@@ -15,6 +15,8 @@ import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
+import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
+import type { BookingStatus } from "@/lib/bookings/types";
 
 export const BOOKING_LIST_LIMIT = 80;
 
@@ -27,6 +29,17 @@ export type CreateBookingInput = {
   estimatedDurationMinutes: number;
   note?: string;
 };
+
+export async function getBusinessBooking(
+  businessId: string,
+  bookingId: string,
+): Promise<BookingDetail | null> {
+  const snap = await adminDb.collection(BOOKING_COLLECTION).doc(bookingId).get();
+  if (!snap.exists) return null;
+  const booking = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (booking.businessId !== businessId) return null;
+  return booking;
+}
 
 export async function listBusinessBookings(
   businessId: string,
@@ -127,6 +140,7 @@ export async function createBookingFromInspection(
   const inspectionUpdates: Record<string, unknown> = {
     bookingId: bookingRef.id,
     bookingCode,
+    bookingStatus: "scheduled",
     bookingConfirmedAt: now,
     updatedAt: now,
   };
@@ -149,9 +163,35 @@ export async function createBookingFromInspection(
     inspectionRef.get(),
   ]);
 
+  await mirrorBookingToQuotations(current.id, bookingRef.id, bookingCode, "scheduled");
+
   return {
     ok: true,
     booking: mapBookingDoc(bookingRef.id, bookingSnap.data() ?? {}),
     request: mapInspectionDoc(requestSnap.id, requestSnap.data() ?? {}),
   };
+}
+
+async function mirrorBookingToQuotations(
+  inspectionRequestId: string,
+  bookingId: string,
+  bookingCode: string,
+  bookingStatus: BookingStatus,
+): Promise<void> {
+  const snap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .where("inspectionRequestId", "==", inspectionRequestId)
+    .get();
+  if (snap.empty) return;
+
+  const batch = adminDb.batch();
+  for (const doc of snap.docs) {
+    batch.update(doc.ref, {
+      bookingId,
+      bookingCode,
+      bookingStatus,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
 }
