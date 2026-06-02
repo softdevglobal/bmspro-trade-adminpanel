@@ -9,16 +9,24 @@ import type {
 
 export const BOOKING_COLLECTION = "bookings";
 
-export const BOOKING_STATUSES = ["scheduled", "cancelled", "completed"] as const;
+export const BOOKING_STATUSES = [
+  "await",
+  "scheduled",
+  "cancelled",
+  "completed",
+] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
+  await: "Awaiting booking",
   scheduled: "Scheduled",
   cancelled: "Cancelled",
   completed: "Completed",
 };
 
 export const BOOKING_STATUS_TONE: Record<BookingStatus, string> = {
+  await:
+    "bg-orange-50 text-orange-800 border border-orange-200",
   scheduled:
     "bg-emerald-50 text-emerald-700 border border-emerald-200",
   cancelled:

@@ -556,7 +556,11 @@ export async function listQuotationsForInspection(
       : null;
   const fallbackBookingStatus =
     parseBookingStatus(inspectionData.bookingStatus) ??
-    (fallbackBookingId ? ("scheduled" as const) : null);
+    (fallbackBookingId
+      ? ("scheduled" as const)
+      : inspectionData.status === "awaiting_decision"
+        ? ("await" as const)
+        : null);
 
   return snap.docs
     .map((doc) => {

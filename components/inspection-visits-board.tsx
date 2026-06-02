@@ -529,25 +529,23 @@ function RequestCard({
             </span>
           ) : null}
           {hasLinkedBooking ? (
-            <>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
-                <span className="material-symbols-outlined text-[12px] leading-none">
-                  assignment
-                </span>
-                {displayBookingCode({
-                  id: request.bookingId ?? "",
-                  bookingCode: request.bookingCode,
-                })}
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
+              <span className="material-symbols-outlined text-[12px] leading-none">
+                assignment
               </span>
-              {request.bookingStatus ? (
-                <BookingStatusPill status={request.bookingStatus} />
-              ) : null}
-            </>
+              {displayBookingCode({
+                id: request.bookingId ?? "",
+                bookingCode: request.bookingCode,
+              })}
+            </span>
+          ) : null}
+          {request.bookingStatus ? (
+            <BookingStatusPill status={request.bookingStatus} />
           ) : null}
           {showPostQuoteActions ? (
             <div
               className={`flex shrink-0 items-center gap-1.5 ${
-                request.assignedTo || hasLinkedBooking
+                request.assignedTo || hasLinkedBooking || request.bookingStatus
                   ? "border-l border-outline-variant/50 pl-2"
                   : ""
               }`}
@@ -1144,7 +1142,7 @@ function DetailDrawerContent({
               {STATUS_LABELS[request.status]}
             </span>
             <CreatedSourcePill source={request.createdSource} />
-            {request.bookingId && request.bookingStatus ? (
+            {request.bookingStatus ? (
               <BookingStatusPill status={request.bookingStatus} />
             ) : null}
           </div>

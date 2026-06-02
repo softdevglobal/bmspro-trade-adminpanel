@@ -164,6 +164,9 @@ function mapBookingDoc(
       if (typeof data.bookingId === "string" && data.bookingId.trim()) {
         return "scheduled";
       }
+      if (data.status === "awaiting_decision") {
+        return "await";
+      }
       return null;
     })(),
     estimatedDurationMinutes:

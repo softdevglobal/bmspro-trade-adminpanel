@@ -23,7 +23,10 @@ import {
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
-import { createBookingFromInspection } from "@/lib/bookings/server";
+import {
+  createBookingFromInspection,
+  mirrorBookingToQuotations,
+} from "@/lib/bookings/server";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -299,10 +302,19 @@ export async function applyOwnerAction(
       };
     }
     updates.status = "awaiting_decision" satisfies InspectionRequestStatus;
+    updates.bookingStatus = "await";
     if (typeof action.note === "string") updates.ownerNote = action.note;
   }
 
   await ref.update(updates);
+
+  if (action.type === "mark_awaiting_decision") {
+    try {
+      await mirrorBookingToQuotations(id, { bookingStatus: "await" });
+    } catch (error) {
+      console.error("quotation bookingStatus mirror failed:", error);
+    }
+  }
   const after = await ref.get();
   const request = mapInspectionDoc(ref.id, after.data() ?? {});
 
