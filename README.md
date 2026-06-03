@@ -651,6 +651,13 @@ There are **no separate `.html` or React email files**. All HTML is built in Typ
 
 **Layout vs copy:** Change **look and feel** in `layout.ts`. Change **wording or which fields appear** in the matching file under `lib/email/templates/`.
 
+### Logos + fonts in emails
+
+- **BMS Pro blue logo (header):** All account-style emails pass `platformLogoUrl` using `platformBrandLogoDataUri()` (embedded base64 from `public/bms_pro_blue.jpeg`) so it renders even when the app URL is not publicly accessible.
+- **Business logo (body):** Templates pass `bodyLogoUrl` for the business logo, which renders in the white body section above the title.
+- **Centering:** Use `headerAlign: "center"` to center the header logo + headline (welcome emails, password reset, customer notifications, quotation).
+- **Fonts:** Emails use a best-effort font stack matching the dashboard (`Saira` base, `Bitter` for headings, `Finlandica` for body). Email clients may fall back to system fonts if web fonts are blocked.
+
 ### Which file sends which email
 
 | Email | Template builder | Sender function | ZeptoMail sender | Triggered from |
@@ -1312,7 +1319,7 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 | `notifyCustomerOfStatusChange(request, nextStatus, ctx)` | Creates status-change notification (scheduled/proposed/cancelled/completed) | write `customer_notifications` |
 | `notifyCustomerOfAssignment(request, ctx)` | Creates `request_assigned` notification | write `customer_notifications` |
 | `notifyBusinessOfCustomerAcceptance(request, ctx)` | Creates `request_scheduled` notification on business side | write `business_notifications` |
-| `sendCustomerNotificationEmail(input)` *(private)* | Builds HTML via `renderEmail()` + sends ZeptoMail (`request` sender) | ZeptoMail |
+| `sendInspectionCustomerNotificationEmail(input)` *(private)* | Builds HTML via `renderEmail()` + sends ZeptoMail (`request` sender) | ZeptoMail |
 | `listBusinessNotifications(businessId)` | Reads up to 50 notifications desc | read `business_notifications` |
 | `listCustomerNotifications(uid, email)` | Reads by `customerId` + `customerEmail`, deduplicates | read `customer_notifications` |
 | `markNotificationRead(id, guard)` | Updates `read: true` with ownership check | update collection |
@@ -2152,7 +2159,7 @@ Anonymous (public self-signup)
 | **`templates/*.ts`** | **Per-email copy + senders** — one file per transactional email. |
 | **`zeptomail.ts`** | ZeptoMail transport — `sendEmail()` only; reads `ZEPTOMAIL_*` env vars. |
 
-Inspection update emails are **not** in `lib/email/`; their copy and `renderEmail()` calls live in **`lib/notifications/server.ts`** (`EMAIL_PRESENTATION`, `sendCustomerNotificationEmail`).
+Inspection update emails are built in `lib/email/templates/inspection-customer-notification.ts` and triggered from `lib/notifications/server.ts`.
 
 ### `lib/business/`
 - **`business-profile-context.tsx`** — React context that listens to `businesses/{id}` in real-time (Firestore `onSnapshot`). Provides `businessName`, `logoUrl`, `bookingSlug`.

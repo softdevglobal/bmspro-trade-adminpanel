@@ -10,6 +10,7 @@ import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
+import { formatInspectionVisitReference } from "@/lib/inspection/types";
 import type { NotificationType } from "@/lib/notifications/types";
 
 /** Eyebrow + tone shown in the customer email for each notification type. */
@@ -32,6 +33,7 @@ export type InspectionCustomerNotificationEmailInput = {
   bookingSlug?: string | null;
   businessName?: string | null;
   logoUrl?: string | null;
+  inspectionRequestId?: string | null;
   type: NotificationType;
   title: string;
   body: string;
@@ -67,6 +69,16 @@ export async function sendInspectionCustomerNotificationEmail(
   try {
     const ctaUrl = customerRequestUrl(input.bookingSlug);
     const presentation = EMAIL_PRESENTATION[input.type];
+    const details: EmailDetailRow[] = [];
+    const inspectionId = input.inspectionRequestId?.trim();
+    if (inspectionId) {
+      details.push({
+        label: "Inspection",
+        value: formatInspectionVisitReference(inspectionId),
+      });
+    }
+    if (input.emailDetails?.length) details.push(...input.emailDetails);
+
     const html = renderEmail({
       eyebrow: presentation?.eyebrow ?? "Inspection request",
       tone: presentation?.tone ?? "brand",
@@ -77,7 +89,7 @@ export async function sendInspectionCustomerNotificationEmail(
       title: input.title,
       greetingName: firstName(input.customerName),
       body: input.body,
-      details: input.emailDetails,
+      details,
       highlight: input.emailHighlight ?? null,
       highlightLabel: input.emailHighlightLabel ?? null,
       ctaUrl,
