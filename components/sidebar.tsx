@@ -39,14 +39,25 @@ const NAV_ITEMS: NavItem[] = [
     icon: "assignment",
     businessOwner: true,
   },
-  { href: "#", label: "Messages", icon: "chat" },
+  {
+    href: "/dashboard/quotations",
+    label: "Quotations",
+    icon: "request_quote",
+    businessOwner: true,
+  },
+  {
+    href: "/dashboard/invoices",
+    label: "Invoices",
+    icon: "receipt_long",
+    businessOwner: true,
+  },
+  { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
   {
     href: "/dashboard/team",
     label: "Team",
     icon: "groups",
     businessOwner: true,
   },
-  { href: "#", label: "Availability", icon: "schedule" },
   {
     href: "/dashboard/customers",
     label: "Customers",
@@ -59,14 +70,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: "inventory_2",
     businessOwner: true,
   },
-  { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
+  { href: "/dashboard/settings", label: "Settings", icon: "settings" },
   {
     href: "/dashboard/tenants",
     label: "Tenants",
     icon: "domain",
     superAdmin: true,
   },
-  { href: "/dashboard/settings", label: "Settings", icon: "settings" },
 ];
 
 type SidebarProps = {

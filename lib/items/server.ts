@@ -8,6 +8,8 @@ export const ITEM_COLLECTION = "items";
 export type CatalogItem = {
   id: string;
   name: string;
+  code: string | null;
+  description: string | null;
   priceAud: number;
   imageUrl: string | null;
   createdAt: number | null;
@@ -17,6 +19,8 @@ export type CatalogItem = {
 export type CatalogItemInput = {
   name: string;
   priceAud: number;
+  code?: string | null;
+  description?: string | null;
   imageUrl?: string | null;
 };
 
@@ -38,6 +42,14 @@ function mapItemDoc(id: string, data: Record<string, unknown>): CatalogItem {
   return {
     id,
     name: typeof data.name === "string" ? data.name : "",
+    code:
+      typeof data.code === "string" && data.code.trim()
+        ? data.code.trim()
+        : null,
+    description:
+      typeof data.description === "string" && data.description.trim()
+        ? data.description.trim()
+        : null,
     priceAud:
       typeof data.priceAud === "number" && Number.isFinite(data.priceAud)
         ? data.priceAud
@@ -70,6 +82,24 @@ function parseImageUrl(raw: unknown): string | null | undefined {
   }
 }
 
+function parseCode(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length > 50) return undefined;
+  return trimmed || null;
+}
+
+function parseDescription(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length > 500) return undefined;
+  return trimmed || null;
+}
+
 export function parseCatalogItemInput(raw: unknown): CatalogItemInput | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
@@ -84,6 +114,16 @@ export function parseCatalogItemInput(raw: unknown): CatalogItemInput | null {
   if (priceAud == null || priceAud < 0) return null;
 
   const parsed: CatalogItemInput = { name, priceAud };
+  if ("code" in item) {
+    const code = parseCode(item.code);
+    if (code === undefined) return null;
+    parsed.code = code;
+  }
+  if ("description" in item) {
+    const description = parseDescription(item.description);
+    if (description === undefined) return null;
+    parsed.description = description;
+  }
   if ("imageUrl" in item) {
     const imageUrl = parseImageUrl(item.imageUrl);
     if (imageUrl === undefined) return null;
@@ -134,6 +174,12 @@ export async function upsertCatalogItem(
     if (input.imageUrl !== undefined) {
       updates.imageUrl = input.imageUrl;
     }
+    if (input.code !== undefined) {
+      updates.code = input.code;
+    }
+    if (input.description !== undefined) {
+      updates.description = input.description;
+    }
     await ref.set(updates, { merge: true });
     const saved = await ref.get();
     return mapItemDoc(ref.id, saved.data() ?? {});
@@ -152,9 +198,34 @@ export async function upsertCatalogItem(
   if (input.imageUrl) {
     payload.imageUrl = input.imageUrl;
   }
+  if (input.code) {
+    payload.code = input.code;
+  }
+  if (input.description) {
+    payload.description = input.description;
+  }
   await ref.set(payload);
   const saved = await ref.get();
   return mapItemDoc(ref.id, saved.data() ?? {});
+}
+
+/** Maps a quotation line item to a catalog entry (unit rate, optional code). */
+export function catalogInputFromQuotationLineItem(item: {
+  name: string;
+  rateAud?: number | null;
+  priceAud: number;
+  code?: string | null;
+  description?: string | null;
+}): CatalogItemInput {
+  return {
+    name: item.name,
+    priceAud:
+      typeof item.rateAud === "number" && Number.isFinite(item.rateAud)
+        ? item.rateAud
+        : item.priceAud,
+    code: item.code?.trim() || null,
+    description: item.description?.trim() || null,
+  };
 }
 
 /** Best-effort bulk upsert used when a quotation is created. */
@@ -213,6 +284,12 @@ export async function updateCatalogItem(
   };
   if (input.imageUrl !== undefined) {
     updates.imageUrl = input.imageUrl;
+  }
+  if (input.code !== undefined) {
+    updates.code = input.code;
+  }
+  if (input.description !== undefined) {
+    updates.description = input.description;
   }
 
   await ref.set(updates, { merge: true });

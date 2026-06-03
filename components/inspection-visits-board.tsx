@@ -62,7 +62,9 @@ function CreatedSourcePill({
       ? "language"
       : source === "owner_mobile"
         ? "smartphone"
-        : "dashboard";
+        : source === "quotation_direct"
+          ? "request_quote"
+          : "dashboard";
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
       <span className="material-symbols-outlined text-[12px] leading-none text-primary">
@@ -160,6 +162,9 @@ export function InspectionVisitsBoard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpenMode, setDrawerOpenMode] = useState<DrawerMode | null>(null);
   const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  const [pendingDrawerMode, setPendingDrawerMode] = useState<DrawerMode | null>(
+    null,
+  );
   const [addModalOpen, setAddModalOpen] = useState(false);
 
   useEffect(() => {
@@ -194,8 +199,13 @@ export function InspectionVisitsBoard() {
   // Open a specific request when arriving from a notification (URL ?request=
   // on first load, or a custom event when already on this page).
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("request");
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("request");
+    const action = params.get("action");
     if (fromUrl) setPendingOpenId(fromUrl);
+    if (action === "schedule-job") {
+      setPendingDrawerMode("convert_booking");
+    }
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<string>).detail;
       if (detail) setPendingOpenId(detail);
@@ -209,9 +219,13 @@ export function InspectionVisitsBoard() {
     if (!pendingOpenId) return;
     if (boardRequests.some((req) => req.id === pendingOpenId)) {
       setSelectedId(pendingOpenId);
+      if (pendingDrawerMode) {
+        setDrawerOpenMode(pendingDrawerMode);
+        setPendingDrawerMode(null);
+      }
       setPendingOpenId(null);
     }
-  }, [pendingOpenId, boardRequests]);
+  }, [pendingOpenId, pendingDrawerMode, boardRequests]);
 
   const selected = useMemo(
     () => boardRequests.find((req) => req.id === selectedId) ?? null,
@@ -1445,9 +1459,7 @@ type QuotationView = {
   bookingStatus: BookingStatus | null;
   serviceTitle: string;
   lineItems: { name: string; priceAud: number }[];
-  additions: { name: string; priceAud: number }[];
   subtotalAud: number;
-  additionsTotalAud: number;
   finalPriceAud: number;
   notes: string | null;
   validUntil: string | null;
@@ -1622,24 +1634,6 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
         <span>Total item price</span>
         <span>{formatAud(quotation.subtotalAud)}</span>
       </div>
-
-      {quotation.additions.length > 0 ? (
-        <ul className="mt-2 space-y-1.5">
-          {quotation.additions.map((item, index) => (
-            <li
-              key={`add-${index}`}
-              className="flex items-center justify-between gap-3 font-body text-[13px]"
-            >
-              <span className="min-w-0 truncate text-on-surface">
-                + {item.name}
-              </span>
-              <span className="shrink-0 text-on-surface-variant">
-                {formatAud(item.priceAud)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-primary/10 px-3 py-2">
         <span className="font-body text-[12px] font-bold uppercase tracking-wider text-primary">

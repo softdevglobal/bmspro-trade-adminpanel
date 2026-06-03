@@ -1,5 +1,7 @@
 import { BookingLinkCard } from "@/components/booking-link-card";
+import { BusinessGstSettings } from "@/components/business-gst-settings";
 import { BusinessLogoSettings } from "@/components/business-logo-settings";
+import { BusinessTermsSettings } from "@/components/business-terms-settings";
 import { DashboardShell } from "@/components/dashboard-shell";
 
 const SETTINGS_CARDS = [
@@ -77,6 +79,14 @@ export default function SettingsPage() {
 
       <div className="mb-8">
         <BusinessLogoSettings />
+      </div>
+
+      <div className="mb-8">
+        <BusinessGstSettings />
+      </div>
+
+      <div className="mb-8">
+        <BusinessTermsSettings />
       </div>
 
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">

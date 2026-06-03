@@ -122,6 +122,7 @@ export async function POST(request: Request) {
           : null,
       logoUrl:
         typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
+      context: "inspection",
     });
     customerId = account.uid;
   } catch (error) {

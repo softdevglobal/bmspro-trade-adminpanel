@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "rea
 type CatalogItem = {
   id: string;
   name: string;
+  code: string | null;
+  description: string | null;
   priceAud: number;
   imageUrl: string | null;
   createdAt: number | null;
@@ -132,7 +134,12 @@ export function ItemListBoard() {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return items;
-    return items.filter((item) => item.name.toLowerCase().includes(query));
+    return items.filter(
+      (item) =>
+        item.name.toLowerCase().includes(query) ||
+        (item.code?.toLowerCase().includes(query) ?? false) ||
+        (item.description?.toLowerCase().includes(query) ?? false),
+    );
   }, [items, search]);
 
   function openCreate() {
@@ -257,6 +264,11 @@ export function ItemListBoard() {
                 )}
               </span>
               <div className="min-w-0 flex-1">
+                {item.code ? (
+                  <p className="font-numeric truncate font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+                    {item.code}
+                  </p>
+                ) : null}
                 <p className="truncate font-display text-[17px] font-semibold text-on-surface">
                   {item.name}
                 </p>
@@ -337,6 +349,8 @@ function ItemEditorModal({
   const isEdit = item !== null;
   const [currentStep, setCurrentStep] = useState(1);
   const [name, setName] = useState(item?.name ?? "");
+  const [code, setCode] = useState(item?.code ?? "");
+  const [description, setDescription] = useState(item?.description ?? "");
   const [price, setPrice] = useState(
     item ? item.priceAud.toString() : "",
   );
@@ -401,6 +415,8 @@ function ItemEditorModal({
       body: JSON.stringify({
         name: trimmedName,
         priceAud: parsedPrice,
+        code: code.trim() || null,
+        description: description.trim() || null,
         imageUrl,
       }),
     });
@@ -566,6 +582,20 @@ function ItemEditorModal({
 
               <label className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Item code
+                </span>
+                <input
+                  type="text"
+                  value={code}
+                  onChange={(event) => setCode(event.target.value)}
+                  placeholder="e.g. TAP-001"
+                  className={INPUT_CLASS}
+                  autoFocus
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Name <span className="text-error">*</span>
                 </span>
                 <input
@@ -574,7 +604,20 @@ function ItemEditorModal({
                   onChange={(event) => setName(event.target.value)}
                   placeholder="e.g. Tap replacement"
                   className={INPUT_CLASS}
-                  autoFocus
+                />
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Description
+                </span>
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Optional details for quotations"
+                  rows={3}
+                  maxLength={500}
+                  className={`${INPUT_CLASS} resize-y`}
                 />
               </label>
 
@@ -605,6 +648,8 @@ function ItemEditorModal({
 
               <ItemPreviewPanel
                 name={name.trim() || "Untitled item"}
+                code={code.trim() || null}
+                description={description.trim() || null}
                 priceAud={previewPrice}
                 imageUrl={imageUrl}
               />
@@ -697,10 +742,14 @@ function ItemEditorHero({
 
 function ItemPreviewPanel({
   name,
+  code,
+  description,
   priceAud,
   imageUrl,
 }: {
   name: string;
+  code: string | null;
+  description: string | null;
   priceAud: number;
   imageUrl: string | null;
 }) {
@@ -733,6 +782,14 @@ function ItemPreviewPanel({
       <div className="grid grid-cols-1 gap-2 border-t border-outline-variant/60 p-4 sm:grid-cols-2">
         <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5">
           <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Code
+          </p>
+          <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
+            {code ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
             Name
           </p>
           <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
@@ -748,6 +805,14 @@ function ItemPreviewPanel({
           </p>
         </div>
         <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5 sm:col-span-2">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Description
+          </p>
+          <p className="mt-1 whitespace-pre-line font-body text-[13px] text-on-surface">
+            {description ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5">
           <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
             Photo
           </p>

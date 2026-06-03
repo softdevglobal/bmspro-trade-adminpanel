@@ -1,6 +1,8 @@
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
+  createStandaloneQuotation,
+  listBusinessQuotations,
   listQuotationsForInspection,
 } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
@@ -75,12 +77,100 @@ export async function POST(request: Request) {
   }
 
   const payload = body as Record<string, unknown>;
+
+  // Standalone quotation: no existing inspection visit. Creates both a
+  // completed inspection_requests record and the quotation document.
+  if (payload.standalone === true || payload.source === "standalone") {
+    const customer = (payload.customer ?? {}) as {
+      fullName?: string;
+      email?: string;
+      phone?: string;
+    };
+    const address = (payload.address ?? {}) as {
+      street?: string;
+      suburb?: string;
+      state?: string;
+      postcode?: string;
+    };
+    const result = await createStandaloneQuotation(auth.businessId, auth.uid, {
+      customer: {
+        fullName: typeof customer.fullName === "string" ? customer.fullName : "",
+        email: typeof customer.email === "string" ? customer.email : "",
+        phone: typeof customer.phone === "string" ? customer.phone : "",
+      },
+      address: {
+        street: typeof address.street === "string" ? address.street : "",
+        suburb: typeof address.suburb === "string" ? address.suburb : "",
+        state: typeof address.state === "string" ? address.state : "",
+        postcode: typeof address.postcode === "string" ? address.postcode : "",
+      },
+      title: typeof payload.title === "string" ? payload.title : "",
+      description:
+        typeof payload.description === "string" ? payload.description : null,
+      requestType:
+        payload.requestType === "existing_service" ||
+        payload.requestType === "custom_quote"
+          ? payload.requestType
+          : undefined,
+      serviceId:
+        typeof payload.serviceId === "string" ? payload.serviceId : null,
+      customRequest:
+        payload.customRequest &&
+        typeof payload.customRequest === "object" &&
+        !Array.isArray(payload.customRequest)
+          ? {
+              title:
+                typeof (payload.customRequest as { title?: unknown }).title ===
+                "string"
+                  ? (payload.customRequest as { title: string }).title
+                  : "",
+              description:
+                typeof (payload.customRequest as { description?: unknown })
+                  .description === "string"
+                  ? (payload.customRequest as { description: string })
+                      .description
+                  : "",
+            }
+          : null,
+      lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
+      finalPriceAud:
+        typeof payload.finalPriceAud === "number" &&
+        Number.isFinite(payload.finalPriceAud)
+          ? payload.finalPriceAud
+          : null,
+      notes: typeof payload.notes === "string" ? payload.notes : null,
+      termsAndConditions:
+        typeof payload.termsAndConditions === "string"
+          ? payload.termsAndConditions
+          : null,
+      discountAud:
+        typeof payload.discountAud === "number" &&
+        Number.isFinite(payload.discountAud)
+          ? payload.discountAud
+          : null,
+      validUntil:
+        typeof payload.validUntil === "string" ? payload.validUntil : null,
+      imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],
+      depositRequest: payload.depositRequest ?? null,
+    });
+
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, quotation: result.quotation },
+      { status: 201 },
+    );
+  }
+
   const inspectionRequestId =
     typeof payload.inspectionRequestId === "string"
       ? payload.inspectionRequestId
       : "";
   const lineItems = payload.lineItems;
-  const additions = payload.additions;
   const finalPriceAud =
     typeof payload.finalPriceAud === "number" &&
     Number.isFinite(payload.finalPriceAud)
@@ -97,7 +187,6 @@ export async function POST(request: Request) {
     {
       inspectionRequestId,
       lineItems: Array.isArray(lineItems) ? lineItems : [],
-      additions: Array.isArray(additions) ? additions : [],
       finalPriceAud,
       notes,
       validUntil,
@@ -128,11 +217,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const inspectionRequestId =
     url.searchParams.get("inspectionRequestId")?.trim() ?? "";
+
   if (!inspectionRequestId) {
-    return NextResponse.json(
-      { ok: false, error: "Missing inspectionRequestId." },
-      { status: 400 },
-    );
+    const quotations = await listBusinessQuotations(auth.businessId);
+    return NextResponse.json({ ok: true, quotations });
   }
 
   const quotations = await listQuotationsForInspection(

@@ -176,8 +176,10 @@ export const DEFAULT_CUSTOMER_PASSWORD = "00001111";
 export type EnsuredCustomerAccount = {
   uid: string;
   email: string;
-  /** True when the account was created during this call (new sign-up). */
+  /** True when the Firebase Auth user was created during this call. */
   created: boolean;
+  /** True when a welcome email was sent during this call. */
+  welcomeEmailSent: boolean;
 };
 
 /**
@@ -194,6 +196,8 @@ export async function ensureCustomerAccount(input: {
   businessName?: string | null;
   bookingSlug?: string | null;
   logoUrl?: string | null;
+  /** Adjust welcome copy (e.g. quotation vs inspection). */
+  context?: "quotation" | "inspection" | null;
 }): Promise<EnsuredCustomerAccount> {
   const email = normalizeEmail(input.email);
   const fullName = input.fullName.trim();
@@ -251,29 +255,35 @@ export async function ensureCustomerAccount(input: {
     await ref.set(update, { merge: true });
   }
 
-  // Send the welcome email whenever the email wasn't already a customer.
-  // Only include the default password when we actually created the login
-  // (otherwise we'd be claiming a password we don't control).
-  if (isNewCustomer) {
+  const profileSnap = await ref.get();
+  const profileData = profileSnap.data() ?? {};
+  const welcomeAlreadySent = profileData.welcomeEmailSent === true;
+  const shouldSendWelcome = !welcomeAlreadySent;
+
+  let welcomeEmailSent = false;
+  if (shouldSendWelcome) {
     try {
-      await sendCustomerWelcomeEmail({
+      welcomeEmailSent = await sendCustomerWelcomeEmail({
         email,
         fullName,
         businessName: input.businessName ?? null,
         bookingSlug: input.bookingSlug ?? null,
         logoUrl: input.logoUrl ?? null,
         temporaryPassword: created ? DEFAULT_CUSTOMER_PASSWORD : null,
+        context: input.context ?? null,
       });
-      await ref.set(
-        { welcomeEmailSent: true, updatedAt: FieldValue.serverTimestamp() },
-        { merge: true },
-      );
+      if (welcomeEmailSent) {
+        await ref.set(
+          { welcomeEmailSent: true, updatedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+      }
     } catch {
       /* welcome email is best-effort */
     }
   }
 
-  return { uid, email, created };
+  return { uid, email, created, welcomeEmailSent };
 }
 
 export async function updateCustomerProfile(

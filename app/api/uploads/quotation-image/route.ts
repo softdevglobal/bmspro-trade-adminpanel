@@ -1,5 +1,5 @@
 import { adminAuth } from "@/lib/firebase/admin";
-import { uploadQuotationImage } from "@/lib/onboarding/services/upload";
+import { uploadQuotationAttachment } from "@/lib/onboarding/services/upload";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -27,7 +27,7 @@ async function requireQuotationAuthor(request: Request) {
       return {
         ok: false as const,
         status: 403,
-        error: "You do not have permission to upload quotation images.",
+        error: "You do not have permission to upload quotation attachments.",
       };
     }
 
@@ -70,13 +70,13 @@ export async function POST(request: Request) {
 
     if (!(file instanceof File)) {
       return NextResponse.json(
-        { ok: false, error: "Please choose an image file." },
+        { ok: false, error: "Please choose a file." },
         { status: 400 },
       );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = await uploadQuotationImage(buffer, file.type || "", {
+    const result = await uploadQuotationAttachment(buffer, file.type || "", {
       businessId: auth.businessId,
       uid: auth.uid,
       filename: file.name || "photo.jpg",
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("POST /api/uploads/quotation-image failed:", error);
     return NextResponse.json(
-      { ok: false, error: "Could not upload image." },
+      { ok: false, error: "Could not upload file." },
       { status: 500 },
     );
   }
