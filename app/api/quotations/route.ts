@@ -177,9 +177,22 @@ export async function POST(request: Request) {
       ? payload.finalPriceAud
       : null;
   const notes = typeof payload.notes === "string" ? payload.notes : null;
+  const termsAndConditions =
+    typeof payload.termsAndConditions === "string"
+      ? payload.termsAndConditions
+      : null;
+  const discountAud =
+    typeof payload.discountAud === "number" &&
+    Number.isFinite(payload.discountAud)
+      ? payload.discountAud
+      : null;
   const validUntil =
     typeof payload.validUntil === "string" ? payload.validUntil : null;
   const imageUrls = payload.imageUrls;
+  const depositRequest = payload.depositRequest ?? null;
+
+  const customerPayload = payload.customer;
+  const addressPayload = payload.address;
 
   const result = await createQuotationForInspection(
     auth.businessId,
@@ -189,8 +202,62 @@ export async function POST(request: Request) {
       lineItems: Array.isArray(lineItems) ? lineItems : [],
       finalPriceAud,
       notes,
+      termsAndConditions,
+      discountAud,
       validUntil,
       imageUrls: Array.isArray(imageUrls) ? imageUrls : [],
+      depositRequest,
+      ...(customerPayload &&
+      typeof customerPayload === "object" &&
+      !Array.isArray(customerPayload)
+        ? {
+            customer: {
+              fullName:
+                typeof (customerPayload as { fullName?: unknown }).fullName ===
+                "string"
+                  ? (customerPayload as { fullName: string }).fullName
+                  : "",
+              email:
+                typeof (customerPayload as { email?: unknown }).email ===
+                "string"
+                  ? (customerPayload as { email: string }).email
+                  : "",
+              phone:
+                typeof (customerPayload as { phone?: unknown }).phone ===
+                "string"
+                  ? (customerPayload as { phone: string }).phone
+                  : "",
+            },
+          }
+        : {}),
+      ...(addressPayload &&
+      typeof addressPayload === "object" &&
+      !Array.isArray(addressPayload)
+        ? {
+            address: {
+              street:
+                typeof (addressPayload as { street?: unknown }).street ===
+                "string"
+                  ? (addressPayload as { street: string }).street
+                  : "",
+              suburb:
+                typeof (addressPayload as { suburb?: unknown }).suburb ===
+                "string"
+                  ? (addressPayload as { suburb: string }).suburb
+                  : "",
+              state:
+                typeof (addressPayload as { state?: unknown }).state ===
+                "string"
+                  ? (addressPayload as { state: string }).state
+                  : "",
+              postcode:
+                typeof (addressPayload as { postcode?: unknown }).postcode ===
+                "string"
+                  ? (addressPayload as { postcode: string }).postcode
+                  : "",
+            },
+          }
+        : {}),
     },
   );
 
