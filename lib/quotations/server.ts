@@ -804,8 +804,14 @@ function parseStandaloneRequestType(
   return raw === "existing_service" ? "existing_service" : "custom_quote";
 }
 
+type QuotationCustomerInput = {
+  fullName?: string;
+  email?: string;
+  phone?: string;
+} | null | undefined;
+
 function parseStandaloneCustomer(
-  raw: StandaloneQuotationInput["customer"],
+  raw: QuotationCustomerInput,
 ): { ok: true; value: InspectionCustomer } | { ok: false; error: string } {
   const fullName = (raw?.fullName ?? "").trim();
   const email = (raw?.email ?? "").trim().toLowerCase();
@@ -822,8 +828,15 @@ function parseStandaloneCustomer(
   return { ok: true, value: { fullName, email, phone } };
 }
 
+type QuotationAddressInput = {
+  street?: string;
+  suburb?: string;
+  state?: string;
+  postcode?: string;
+} | null | undefined;
+
 function parseStandaloneAddress(
-  raw: InspectionAddress,
+  raw: QuotationAddressInput,
 ): { ok: true; value: InspectionAddress } | { ok: false; error: string } {
   const address: InspectionAddress = {
     street: (raw?.street ?? "").trim(),
