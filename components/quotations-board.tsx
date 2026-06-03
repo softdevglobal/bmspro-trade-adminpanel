@@ -3,7 +3,11 @@
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
-import { formatAddress } from "@/lib/inspection/types";
+import {
+  CREATED_SOURCE_LABELS,
+  formatAddress,
+  type InspectionRequestCreatedSource,
+} from "@/lib/inspection/types";
 import type { QuotationDetail } from "@/lib/quotations/server";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
@@ -24,6 +28,31 @@ function formatWhen(timestamp: number | null): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function CreatedSourcePill({
+  source,
+}: {
+  source: InspectionRequestCreatedSource | null | undefined;
+}) {
+  if (!source) return null;
+  const label = CREATED_SOURCE_LABELS[source];
+  const icon =
+    source === "booking_engine"
+      ? "language"
+      : source === "owner_mobile"
+        ? "smartphone"
+        : source === "quotation_direct"
+          ? "request_quote"
+          : "dashboard";
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
+      <span className="material-symbols-outlined text-[12px] leading-none text-primary">
+        {icon}
+      </span>
+      {label}
+    </span>
+  );
 }
 
 function QuotationCard({
@@ -52,6 +81,7 @@ function QuotationCard({
         <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
           {quotation.status}
         </span>
+        <CreatedSourcePill source={quotation.createdSource} />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
         {quotation.serviceTitle || "Quotation"}
@@ -142,6 +172,7 @@ function QuotationPreviewContent({
             <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
               {quotation.status}
             </span>
+            <CreatedSourcePill source={quotation.createdSource} />
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
             {title}
@@ -161,6 +192,17 @@ function QuotationPreviewContent({
       </header>
 
       <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3 sm:space-y-3 sm:px-5">
+        {quotation.createdSource ? (
+          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Source
+            </p>
+            <div className="mt-2">
+              <CreatedSourcePill source={quotation.createdSource} />
+            </div>
+          </section>
+        ) : null}
+
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Customer
