@@ -12,7 +12,9 @@ import {
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
+  type InspectionRequestCreatedSource,
   type InspectionRequestType,
+  parseCreatedSource,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
@@ -72,6 +74,8 @@ export type QuotationDetail = {
   createdBy: string;
   createdAt: number | null;
   updatedAt: number | null;
+  /** From the linked inspection visit (`createdSource`). */
+  createdSource?: InspectionRequestCreatedSource | null;
 };
 
 export type CreateQuotationInput = {
@@ -79,8 +83,18 @@ export type CreateQuotationInput = {
   lineItems: QuotationLineItem[];
   finalPriceAud?: number | null;
   notes?: string | null;
+  termsAndConditions?: string | null;
+  discountAud?: number | null;
   validUntil?: string | null;
   imageUrls?: string[];
+  depositRequest?: unknown;
+  customer?: { fullName?: string; email?: string; phone?: string };
+  address?: {
+    street?: string;
+    suburb?: string;
+    state?: string;
+    postcode?: string;
+  };
 };
 
 function parseImageUrls(raw: unknown): string[] {
@@ -517,8 +531,35 @@ export async function createQuotationForInspection(
     };
   }
 
+  const requestCustomer = (requestData.customer ?? {}) as {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+  };
+  const requestAddress = (requestData.address ?? {}) as InspectionAddress;
+  const customerSource = input.customer ?? requestCustomer;
+  const addressSource = input.address ?? requestAddress;
+
+  const customerParsed = parseStandaloneCustomer(customerSource);
+  if (!customerParsed.ok) {
+    return { ok: false, status: 400, error: customerParsed.error };
+  }
+  const addressParsed = parseStandaloneAddress(addressSource);
+  if (!addressParsed.ok) {
+    return { ok: false, status: 400, error: addressParsed.error };
+  }
+
+  const customer = customerParsed.value;
+  const address = addressParsed.value;
+
   const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
-  const computedFinal = subtotalAud;
+  const discountAud =
+    typeof input.discountAud === "number" &&
+    Number.isFinite(input.discountAud) &&
+    input.discountAud >= 0
+      ? input.discountAud
+      : 0;
+  const computedFinal = Math.max(0, subtotalAud - discountAud);
   const finalPriceAud =
     typeof input.finalPriceAud === "number" &&
     Number.isFinite(input.finalPriceAud) &&
@@ -526,7 +567,18 @@ export async function createQuotationForInspection(
       ? input.finalPriceAud
       : computedFinal;
   const imageUrls = parseImageUrls(input.imageUrls);
-  const balanceDueAud = computeBalanceDueAud(finalPriceAud, null);
+  const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud, depositRequest);
+  const baseTerms =
+    typeof input.termsAndConditions === "string" &&
+    input.termsAndConditions.trim()
+      ? input.termsAndConditions.trim()
+      : null;
+  const termsAndConditions = depositRequest
+    ? baseTerms
+      ? `${baseTerms}\n\n${depositPaymentNote(depositRequest)}`
+      : depositPaymentNote(depositRequest)
+    : baseTerms;
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
   const quotationCode = buildQuotationCodeForInspection({
     id: inspectionId,
@@ -536,13 +588,22 @@ export async function createQuotationForInspection(
         : null,
   });
 
+  await requestSnap.ref.set(
+    {
+      customer,
+      address,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
   await ref.set({
     quotationCode,
     businessId,
     inspectionRequestId: inspectionId,
     serviceTitle: requestHeadline(requestData),
-    customer: requestData.customer ?? {},
-    address: requestData.address ?? {},
+    customer,
+    address,
     lineItems: serializeLineItemsForFirestore(lineItems),
     subtotalAud,
     finalPriceAud,
@@ -552,6 +613,10 @@ export async function createQuotationForInspection(
       typeof input.notes === "string" && input.notes.trim()
         ? input.notes.trim()
         : null,
+    paymentInstructions: null,
+    termsAndConditions,
+    discountAud,
+    depositRequest,
     validUntil:
       typeof input.validUntil === "string" && input.validUntil.trim()
         ? input.validUntil.trim()
@@ -739,8 +804,14 @@ function parseStandaloneRequestType(
   return raw === "existing_service" ? "existing_service" : "custom_quote";
 }
 
+type QuotationCustomerInput = {
+  fullName?: string;
+  email?: string;
+  phone?: string;
+} | null | undefined;
+
 function parseStandaloneCustomer(
-  raw: StandaloneQuotationInput["customer"],
+  raw: QuotationCustomerInput,
 ): { ok: true; value: InspectionCustomer } | { ok: false; error: string } {
   const fullName = (raw?.fullName ?? "").trim();
   const email = (raw?.email ?? "").trim().toLowerCase();
@@ -757,8 +828,15 @@ function parseStandaloneCustomer(
   return { ok: true, value: { fullName, email, phone } };
 }
 
+type QuotationAddressInput = {
+  street?: string;
+  suburb?: string;
+  state?: string;
+  postcode?: string;
+} | null | undefined;
+
 function parseStandaloneAddress(
-  raw: InspectionAddress,
+  raw: QuotationAddressInput,
 ): { ok: true; value: InspectionAddress } | { ok: false; error: string } {
   const address: InspectionAddress = {
     street: (raw?.street ?? "").trim(),
@@ -1143,6 +1221,9 @@ export async function listQuotationsForInspection(
   ]);
 
   const inspectionData = inspectionSnap.data() ?? {};
+  const inspectionCreatedSource = parseCreatedSource(
+    inspectionData.createdSource,
+  );
   const fallbackBookingId =
     typeof inspectionData.bookingId === "string" ? inspectionData.bookingId : null;
   const fallbackBookingCode =
@@ -1167,9 +1248,12 @@ export async function listQuotationsForInspection(
       const needsBookingStatus =
         fallbackBookingStatus &&
         (!quotation.bookingStatus || !quotation.bookingStatusAt);
-      if (!needsBookingId && !needsBookingStatus) return quotation;
+      const withSource = inspectionCreatedSource
+        ? { ...quotation, createdSource: inspectionCreatedSource }
+        : quotation;
+      if (!needsBookingId && !needsBookingStatus) return withSource;
       return {
-        ...quotation,
+        ...withSource,
         ...(needsBookingId
           ? {
               bookingId: fallbackBookingId,
@@ -1190,6 +1274,41 @@ export async function listQuotationsForInspection(
 
 export const QUOTATION_LIST_LIMIT = 80;
 
+async function enrichQuotationsWithCreatedSource(
+  quotations: QuotationDetail[],
+): Promise<QuotationDetail[]> {
+  const ids = [
+    ...new Set(
+      quotations
+        .map((q) => q.inspectionRequestId.trim())
+        .filter((id) => id.length > 0),
+    ),
+  ];
+  if (ids.length === 0) return quotations;
+
+  const sourceById = new Map<string, InspectionRequestCreatedSource | null>();
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const refs = chunk.map((id) =>
+      adminDb.collection(INSPECTION_COLLECTION).doc(id),
+    );
+    const snaps = await adminDb.getAll(...refs);
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      sourceById.set(
+        snap.id,
+        parseCreatedSource(snap.data()?.createdSource),
+      );
+    }
+  }
+
+  return quotations.map((quotation) => {
+    const source = sourceById.get(quotation.inspectionRequestId.trim());
+    if (!source) return quotation;
+    return { ...quotation, createdSource: source };
+  });
+}
+
 /** Lists all quotations for a business (newest first). */
 export async function listBusinessQuotations(
   businessId: string,
@@ -1201,9 +1320,10 @@ export async function listBusinessQuotations(
     .limit(QUOTATION_LIST_LIMIT)
     .get();
 
-  return snapshot.docs.map((doc) =>
+  const quotations = snapshot.docs.map((doc) =>
     mapQuotationDoc(doc.id, doc.data() ?? {}),
   );
+  return enrichQuotationsWithCreatedSource(quotations);
 }
 
 async function sendQuotationCreatedEmail(
