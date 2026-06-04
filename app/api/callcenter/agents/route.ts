@@ -20,9 +20,9 @@
  * Copy the `idToken` from the response — use it as the Bearer token below.
  *
  * ──────────────────────────────────────────────────────────────────────────────
- * STEP 2 — POST /api/admin/callcenter-agents  (Register / create an agent)
+ * STEP 2 — POST /api/callcenter/agents  (Register / create an agent)
  * ──────────────────────────────────────────────────────────────────────────────
- * URL:     http://localhost:3000/api/admin/callcenter-agents
+ * URL:     http://localhost:3000/api/callcenter/agents
  * Method:  POST
  * Headers:
  *   Authorization: Bearer <SUPER_ADMIN_ID_TOKEN>
@@ -52,22 +52,24 @@
  *   { "ok": false, "error": "Could not create call-center agent." }          500
  *
  * ──────────────────────────────────────────────────────────────────────────────
- * STEP 3 — Agent login (call this from the call-center app)
+ * STEP 3 — Agent login
  * ──────────────────────────────────────────────────────────────────────────────
- * POST https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyCSNbcUWFdpueif3XMB85yHt29uho96bm0
+ * URL:     http://localhost:3000/api/callcenter/auth/login
+ * Method:  POST
+ * Headers:
+ *   Content-Type: application/json
  * Body (raw JSON):
  *   {
- *     "email":             "sarah.johnson@callcenter.com",
- *     "password":          "Agent@1234",
- *     "returnSecureToken": true
+ *     "email":    "sarah.johnson@callcenter.com",
+ *     "password": "Agent@1234"
  *   }
  * The response contains `idToken` — use it as `Authorization: Bearer <idToken>`
- * in all call-center API requests.
+ * in all subsequent call-center API requests.
  *
  * ──────────────────────────────────────────────────────────────────────────────
- * GET /api/admin/callcenter-agents  — List all call-center agents
+ * GET /api/callcenter/agents  — List all call-center agents
  * ──────────────────────────────────────────────────────────────────────────────
- * URL:     http://localhost:3000/api/admin/callcenter-agents
+ * URL:     http://localhost:3000/api/callcenter/agents
  * Method:  GET
  * Headers:
  *   Authorization: Bearer <SUPER_ADMIN_ID_TOKEN>
@@ -134,8 +136,7 @@ function parseAgentPayload(
   const email =
     typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
   const phone = typeof data.phone === "string" ? data.phone.trim() : "";
-  const password =
-    typeof data.password === "string" ? data.password : "";
+  const password = typeof data.password === "string" ? data.password : "";
 
   if (!fullName) {
     return { ok: false, error: "Full name is required." };
@@ -154,7 +155,7 @@ function parseAgentPayload(
 }
 
 /**
- * POST /api/admin/callcenter-agents
+ * POST /api/callcenter/agents
  *
  * Creates a new call-center agent. Super admin access required.
  *
@@ -255,10 +256,7 @@ export async function POST(request: Request) {
       updatedAt: now,
     });
 
-    return NextResponse.json(
-      { ok: true, agentId: authUid },
-      { status: 201 },
-    );
+    return NextResponse.json({ ok: true, agentId: authUid }, { status: 201 });
   } catch (error) {
     console.error("[callcenter] agent creation failed:", error);
     // Roll back the auth user if the Firestore write failed.
@@ -277,7 +275,7 @@ export async function POST(request: Request) {
 }
 
 /**
- * GET /api/admin/callcenter-agents
+ * GET /api/callcenter/agents
  *
  * Returns all call-center agent accounts. Super admin access required.
  *
