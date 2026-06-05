@@ -10,13 +10,23 @@ import {
 type Props = {
   document: QuotationDocumentData;
   className?: string;
+  /** When `invoice`, labels and layout match a tax invoice instead of a quote. */
+  kind?: "quote" | "invoice";
 };
 
 /**
  * HTML preview that mirrors the generated quotation PDF layout.
  */
-export function QuotationDocumentPreview({ document, className = "" }: Props) {
+export function QuotationDocumentPreview({
+  document,
+  className = "",
+  kind = "quote",
+}: Props) {
   const { business, lineItems } = document;
+  const isInvoice = kind === "invoice";
+  const docLabel = isInvoice ? "Invoice" : "Quote";
+  const numberLabel = isInvoice ? "Invoice No" : "Quote No";
+  const dateLabel = isInvoice ? "Due date" : "Valid until";
 
   return (
     <div
@@ -52,7 +62,7 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
         aria-hidden
         className="pointer-events-none absolute left-[14%] top-[40%] rotate-[-18deg] select-none font-display text-[clamp(72px,16vw,128px)] font-bold leading-none text-[#0b33a0]/[0.022]"
       >
-        QUOTE
+        {isInvoice ? "INVOICE" : "QUOTE"}
       </p>
       <div
         aria-hidden
@@ -68,7 +78,7 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">
             <h2 className="font-display text-[34px] font-bold leading-none tracking-tight text-[#0b33a0]">
-              Quote
+              {docLabel}
             </h2>
             <div className="mt-2 h-1 w-14 rounded-full bg-[#0b33a0]" />
             <p className="mt-3 font-display text-[16px] font-bold text-[#1e2430]">
@@ -133,7 +143,7 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
           <div className="absolute inset-x-0 top-0 h-0.5 bg-[#0b33a0]/12" />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>
-              Quote No:{" "}
+              {numberLabel}:{" "}
               <span className="font-normal">{document.quoteNo}</span>
             </span>
             <span>
@@ -145,7 +155,7 @@ export function QuotationDocumentPreview({ document, className = "" }: Props) {
           </div>
           {document.validUntil ? (
             <p className="mt-1.5 font-normal text-[#6b7280]">
-              Valid until:{" "}
+              {dateLabel}:{" "}
               <span className="font-medium text-[#1e2430]">
                 {formatQuoteDate(document.validUntil)}
               </span>

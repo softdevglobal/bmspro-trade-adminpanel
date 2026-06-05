@@ -10,7 +10,7 @@ import {
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
-import type { QuotationDetail } from "@/lib/quotations/server";
+import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayQuotationCode } from "@/lib/reference-codes";
 import {
   PDFDocument,
@@ -60,7 +60,11 @@ function lerpColor(
   );
 }
 
-function drawPageDecorations(targetPage: PDFPage, fontBold: PDFFont) {
+function drawPageDecorations(
+  targetPage: PDFPage,
+  fontBold: PDFFont,
+  watermark = "QUOTE",
+) {
   // Full-page pearl gradient — the document surface itself, not a white box on top.
   const bands = 36;
   const top = { r: 0.965, g: 0.975, b: 0.995 };
@@ -119,7 +123,7 @@ function drawPageDecorations(targetPage: PDFPage, fontBold: PDFFont) {
   }
 
   // Watermark sitting on the page background
-  targetPage.drawText("QUOTE", {
+  targetPage.drawText(watermark, {
     x: PAGE_WIDTH * 0.18,
     y: PAGE_HEIGHT * 0.42,
     size: 92,
@@ -291,26 +295,19 @@ export function buildQuotationDocumentFromDetail(
   };
 }
 
+export type DocumentPdfKind = "quote" | "invoice";
+
 /**
- * Renders a polished A4 quotation PDF and returns the raw bytes.
+ * Renders a polished A4 quote or invoice PDF and returns the raw bytes.
  */
-export async function generateQuotationPdf(
-  quotation: QuotationDetail,
-  options: {
-    businessName?: string | null;
-    logoUrl?: string | null;
-    businessAddress?: string | null;
-    businessEmail?: string | null;
-    businessPhone?: string | null;
-    bookingSlug?: string | null;
-    bookingPath?: string | null;
-    abn?: string | null;
-    registeredForGst?: boolean;
-    gstPercentage?: number | null;
-    inspectionRequestCode?: string | null;
-  } = {},
+export async function generateDocumentPdf(
+  data: QuotationDocumentData,
+  kind: DocumentPdfKind = "quote",
 ): Promise<Buffer> {
-  const data = buildQuotationDocumentFromDetail(quotation, options);
+  const docTitle = kind === "invoice" ? "Invoice" : "Quote";
+  const watermark = kind === "invoice" ? "INVOICE" : "QUOTE";
+  const refLabel = kind === "invoice" ? "Invoice No:" : "Quote No:";
+  const dueLabel = kind === "invoice" ? "Due date:" : "Valid until:";
 
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -319,7 +316,7 @@ export async function generateQuotationPdf(
   const fontNumericBold = await doc.embedFont(StandardFonts.TimesRomanBold);
 
   let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  drawPageDecorations(page, fontBold);
+  drawPageDecorations(page, fontBold, watermark);
   let y = PAGE_HEIGHT;
 
   const logoImage =
@@ -429,7 +426,7 @@ export async function generateQuotationPdf(
   const ensureSpace = (needed: number) => {
     if (y - needed < MARGIN + 72) {
       page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      drawPageDecorations(page, fontBold);
+      drawPageDecorations(page, fontBold, watermark);
       y = PAGE_HEIGHT - MARGIN;
     }
   };
@@ -452,7 +449,7 @@ export async function generateQuotationPdf(
     });
   }
 
-  drawText("Quote", MARGIN, y, { size: 32, bold: true, color: BRAND });
+  drawText(docTitle, MARGIN, y, { size: 32, bold: true, color: BRAND });
   y -= 6;
   page.drawLine({
     start: { x: MARGIN, y: y - 2 },
@@ -571,13 +568,13 @@ export async function generateQuotationPdf(
     color: BRAND,
     opacity: 0.12,
   });
-  drawText(`Quote No:  ${data.quoteNo}`, MARGIN + 10, y - 14, {
+  drawText(`${refLabel}  ${data.quoteNo}`, MARGIN + 10, y - 14, {
     size: 9,
     bold: true,
   });
   if (data.validUntil) {
     drawText(
-      `Valid until:  ${formatQuoteDate(data.validUntil)}`,
+      `${dueLabel}  ${formatQuoteDate(data.validUntil)}`,
       MARGIN + 10,
       y - 26,
       { size: 8.5, color: MUTED },
@@ -960,4 +957,27 @@ export async function generateQuotationPdf(
   });
 
   return Buffer.from(await doc.save());
+}
+
+/**
+ * Renders a polished A4 quotation PDF and returns the raw bytes.
+ */
+export async function generateQuotationPdf(
+  quotation: QuotationDetail,
+  options: {
+    businessName?: string | null;
+    logoUrl?: string | null;
+    businessAddress?: string | null;
+    businessEmail?: string | null;
+    businessPhone?: string | null;
+    bookingSlug?: string | null;
+    bookingPath?: string | null;
+    abn?: string | null;
+    registeredForGst?: boolean;
+    gstPercentage?: number | null;
+    inspectionRequestCode?: string | null;
+  } = {},
+): Promise<Buffer> {
+  const data = buildQuotationDocumentFromDetail(quotation, options);
+  return generateDocumentPdf(data, "quote");
 }

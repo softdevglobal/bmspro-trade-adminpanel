@@ -136,6 +136,8 @@ export function mapBookingDoc(
     assignedTo: parseAssignment(data.assignedTo),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
     quotation: parseInspectionQuotation(data.quotation),
+    visitStartedAt: toMillis(data.visitStartedAt),
+    bookingStartedAt: toMillis(data.bookingStartedAt),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };

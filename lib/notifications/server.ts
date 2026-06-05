@@ -20,6 +20,7 @@ import {
   type InspectionRequestStatus,
   type InspectionSlot,
 } from "@/lib/inspection/types";
+import type { BookingDetail } from "@/lib/bookings/types";
 import type { EmailDetailRow } from "@/lib/email/layout";
 import { sendInspectionCustomerNotificationEmail } from "@/lib/email/templates/inspection-customer-notification";
 import {
@@ -392,6 +393,77 @@ export async function notifyCustomerOfAssignment(
       emailDetails,
       emailHighlight: visitWindow ? visitWindow : null,
       emailHighlightLabel: visitWindow ? "Arrival window" : null,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+function bookingHeadline(booking: BookingDetail): string {
+  return (
+    booking.serviceName ??
+    booking.customRequest?.title ??
+    (booking.requestType === "custom_quote"
+      ? "Custom job"
+      : "Scheduled job")
+  );
+}
+
+/** Notify the customer their technician has started the booked job and is on the way. */
+export async function notifyCustomerOfBookingOnTheWay(
+  booking: BookingDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  if (!booking.assignedTo) return;
+
+  const business = context.businessName ?? "The business";
+  const technician = booking.assignedTo.name;
+  const headline = bookingHeadline(booking);
+  const visitWindow = formatVisitWindow(
+    booking.scheduledStartTime,
+    booking.scheduledEndTime,
+  );
+  const address = formatAddress(booking.address);
+
+  const emailDetails: EmailDetailRow[] = [
+    { label: "Job", value: headline },
+    { label: "Technician", value: technician },
+  ];
+  if (booking.bookingCode) {
+    emailDetails.push({ label: "Booking", value: booking.bookingCode });
+  }
+  if (address) {
+    emailDetails.push({ label: "Address", value: address });
+  }
+  if (booking.scheduledSlot) {
+    emailDetails.push({
+      label: "Date",
+      value: formatSlotDate(booking.scheduledSlot.date),
+    });
+  }
+
+  const body = visitWindow
+    ? `${technician} from ${business} is on the way for your booked job (${headline}). Expected arrival: ${visitWindow}.`
+    : `${technician} from ${business} is on the way for your booked job (${headline}).`;
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: booking.businessId,
+      customerId: booking.customerId,
+      customerEmail: booking.customer.email || null,
+      customerName: booking.customer.fullName || null,
+      requestId: booking.inspectionRequestId || booking.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "scheduled",
+      type: "booking_on_the_way",
+      title: `${technician} is on the way for your job`,
+      body,
+      emailDetails,
+      emailHighlight: visitWindow,
+      emailHighlightLabel: visitWindow ? "Expected arrival" : null,
     });
   } catch {
     /* best-effort */
