@@ -100,6 +100,25 @@ export function formatDepositSummary(deposit: QuotationDocumentDeposit): string 
   return `Due ${due}`;
 }
 
+/** Human-readable deposit line for terms, invoices, and payment notes. */
+export function formatDepositPaymentNote(deposit: {
+  mode: "percent" | "fixed";
+  percent: number;
+  amountAud: number;
+  dueDate: string;
+}): string {
+  const amount = deposit.amountAud.toLocaleString("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const due = formatQuoteDate(deposit.dueDate);
+  const basis =
+    deposit.mode === "percent" && deposit.percent > 0
+      ? `${deposit.percent}% deposit`
+      : "Deposit";
+  return `${basis}: $${amount} due by ${due}.`;
+}
+
 /** True when a stored attachment URL points to a PDF file. */
 export function isPdfAttachmentUrl(url: string): boolean {
   const normalized = url.trim().toLowerCase();

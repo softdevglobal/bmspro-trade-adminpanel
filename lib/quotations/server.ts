@@ -1306,6 +1306,24 @@ async function enrichQuotationsFromInspections(
   });
 }
 
+/** Loads one quotation for a business, with inspection metadata when linked. */
+export async function getBusinessQuotationById(
+  businessId: string,
+  quotationId: string,
+): Promise<QuotationDetail | null> {
+  const snap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .doc(quotationId)
+    .get();
+  if (!snap.exists) return null;
+  const data = snap.data() ?? {};
+  if (data.businessId !== businessId) return null;
+  const [quotation] = await enrichQuotationsFromInspections([
+    mapQuotationDoc(snap.id, data),
+  ]);
+  return quotation ?? null;
+}
+
 /** Lists all quotations for a business (newest first). */
 export async function listBusinessQuotations(
   businessId: string,

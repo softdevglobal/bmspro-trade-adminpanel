@@ -8,7 +8,9 @@ import {
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { INSPECTION_COLLECTION } from "@/lib/inspection/types";
 import type {
+  InspectionAddress,
   InspectionAssignment,
+  InspectionCustomer,
   InspectionRequestDetail,
   InspectionSlot,
 } from "@/lib/inspection/types";
@@ -426,6 +428,149 @@ export async function startBusinessBookingJob(
     ok: true,
     booking: mapBookingDoc(updated.id, updated.data() ?? {}),
   };
+}
+
+/**
+ * Marks the booking for an inspection visit as completed when an invoice is
+ * issued. If no booking exists yet, a completed booking is created so the job
+ * still shows in the bookings table. Mirrors the status to the quotation and
+ * inspection visit.
+ */
+export async function completeBookingForInvoicedQuotation(input: {
+  businessId: string;
+  inspectionRequestId: string;
+  quotation: {
+    id: string;
+    quotationCode: string | null;
+    serviceTitle: string;
+    customer: InspectionCustomer;
+    address: InspectionAddress;
+    finalPriceAud: number;
+    subtotalAud: number;
+    balanceDueAud: number;
+    status: string | null;
+  };
+}): Promise<{ bookingId: string; bookingCode: string | null } | null> {
+  const { businessId, inspectionRequestId, quotation } = input;
+  const now = FieldValue.serverTimestamp();
+
+  // 1) Existing booking linked to this inspection visit → mark completed.
+  if (inspectionRequestId) {
+    const existing = await adminDb
+      .collection(BOOKING_COLLECTION)
+      .where("businessId", "==", businessId)
+      .where("inspectionRequestId", "==", inspectionRequestId)
+      .limit(1)
+      .get();
+
+    if (!existing.empty) {
+      const doc = existing.docs[0]!;
+      const current = mapBookingDoc(doc.id, doc.data() ?? {});
+      if (current.status !== "completed") {
+        await doc.ref.update({ status: "completed", updatedAt: now });
+      }
+      await Promise.all([
+        mirrorBookingToQuotations(inspectionRequestId, {
+          bookingStatus: "completed",
+          bookingId: current.id,
+          bookingCode: current.bookingCode,
+        }),
+        mirrorBookingStatusToInspection(inspectionRequestId, "completed", {
+          bookingId: current.id,
+          bookingCode: current.bookingCode,
+        }),
+      ]);
+      return { bookingId: current.id, bookingCode: current.bookingCode };
+    }
+  }
+
+  // 2) No booking yet → create a completed one from the quotation data.
+  let requestType: InspectionRequestDetail["requestType"] = "custom_quote";
+  let serviceId: string | null = null;
+  let serviceName: string | null = null;
+  let serviceBusinessType: string | null = null;
+  let customRequest: { title: string; description: string } | null = null;
+  let customerId: string | null = null;
+  let inspectionRequestCode: string | null = null;
+
+  if (inspectionRequestId) {
+    const inspectionSnap = await adminDb
+      .collection(INSPECTION_COLLECTION)
+      .doc(inspectionRequestId)
+      .get();
+    if (inspectionSnap.exists) {
+      const inspection = mapInspectionDoc(
+        inspectionSnap.id,
+        inspectionSnap.data() ?? {},
+      );
+      requestType = inspection.requestType;
+      serviceId = inspection.serviceId;
+      serviceName = inspection.serviceName;
+      serviceBusinessType = inspection.serviceBusinessType;
+      customRequest = inspection.customRequest;
+      customerId = inspection.customerId;
+      inspectionRequestCode = inspection.requestCode;
+    }
+  }
+
+  const bookingCode = await allocateBookingCode();
+  const bookingRef = adminDb.collection(BOOKING_COLLECTION).doc();
+  const ownerUid = await resolveBusinessOwnerUid(businessId);
+
+  const bookingPayload: Record<string, unknown> = {
+    businessId,
+    ownerUid: ownerUid ?? null,
+    bookingCode,
+    inspectionRequestId: inspectionRequestId || null,
+    inspectionRequestCode,
+    quotationId: quotation.id,
+    status: "completed",
+    requestType,
+    serviceId,
+    serviceName: serviceName ?? quotation.serviceTitle,
+    serviceBusinessType,
+    customRequest,
+    customer: quotation.customer,
+    customerId,
+    address: quotation.address,
+    scheduledSlot: null,
+    scheduledStartTime: null,
+    scheduledEndTime: null,
+    estimatedDurationMinutes: null,
+    assignedTo: null,
+    ownerNote: null,
+    quotation: {
+      id: quotation.id,
+      quotationCode: quotation.quotationCode,
+      pdfUrl: null,
+      finalPriceAud: quotation.finalPriceAud,
+      subtotalAud: quotation.subtotalAud,
+      balanceDueAud: quotation.balanceDueAud,
+      status: quotation.status,
+      createdAt: null,
+    },
+    completedFromInvoice: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await bookingRef.set(bookingPayload);
+
+  if (inspectionRequestId) {
+    await Promise.all([
+      mirrorBookingToQuotations(inspectionRequestId, {
+        bookingStatus: "completed",
+        bookingId: bookingRef.id,
+        bookingCode,
+      }),
+      mirrorBookingStatusToInspection(inspectionRequestId, "completed", {
+        bookingId: bookingRef.id,
+        bookingCode,
+      }),
+    ]);
+  }
+
+  return { bookingId: bookingRef.id, bookingCode };
 }
 
 export async function completeBusinessBooking(
