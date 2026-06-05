@@ -1,9 +1,21 @@
 "use client";
 
+import {
+  bookingMinDateFromInspection,
+  canConvertQuotationToBooking,
+  ConvertToBookingPanel,
+} from "@/components/convert-to-booking-panel";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import {
+  BOOKING_STATUS_LABELS,
+  BOOKING_STATUS_TONE,
+  type BookingStatus,
+} from "@/lib/bookings/types";
+import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
+import type { InspectionRequestDetail } from "@/lib/inspection/types";
 import {
   CREATED_SOURCE_LABELS,
   formatAddress,
@@ -29,6 +41,18 @@ function formatWhen(timestamp: number | null): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+type QuotationPreviewMode = "review" | "convert_booking";
+
+function BookingStatusPill({ status }: { status: BookingStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${BOOKING_STATUS_TONE[status]}`}
+    >
+      {BOOKING_STATUS_LABELS[status]}
+    </span>
+  );
 }
 
 function CreatedSourcePill({
@@ -60,15 +84,15 @@ function QuotationCard({
   quotation,
   isPreviewOpen,
   onOpen,
+  onBook,
 }: {
   quotation: QuotationDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
+  onBook: () => void;
 }) {
-  const showFollowUpActions =
-    quotation.status === "sent" && !quotation.bookingId;
-  const inspectionVisitHref = (action: "schedule-job" | "awaiting-decision") =>
-    `/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=${action}`;
+  const showFollowUpActions = canConvertQuotationToBooking(quotation);
+  const waitHref = `/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
 
   return (
     <div
@@ -94,6 +118,9 @@ function QuotationCard({
         <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
           {quotation.status}
         </span>
+        {quotation.bookingStatus && !quotation.bookingId ? (
+          <BookingStatusPill status={quotation.bookingStatus} />
+        ) : null}
         <CreatedSourcePill source={quotation.createdSource} />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
@@ -115,8 +142,8 @@ function QuotationCard({
         {showFollowUpActions ? (
           <FollowUpActionButtons
             className="sm:ml-auto"
-            bookHref={inspectionVisitHref("schedule-job")}
-            waitHref={inspectionVisitHref("awaiting-decision")}
+            onBook={onBook}
+            waitHref={waitHref}
           />
         ) : quotation.bookingId ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary sm:ml-auto">
@@ -136,10 +163,18 @@ function QuotationCard({
 
 function QuotationPreviewDrawer({
   quotation,
+  previewMode,
+  linkedInspection,
   onClose,
+  onPreviewModeChange,
+  onBookingCreated,
 }: {
   quotation: QuotationDetail | null;
+  previewMode: QuotationPreviewMode;
+  linkedInspection: InspectionRequestDetail | null;
   onClose: () => void;
+  onPreviewModeChange: (mode: QuotationPreviewMode) => void;
+  onBookingCreated: (request: InspectionRequestDetail) => void;
 }) {
   const open = quotation !== null;
 
@@ -166,7 +201,14 @@ function QuotationPreviewDrawer({
             onClick={(e) => e.stopPropagation()}
             className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
-            <QuotationPreviewContent quotation={quotation} onClose={onClose} />
+            <QuotationPreviewContent
+              quotation={quotation}
+              previewMode={previewMode}
+              linkedInspection={linkedInspection}
+              onClose={onClose}
+              onPreviewModeChange={onPreviewModeChange}
+              onBookingCreated={onBookingCreated}
+            />
           </motion.aside>
         </motion.div>
       ) : null}
@@ -176,10 +218,18 @@ function QuotationPreviewDrawer({
 
 function QuotationPreviewContent({
   quotation,
+  previewMode,
+  linkedInspection,
   onClose,
+  onPreviewModeChange,
+  onBookingCreated,
 }: {
   quotation: QuotationDetail;
+  previewMode: QuotationPreviewMode;
+  linkedInspection: InspectionRequestDetail | null;
   onClose: () => void;
+  onPreviewModeChange: (mode: QuotationPreviewMode) => void;
+  onBookingCreated: (request: InspectionRequestDetail) => void;
 }) {
   const [pdfOpen, setPdfOpen] = useState(false);
   const title = quotation.serviceTitle || "Quotation";
@@ -189,14 +239,18 @@ function QuotationPreviewContent({
     .toLowerCase() || "bmspro"}.pdf`;
 
   const hasFooterActions =
-    quotation.status === "sent" || Boolean(quotation.pdfUrl);
+    previewMode === "review" &&
+    (quotation.status === "sent" || Boolean(quotation.pdfUrl));
+  const canConvert = canConvertQuotationToBooking(quotation);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant/60 px-4 py-4 sm:px-5">
         <div className="min-w-0 flex-1">
           <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
-            Quotation preview
+            {previewMode === "convert_booking"
+              ? "Create booking"
+              : "Quotation preview"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
@@ -205,6 +259,9 @@ function QuotationPreviewContent({
             <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
               {quotation.status}
             </span>
+            {quotation.bookingStatus && !quotation.bookingId ? (
+              <BookingStatusPill status={quotation.bookingStatus} />
+            ) : null}
             <CreatedSourcePill source={quotation.createdSource} />
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
@@ -225,7 +282,18 @@ function QuotationPreviewContent({
       </header>
 
       <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3 sm:space-y-3 sm:px-5">
-        {quotation.createdSource ? (
+        {previewMode === "convert_booking" ? (
+          <ConvertToBookingPanel
+            inspectionRequestId={quotation.inspectionRequestId}
+            minBookingDate={bookingMinDateFromInspection(linkedInspection)}
+            initialStartTime={linkedInspection?.scheduledStartTime ?? "10:00"}
+            initialEndTime={linkedInspection?.scheduledEndTime ?? "11:00"}
+            onSuccess={onBookingCreated}
+            onCancel={() => onPreviewModeChange("review")}
+          />
+        ) : null}
+
+        {previewMode === "review" && quotation.createdSource ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
               Source
@@ -236,6 +304,8 @@ function QuotationPreviewContent({
           </section>
         ) : null}
 
+        {previewMode === "review" ? (
+        <>
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Customer
@@ -338,18 +408,18 @@ function QuotationPreviewContent({
                     </span>
                     View scheduled job
                   </Link>
-                ) : (
-                  <Link
-                    href={`/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=schedule-job`}
-                    onClick={onClose}
+                ) : canConvert ? (
+                  <button
+                    type="button"
+                    onClick={() => onPreviewModeChange("convert_booking")}
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
                   >
                     <span className="material-symbols-outlined text-[20px]">
                       event
                     </span>
                     Schedule job
-                  </Link>
-                )}
+                  </button>
+                ) : null}
                 <Link
                   href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
                   onClick={onClose}
@@ -377,6 +447,8 @@ function QuotationPreviewContent({
             ) : null}
           </footer>
         ) : null}
+        </>
+        ) : null}
       </div>
 
       {quotation.pdfUrl ? (
@@ -394,10 +466,13 @@ function QuotationPreviewContent({
 
 export function QuotationsBoard() {
   const { user, status: authStatus } = useAuth();
+  const { requests: inspectionRequests } = useInspectionRequests();
   const [quotations, setQuotations] = useState<QuotationDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] =
+    useState<QuotationPreviewMode>("review");
 
   const load = useCallback(async () => {
     if (!user) {
@@ -439,6 +514,46 @@ export function QuotationsBoard() {
     () => quotations.find((quotation) => quotation.id === selectedId) ?? null,
     [quotations, selectedId],
   );
+
+  const linkedInspection = useMemo(() => {
+    if (!selected) return null;
+    return (
+      inspectionRequests.find(
+        (request) => request.id === selected.inspectionRequestId,
+      ) ?? null
+    );
+  }, [inspectionRequests, selected]);
+
+  function handleOpenQuotation(id: string) {
+    setSelectedId(id);
+    setPreviewMode("review");
+  }
+
+  function handleStartConvertBooking(id: string) {
+    setSelectedId(id);
+    setPreviewMode("convert_booking");
+  }
+
+  function handleBookingCreated(request: InspectionRequestDetail) {
+    setQuotations((prev) =>
+      prev.map((quotation) => {
+        if (quotation.inspectionRequestId !== request.id) return quotation;
+        return {
+          ...quotation,
+          bookingId: request.bookingId,
+          bookingCode: request.bookingCode,
+          bookingStatus: request.bookingStatus,
+          inspectionRequestStatus: request.status,
+        };
+      }),
+    );
+    setPreviewMode("review");
+  }
+
+  function handleClosePreview() {
+    setSelectedId(null);
+    setPreviewMode("review");
+  }
 
   if (authStatus === "loading" || loading) {
     return (
@@ -522,7 +637,8 @@ export function QuotationsBoard() {
             <QuotationCard
               quotation={quotation}
               isPreviewOpen={selectedId === quotation.id}
-              onOpen={() => setSelectedId(quotation.id)}
+              onOpen={() => handleOpenQuotation(quotation.id)}
+              onBook={() => handleStartConvertBooking(quotation.id)}
             />
           </li>
         ))}
@@ -530,7 +646,11 @@ export function QuotationsBoard() {
 
       <QuotationPreviewDrawer
         quotation={selected}
-        onClose={() => setSelectedId(null)}
+        previewMode={previewMode}
+        linkedInspection={linkedInspection}
+        onClose={handleClosePreview}
+        onPreviewModeChange={setPreviewMode}
+        onBookingCreated={handleBookingCreated}
       />
     </>
   );

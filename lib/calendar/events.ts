@@ -93,7 +93,9 @@ export function datesForRequestOnCalendar(
 }
 
 export function datesForBookingOnCalendar(booking: BookingDetail): string[] {
-  if (booking.status !== "scheduled") return [];
+  if (booking.status !== "scheduled" && booking.status !== "ongoing") {
+    return [];
+  }
   return booking.scheduledSlot?.date ? [booking.scheduledSlot.date] : [];
 }
 
@@ -109,6 +111,7 @@ export const BOOKING_CALENDAR_STATUS_TONE: Record<
 > = {
   awaiting: "bg-amber-50 text-amber-800 border border-amber-200",
   scheduled: "bg-primary/10 text-primary border border-primary/25",
+  ongoing: "bg-amber-50 text-amber-800 border border-amber-200",
   cancelled: "bg-stone-100 text-stone-600 border border-stone-200",
   completed: "bg-sky-50 text-sky-700 border border-sky-200",
 };

@@ -482,6 +482,30 @@ export async function PATCH(
         { status: 400 },
       );
     }
+
+    let assignedTo: InspectionAssignment | null = null;
+    const assignTo =
+      typeof payload.assignTo === "string" ? payload.assignTo.trim() : "";
+    if (assignTo === "owner") {
+      assignedTo = await resolveOwnerAssignment(auth.uid, auth.email);
+    } else if (assignTo === "staff") {
+      const staffId =
+        typeof payload.staffId === "string" ? payload.staffId.trim() : "";
+      if (!staffId) {
+        return NextResponse.json(
+          { ok: false, error: "Choose a team member to assign." },
+          { status: 400 },
+        );
+      }
+      assignedTo = await resolveStaffAssignment(auth.businessId, staffId);
+      if (!assignedTo) {
+        return NextResponse.json(
+          { ok: false, error: "Selected staff member is unavailable." },
+          { status: 400 },
+        );
+      }
+    }
+
     const result = await applyOwnerAction(id, auth.businessId, {
       type: "convert_to_booking",
       slot,
@@ -489,6 +513,7 @@ export async function PATCH(
       endTime: window.endTime,
       estimatedDurationMinutes: duration.minutes,
       note,
+      assignedTo,
     });
     if (!result.ok) {
       return NextResponse.json(

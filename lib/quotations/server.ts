@@ -13,7 +13,9 @@ import {
   type InspectionAssignment,
   type InspectionCustomer,
   type InspectionRequestCreatedSource,
+  type InspectionRequestStatus,
   type InspectionRequestType,
+  REQUEST_STATUSES,
   parseCreatedSource,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
@@ -76,6 +78,8 @@ export type QuotationDetail = {
   updatedAt: number | null;
   /** From the linked inspection visit (`createdSource`). */
   createdSource?: InspectionRequestCreatedSource | null;
+  /** Linked inspection visit status (for follow-up actions). */
+  inspectionRequestStatus?: InspectionRequestStatus | null;
 };
 
 export type CreateQuotationInput = {
@@ -1274,7 +1278,7 @@ export async function listQuotationsForInspection(
 
 export const QUOTATION_LIST_LIMIT = 80;
 
-async function enrichQuotationsWithCreatedSource(
+async function enrichQuotationsFromInspections(
   quotations: QuotationDetail[],
 ): Promise<QuotationDetail[]> {
   const ids = [
@@ -1286,7 +1290,16 @@ async function enrichQuotationsWithCreatedSource(
   ];
   if (ids.length === 0) return quotations;
 
-  const sourceById = new Map<string, InspectionRequestCreatedSource | null>();
+  type InspectionMeta = {
+    createdSource: InspectionRequestCreatedSource | null;
+    status: QuotationDetail["inspectionRequestStatus"];
+    bookingId: string | null;
+    bookingCode: string | null;
+    bookingStatus: ReturnType<typeof parseBookingStatus>;
+    bookingStatusAt: number | null;
+  };
+
+  const metaById = new Map<string, InspectionMeta>();
   for (let i = 0; i < ids.length; i += 10) {
     const chunk = ids.slice(i, i + 10);
     const refs = chunk.map((id) =>
@@ -1295,17 +1308,63 @@ async function enrichQuotationsWithCreatedSource(
     const snaps = await adminDb.getAll(...refs);
     for (const snap of snaps) {
       if (!snap.exists) continue;
-      sourceById.set(
-        snap.id,
-        parseCreatedSource(snap.data()?.createdSource),
-      );
+      const data = snap.data() ?? {};
+      const bookingId =
+        typeof data.bookingId === "string" ? data.bookingId : null;
+      const bookingCode =
+        typeof data.bookingCode === "string" ? data.bookingCode : null;
+      const bookingStatus =
+        parseBookingStatus(data.bookingStatus) ??
+        (bookingId
+          ? ("scheduled" as const)
+          : data.quotation
+            ? ("awaiting" as const)
+            : data.status === "awaiting_decision"
+              ? ("awaiting" as const)
+              : null);
+      const status =
+        typeof data.status === "string" &&
+        (REQUEST_STATUSES as readonly string[]).includes(data.status)
+          ? (data.status as InspectionRequestStatus)
+          : null;
+      metaById.set(snap.id, {
+        createdSource: parseCreatedSource(data.createdSource),
+        status,
+        bookingId,
+        bookingCode,
+        bookingStatus,
+        bookingStatusAt: toMillis(data.bookingStatusAt),
+      });
     }
   }
 
   return quotations.map((quotation) => {
-    const source = sourceById.get(quotation.inspectionRequestId.trim());
-    if (!source) return quotation;
-    return { ...quotation, createdSource: source };
+    const meta = metaById.get(quotation.inspectionRequestId.trim());
+    if (!meta) return quotation;
+
+    const needsBookingId = !quotation.bookingId && meta.bookingId;
+    const needsBookingStatus =
+      meta.bookingStatus &&
+      (!quotation.bookingStatus || !quotation.bookingStatusAt);
+
+    return {
+      ...quotation,
+      ...(meta.createdSource ? { createdSource: meta.createdSource } : {}),
+      ...(meta.status ? { inspectionRequestStatus: meta.status } : {}),
+      ...(needsBookingId
+        ? {
+            bookingId: meta.bookingId,
+            bookingCode: quotation.bookingCode ?? meta.bookingCode,
+          }
+        : {}),
+      ...(needsBookingStatus
+        ? {
+            bookingStatus: quotation.bookingStatus ?? meta.bookingStatus,
+            bookingStatusAt:
+              quotation.bookingStatusAt ?? meta.bookingStatusAt,
+          }
+        : {}),
+    };
   });
 }
 
@@ -1323,7 +1382,7 @@ export async function listBusinessQuotations(
   const quotations = snapshot.docs.map((doc) =>
     mapQuotationDoc(doc.id, doc.data() ?? {}),
   );
-  return enrichQuotationsWithCreatedSource(quotations);
+  return enrichQuotationsFromInspections(quotations);
 }
 
 async function sendQuotationCreatedEmail(

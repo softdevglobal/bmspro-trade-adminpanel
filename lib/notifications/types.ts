@@ -25,7 +25,8 @@ export type NotificationType =
   | "request_cancelled"
   | "request_completed"
   | "request_assigned"
-  | "visit_on_the_way";
+  | "visit_on_the_way"
+  | "booking_on_the_way";
 
 /** Client-facing notification (timestamps are epoch millis). */
 export type NotificationRecord = {

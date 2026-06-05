@@ -11,11 +11,12 @@ type FollowUpActionButtonsProps = {
   className?: string;
 };
 
-const bookClassName =
-  "inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-2.5 font-body text-[11px] font-semibold text-on-primary transition-colors hover:bg-primary/90";
+const pillBase =
+  "inline-flex items-center justify-center rounded-full px-3 py-1.5 font-body text-[12px] font-semibold transition-all sm:px-4 sm:py-2 sm:text-[13px]";
 
-const waitClassName =
-  "inline-flex h-7 items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-2.5 font-body text-[11px] font-semibold text-orange-800 transition-colors hover:bg-orange-100";
+const bookClassName = `${pillBase} bg-primary text-on-primary shadow-sm hover:bg-primary/90`;
+
+const waitClassName = `${pillBase} border border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:border-primary/50 hover:text-primary`;
 
 export function FollowUpActionButtons({
   onBook,
@@ -27,31 +28,22 @@ export function FollowUpActionButtons({
 }: FollowUpActionButtonsProps) {
   return (
     <div
-      className={`inline-flex items-center gap-1.5 ${className}`}
+      className={`inline-flex flex-wrap items-center gap-2 ${className}`}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
       {bookHref ? (
         <Link href={bookHref} className={bookClassName} title="Create booking">
-          <span className="material-symbols-outlined text-[12px] leading-none">
-            assignment
-          </span>
           Book
         </Link>
       ) : (
         <button type="button" onClick={onBook} className={bookClassName} title="Create booking">
-          <span className="material-symbols-outlined text-[12px] leading-none">
-            assignment
-          </span>
           Book
         </button>
       )}
       {showWait ? (
         waitHref ? (
           <Link href={waitHref} className={waitClassName} title="Mark awaiting decision">
-            <span className="material-symbols-outlined text-[12px] leading-none">
-              pending_actions
-            </span>
             Wait
           </Link>
         ) : (
@@ -61,9 +53,6 @@ export function FollowUpActionButtons({
             className={waitClassName}
             title="Mark awaiting decision"
           >
-            <span className="material-symbols-outlined text-[12px] leading-none">
-              pending_actions
-            </span>
             Wait
           </button>
         )

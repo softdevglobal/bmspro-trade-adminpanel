@@ -7,6 +7,7 @@ import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
+import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -30,7 +31,6 @@ import {
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
   TIME_RANGES,
-  timeRangeFromStartTime,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   type InspectionSlot,
@@ -650,7 +650,7 @@ function RequestDetailDrawer({
             className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
             <DetailDrawerContent
-              key={`${request.id}-${initialMode ?? "review"}`}
+              key={request.id}
               request={request}
               staff={staff}
               initialMode={initialMode}
@@ -934,7 +934,8 @@ function DetailDrawerContent({
   const [actionError, setActionError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const actionPanelRef = useRef<HTMLDivElement>(null);
-  const inActionMode = mode !== "review";
+  const inBookingMode = mode === "convert_booking";
+  const inActionMode = mode !== "review" && !inBookingMode;
 
   // Accept-form state
   const [acceptedSlot, setAcceptedSlot] = useState<InspectionSlot | null>(null);
@@ -954,32 +955,27 @@ function DetailDrawerContent({
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
   const [staffId, setStaffId] = useState<string>("");
 
-  const [bookingSlot, setBookingSlot] = useState<InspectionSlot>({
-    date: "",
-    timeRange: "morning",
-  });
-  const [bookingDayPage, setBookingDayPage] = useState(0);
-  const [bookingStartTime, setBookingStartTime] = useState("10:00");
-  const [bookingEndTime, setBookingEndTime] = useState("11:00");
-  const [bookingEstimateMinutes, setBookingEstimateMinutes] = useState(120);
-  const [bookingNote, setBookingNote] = useState("");
   const [awaitingNote, setAwaitingNote] = useState("");
+
+  const bookingTimeDefaults = useMemo(() => {
+    const timeRange = request.scheduledSlot?.timeRange ?? "morning";
+    const defaults = DEFAULT_VISIT_WINDOW[timeRange];
+    return {
+      start: request.scheduledStartTime ?? defaults.start,
+      end: request.scheduledEndTime ?? defaults.end,
+    };
+  }, [
+    request.id,
+    request.scheduledSlot?.timeRange,
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  ]);
 
   useEffect(() => {
     if (!initialMode || initialMode === "review") return;
     setMode(initialMode);
-    if (initialMode === "convert_booking") {
-      const minDate = bookingMinDateFromRequest(request);
-      const timeRange = request.scheduledSlot?.timeRange ?? "morning";
-      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
-      setBookingSlot({ date: minDate, timeRange });
-      setBookingDayPage(0);
-      setBookingStartTime(request.scheduledStartTime ?? defaults.start);
-      setBookingEndTime(request.scheduledEndTime ?? defaults.end);
-      setBookingNote("");
-    }
     onInitialModeConsumed();
-  }, [initialMode, onInitialModeConsumed, request.id]);
+  }, [initialMode, onInitialModeConsumed]);
 
   const hasVisitWindow =
     !!request.scheduledStartTime || !!request.scheduledEndTime;
@@ -1084,10 +1080,15 @@ function DetailDrawerContent({
 
   useEffect(() => {
     if (mode === "review") return;
-    const panel = actionPanelRef.current;
     const scroller = scrollRef.current;
-    if (!panel || !scroller) return;
+    if (!scroller) return;
     const frame = requestAnimationFrame(() => {
+      if (mode === "convert_booking") {
+        scroller.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      const panel = actionPanelRef.current;
+      if (!panel) return;
       scroller.scrollTo({
         top: Math.max(0, panel.offsetTop - 12),
         behavior: "smooth",
@@ -1102,16 +1103,6 @@ function DetailDrawerContent({
       if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
       if (request.scheduledEndTime) setAcceptEndTime(request.scheduledEndTime);
     }
-    if (nextMode === "convert_booking") {
-      const minDate = bookingMinDateFromRequest(request);
-      const timeRange = request.scheduledSlot?.timeRange ?? "morning";
-      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
-      setBookingSlot({ date: minDate, timeRange });
-      setBookingDayPage(0);
-      setBookingStartTime(request.scheduledStartTime ?? defaults.start);
-      setBookingEndTime(request.scheduledEndTime ?? defaults.end);
-      setBookingNote("");
-    }
     setMode(nextMode);
   }
 
@@ -1120,7 +1111,7 @@ function DetailDrawerContent({
       <header className="flex shrink-0 items-start justify-between gap-2 border-b border-outline-variant/40 px-4 py-2.5 sm:px-5 sm:py-3">
         <div className="min-w-0">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            Inspection request
+            {inBookingMode ? "Create booking" : "Inspection request"}
           </p>
           <p className="mt-0.5">
             <InspectionRequestCode
@@ -1159,7 +1150,19 @@ function DetailDrawerContent({
         ref={scrollRef}
         className="min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-4 py-3 sm:space-y-3 sm:px-5"
       >
-        {inActionMode ? (
+        {inBookingMode ? (
+          <ConvertToBookingPanel
+            inspectionRequestId={request.id}
+            minBookingDate={bookingMinDateFromRequest(request)}
+            initialStartTime={bookingTimeDefaults.start}
+            initialEndTime={bookingTimeDefaults.end}
+            onSuccess={(updated) => {
+              onUpdated(updated);
+              setMode("review");
+            }}
+            onCancel={() => setMode("review")}
+          />
+        ) : inActionMode ? (
           <CompactRequestSummary
             request={request}
             onShowFullDetails={() => setMode("review")}
@@ -1205,7 +1208,7 @@ function DetailDrawerContent({
           </>
         )}
 
-        {actionError ? (
+        {!inBookingMode && actionError ? (
           <div
             role="alert"
             className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
@@ -1214,6 +1217,7 @@ function DetailDrawerContent({
           </div>
         ) : null}
 
+        {!inBookingMode ? (
         <div ref={actionPanelRef} className="space-y-4">
         {mode === "accept" ? (
           <AcceptForm
@@ -1350,51 +1354,6 @@ function DetailDrawerContent({
           />
         ) : null}
 
-        {mode === "convert_booking" ? (
-          <ConvertToBookingForm
-            minBookingDate={bookingMinDateFromRequest(request)}
-            slot={bookingSlot}
-            dayPage={bookingDayPage}
-            onDayPageChange={setBookingDayPage}
-            onSlotChange={setBookingSlot}
-            startTime={bookingStartTime}
-            endTime={bookingEndTime}
-            onStartTimeChange={setBookingStartTime}
-            onEndTimeChange={setBookingEndTime}
-            estimatedMinutes={bookingEstimateMinutes}
-            onEstimatedMinutesChange={setBookingEstimateMinutes}
-            note={bookingNote}
-            onNoteChange={setBookingNote}
-            disabled={submitting}
-            onCancel={() => setMode("review")}
-            onSubmit={() => {
-              if (!bookingSlot.date) {
-                setActionError("Choose a date for the job.");
-                return;
-              }
-              if (!bookingStartTime || !bookingEndTime) {
-                setActionError("Set a start and end time for the job.");
-                return;
-              }
-              if (bookingStartTime >= bookingEndTime) {
-                setActionError("The end time must be after the start time.");
-                return;
-              }
-              void callAction({
-                action: "convert_to_booking",
-                slot: {
-                  date: bookingSlot.date,
-                  timeRange: timeRangeFromStartTime(bookingStartTime),
-                },
-                startTime: bookingStartTime,
-                endTime: bookingEndTime,
-                estimatedDurationMinutes: bookingEstimateMinutes,
-                note: bookingNote.trim() || undefined,
-              });
-            }}
-          />
-        ) : null}
-
         {mode === "awaiting_decision" ? (
           <AwaitingDecisionForm
             note={awaitingNote}
@@ -1410,8 +1369,10 @@ function DetailDrawerContent({
           />
         ) : null}
         </div>
+        ) : null}
 
-        {mode === "review" &&
+        {!inBookingMode &&
+        mode === "review" &&
         (!isClosed || canFollowUpAfterQuotation(request)) ? (
           <DrawerReviewFooter
             request={request}
@@ -2430,8 +2391,6 @@ function SetTimeForm({
   );
 }
 
-const JOB_ESTIMATE_MINUTES = [60, 90, 120, 180, 240, 360] as const;
-
 /** Earliest selectable job day: inspection visit date (inclusive), then later days only. */
 function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
   const scheduled = request.scheduledSlot?.date?.trim();
@@ -2442,135 +2401,6 @@ function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
     .sort();
   if (preferredDates.length > 0) return preferredDates[0];
   return todayIso();
-}
-
-function ConvertToBookingForm({
-  minBookingDate,
-  slot,
-  dayPage,
-  onDayPageChange,
-  onSlotChange,
-  startTime,
-  endTime,
-  onStartTimeChange,
-  onEndTimeChange,
-  estimatedMinutes,
-  onEstimatedMinutesChange,
-  note,
-  onNoteChange,
-  disabled,
-  onCancel,
-  onSubmit,
-}: {
-  minBookingDate: string;
-  slot: InspectionSlot;
-  dayPage: number;
-  onDayPageChange: (page: number) => void;
-  onSlotChange: (slot: InspectionSlot) => void;
-  startTime: string;
-  endTime: string;
-  onStartTimeChange: (value: string) => void;
-  onEndTimeChange: (value: string) => void;
-  estimatedMinutes: number;
-  onEstimatedMinutesChange: (minutes: number) => void;
-  note: string;
-  onNoteChange: (value: string) => void;
-  disabled: boolean;
-  onCancel: () => void;
-  onSubmit: () => void;
-}) {
-  const minDate = minBookingDate;
-
-  function selectDate(iso: string) {
-    onSlotChange({ ...slot, date: iso });
-  }
-
-  return (
-    <section className="rounded-xl border border-primary/25 bg-primary/5 p-4">
-      <h4 className="font-display text-[15px] font-semibold text-on-surface">
-        Create booking
-      </h4>
-      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Schedule the job after the customer accepted your quotation (or when
-        they confirmed by phone).
-      </p>
-
-      <div className="mt-4">
-        <SlotDayPicker
-          selectedIso={slot.date}
-          minDate={minDate}
-          dayPage={dayPage}
-          onDayPageChange={onDayPageChange}
-          onSelect={selectDate}
-          disabled={disabled}
-          dayStripLayout="fit"
-        />
-      </div>
-
-      <label className="mt-4 block">
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Job time
-        </span>
-        <div className="mt-1">
-          <VisitTimeRangeFields
-            startTime={startTime}
-            endTime={endTime}
-            timeRange={null}
-            fullDay
-            disabled={disabled || !slot.date}
-            onStartTimeChange={onStartTimeChange}
-            onEndTimeChange={onEndTimeChange}
-          />
-        </div>
-      </label>
-
-      <label className="mt-4 block">
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Estimated time on site
-        </span>
-        <select
-          value={estimatedMinutes}
-          disabled={disabled}
-          onChange={(event) =>
-            onEstimatedMinutesChange(Number.parseInt(event.target.value, 10))
-          }
-          className="mt-1 w-full rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60"
-        >
-          {JOB_ESTIMATE_MINUTES.map((mins) => (
-            <option key={mins} value={mins}>
-              {mins < 60
-                ? `${mins} minutes`
-                : mins % 60 === 0
-                  ? `${mins / 60} hours`
-                  : `${Math.floor(mins / 60)} hr ${mins % 60} min`}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="mt-3 block">
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Note for customer (optional)
-        </span>
-        <textarea
-          value={note}
-          onChange={(event) => onNoteChange(event.target.value)}
-          rows={2}
-          maxLength={500}
-          placeholder="e.g. Please ensure access to the meter box."
-          className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
-        />
-      </label>
-
-      <FormActions
-        confirmLabel="Save booking"
-        confirmIcon="assignment"
-        disabled={disabled}
-        onCancel={onCancel}
-        onSubmit={onSubmit}
-      />
-    </section>
-  );
 }
 
 function AwaitingDecisionForm({

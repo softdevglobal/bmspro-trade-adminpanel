@@ -1,6 +1,6 @@
 import "server-only";
 
-import { adminAuth } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 
 export type BusinessOwnerAuth =
   | { ok: true; businessId: string }
@@ -17,6 +17,37 @@ export function extractBearerToken(request: Request): string | null {
   return queryToken || null;
 }
 
+const OWNER_ROLES = new Set([
+  "owner",
+  "admin",
+  "business_owner",
+  "salon_owner",
+]);
+
+async function resolveOwnerBusinessId(
+  uid: string,
+): Promise<string | null> {
+  const userSnap = await adminDb.collection("users").doc(uid).get();
+  if (!userSnap.exists) return null;
+
+  const userData = userSnap.data() ?? {};
+  const role = typeof userData.role === "string" ? userData.role : "";
+  if (!OWNER_ROLES.has(role)) return null;
+
+  const docBusinessId =
+    typeof userData.businessId === "string" ? userData.businessId.trim() : "";
+  if (docBusinessId) return docBusinessId;
+
+  const bizSnap = await adminDb
+    .collection("businesses")
+    .where("ownerUid", "==", uid)
+    .limit(1)
+    .get();
+  if (!bizSnap.empty) return bizSnap.docs[0].id;
+
+  return null;
+}
+
 export async function requireBusinessOwnerFromToken(
   token: string | null,
 ): Promise<BusinessOwnerAuth> {
@@ -29,17 +60,30 @@ export async function requireBusinessOwnerFromToken(
   }
   try {
     const decoded = await adminAuth.verifyIdToken(token);
-    const businessId =
-      typeof decoded.businessId === "string" ? decoded.businessId : null;
-    const role = decoded.role;
-    if (!businessId || (role !== "owner" && role !== "admin")) {
-      return {
-        ok: false,
-        status: 403,
-        error: "Business owner access required.",
-      };
+    const claimBusinessId =
+      typeof decoded.businessId === "string"
+        ? decoded.businessId.trim()
+        : "";
+    const claimRole =
+      typeof decoded.role === "string" ? decoded.role : "";
+
+    if (
+      claimBusinessId &&
+      (claimRole === "owner" || claimRole === "admin")
+    ) {
+      return { ok: true, businessId: claimBusinessId };
     }
-    return { ok: true, businessId };
+
+    const resolved = await resolveOwnerBusinessId(decoded.uid);
+    if (resolved) {
+      return { ok: true, businessId: resolved };
+    }
+
+    return {
+      ok: false,
+      status: 403,
+      error: "Business owner access required.",
+    };
   } catch {
     return { ok: false, status: 401, error: "Invalid or expired session." };
   }

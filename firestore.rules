@@ -167,6 +167,12 @@ service cloud.firestore {
         && resource.data.assignedTo.uid == request.auth.uid;
     }
 
+    function ownsAssignedTradeBooking() {
+      return isSignedIn()
+        && resource.data.assignedTo is map
+        && resource.data.assignedTo.uid == request.auth.uid;
+    }
+
     function ownsCustomerBooking() {
       return isSignedIn()
         && (
@@ -185,13 +191,15 @@ service cloud.firestore {
 
     function canReadTradeBooking() {
       return resource.data.businessId is string
-        && resource.data.inspectionRequestId is string
         && (
           (isBusinessOwner()
               && resource.data.businessId == request.auth.token.businessId)
           || userOwnsBusiness(resource.data.businessId)
           || ownsStaffBooking()
+          || ownsAssignedTradeBooking()
           || ownsCustomerBooking()
+          || (isSignedIn()
+              && resource.data.ownerUid == request.auth.uid)
         );
     }
 

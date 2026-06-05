@@ -14,6 +14,8 @@ import type {
 } from "@/lib/inspection/types";
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
+import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
+import { notifyCustomerOfBookingOnTheWay } from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
@@ -29,6 +31,7 @@ export type CreateBookingInput = {
   endTime: string;
   estimatedDurationMinutes: number;
   note?: string;
+  assignedTo?: InspectionAssignment | null;
 };
 
 export async function getBusinessBooking(
@@ -111,9 +114,11 @@ export async function createBookingFromInspection(
   const bookingCode = await allocateBookingCode();
   const bookingRef = adminDb.collection(BOOKING_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
+  const ownerUid = await resolveBusinessOwnerUid(current.businessId);
 
   const bookingPayload: Record<string, unknown> = {
     businessId: current.businessId,
+    ownerUid: ownerUid ?? null,
     bookingCode,
     inspectionRequestId: current.id,
     inspectionRequestCode: current.requestCode,
@@ -131,7 +136,7 @@ export async function createBookingFromInspection(
     scheduledStartTime: input.startTime,
     scheduledEndTime: input.endTime,
     estimatedDurationMinutes: input.estimatedDurationMinutes,
-    assignedTo: null,
+    assignedTo: input.assignedTo ?? null,
     ownerNote: typeof input.note === "string" ? input.note : null,
     quotation: current.quotation,
     createdAt: now,
@@ -213,6 +218,28 @@ export async function mirrorBookingToQuotations(
   await batch.commit();
 }
 
+async function mirrorBookingStatusToInspection(
+  inspectionRequestId: string,
+  bookingStatus: BookingStatus,
+  fields: {
+    bookingId?: string | null;
+    bookingCode?: string | null;
+  } = {},
+): Promise<void> {
+  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(inspectionRequestId);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+
+  const update: Record<string, unknown> = {
+    bookingStatus,
+    bookingStatusAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (fields.bookingId) update.bookingId = fields.bookingId;
+  if (fields.bookingCode) update.bookingCode = fields.bookingCode;
+  await ref.update(update);
+}
+
 export async function assignBusinessBooking(
   businessId: string,
   bookingId: string,
@@ -244,6 +271,228 @@ export async function assignBusinessBooking(
     assignedTo: assignment,
     updatedAt: FieldValue.serverTimestamp(),
   });
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+  };
+}
+
+async function loadBusinessSummary(businessId: string): Promise<{
+  businessName: string | null;
+  bookingSlug: string | null;
+  logoUrl: string | null;
+}> {
+  try {
+    const snap = await adminDb.collection("businesses").doc(businessId).get();
+    const data = snap.exists ? snap.data() ?? {} : {};
+    return {
+      businessName:
+        typeof data.businessName === "string" ? data.businessName : null,
+      bookingSlug:
+        typeof data.bookingSlug === "string" ? data.bookingSlug : null,
+      logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+    };
+  } catch {
+    return { businessName: null, bookingSlug: null, logoUrl: null };
+  }
+}
+
+export async function startBusinessBookingVisit(
+  bookingId: string,
+  businessId: string,
+  operatorUid: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  if (current.status !== "scheduled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only scheduled bookings can be started.",
+    };
+  }
+
+  const assignedUid = current.assignedTo?.uid;
+  if (!assignedUid || assignedUid !== operatorUid) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This job is not assigned to you.",
+    };
+  }
+
+  if (current.visitStartedAt) {
+    return { ok: true, booking: current };
+  }
+
+  await ref.update({
+    visitStartedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfBookingOnTheWay(booking, summary);
+
+  return { ok: true, booking };
+}
+
+export async function startBusinessBookingJob(
+  bookingId: string,
+  businessId: string,
+  operatorUid: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  if (current.status === "ongoing") {
+    return { ok: true, booking: current };
+  }
+
+  if (current.status !== "scheduled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only scheduled bookings can be started.",
+    };
+  }
+
+  const assignedUid = current.assignedTo?.uid;
+  if (!assignedUid || assignedUid !== operatorUid) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This job is not assigned to you.",
+    };
+  }
+
+  if (!current.visitStartedAt) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Start the visit before starting the booking.",
+    };
+  }
+
+  await ref.update({
+    bookingStartedAt:
+      current.bookingStartedAt ?? FieldValue.serverTimestamp(),
+    status: "ongoing",
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  if (current.inspectionRequestId) {
+    await Promise.all([
+      mirrorBookingToQuotations(current.inspectionRequestId, {
+        bookingStatus: "ongoing",
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+      mirrorBookingStatusToInspection(current.inspectionRequestId, "ongoing", {
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+    ]);
+  }
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+  };
+}
+
+export async function completeBusinessBooking(
+  bookingId: string,
+  businessId: string,
+  operatorUid: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Booking not found." };
+  }
+
+  if (current.status === "completed") {
+    return { ok: true, booking: current };
+  }
+
+  const canComplete =
+    current.status === "ongoing" ||
+    (current.status === "scheduled" && current.bookingStartedAt);
+  if (!canComplete) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only ongoing bookings can be completed.",
+    };
+  }
+
+  const assignedUid = current.assignedTo?.uid;
+  if (!assignedUid || assignedUid !== operatorUid) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This job is not assigned to you.",
+    };
+  }
+
+  await ref.update({
+    status: "completed",
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  if (current.inspectionRequestId) {
+    await Promise.all([
+      mirrorBookingToQuotations(current.inspectionRequestId, {
+        bookingStatus: "completed",
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+      mirrorBookingStatusToInspection(
+        current.inspectionRequestId,
+        "completed",
+        {
+          bookingId: current.id,
+          bookingCode: current.bookingCode,
+        },
+      ),
+    ]);
+  }
 
   const updated = await ref.get();
   return {
