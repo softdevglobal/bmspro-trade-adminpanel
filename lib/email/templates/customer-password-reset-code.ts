@@ -14,26 +14,24 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
   return null;
 }
 
-export type PasswordResetCodeEmailInput = {
+export type CustomerPasswordResetCodeEmailInput = {
   email: string;
   code: string;
-  /** Owner business name when the account belongs to a tenant. */
   businessName?: string | null;
-  /** Business logo shown in the email body (above the title). */
   logoUrl?: string | null;
 };
 
 /**
- * Sends a 6-digit password reset code email.
+ * Sends a 6-digit password reset code email for customer booking accounts.
  * Uses the `system` (noreply@) sender. Best-effort — never throws.
  */
-export async function sendPasswordResetCodeEmail(
-  input: PasswordResetCodeEmailInput,
+export async function sendCustomerPasswordResetCodeEmail(
+  input: CustomerPasswordResetCodeEmailInput,
 ): Promise<boolean> {
   const business = input.businessName?.trim() || null;
   const body = business
-    ? `Use the 6-digit code below to reset your BMS Pro Trade admin password for ${business}. This code expires in 15 minutes.`
-    : "Use the 6-digit code below to reset your BMS Pro Trade admin password. This code expires in 15 minutes.";
+    ? `Use the 6-digit code below to reset your BMS Pro Trade customer password for ${business}. This code expires in 15 minutes.`
+    : "Use the 6-digit code below to reset your BMS Pro Trade customer password. This code expires in 15 minutes.";
 
   const html = renderEmail({
     eyebrow: "Password reset",
@@ -42,7 +40,9 @@ export async function sendPasswordResetCodeEmail(
     headerHeadline: "BMS Pro Trade",
     platformLogoUrl: platformBrandLogoDataUri(),
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
-    title: business ? `Reset your ${business} password` : "Reset your password",
+    title: business
+      ? `Reset your ${business} customer password`
+      : "Reset your customer password",
     body,
     highlight: input.code,
     highlightLabel: "Your verification code",
@@ -57,7 +57,7 @@ export async function sendPasswordResetCodeEmail(
   return sendEmail({
     sender: "system",
     to: input.email,
-    subject: `${input.code} — ${subjectBusiness}BMS Pro Trade password reset code`,
+    subject: `${input.code} — ${subjectBusiness}BMS Pro Trade customer password reset`,
     htmlBody: html,
   });
 }

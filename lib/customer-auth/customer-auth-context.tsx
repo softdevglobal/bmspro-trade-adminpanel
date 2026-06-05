@@ -9,7 +9,6 @@ import {
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
@@ -52,7 +51,6 @@ type CustomerAuthContextValue = {
   }) => Promise<void>;
   logout: () => Promise<void>;
   saveProfile: (input: CustomerProfileInput) => Promise<CustomerProfile>;
-  resetPassword: (email: string) => Promise<void>;
   getIdToken: () => Promise<string | null>;
   openAuth: (options?: OpenAuthOptions) => void;
   closeAuth: () => void;
@@ -267,10 +265,6 @@ export function CustomerAuthProvider({
     return next;
   }, []);
 
-  const resetPassword = useCallback(async (email: string) => {
-    await sendPasswordResetEmail(customerAuth, email.trim());
-  }, []);
-
   const getIdToken = useCallback(async () => {
     const current = userRef.current;
     if (!current) return null;
@@ -310,7 +304,6 @@ export function CustomerAuthProvider({
       register,
       logout,
       saveProfile,
-      resetPassword,
       getIdToken,
       openAuth,
       closeAuth,
@@ -324,7 +317,6 @@ export function CustomerAuthProvider({
       register,
       logout,
       saveProfile,
-      resetPassword,
       getIdToken,
       openAuth,
       closeAuth,

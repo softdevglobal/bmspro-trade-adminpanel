@@ -1,6 +1,6 @@
 # BMS Pro Trade — Admin Panel
 
-A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super-admin tenant management, business-owner dashboards (inspection visits, team, services, customers), a public customer booking engine, custom admin password reset (6-digit code), and transactional email via ZeptoMail.
+A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super-admin tenant management, business-owner dashboards (inspection visits, team, services, customers), a public customer booking engine, a **call-center REST API** (`/api/callcenter/*`) for platform-wide agents, custom admin password reset (6-digit code), and transactional email via ZeptoMail.
 
 ### Feature quick reference
 
@@ -13,6 +13,7 @@ A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super
 | Email HTML templates | — | `lib/email/layout.ts` + `lib/email/templates/*` | [§6 — Where templates live](#where-email-templates-live) |
 | Staff **Can get quotation** | `components/team-staff-form.tsx` | `users.canget_qutaion` via `/api/team/staff` | [§5 users](#usersuid) |
 | Brand logo / favicon | `sidebar.tsx`, `app/login/page.tsx` | `public/bms_pro_blue.jpeg`, `app/icon.jpg` | [§3](#3-folder-structure) |
+| Call-center API (agents) | — (external / Postman) | `app/api/callcenter/*`, `lib/callcenter/auth.ts` | [§8 — Call-center API](#call-center-api) |
 
 ---
 
@@ -154,6 +155,15 @@ bmspro-trade-adminpanel/
 │       │   ├── bookings/[id]/route.ts
 │       │   ├── notifications/route.ts
 │       │   └── notifications/[id]/route.ts
+│       ├── callcenter/               # Call-center agent API (see §8)
+│       │   ├── agents/route.ts       # Super admin: create / list agents
+│       │   ├── auth/login/route.ts   # Agent email + password → idToken
+│       │   ├── tenants/route.ts      # List all businesses
+│       │   ├── staff/route.ts        # Staff for ?businessId=
+│       │   ├── services/route.ts     # Catalog items (response key: services)
+│       │   ├── items/route.ts        # Same catalog (response key: items)
+│       │   ├── business-services/route.ts  # Checklist services collection
+│       │   └── quotations/route.ts
 │       └── onboarding/submit/route.ts
 │
 ├── components/                   # All React components (see §11)
@@ -162,6 +172,8 @@ bmspro-trade-adminpanel/
 │   ├── booking-engine.tsx
 │   └── ...
 ├── lib/                          # All shared server + client logic (see §10)
+│   ├── callcenter/
+│   │   └── auth.ts               # requireCallCenterAgent() — agent or super admin
 │   └── email/                    # Transactional email (see §6 — Email templates)
 │       ├── layout.ts             # Shared HTML shell: renderEmail()
 │       ├── templates/            # One file per email (owner-welcome, customer-welcome, …)
@@ -222,8 +234,9 @@ User submits email + password
 
 | Role | Access |
 |---|---|
-| `super_admin` | Tenants, global service templates, all data |
+| `super_admin` | Tenants, global service templates, all data; also all `/api/callcenter/*` routes |
 | `business_owner` | Their own services, team, inspection visits, customers |
+| `call_center` | Platform-wide read API only (`/api/callcenter/*`); no `businessId` claim — picks tenant per request |
 
 #### How the session is kept
 
@@ -338,6 +351,19 @@ Written by `lib/onboarding/server.ts` (owners) and `app/api/team/staff/route.ts`
 | `createdByUid` | `string` | **→ `users/{uid}`** (creating owner) |
 | `createdByEmail` | `string \| null` | Email of creating owner |
 | `canget_qutaion` | `boolean` | Whether staff can receive/handle quotation requests (default `false`) |
+
+**Call-center agent fields** (written by `POST /api/callcenter/agents`):
+
+| Field | Type | Description |
+|---|---|---|
+| `role` | `string` | `"call_center"` |
+| `phone` | `string` | Optional contact number |
+| `status` | `string` | `"active"` or `"suspended"` |
+| `isActive` | `boolean` | Mirrors active status |
+| `createdByUid` | `string` | **→ `users/{uid}`** (creating super admin) |
+| `createdByEmail` | `string \| null` | Email of creating super admin |
+
+No `businessId` — agents are platform-wide. JWT custom claim: `{ role: "call_center" }`.
 
 ---
 
@@ -877,6 +903,7 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 | **Super admin OR owner** | Either | `requireSession` — tries super admin first, then owner |
 | **Optional session** | Anyone | Business logo upload (public onboarding also allowed) |
 | **Customer** | Customers | Any Firebase Auth user with `email` on token (`authenticateCustomerRequest`) |
+| **Call-center agent or super admin** | Call-center agents + super admins | `requireCallCenterAgent` — `role === "call_center"` OR super admin (claims or `super_admins/{uid}`) |
 
 ---
 
@@ -1269,7 +1296,139 @@ Every protected route reads `Authorization: Bearer <Firebase ID token>` and call
 
 ---
 
+### Call-center API
+
+All routes live under `/api/callcenter/`.
+
+REST endpoints for **call-center agents** — platform-wide operators who look up any tenant’s data. There is no call-center UI in this repo; consumers are external apps or Postman.
+
+**Auth helper:** `lib/callcenter/auth.ts → requireCallCenterAgent(request)`
+
+| Who | How to get a Bearer token |
+|---|---|
+| **Call-center agent** | `POST /api/callcenter/auth/login` with `{ email, password }` → copy `idToken` from JSON |
+| **Super admin** | Firebase `signInWithPassword` (Identity Toolkit REST API) — same token used for `/api/admin/*` |
+| **Create agents** | Super admin only: `POST /api/callcenter/agents` |
+
+**Using the token:** Set header `Authorization: Bearer eyJhbGciOi...` — paste the **raw JWT only** (no angle brackets, no quotes, no line breaks). Postman: Auth type **Bearer Token**, paste token in the Token field.
+
+**Typical flow:** login → `GET /api/callcenter/tenants` → pick `id` → pass `?businessId=<id>` on tenant-scoped routes.
+
+#### Endpoint summary
+
+| Method | Path | Auth | Query / body | Returns |
+|---|---|---|---|---|
+| POST | `/api/callcenter/auth/login` | None | `{ email, password }` | `{ ok, idToken, uid, email, fullName }` |
+| POST | `/api/callcenter/agents` | Super admin | `{ fullName, email, password, phone? }` | `{ ok, agentId }` (201) |
+| GET | `/api/callcenter/agents` | Super admin | — | `{ ok, agents[] }` |
+| GET | `/api/callcenter/tenants` | Agent or super admin | `status?`, `search?`, `limit?` | `{ ok, total, tenants[] }` |
+| GET | `/api/callcenter/staff` | Agent or super admin | **`businessId`** (required) | `{ ok, businessId, total, staff[] }` |
+| GET | `/api/callcenter/services` | Agent or super admin | **`businessId`** (required) | `{ ok, businessId, total, services[] }` — catalog `items` |
+| GET | `/api/callcenter/items` | Agent or super admin | **`businessId`** (required) | `{ ok, businessId, total, items[] }` — same data as `services` |
+| GET | `/api/callcenter/business-services` | Agent or super admin | **`businessId`** (required), `activeOnly?` | `{ ok, businessId, total, services[] }` — checklist `services` |
+| GET | `/api/callcenter/quotations` | Agent or super admin | **`businessId`** (required), `status?` | `{ ok, businessId, total, quotations[] }` |
+
+#### Catalog vs checklist services
+
+| Route | Firestore collection | Purpose |
+|---|---|---|
+| `/api/callcenter/services` or `/items` | `items` | Price catalog for quotation line items (name, code, `priceAud`) |
+| `/api/callcenter/business-services` | `services` | Owner-adopted inspection services with checklist tasks, duration, trade type |
+
+Global **service templates** (super-admin catalog) remain under `/api/admin/service-templates` — not exposed on call-center routes yet.
+
+---
+
+### `POST /api/callcenter/auth/login`
+
+**Auth:** None (public login)  
+**File:** `app/api/callcenter/auth/login/route.ts`
+
+Authenticates via Firebase Identity Toolkit `signInWithPassword`, verifies JWT has `role: "call_center"`, returns `idToken` (1 hour).
+
+**Request body:** `{ email: string, password: string }`  
+**Returns:** `{ ok: true, idToken, uid, email, fullName }` or 401/403
+
+---
+
+### `POST /api/callcenter/agents` · `GET /api/callcenter/agents`
+
+**Auth:** Super admin only (`requireSuperAdmin`)  
+**File:** `app/api/callcenter/agents/route.ts`
+
+| Method | Does |
+|---|---|
+| POST | Creates Firebase Auth user + `users/{uid}` with `role: "call_center"` claim (no `businessId`). Super admin supplies password at registration. Rolls back Auth user if Firestore write fails. |
+| GET | Lists up to 200 users where `role == "call_center"` |
+
+**POST body:** `{ fullName, email, password, phone? }` — password ≥ 8 chars  
+**POST returns:** `{ ok: true, agentId }` (201)
+
+---
+
+### `GET /api/callcenter/tenants`
+
+**Auth:** Call-center agent or super admin  
+**File:** `app/api/callcenter/tenants/route.ts`
+
+Reads `businesses` (newest first). Optional filters: `status`, `search` (businessName prefix), `limit` (default 100, max 200).
+
+**Returns:** `{ ok: true, total, tenants: TenantSummary[] }` — each tenant includes `id`, contact fields, `bookingSlug`, `owner`, `plan`, timestamps.
+
+---
+
+### `GET /api/callcenter/staff`
+
+**Auth:** Call-center agent or super admin  
+**File:** `app/api/callcenter/staff/route.ts`  
+**Query:** `businessId` (required)
+
+Lists `users` where `businessId` matches and `role == "staff"`. Returns availability, `staffType`, `canget_qutaion`, status.
+
+**Delegates to:** Firestore query on `users`  
+**Errors:** 400 missing `businessId`, 404 business not found
+
+---
+
+### `GET /api/callcenter/services` · `GET /api/callcenter/items`
+
+**Auth:** Call-center agent or super admin  
+**Files:** `app/api/callcenter/services/route.ts`, `app/api/callcenter/items/route.ts`  
+**Query:** `businessId` (required)
+
+Both read the same catalog via `listCatalogItems(businessId)` from `lib/items/server.ts`. Response key differs: `services` vs `items`.
+
+---
+
+### `GET /api/callcenter/business-services`
+
+**Auth:** Call-center agent or super admin  
+**File:** `app/api/callcenter/business-services/route.ts`  
+**Query:** `businessId` (required), `activeOnly=true` (optional)
+
+**Delegates to:** `lib/onboarding/services/server.ts → listBusinessServices(businessId)`
+
+---
+
+### `GET /api/callcenter/quotations`
+
+**Auth:** Call-center agent or super admin  
+**File:** `app/api/callcenter/quotations/route.ts`  
+**Query:** `businessId` (required), `status` optional (`draft` \| `sent`)
+
+**Delegates to:** `lib/quotations/server.ts → listBusinessQuotations`
+
+---
+
 ### Lib Server Functions
+
+#### `lib/callcenter/auth.ts`
+
+| Function | Params | Does | Firestore / Auth |
+|---|---|---|---|
+| `requireCallCenterAgent(req)` | `Request` | Verifies Bearer token; allows `role === "call_center"` OR super admin (claims or active `super_admins/{uid}`) | Auth verify; read `super_admins` |
+
+---
 
 #### `lib/onboarding/server.ts`
 
@@ -2169,6 +2328,9 @@ Inspection update emails are built in `lib/email/templates/inspection-customer-n
 - **`types.ts`** — All business types, AU states, plans, onboarding payload shape.
 - **`server.ts`** — `createTenantFromPayload()`, `registerSelfSignupTenant()`. Creates the Firestore business doc, Firebase Auth user, and sends welcome email.
 - **`booking-slug.ts`** — Slugify + validate + reserve booking URLs.
+
+### `lib/callcenter/`
+- **`auth.ts`** — `requireCallCenterAgent()` — shared guard for all `/api/callcenter/*` data routes (call-center agents and super admins).
 
 ### `lib/inspection/`
 - **`types.ts`** — All inspection request statuses, types, and transitions.
