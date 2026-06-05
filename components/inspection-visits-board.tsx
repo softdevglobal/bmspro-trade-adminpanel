@@ -7,6 +7,7 @@ import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
+import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
@@ -205,6 +206,9 @@ export function InspectionVisitsBoard() {
     if (fromUrl) setPendingOpenId(fromUrl);
     if (action === "schedule-job") {
       setPendingDrawerMode("convert_booking");
+    }
+    if (action === "awaiting-decision") {
+      setPendingDrawerMode("awaiting_decision");
     }
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<string>).detail;
@@ -558,37 +562,17 @@ function RequestCard({
           ) : null}
           {showPostQuoteActions ? (
             <div
-              className={`flex shrink-0 items-center gap-1.5 ${
+              className={
                 request.assignedTo || hasLinkedBooking || request.bookingStatus
                   ? "border-l border-outline-variant/50 pl-2"
                   : ""
-              }`}
-              onClick={(event) => event.stopPropagation()}
+              }
             >
-              <button
-                type="button"
-                title="Create booking"
-                onClick={onCreateBooking}
-                className="inline-flex h-7 items-center gap-0.5 rounded-lg bg-primary px-2.5 font-body text-[11px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 active:scale-[0.98]"
-              >
-                <span className="material-symbols-outlined text-[12px] leading-none">
-                  assignment
-                </span>
-                Book
-              </button>
-              {request.status === "completed" ? (
-                <button
-                  type="button"
-                  title="Awaiting decision"
-                  onClick={onAwaitingDecision}
-                  className="inline-flex h-7 items-center gap-0.5 rounded-lg border border-orange-300 bg-orange-50 px-2.5 font-body text-[11px] font-semibold text-orange-800 transition-colors hover:bg-orange-100 active:scale-[0.98]"
-                >
-                  <span className="material-symbols-outlined text-[12px] leading-none">
-                    pending_actions
-                  </span>
-                  Awaiting
-                </button>
-              ) : null}
+              <FollowUpActionButtons
+                onBook={onCreateBooking}
+                onWait={onAwaitingDecision}
+                showWait={request.status === "completed"}
+              />
             </div>
           ) : null}
         </div>

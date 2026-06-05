@@ -1,5 +1,6 @@
 "use client";
 
+import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -64,11 +65,23 @@ function QuotationCard({
   isPreviewOpen: boolean;
   onOpen: () => void;
 }) {
+  const showFollowUpActions =
+    quotation.status === "sent" && !quotation.bookingId;
+  const inspectionVisitHref = (action: "schedule-job" | "awaiting-decision") =>
+    `/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=${action}`;
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className={`group flex w-full min-w-0 flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 ${
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`group flex w-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 sm:hover:-translate-y-0.5 ${
         isPreviewOpen
           ? "border-primary/40 ring-2 ring-primary/15"
           : "border-outline-variant/60 hover:border-primary/30 hover:shadow-md"
@@ -92,15 +105,32 @@ function QuotationCard({
       <p className="font-body text-[12px] text-on-surface-variant">
         {formatAddress(quotation.address)}
       </p>
-      <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
         <span className="font-numeric text-[15px] font-semibold text-primary">
           {formatAud(quotation.finalPriceAud)}
         </span>
-        <span className="font-body text-[11px] text-on-surface-variant sm:ml-auto">
+        <span className="font-body text-[11px] text-on-surface-variant">
           {formatWhen(quotation.createdAt)}
         </span>
+        {showFollowUpActions ? (
+          <FollowUpActionButtons
+            className="sm:ml-auto"
+            bookHref={inspectionVisitHref("schedule-job")}
+            waitHref={inspectionVisitHref("awaiting-decision")}
+          />
+        ) : quotation.bookingId ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary sm:ml-auto">
+            <span className="material-symbols-outlined text-[12px] leading-none">
+              assignment
+            </span>
+            {displayBookingCode({
+              id: quotation.bookingId,
+              bookingCode: quotation.bookingCode,
+            })}
+          </span>
+        ) : null}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -157,6 +187,9 @@ function QuotationPreviewContent({
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase() || "bmspro"}.pdf`;
+
+  const hasFooterActions =
+    quotation.status === "sent" || Boolean(quotation.pdfUrl);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -289,60 +322,62 @@ function QuotationPreviewContent({
             />
           </Link>
         </section>
+
+        {hasFooterActions ? (
+          <footer className="space-y-2 border-t border-outline-variant/40 pt-3">
+            {quotation.status === "sent" ? (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {quotation.bookingId ? (
+                  <Link
+                    href="/dashboard/bookings"
+                    onClick={onClose}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      assignment
+                    </span>
+                    View scheduled job
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=schedule-job`}
+                    onClick={onClose}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      event
+                    </span>
+                    Schedule job
+                  </Link>
+                )}
+                <Link
+                  href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
+                  onClick={onClose}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    receipt_long
+                  </span>
+                  Issue invoice
+                </Link>
+              </div>
+            ) : null}
+
+            {quotation.pdfUrl ? (
+              <button
+                type="button"
+                onClick={() => setPdfOpen(true)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  picture_as_pdf
+                </span>
+                View quotation PDF
+              </button>
+            ) : null}
+          </footer>
+        ) : null}
       </div>
-
-      <footer className="shrink-0 space-y-2 border-t border-outline-variant/60 bg-surface-container-lowest px-4 py-3 sm:px-5">
-        {quotation.status === "sent" ? (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {quotation.bookingId ? (
-              <Link
-                href="/dashboard/bookings"
-                onClick={onClose}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
-              >
-                <span className="material-symbols-outlined text-[20px]">
-                  assignment
-                </span>
-                View scheduled job
-              </Link>
-            ) : (
-              <Link
-                href={`/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=schedule-job`}
-                onClick={onClose}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
-              >
-                <span className="material-symbols-outlined text-[20px]">
-                  event
-                </span>
-                Schedule job
-              </Link>
-            )}
-            <Link
-              href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
-              onClick={onClose}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
-            >
-              <span className="material-symbols-outlined text-[20px]">
-                receipt_long
-              </span>
-              Issue invoice
-            </Link>
-          </div>
-        ) : null}
-
-        {quotation.pdfUrl ? (
-          <button
-            type="button"
-            onClick={() => setPdfOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              picture_as_pdf
-            </span>
-            View quotation PDF
-          </button>
-        ) : null}
-      </footer>
 
       {quotation.pdfUrl ? (
         <QuotationPdfViewerModal
