@@ -24,7 +24,9 @@ function InvoicesPageInner() {
       subtitle="Create and send invoices to your customers."
       icon="receipt_long"
     >
-      <InvoicesBoard />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <InvoicesBoard />
+      </div>
     </DashboardShell>
   );
 }

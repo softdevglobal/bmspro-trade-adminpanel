@@ -15,6 +15,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import type { CreateInvoiceInput, InvoiceDetail } from "@/lib/invoices/types";
 
 export const INVOICE_COLLECTION = "invoices";
+export const INVOICE_LIST_LIMIT = 80;
 
 function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
   if (!raw || typeof raw !== "object") return null;
@@ -192,6 +193,23 @@ function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
+}
+
+/** Lists all invoices for a business (newest first). */
+export async function listBusinessInvoices(
+  businessId: string,
+): Promise<InvoiceDetail[]> {
+  // Filter-only query — avoids a composite index on businessId + createdAt.
+  // Sort newest-first in memory (typical invoice volume is small).
+  const snapshot = await adminDb
+    .collection(INVOICE_COLLECTION)
+    .where("businessId", "==", businessId)
+    .get();
+
+  return snapshot.docs
+    .map((doc) => mapInvoiceDoc(doc.id, doc.data() ?? {}))
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    .slice(0, INVOICE_LIST_LIMIT);
 }
 
 export async function getBusinessInvoiceByQuotationId(

@@ -1,5 +1,8 @@
 import { adminAuth } from "@/lib/firebase/admin";
-import { createInvoiceFromQuotation } from "@/lib/invoices/server";
+import {
+  createInvoiceFromQuotation,
+  listBusinessInvoices,
+} from "@/lib/invoices/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -42,6 +45,27 @@ async function requireInvoiceAuthor(request: Request) {
       status: 401,
       error: "Invalid or expired session.",
     };
+  }
+}
+
+export async function GET(request: Request) {
+  const auth = await requireInvoiceAuthor(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  try {
+    const invoices = await listBusinessInvoices(auth.businessId);
+    return NextResponse.json({ ok: true, invoices });
+  } catch (error) {
+    console.error("[invoices] list failed:", error);
+    return NextResponse.json(
+      { ok: false, error: "Could not load invoices." },
+      { status: 500 },
+    );
   }
 }
 

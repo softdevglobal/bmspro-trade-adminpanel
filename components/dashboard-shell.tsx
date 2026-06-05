@@ -205,9 +205,9 @@ export function DashboardShell({
         </header>
 
         <main
-          className={`mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden ${
+          className={`mx-auto flex w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden ${
             fullBleed
-              ? "flex flex-col px-0 pb-0 pt-[calc(3.5rem+0px)] sm:pt-[calc(4rem+0px)] lg:pt-0"
+              ? "px-0 pb-0 pt-[calc(3.5rem+0px)] sm:pt-[calc(4rem+0px)] lg:pt-0"
               : "px-3 pb-4 pt-[calc(3.5rem+1rem)] sm:max-w-container-max sm:pb-gutter sm:pt-[calc(4rem+1rem)] sm:px-gutter lg:px-3 lg:py-4 lg:pt-4"
           }`}
         >
