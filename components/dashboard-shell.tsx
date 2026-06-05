@@ -180,12 +180,6 @@ export function DashboardShell({
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <BusinessNotificationBell />
-            <button
-              type="button"
-              className="hidden rounded-lg bg-primary px-5 py-2 font-body text-label-bold text-label-bold text-on-primary transition-all hover:bg-primary/90 sm:inline-flex"
-            >
-              Add Booking
-            </button>
             <div
               className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-container font-body text-[14px] font-bold text-on-primary ring-1 ring-outline-variant"
               title={brandLogo ? brandName : email}

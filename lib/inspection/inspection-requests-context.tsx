@@ -21,6 +21,7 @@ const INSPECTION_ROUTES = [
 
 function needsInspectionFeed(pathname: string | null): boolean {
   if (!pathname) return false;
+  if (pathname === "/dashboard" || pathname === "/dashboard/") return true;
   return INSPECTION_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
