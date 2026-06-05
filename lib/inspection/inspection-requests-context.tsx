@@ -15,6 +15,7 @@ import {
 
 const INSPECTION_ROUTES = [
   "/dashboard/inspection-visits",
+  "/dashboard/quotations",
   "/dashboard/customers",
   "/dashboard/calendar",
 ] as const;

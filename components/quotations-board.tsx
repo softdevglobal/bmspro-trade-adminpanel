@@ -21,11 +21,11 @@ import {
   formatAddress,
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
-import type { QuotationDetail } from "@/lib/quotations/server";
+import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function formatAud(value: number | null): string {
   if (value == null) return "—";
@@ -80,6 +80,112 @@ function CreatedSourcePill({
   );
 }
 
+function QuotationCardMenu({
+  quotation,
+  onScheduleBooking,
+}: {
+  quotation: QuotationDetail;
+  onScheduleBooking: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const canSchedule = canConvertQuotationToBooking(quotation);
+  const hasBooking = Boolean(quotation.bookingId);
+  const invoiceHref = `/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`;
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  const menuItemClass =
+    "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-45";
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative shrink-0"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        aria-label="Quotation actions"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+      >
+        <span className="material-symbols-outlined text-[20px]">more_vert</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
+        >
+          {canSchedule ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onScheduleBooking();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                event
+              </span>
+              Schedule booking
+            </button>
+          ) : hasBooking ? (
+            <Link
+              href="/dashboard/bookings"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                assignment
+              </span>
+              Schedule booking
+            </Link>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              disabled
+              className={menuItemClass}
+              title="Complete the inspection visit before scheduling"
+            >
+              <span className="material-symbols-outlined text-[18px] text-outline">
+                event
+              </span>
+              Schedule booking
+            </button>
+          )}
+          <Link
+            href={invoiceHref}
+            role="menuitem"
+            className={menuItemClass}
+            onClick={() => setOpen(false)}
+          >
+            <span className="material-symbols-outlined text-[18px] text-primary">
+              receipt_long
+            </span>
+            Issue invoice
+          </Link>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function QuotationCard({
   quotation,
   isPreviewOpen,
@@ -105,23 +211,29 @@ function QuotationCard({
           onOpen();
         }
       }}
-      className={`group flex w-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 sm:hover:-translate-y-0.5 ${
+      className={`group relative flex w-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 sm:hover:-translate-y-0.5 ${
         isPreviewOpen
           ? "border-primary/40 ring-2 ring-primary/15"
           : "border-outline-variant/60 hover:border-primary/30 hover:shadow-md"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
-          {displayQuotationCode(quotation)}
-        </span>
-        <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
-          {quotation.status}
-        </span>
-        {quotation.bookingStatus && !quotation.bookingId ? (
-          <BookingStatusPill status={quotation.bookingStatus} />
-        ) : null}
-        <CreatedSourcePill source={quotation.createdSource} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
+            {displayQuotationCode(quotation)}
+          </span>
+          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
+            {quotation.status}
+          </span>
+          {quotation.bookingStatus && !quotation.bookingId ? (
+            <BookingStatusPill status={quotation.bookingStatus} />
+          ) : null}
+          <CreatedSourcePill source={quotation.createdSource} />
+        </div>
+        <QuotationCardMenu
+          quotation={quotation}
+          onScheduleBooking={onBook}
+        />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
         {quotation.serviceTitle || "Quotation"}

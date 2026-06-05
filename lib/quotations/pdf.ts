@@ -10,7 +10,7 @@ import {
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
-import type { QuotationDetail } from "@/lib/quotations/server";
+import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayQuotationCode } from "@/lib/reference-codes";
 import {
   PDFDocument,

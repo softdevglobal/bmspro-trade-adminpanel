@@ -1,10 +1,19 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
-import {
-  parseBookingStatus,
-  type BookingStatus,
-} from "@/lib/bookings/types";
+import { parseBookingStatus } from "@/lib/bookings/types";
+import type {
+  CreateQuotationInput,
+  QuotationDepositRequest,
+  QuotationDetail,
+  QuotationLineItem,
+} from "@/lib/quotations/types";
+export type {
+  CreateQuotationInput,
+  QuotationDepositRequest,
+  QuotationDetail,
+  QuotationLineItem,
+} from "@/lib/quotations/types";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
@@ -29,77 +38,6 @@ import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const QUOTATION_COLLECTION = "quotations";
-
-export type QuotationLineItem = {
-  name: string;
-  priceAud: number;
-  code?: string | null;
-  description?: string | null;
-  quantity?: number | null;
-  rateAud?: number | null;
-  gstPercent?: number | null;
-};
-
-export type QuotationDepositRequest = {
-  mode: "percent" | "fixed";
-  percent: number;
-  amountAud: number;
-  dueDate: string;
-};
-
-export type QuotationDetail = {
-  id: string;
-  quotationCode: string | null;
-  businessId: string;
-  inspectionRequestId: string;
-  serviceTitle: string;
-  customer: InspectionCustomer;
-  address: InspectionAddress;
-  lineItems: QuotationLineItem[];
-  subtotalAud: number;
-  finalPriceAud: number;
-  /** Amount still owed after any deposit (equals finalPriceAud when no deposit). */
-  balanceDueAud: number;
-  notes: string | null;
-  paymentInstructions: string | null;
-  termsAndConditions: string | null;
-  discountAud: number;
-  depositRequest: QuotationDepositRequest | null;
-  validUntil: string | null;
-  imageUrls: string[];
-  pdfUrl: string | null;
-  status: "draft" | "sent";
-  bookingId: string | null;
-  bookingCode: string | null;
-  bookingStatus: BookingStatus | null;
-  bookingStatusAt: number | null;
-  createdBy: string;
-  createdAt: number | null;
-  updatedAt: number | null;
-  /** From the linked inspection visit (`createdSource`). */
-  createdSource?: InspectionRequestCreatedSource | null;
-  /** Linked inspection visit status (for follow-up actions). */
-  inspectionRequestStatus?: InspectionRequestStatus | null;
-};
-
-export type CreateQuotationInput = {
-  inspectionRequestId: string;
-  lineItems: QuotationLineItem[];
-  finalPriceAud?: number | null;
-  notes?: string | null;
-  termsAndConditions?: string | null;
-  discountAud?: number | null;
-  validUntil?: string | null;
-  imageUrls?: string[];
-  depositRequest?: unknown;
-  customer?: { fullName?: string; email?: string; phone?: string };
-  address?: {
-    street?: string;
-    suburb?: string;
-    state?: string;
-    postcode?: string;
-  };
-};
 
 function parseImageUrls(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
