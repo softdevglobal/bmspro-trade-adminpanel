@@ -21,6 +21,10 @@ import {
   formatAddress,
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
+import {
+  quotationHasInvoice,
+  quotationJobActionsLocked,
+} from "@/lib/quotations/actions";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
@@ -44,6 +48,12 @@ function formatWhen(timestamp: number | null): string {
 }
 
 type QuotationPreviewMode = "review" | "convert_booking";
+
+const disabledActionClass =
+  "inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 px-4 py-3 font-body text-[14px] font-semibold text-on-surface-variant opacity-50";
+
+const disabledMenuItemClass =
+  "flex w-full cursor-not-allowed items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface-variant opacity-50";
 
 function BookingStatusPill({ status }: { status: BookingStatus }) {
   return (
@@ -91,6 +101,8 @@ function QuotationCardMenu({
   const rootRef = useRef<HTMLDivElement>(null);
   const canSchedule = canConvertQuotationToBooking(quotation);
   const hasBooking = Boolean(quotation.bookingId);
+  const hasInvoice = quotationHasInvoice(quotation);
+  const jobLocked = quotationJobActionsLocked(quotation);
   const invoiceHref = `/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`;
 
   useEffect(() => {
@@ -132,8 +144,15 @@ function QuotationCardMenu({
             <button
               type="button"
               role="menuitem"
+              disabled={jobLocked}
               className={menuItemClass}
+              title={
+                jobLocked
+                  ? "Job completed and invoice already issued"
+                  : undefined
+              }
               onClick={() => {
+                if (jobLocked) return;
                 setOpen(false);
                 onScheduleBooking();
               }}
@@ -144,17 +163,30 @@ function QuotationCardMenu({
               Schedule booking
             </button>
           ) : hasBooking ? (
-            <Link
-              href="/dashboard/bookings"
-              role="menuitem"
-              className={menuItemClass}
-              onClick={() => setOpen(false)}
-            >
-              <span className="material-symbols-outlined text-[18px] text-primary">
-                assignment
+            jobLocked ? (
+              <span
+                role="menuitem"
+                className={disabledMenuItemClass}
+                title="Job completed and invoice already issued"
+              >
+                <span className="material-symbols-outlined text-[18px] text-outline">
+                  assignment
+                </span>
+                Schedule booking
               </span>
-              Schedule booking
-            </Link>
+            ) : (
+              <Link
+                href="/dashboard/bookings"
+                role="menuitem"
+                className={menuItemClass}
+                onClick={() => setOpen(false)}
+              >
+                <span className="material-symbols-outlined text-[18px] text-primary">
+                  assignment
+                </span>
+                Schedule booking
+              </Link>
+            )
           ) : (
             <button
               type="button"
@@ -169,17 +201,30 @@ function QuotationCardMenu({
               Schedule booking
             </button>
           )}
-          <Link
-            href={invoiceHref}
-            role="menuitem"
-            className={menuItemClass}
-            onClick={() => setOpen(false)}
-          >
-            <span className="material-symbols-outlined text-[18px] text-primary">
-              receipt_long
+          {hasInvoice ? (
+            <span
+              role="menuitem"
+              className={disabledMenuItemClass}
+              title="Invoice already issued for this quotation"
+            >
+              <span className="material-symbols-outlined text-[18px] text-outline">
+                receipt_long
+              </span>
+              Issue invoice
             </span>
-            Issue invoice
-          </Link>
+          ) : (
+            <Link
+              href={invoiceHref}
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                receipt_long
+              </span>
+              Issue invoice
+            </Link>
+          )}
         </div>
       ) : null}
     </div>
@@ -343,17 +388,77 @@ function QuotationPreviewContent({
   onPreviewModeChange: (mode: QuotationPreviewMode) => void;
   onBookingCreated: (request: InspectionRequestDetail) => void;
 }) {
+  const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [invoicePdfOpen, setInvoicePdfOpen] = useState(false);
+  const [invoicePdfSource, setInvoicePdfSource] = useState<string | null>(null);
+  const [invoicePdfLoading, setInvoicePdfLoading] = useState(false);
+  const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null);
   const title = quotation.serviceTitle || "Quotation";
   const downloadFilename = `quotation-${title
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase() || "bmspro"}.pdf`;
+  const invoiceDownloadFilename = `${(quotation.invoiceCode ?? "invoice")
+    .replace(/[^a-z0-9.\-]+/gi, "-")
+    .toLowerCase()}.pdf`;
 
+  const canConvert = canConvertQuotationToBooking(quotation);
+  const hasInvoice = quotationHasInvoice(quotation);
+  const jobLocked = quotationJobActionsLocked(quotation);
   const hasFooterActions =
     previewMode === "review" &&
-    (quotation.status === "sent" || Boolean(quotation.pdfUrl));
-  const canConvert = canConvertQuotationToBooking(quotation);
+    (quotation.status === "sent" ||
+      Boolean(quotation.pdfUrl) ||
+      hasInvoice);
+
+  function closeInvoicePdf() {
+    setInvoicePdfOpen(false);
+    if (invoicePdfSource?.startsWith("blob:")) {
+      URL.revokeObjectURL(invoicePdfSource);
+    }
+    setInvoicePdfSource(null);
+    setInvoicePdfError(null);
+  }
+
+  async function openInvoicePdf() {
+    setInvoicePdfError(null);
+    if (quotation.invoicePdfUrl) {
+      setInvoicePdfSource(quotation.invoicePdfUrl);
+      setInvoicePdfOpen(true);
+      return;
+    }
+    if (!user || !quotation.invoiceId) {
+      setInvoicePdfError("Could not open invoice PDF.");
+      return;
+    }
+
+    setInvoicePdfLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/invoices/pdf?quotationId=${encodeURIComponent(quotation.id)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Could not load invoice PDF.");
+      }
+      const blob = await response.blob();
+      setInvoicePdfSource(URL.createObjectURL(blob));
+      setInvoicePdfOpen(true);
+    } catch (error) {
+      setInvoicePdfError(
+        error instanceof Error
+          ? error.message
+          : "Could not open invoice PDF.",
+      );
+    } finally {
+      setInvoicePdfLoading(false);
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -486,6 +591,17 @@ function QuotationPreviewContent({
           </section>
         ) : null}
 
+        {hasInvoice ? (
+          <section className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+              Linked invoice
+            </p>
+            <p className="mt-1 font-mono text-[13px] font-semibold text-emerald-900">
+              {quotation.invoiceCode ?? "Invoice issued"}
+            </p>
+          </section>
+        ) : null}
+
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Linked visit
@@ -510,21 +626,46 @@ function QuotationPreviewContent({
             {quotation.status === "sent" ? (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {quotation.bookingId ? (
-                  <Link
-                    href="/dashboard/bookings"
-                    onClick={onClose}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">
-                      assignment
+                  jobLocked ? (
+                    <span
+                      className={disabledActionClass}
+                      title="Job completed and invoice already issued"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">
+                        assignment
+                      </span>
+                      View scheduled job
                     </span>
-                    View scheduled job
-                  </Link>
+                  ) : (
+                    <Link
+                      href="/dashboard/bookings"
+                      onClick={onClose}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">
+                        assignment
+                      </span>
+                      View scheduled job
+                    </Link>
+                  )
                 ) : canConvert ? (
                   <button
                     type="button"
-                    onClick={() => onPreviewModeChange("convert_booking")}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                    disabled={jobLocked}
+                    title={
+                      jobLocked
+                        ? "Job completed and invoice already issued"
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (jobLocked) return;
+                      onPreviewModeChange("convert_booking");
+                    }}
+                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-body text-[14px] font-semibold transition-colors ${
+                      jobLocked
+                        ? "cursor-not-allowed bg-primary/40 text-on-primary/70"
+                        : "bg-primary text-on-primary hover:bg-primary/90"
+                    }`}
                   >
                     <span className="material-symbols-outlined text-[20px]">
                       event
@@ -532,30 +673,73 @@ function QuotationPreviewContent({
                     Schedule job
                   </button>
                 ) : null}
-                <Link
-                  href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
-                  onClick={onClose}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
-                >
-                  <span className="material-symbols-outlined text-[20px]">
-                    receipt_long
+                {hasInvoice ? (
+                  <span
+                    className={disabledActionClass}
+                    title="Invoice already issued for this quotation"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      receipt_long
+                    </span>
+                    Issue invoice
                   </span>
-                  Issue invoice
-                </Link>
+                ) : (
+                  <Link
+                    href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
+                    onClick={onClose}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      receipt_long
+                    </span>
+                    Issue invoice
+                  </Link>
+                )}
               </div>
             ) : null}
 
-            {quotation.pdfUrl ? (
-              <button
-                type="button"
-                onClick={() => setPdfOpen(true)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+            {quotation.pdfUrl || hasInvoice ? (
+              <div
+                className={`grid gap-2 ${
+                  quotation.pdfUrl && hasInvoice
+                    ? "grid-cols-1 sm:grid-cols-2"
+                    : "grid-cols-1"
+                }`}
               >
-                <span className="material-symbols-outlined text-[20px]">
-                  picture_as_pdf
-                </span>
-                View quotation PDF
-              </button>
+                {quotation.pdfUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => setPdfOpen(true)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      picture_as_pdf
+                    </span>
+                    View quotation PDF
+                  </button>
+                ) : null}
+                {hasInvoice ? (
+                  <button
+                    type="button"
+                    onClick={() => void openInvoicePdf()}
+                    disabled={invoicePdfLoading}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      {invoicePdfLoading ? "progress_activity" : "receipt_long"}
+                    </span>
+                    {invoicePdfLoading ? "Loading invoice…" : "View invoice PDF"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {invoicePdfError ? (
+              <p
+                role="alert"
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-700"
+              >
+                {invoicePdfError}
+              </p>
             ) : null}
           </footer>
         ) : null}
@@ -570,6 +754,15 @@ function QuotationPreviewContent({
           pdfUrl={quotation.pdfUrl}
           title={title}
           downloadFilename={downloadFilename}
+        />
+      ) : null}
+      {invoicePdfSource ? (
+        <QuotationPdfViewerModal
+          open={invoicePdfOpen}
+          onClose={closeInvoicePdf}
+          pdfUrl={invoicePdfSource}
+          title={`Invoice — ${quotation.invoiceCode ?? title}`}
+          downloadFilename={invoiceDownloadFilename}
         />
       ) : null}
     </div>

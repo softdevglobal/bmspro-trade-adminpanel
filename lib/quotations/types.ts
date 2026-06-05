@@ -1,4 +1,5 @@
 import type { BookingStatus } from "@/lib/bookings/types";
+import type { InvoiceStatus } from "@/lib/invoices/types";
 import type {
   InspectionAddress,
   InspectionCustomer,
@@ -49,6 +50,11 @@ export type QuotationDetail = {
   bookingCode: string | null;
   bookingStatus: BookingStatus | null;
   bookingStatusAt: number | null;
+  /** Set when an invoice document exists for this quotation (same id). */
+  invoiceId: string | null;
+  invoiceCode: string | null;
+  invoiceStatus: InvoiceStatus | null;
+  invoicePdfUrl: string | null;
   createdBy: string;
   createdAt: number | null;
   updatedAt: number | null;

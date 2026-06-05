@@ -401,3 +401,42 @@ export async function uploadQuotationPdf(
     return { ok: false, error: "Could not upload PDF." };
   }
 }
+
+/**
+ * Uploads a generated invoice PDF to Firebase Storage and returns a public
+ * download URL.
+ */
+export async function uploadInvoicePdf(
+  file: Buffer,
+  options: {
+    businessId: string;
+    inspectionRequestId: string;
+    invoiceId: string;
+  },
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const bucket = getStorage().bucket(bucketName);
+  const requestPart = options.inspectionRequestId.trim() || "general";
+  const path = `invoices/${options.businessId}/${requestPart}/pdf/${options.invoiceId}.pdf`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType: "application/pdf",
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+    const url = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, url };
+  } catch (error) {
+    console.error("uploadInvoicePdf failed:", error);
+    return { ok: false, error: "Could not upload PDF." };
+  }
+}

@@ -450,7 +450,11 @@ export async function completeBookingForInvoicedQuotation(input: {
     balanceDueAud: number;
     status: string | null;
   };
-}): Promise<{ bookingId: string; bookingCode: string | null } | null> {
+}): Promise<{
+  bookingId: string;
+  bookingCode: string | null;
+  bookingStatus: BookingStatus;
+} | null> {
   const { businessId, inspectionRequestId, quotation } = input;
   const now = FieldValue.serverTimestamp();
 
@@ -480,7 +484,11 @@ export async function completeBookingForInvoicedQuotation(input: {
           bookingCode: current.bookingCode,
         }),
       ]);
-      return { bookingId: current.id, bookingCode: current.bookingCode };
+      return {
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+        bookingStatus: "completed",
+      };
     }
   }
 
@@ -570,7 +578,11 @@ export async function completeBookingForInvoicedQuotation(input: {
     ]);
   }
 
-  return { bookingId: bookingRef.id, bookingCode };
+  return {
+    bookingId: bookingRef.id,
+    bookingCode,
+    bookingStatus: "completed",
+  };
 }
 
 export async function completeBusinessBooking(

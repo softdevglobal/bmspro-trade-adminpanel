@@ -282,6 +282,10 @@ function mapQuotationDoc(
       return null;
     })(),
     bookingStatusAt: toMillis(data.bookingStatusAt),
+    invoiceId: null,
+    invoiceCode: null,
+    invoiceStatus: null,
+    invoicePdfUrl: null,
     createdBy: typeof data.createdBy === "string" ? data.createdBy : "",
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
@@ -1321,7 +1325,12 @@ export async function getBusinessQuotationById(
   const [quotation] = await enrichQuotationsFromInspections([
     mapQuotationDoc(snap.id, data),
   ]);
-  return quotation ?? null;
+  if (!quotation) return null;
+  const { enrichQuotationsWithInvoices } = await import(
+    "@/lib/invoices/enrich-quotations"
+  );
+  const [enriched] = await enrichQuotationsWithInvoices([quotation]);
+  return enriched ?? null;
 }
 
 /** Lists all quotations for a business (newest first). */
@@ -1338,7 +1347,11 @@ export async function listBusinessQuotations(
   const quotations = snapshot.docs.map((doc) =>
     mapQuotationDoc(doc.id, doc.data() ?? {}),
   );
-  return enrichQuotationsFromInspections(quotations);
+  const enriched = await enrichQuotationsFromInspections(quotations);
+  const { enrichQuotationsWithInvoices } = await import(
+    "@/lib/invoices/enrich-quotations"
+  );
+  return enrichQuotationsWithInvoices(enriched);
 }
 
 async function sendQuotationCreatedEmail(

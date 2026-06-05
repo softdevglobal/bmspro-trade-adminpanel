@@ -1,3 +1,4 @@
+import type { BookingStatus } from "@/lib/bookings/types";
 import type {
   InspectionAddress,
   InspectionCustomer,
@@ -34,6 +35,9 @@ export type InvoiceDetail = {
   status: InvoiceStatus;
   bookingId: string | null;
   bookingCode: string | null;
+  bookingStatus: BookingStatus | null;
+  bookingStatusAt: number | null;
+  pdfUrl: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
