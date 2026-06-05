@@ -166,20 +166,26 @@ export function DashboardShell({
               </h1>
             </div>
 
-            <div className="hidden items-center gap-2 rounded-full border border-outline-variant bg-surface-container-low px-4 py-1.5 md:flex">
-              <span className="material-symbols-outlined text-[20px] text-outline">
-                search
-              </span>
-              <input
-                type="search"
-                placeholder="Search bookings..."
-                className="w-48 border-none bg-transparent font-body text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-0 lg:w-64"
-              />
-            </div>
+            {role === "business_owner" ? (
+              <div className="hidden items-center gap-2 rounded-full border border-outline-variant bg-surface-container-low px-4 py-1.5 md:flex">
+                <span className="material-symbols-outlined text-[20px] text-outline">
+                  search
+                </span>
+                <input
+                  type="search"
+                  placeholder="Search bookings..."
+                  className="w-48 border-none bg-transparent font-body text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-0 lg:w-64"
+                />
+              </div>
+            ) : (
+              <p className="hidden font-body text-[13px] font-medium text-on-surface-variant md:block">
+                Platform administration
+              </p>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <BusinessNotificationBell />
+            {role === "business_owner" ? <BusinessNotificationBell /> : null}
             <div
               className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-container font-body text-[14px] font-bold text-on-primary ring-1 ring-outline-variant"
               title={brandLogo ? brandName : email}

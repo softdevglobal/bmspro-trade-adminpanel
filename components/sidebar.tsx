@@ -26,7 +26,12 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
-  { href: "/dashboard/calendar", label: "Calendar", icon: "calendar_month" },
+  {
+    href: "/dashboard/calendar",
+    label: "Calendar",
+    icon: "calendar_month",
+    businessOwner: true,
+  },
   {
     href: "/dashboard/inspection-visits",
     label: "Inspection visits",
@@ -213,10 +218,18 @@ export function Sidebar({
                 </span>
                 {showLabels && (
                   <span className="truncate font-body text-[14px] font-medium">
-                    {item.label}
+                    {item.href === "/dashboard" && role === "super_admin"
+                      ? "Overview"
+                      : item.label}
                   </span>
                 )}
-                {!showLabels && <span className="sr-only">{item.label}</span>}
+                {!showLabels && (
+                  <span className="sr-only">
+                    {item.href === "/dashboard" && role === "super_admin"
+                      ? "Overview"
+                      : item.label}
+                  </span>
+                )}
               </>
             );
 

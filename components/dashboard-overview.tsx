@@ -2,6 +2,8 @@
 
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { SuperAdminDashboardOverview } from "@/components/super-admin-dashboard-overview";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
@@ -126,6 +128,15 @@ function formatTodayLabel(): string {
 }
 
 export function DashboardOverview() {
+  const { role } = useAuth();
+  if (role === "super_admin") {
+    return <SuperAdminDashboardOverview />;
+  }
+
+  return <BusinessDashboardOverview />;
+}
+
+function BusinessDashboardOverview() {
   const profile = useBusinessProfile();
   const { bookings, loading: bookingsLoading } = useBookings();
   const { requests, loading: requestsLoading } = useInspectionRequests();
