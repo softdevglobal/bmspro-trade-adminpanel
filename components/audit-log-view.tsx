@@ -236,7 +236,9 @@ export function AuditLogView() {
           count={stats.total}
           onClick={() => setCategory("all")}
         />
-        {AUDIT_CATEGORIES.map((cat) => (
+        {AUDIT_CATEGORIES.filter(
+          (cat) => cat !== "staff", // Staff filter chip hidden for now
+        ).map((cat) => (
           <CategoryChip
             key={cat}
             label={CATEGORY_LABELS[cat]}
