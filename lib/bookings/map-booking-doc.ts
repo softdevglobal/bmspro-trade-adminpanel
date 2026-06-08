@@ -138,6 +138,7 @@ export function mapBookingDoc(
     quotation: parseInspectionQuotation(data.quotation),
     visitStartedAt: toMillis(data.visitStartedAt),
     bookingStartedAt: toMillis(data.bookingStartedAt),
+    completedFromInvoice: data.completedFromInvoice === true,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
