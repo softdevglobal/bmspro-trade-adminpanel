@@ -1,10 +1,19 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
-import {
-  parseBookingStatus,
-  type BookingStatus,
-} from "@/lib/bookings/types";
+import { parseBookingStatus } from "@/lib/bookings/types";
+import type {
+  CreateQuotationInput,
+  QuotationDepositRequest,
+  QuotationDetail,
+  QuotationLineItem,
+} from "@/lib/quotations/types";
+export type {
+  CreateQuotationInput,
+  QuotationDepositRequest,
+  QuotationDetail,
+  QuotationLineItem,
+} from "@/lib/quotations/types";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
@@ -13,7 +22,9 @@ import {
   type InspectionAssignment,
   type InspectionCustomer,
   type InspectionRequestCreatedSource,
+  type InspectionRequestStatus,
   type InspectionRequestType,
+  REQUEST_STATUSES,
   parseCreatedSource,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
@@ -27,75 +38,6 @@ import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const QUOTATION_COLLECTION = "quotations";
-
-export type QuotationLineItem = {
-  name: string;
-  priceAud: number;
-  code?: string | null;
-  description?: string | null;
-  quantity?: number | null;
-  rateAud?: number | null;
-  gstPercent?: number | null;
-};
-
-export type QuotationDepositRequest = {
-  mode: "percent" | "fixed";
-  percent: number;
-  amountAud: number;
-  dueDate: string;
-};
-
-export type QuotationDetail = {
-  id: string;
-  quotationCode: string | null;
-  businessId: string;
-  inspectionRequestId: string;
-  serviceTitle: string;
-  customer: InspectionCustomer;
-  address: InspectionAddress;
-  lineItems: QuotationLineItem[];
-  subtotalAud: number;
-  finalPriceAud: number;
-  /** Amount still owed after any deposit (equals finalPriceAud when no deposit). */
-  balanceDueAud: number;
-  notes: string | null;
-  paymentInstructions: string | null;
-  termsAndConditions: string | null;
-  discountAud: number;
-  depositRequest: QuotationDepositRequest | null;
-  validUntil: string | null;
-  imageUrls: string[];
-  pdfUrl: string | null;
-  status: "draft" | "sent";
-  bookingId: string | null;
-  bookingCode: string | null;
-  bookingStatus: BookingStatus | null;
-  bookingStatusAt: number | null;
-  createdBy: string;
-  createdAt: number | null;
-  updatedAt: number | null;
-  /** From the linked inspection visit (`createdSource`). */
-  createdSource?: InspectionRequestCreatedSource | null;
-};
-
-export type CreateQuotationInput = {
-  inspectionRequestId: string;
-  lineItems: QuotationLineItem[];
-  finalPriceAud?: number | null;
-  notes?: string | null;
-  termsAndConditions?: string | null;
-  discountAud?: number | null;
-  validUntil?: string | null;
-  imageUrls?: string[];
-  depositRequest?: unknown;
-  customer?: { fullName?: string; email?: string; phone?: string };
-  address?: {
-    street?: string;
-    suburb?: string;
-    state?: string;
-    postcode?: string;
-  };
-};
 
 function parseImageUrls(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -340,6 +282,10 @@ function mapQuotationDoc(
       return null;
     })(),
     bookingStatusAt: toMillis(data.bookingStatusAt),
+    invoiceId: null,
+    invoiceCode: null,
+    invoiceStatus: null,
+    invoicePdfUrl: null,
     createdBy: typeof data.createdBy === "string" ? data.createdBy : "",
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
@@ -1274,7 +1220,7 @@ export async function listQuotationsForInspection(
 
 export const QUOTATION_LIST_LIMIT = 80;
 
-async function enrichQuotationsWithCreatedSource(
+async function enrichQuotationsFromInspections(
   quotations: QuotationDetail[],
 ): Promise<QuotationDetail[]> {
   const ids = [
@@ -1286,7 +1232,16 @@ async function enrichQuotationsWithCreatedSource(
   ];
   if (ids.length === 0) return quotations;
 
-  const sourceById = new Map<string, InspectionRequestCreatedSource | null>();
+  type InspectionMeta = {
+    createdSource: InspectionRequestCreatedSource | null;
+    status: QuotationDetail["inspectionRequestStatus"];
+    bookingId: string | null;
+    bookingCode: string | null;
+    bookingStatus: ReturnType<typeof parseBookingStatus>;
+    bookingStatusAt: number | null;
+  };
+
+  const metaById = new Map<string, InspectionMeta>();
   for (let i = 0; i < ids.length; i += 10) {
     const chunk = ids.slice(i, i + 10);
     const refs = chunk.map((id) =>
@@ -1295,18 +1250,87 @@ async function enrichQuotationsWithCreatedSource(
     const snaps = await adminDb.getAll(...refs);
     for (const snap of snaps) {
       if (!snap.exists) continue;
-      sourceById.set(
-        snap.id,
-        parseCreatedSource(snap.data()?.createdSource),
-      );
+      const data = snap.data() ?? {};
+      const bookingId =
+        typeof data.bookingId === "string" ? data.bookingId : null;
+      const bookingCode =
+        typeof data.bookingCode === "string" ? data.bookingCode : null;
+      const bookingStatus =
+        parseBookingStatus(data.bookingStatus) ??
+        (bookingId
+          ? ("scheduled" as const)
+          : data.quotation
+            ? ("awaiting" as const)
+            : data.status === "awaiting_decision"
+              ? ("awaiting" as const)
+              : null);
+      const status =
+        typeof data.status === "string" &&
+        (REQUEST_STATUSES as readonly string[]).includes(data.status)
+          ? (data.status as InspectionRequestStatus)
+          : null;
+      metaById.set(snap.id, {
+        createdSource: parseCreatedSource(data.createdSource),
+        status,
+        bookingId,
+        bookingCode,
+        bookingStatus,
+        bookingStatusAt: toMillis(data.bookingStatusAt),
+      });
     }
   }
 
   return quotations.map((quotation) => {
-    const source = sourceById.get(quotation.inspectionRequestId.trim());
-    if (!source) return quotation;
-    return { ...quotation, createdSource: source };
+    const meta = metaById.get(quotation.inspectionRequestId.trim());
+    if (!meta) return quotation;
+
+    const needsBookingId = !quotation.bookingId && meta.bookingId;
+    const needsBookingStatus =
+      meta.bookingStatus &&
+      (!quotation.bookingStatus || !quotation.bookingStatusAt);
+
+    return {
+      ...quotation,
+      ...(meta.createdSource ? { createdSource: meta.createdSource } : {}),
+      ...(meta.status ? { inspectionRequestStatus: meta.status } : {}),
+      ...(needsBookingId
+        ? {
+            bookingId: meta.bookingId,
+            bookingCode: quotation.bookingCode ?? meta.bookingCode,
+          }
+        : {}),
+      ...(needsBookingStatus
+        ? {
+            bookingStatus: quotation.bookingStatus ?? meta.bookingStatus,
+            bookingStatusAt:
+              quotation.bookingStatusAt ?? meta.bookingStatusAt,
+          }
+        : {}),
+    };
   });
+}
+
+/** Loads one quotation for a business, with inspection metadata when linked. */
+export async function getBusinessQuotationById(
+  businessId: string,
+  quotationId: string,
+): Promise<QuotationDetail | null> {
+  const snap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .doc(quotationId)
+    .get();
+  if (!snap.exists) return null;
+  const data = snap.data() ?? {};
+  if (data.businessId !== businessId) return null;
+  const [quotation] = await enrichQuotationsFromInspections([
+    mapQuotationDoc(snap.id, data),
+  ]);
+  if (!quotation) return null;
+  const { enrichQuotationsWithInvoices } = await import(
+    "@/lib/invoices/enrich-quotations"
+  );
+  const [enriched] = await enrichQuotationsWithInvoices([quotation]);
+  return enriched ?? null;
 }
 
 /** Lists all quotations for a business (newest first). */
@@ -1323,7 +1347,11 @@ export async function listBusinessQuotations(
   const quotations = snapshot.docs.map((doc) =>
     mapQuotationDoc(doc.id, doc.data() ?? {}),
   );
-  return enrichQuotationsWithCreatedSource(quotations);
+  const enriched = await enrichQuotationsFromInspections(quotations);
+  const { enrichQuotationsWithInvoices } = await import(
+    "@/lib/invoices/enrich-quotations"
+  );
+  return enrichQuotationsWithInvoices(enriched);
 }
 
 async function sendQuotationCreatedEmail(

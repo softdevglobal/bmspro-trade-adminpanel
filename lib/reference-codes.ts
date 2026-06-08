@@ -2,6 +2,7 @@
 
 export const INSPECTION_REQUEST_CODE_PREFIX = "INS-REQ";
 export const QUOTATION_CODE_PREFIX = "QT";
+export const INVOICE_CODE_PREFIX = "INV";
 export const BOOKING_CODE_PREFIX = "BK";
 
 /** Shared random suffix length for visit + quotation on the same request. */
@@ -28,6 +29,10 @@ export function buildInspectionRequestCodeFromSegment(segment: string): string {
 
 export function buildQuotationCodeFromSegment(segment: string): string {
   return `${QUOTATION_CODE_PREFIX} ${segment}`;
+}
+
+export function buildInvoiceCodeFromSegment(segment: string): string {
+  return `${INVOICE_CODE_PREFIX} ${segment}`;
 }
 
 export function buildBookingCodeFromSegment(segment: string): string {
@@ -148,4 +153,16 @@ export function displayQuotationCode(quotation: {
   const id = quotation.id.trim();
   if (!id) return "—";
   return buildQuotationCodeFromSegment(legacySegmentFromInspectionId(id));
+}
+
+/** Invoice uses the same 9 characters as its source quotation. */
+export function buildInvoiceCodeForQuotation(quotation: {
+  id: string;
+  quotationCode?: string | null;
+  inspectionRequestId?: string;
+}): string {
+  const segment =
+    extractReferenceSegment(displayQuotationCode(quotation)) ??
+    legacySegmentFromInspectionId(quotation.id);
+  return buildInvoiceCodeFromSegment(segment);
 }
