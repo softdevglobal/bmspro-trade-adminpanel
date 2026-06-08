@@ -1,3 +1,5 @@
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   listCatalogItems,
@@ -84,5 +86,23 @@ export async function POST(request: Request) {
   }
 
   const item = await upsertCatalogItem(auth.businessId, auth.uid, input);
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "item",
+    action: "item.created",
+    actor: {
+      uid: auth.uid,
+      role: actorRoleFromClaim(auth.role),
+      name: null,
+      email: null,
+    },
+    source: "admin_panel",
+    summary: `Catalog item "${item.name}" added`,
+    targetId: item.id,
+    targetLabel: item.name,
+    metadata: { priceAud: item.priceAud, code: item.code ?? null },
+  });
+
   return NextResponse.json({ ok: true, item }, { status: 201 });
 }

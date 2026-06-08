@@ -1,3 +1,5 @@
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
@@ -39,6 +41,9 @@ async function requireQuotationAuthor(request: Request) {
     return {
       ok: true as const,
       uid: decoded.uid,
+      email: decoded.email ?? null,
+      name: typeof decoded.name === "string" ? decoded.name : null,
+      role: typeof role === "string" ? role : null,
       businessId,
     };
   } catch {
@@ -48,6 +53,49 @@ async function requireQuotationAuthor(request: Request) {
       error: "Invalid or expired session.",
     };
   }
+}
+
+type QuotationAuthor = {
+  uid: string;
+  email: string | null;
+  name: string | null;
+  role: string | null;
+  businessId: string;
+};
+
+type QuotationSummary = {
+  id: string;
+  quotationCode: string | null;
+  finalPriceAud: number;
+  customer: { fullName: string };
+};
+
+/** Records a "quotation.created" audit event (best-effort). */
+async function logQuotationCreated(
+  auth: QuotationAuthor,
+  quotation: QuotationSummary,
+  origin: "standalone" | "from_inspection",
+) {
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "quotation",
+    action: "quotation.created",
+    actor: {
+      uid: auth.uid,
+      role: actorRoleFromClaim(auth.role),
+      name: auth.name,
+      email: auth.email,
+    },
+    source: "admin_panel",
+    summary: `Quotation ${quotation.quotationCode ?? quotation.id} created for ${quotation.customer.fullName || "a customer"}`,
+    targetId: quotation.id,
+    targetLabel: quotation.customer.fullName || null,
+    metadata: {
+      quotationCode: quotation.quotationCode ?? null,
+      finalPriceAud: quotation.finalPriceAud,
+      origin,
+    },
+  });
 }
 
 export async function POST(request: Request) {
@@ -160,6 +208,7 @@ export async function POST(request: Request) {
         { status: result.status },
       );
     }
+    await logQuotationCreated(auth, result.quotation, "standalone");
     return NextResponse.json(
       { ok: true, quotation: result.quotation },
       { status: 201 },
@@ -267,6 +316,8 @@ export async function POST(request: Request) {
       { status: result.status },
     );
   }
+
+  await logQuotationCreated(auth, result.quotation, "from_inspection");
 
   return NextResponse.json({ ok: true, quotation: result.quotation });
 }

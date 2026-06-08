@@ -1,3 +1,5 @@
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { sendStaffWelcomeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
@@ -44,7 +46,13 @@ type TimestampLike = {
 };
 
 async function requireBusinessUser(request: Request): Promise<
-  | { ok: true; uid: string; email: string | undefined; businessId: string }
+  | {
+      ok: true;
+      uid: string;
+      email: string | undefined;
+      role: string | null;
+      businessId: string;
+    }
   | { ok: false; status: number; error: string }
 > {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -63,10 +71,30 @@ async function requireBusinessUser(request: Request): Promise<
       return { ok: false, status: 403, error: "Business owner access required." };
     }
 
-    return { ok: true, uid: decoded.uid, email: decoded.email, businessId };
+    return {
+      ok: true,
+      uid: decoded.uid,
+      email: decoded.email,
+      role: typeof role === "string" ? role : null,
+      businessId,
+    };
   } catch {
     return { ok: false, status: 401, error: "Invalid or expired session." };
   }
+}
+
+/** Builds the audit actor for a staff mutation. */
+function staffActor(auth: {
+  uid: string;
+  email: string | undefined;
+  role: string | null;
+}): AuditActor {
+  return {
+    uid: auth.uid,
+    role: actorRoleFromClaim(auth.role),
+    name: auth.email ?? null,
+    email: auth.email ?? null,
+  };
 }
 
 function sanitizeString(value: unknown) {
@@ -415,6 +443,22 @@ export async function POST(request: Request) {
       console.error("[staff] welcome email failed:", emailError);
     }
 
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "staff",
+      action: "staff.created",
+      actor: staffActor(auth),
+      source: "admin_panel",
+      summary: `Staff member ${parsed.value.fullName} (${parsed.value.staffType}) added`,
+      targetId: authUid,
+      targetLabel: parsed.value.fullName,
+      metadata: {
+        email: parsed.value.email,
+        staffType: parsed.value.staffType,
+        canget_qutaion: parsed.value.canget_qutaion,
+      },
+    });
+
     return NextResponse.json(
       { ok: true, staffId: authUid, welcomeEmailSent },
       { status: 201 }
@@ -560,6 +604,25 @@ export async function PATCH(request: Request) {
       updatedAt: FieldValue.serverTimestamp(),
     });
 
+    const staffName =
+      sanitizeString((await owned.ref.get()).data()?.fullName) || "Staff member";
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "staff",
+      action:
+        parsedStatus.value.status === "suspended"
+          ? "staff.suspended"
+          : "staff.reactivated",
+      actor: staffActor(auth),
+      source: "admin_panel",
+      summary: `Staff member ${staffName} ${
+        parsedStatus.value.status === "suspended" ? "suspended" : "reactivated"
+      }`,
+      targetId: parsedStatus.value.id,
+      targetLabel: staffName,
+      metadata: { status: parsedStatus.value.status },
+    });
+
     return NextResponse.json({
       ok: true,
       staffId: parsedStatus.value.id,
@@ -626,6 +689,22 @@ export async function PATCH(request: Request) {
     updatedAt: FieldValue.serverTimestamp(),
   });
 
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "staff",
+    action: "staff.updated",
+    actor: staffActor(auth),
+    source: "admin_panel",
+    summary: `Staff member ${parsed.value.fullName} details updated`,
+    targetId: parsed.value.id,
+    targetLabel: parsed.value.fullName,
+    metadata: {
+      email: parsed.value.email,
+      staffType: parsed.value.staffType,
+      canget_qutaion: parsed.value.canget_qutaion,
+    },
+  });
+
   return NextResponse.json({ ok: true, staffId: parsed.value.id });
 }
 
@@ -654,6 +733,9 @@ export async function DELETE(request: Request) {
     );
   }
 
+  const deletedName =
+    sanitizeString((await owned.ref.get()).data()?.fullName) || "Staff member";
+
   await owned.ref.delete();
   try {
     await adminAuth.deleteUser(staffId);
@@ -666,6 +748,18 @@ export async function DELETE(request: Request) {
       );
     }
   }
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "staff",
+    action: "staff.deleted",
+    actor: staffActor(auth),
+    source: "admin_panel",
+    summary: `Staff member ${deletedName} removed`,
+    targetId: staffId,
+    targetLabel: deletedName,
+    metadata: {},
+  });
 
   return NextResponse.json({ ok: true });
 }

@@ -16,6 +16,7 @@ const PAGE_ICONS: Record<string, string> = {
   Services: "settings_suggest",
   Settings: "settings",
   Tenants: "domain",
+  "Audit log": "history",
 };
 
 function iconForPageTitle(title: string, override?: string) {

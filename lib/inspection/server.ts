@@ -28,7 +28,31 @@ import {
   mirrorBookingToQuotations,
 } from "@/lib/bookings/server";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+import { logAuditEvent } from "@/lib/audit/server";
+import type { AuditActor, AuditSource } from "@/lib/audit/types";
 import { FieldValue } from "firebase-admin/firestore";
+
+/** Who triggered an inspection action — used for audit logging. */
+export type InspectionActionActor = {
+  actor: AuditActor;
+  source: AuditSource;
+};
+
+const SYSTEM_ACTOR: InspectionActionActor = {
+  actor: { uid: null, role: "system", name: null, email: null },
+  source: "system",
+};
+
+const OWNER_ACTION_SUMMARY: Record<string, string> = {
+  accept: "confirmed an inspection visit date",
+  set_time: "set the inspection time window",
+  propose: "proposed alternative inspection times",
+  assign: "assigned the inspection to an inspector",
+  cancel: "cancelled the inspection",
+  complete: "marked the inspection completed",
+  convert_to_booking: "converted the inspection into a booking",
+  mark_awaiting_decision: "sent the inspection quotation for decision",
+};
 
 type ServiceLookup = {
   name: string;
@@ -195,6 +219,7 @@ export async function applyOwnerAction(
   id: string,
   businessId: string,
   action: OwnerAction,
+  audit: InspectionActionActor = SYSTEM_ACTOR,
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
@@ -284,6 +309,37 @@ export async function applyOwnerAction(
       "scheduled",
       summary,
     );
+    await logAuditEvent({
+      businessId,
+      category: "booking",
+      action: "booking.created",
+      actor: audit.actor,
+      source: audit.source,
+      summary: `Booking created from inspection ${created.request.requestCode ?? id}`,
+      targetId: created.request.id,
+      targetLabel:
+        created.request.serviceName ||
+        created.request.customer.fullName ||
+        null,
+      metadata: {
+        inspectionId: id,
+        estimatedDurationMinutes: action.estimatedDurationMinutes,
+      },
+    });
+    await logAuditEvent({
+      businessId,
+      category: "inspection",
+      action: "inspection.convert_to_booking",
+      actor: audit.actor,
+      source: audit.source,
+      summary: `${audit.actor.name ?? audit.actor.email ?? "Someone"} converted the inspection into a booking`,
+      targetId: id,
+      targetLabel:
+        created.request.serviceName ||
+        created.request.customer.fullName ||
+        null,
+      metadata: { requestCode: created.request.requestCode ?? null },
+    });
     return { ok: true, request: created.request };
   } else if (action.type === "mark_awaiting_decision") {
     if (current.status !== "completed") {
@@ -332,6 +388,23 @@ export async function applyOwnerAction(
   } else {
     await notifyCustomerOfStatusChange(request, request.status, summary);
   }
+
+  await logAuditEvent({
+    businessId,
+    category: "inspection",
+    action: `inspection.${action.type}`,
+    actor: audit.actor,
+    source: audit.source,
+    summary: `${audit.actor.name ?? audit.actor.email ?? "Someone"} ${
+      OWNER_ACTION_SUMMARY[action.type] ?? "updated the inspection"
+    } (${request.requestCode ?? id})`,
+    targetId: id,
+    targetLabel: request.serviceName || request.customer.fullName || null,
+    metadata: {
+      requestCode: request.requestCode ?? null,
+      status: request.status,
+    },
+  });
 
   return { ok: true, request };
 }
@@ -515,6 +588,26 @@ export async function customerAcceptProposedSlot(
 
   const summary = await loadBusinessSummary(request.businessId);
   await notifyBusinessOfCustomerAcceptance(request, summary);
+
+  await logAuditEvent({
+    businessId: request.businessId,
+    category: "inspection",
+    action: "inspection.slot_accepted",
+    actor: {
+      uid: identity.customerId,
+      role: "customer",
+      name: request.customer.fullName || null,
+      email: identity.customerEmail || request.customer.email || null,
+    },
+    source: "customer_portal",
+    summary: `Customer accepted a proposed time for inspection ${request.requestCode ?? id}`,
+    targetId: id,
+    targetLabel: request.serviceName || request.customer.fullName || null,
+    metadata: {
+      requestCode: request.requestCode ?? null,
+      slot: matched,
+    },
+  });
 
   return { ok: true, request };
 }

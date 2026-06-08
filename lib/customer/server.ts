@@ -1,5 +1,6 @@
 import "server-only";
 
+import { logAuditEvent } from "@/lib/audit/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
@@ -167,7 +168,35 @@ export async function getOrCreateCustomerProfile(
   });
   await attachRegistrationBusinessIfEmpty(customer.uid, options.bookingSlug);
   const created = await ref.get();
-  return mapCustomerDoc(created.id, created.data() ?? {});
+  const createdData = created.data() ?? {};
+
+  await logAuditEvent({
+    businessId:
+      typeof createdData.registeredBusinessId === "string"
+        ? createdData.registeredBusinessId
+        : null,
+    category: "customer",
+    action: "customer.created",
+    actor: {
+      uid: customer.uid,
+      role: "customer",
+      name:
+        typeof createdData.fullName === "string" && createdData.fullName
+          ? createdData.fullName
+          : null,
+      email: customer.email,
+    },
+    source: "customer_portal",
+    summary: `New customer ${customer.email} self-registered through the portal`,
+    targetId: customer.uid,
+    targetLabel:
+      typeof createdData.fullName === "string" && createdData.fullName
+        ? createdData.fullName
+        : customer.email,
+    metadata: { via: "self_signup" },
+  });
+
+  return mapCustomerDoc(created.id, createdData);
 }
 
 /** Default password for customer accounts created by a business owner. */

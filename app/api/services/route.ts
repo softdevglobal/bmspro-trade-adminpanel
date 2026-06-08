@@ -5,6 +5,7 @@
  * POST — Create a service from a template or custom checklist data.
  */
 
+import { logAuditEvent } from "@/lib/audit/server";
 import {
   createBusinessService,
   listBusinessServices,
@@ -56,6 +57,27 @@ export async function POST(request: Request) {
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "service",
+    action: "service.created",
+    actor: {
+      uid: auth.uid,
+      role: "owner",
+      name: auth.email ?? null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: `Service "${result.service.name}" created`,
+    targetId: result.serviceId,
+    targetLabel: result.service.name,
+    metadata: {
+      businessType: result.service.businessType,
+      taskCount: result.service.taskCount,
+      isActive: result.service.isActive,
+    },
+  });
 
   return NextResponse.json(result, { status: 201 });
 }

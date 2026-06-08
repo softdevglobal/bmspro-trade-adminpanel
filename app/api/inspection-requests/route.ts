@@ -1,3 +1,5 @@
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
@@ -48,7 +50,9 @@ async function requireBusinessOwner(request: Request) {
     return {
       ok: true as const,
       uid: decoded.uid,
-      email: decoded.email,
+      email: decoded.email ?? null,
+      name: typeof decoded.name === "string" ? decoded.name : null,
+      role: typeof role === "string" ? role : null,
       businessId,
     };
   } catch {
@@ -101,6 +105,7 @@ export async function POST(request: Request) {
   // Auto-create (or reuse) a customer account so they receive the inspection
   // updates and can sign in with the default password.
   let customerId: string | null = null;
+  let customerCreated = false;
   try {
     const businessSnap = await adminDb
       .collection("businesses")
@@ -125,17 +130,63 @@ export async function POST(request: Request) {
       context: "inspection",
     });
     customerId = account.uid;
+    customerCreated = account.created;
   } catch (error) {
     console.error("[inspection] customer account creation failed:", error);
   }
 
+  const createdSource = resolveOwnerCreatedSource(request);
   const result = await createInspectionRequest(auth.businessId, parsed.value, {
     customerId,
-    createdSource: resolveOwnerCreatedSource(request),
+    createdSource,
   });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }
+
+  const actor = {
+    uid: auth.uid,
+    role: actorRoleFromClaim(auth.role),
+    name: auth.name,
+    email: auth.email,
+  };
+  const source = createdSource === "owner_mobile" ? "mobile_app" : "admin_panel";
+
+  if (customerCreated) {
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "customer",
+      action: "customer.created",
+      actor,
+      source,
+      summary: `New customer ${parsed.value.customer.fullName || parsed.value.customer.email} added while booking an inspection`,
+      targetId: customerId,
+      targetLabel:
+        parsed.value.customer.fullName || parsed.value.customer.email,
+      metadata: { via: "inspection" },
+    });
+  }
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "inspection",
+    action: "inspection.created",
+    actor,
+    source,
+    summary: `Inspection ${result.request.requestCode ?? result.request.id} created via the admin panel`,
+    targetId: result.request.id,
+    targetLabel:
+      result.request.serviceName ||
+      result.request.customRequest?.title ||
+      result.request.customer.fullName ||
+      null,
+    metadata: {
+      requestCode: result.request.requestCode ?? null,
+      status: result.request.status,
+      createdSource,
+      customerName: result.request.customer.fullName,
+    },
+  });
 
   return NextResponse.json(
     { ok: true, requestId: result.request.id, request: result.request },

@@ -1,3 +1,4 @@
+import { logAuditEvent } from "@/lib/audit/server";
 import { assignBusinessBooking, getBusinessBooking } from "@/lib/bookings/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import type { InspectionAssignment } from "@/lib/inspection/types";
@@ -164,6 +165,24 @@ export async function PATCH(
         { status: result.status },
       );
     }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "booking",
+      action: "booking.assigned",
+      actor: {
+        uid: ownerUid,
+        role: "owner",
+        name: ownerEmail ?? null,
+        email: ownerEmail ?? null,
+      },
+      source: "admin_panel",
+      summary: `Booking assigned to ${assignment.name}`,
+      targetId: id,
+      targetLabel: assignment.name,
+      metadata: { assignedToUid: assignment.uid, assignedToType: assignment.type },
+    });
+
     return NextResponse.json({ ok: true, booking: result.booking });
   }
 

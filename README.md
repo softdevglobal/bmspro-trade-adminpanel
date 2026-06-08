@@ -14,6 +14,7 @@ A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super
 | Staff **Can get quotation** | `components/team-staff-form.tsx` | `users.canget_qutaion` via `/api/team/staff` | [§5 users](#usersuid) |
 | Brand logo / favicon | `sidebar.tsx`, `app/login/page.tsx` | `public/bms_pro_blue.jpeg`, `app/icon.jpg` | [§3](#3-folder-structure) |
 | Call-center API (agents) | — (external / Postman) | `app/api/callcenter/*`, `lib/callcenter/auth.ts` | [§8 — Call-center API](#call-center-api) |
+| Super-admin audit log | `components/audit-log-view.tsx`, `app/dashboard/audit-log` | `lib/audit/*`, `GET /api/admin/audit-logs` | [§8 — Audit log](#super-admin-audit-log) |
 
 ---
 
@@ -374,6 +375,27 @@ Document ID = Firebase Auth UID. Written once by the seed script.
 | Field | Type | Description |
 |---|---|---|
 | `isActive` | `boolean` | `false` = access denied even if doc exists |
+
+---
+
+### `audit_logs/{id}`
+
+Append-only super-admin activity trail. Written by `lib/audit/server.ts → logAuditEvent()` (best-effort) from action routes. Read by `GET /api/admin/audit-logs`. See [§8 — Audit log](#super-admin-audit-log).
+
+| Field | Type | Description |
+|---|---|---|
+| `businessId` | `string \| null` | **→ `businesses/{id}`** affected tenant |
+| `businessName` | `string \| null` | Denormalized tenant name at write time |
+| `category` | `string` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `action` | `string` | Dotted key, e.g. `inspection.created`, `staff.deleted` |
+| `actorUid` | `string \| null` | UID of the person who acted |
+| `actorRole` | `string` | `super_admin` \| `owner` \| `admin` \| `staff` \| `customer` \| `call_center` \| `system` |
+| `actorName` / `actorEmail` | `string \| null` | Actor identity for display |
+| `source` | `string` | `admin_panel` \| `customer_portal` \| `booking_engine` \| `mobile_app` \| `system` |
+| `summary` | `string` | Human-readable one-liner shown in the feed |
+| `targetId` / `targetLabel` | `string \| null` | Affected document id + short label |
+| `metadata` | `map` | Extra context (counts, status, price, …) |
+| `createdAt` | `Timestamp` | Server timestamp |
 
 ---
 
@@ -1420,7 +1442,51 @@ Both read the same catalog via `listCatalogItems(businessId)` from `lib/items/se
 
 ---
 
+### Super-admin audit log
+
+A platform-wide, append-only activity trail of **everything tenants do**. Only super admins can read it (sidebar → **Audit log**, route `/dashboard/audit-log`).
+
+**What is recorded** — one `audit_logs` document per action, across these categories:
+
+| Category | Events captured | Sources seen |
+|---|---|---|
+| `inspection` | created, accept, set_time, propose, assign, cancel, complete, convert_to_booking, mark_awaiting_decision, slot_accepted | Customer portal (booking engine), Admin panel, Mobile app |
+| `quotation` | created (standalone + from inspection) | Admin panel |
+| `booking` | created (from inspection), assigned | Admin panel |
+| `staff` | created, updated, suspended, reactivated, deleted | Admin panel |
+| `customer` | created (owner-added during inspection, self sign-up via portal) | Admin panel, Customer portal |
+| `service` | created, updated, deleted | Admin panel |
+| `item` | created, updated, deleted | Admin panel |
+
+Each event answers **who** (actor: super admin / owner / staff / customer / call-center / system), **where** (source: `customer_portal`, `booking_engine`, `admin_panel`, `mobile_app`, `system`), **which tenant** (`businessId` + denormalized `businessName`), **what** (`summary` + `metadata`), and **when** (`createdAt`).
+
+**How it's written** — `lib/audit/server.ts → logAuditEvent()` is called from the route handlers / server functions that perform each action. Writes are **best-effort**: any failure is logged and swallowed so the originating action is never blocked. The log only captures actions **from the point this feature shipped** (it is not backfilled).
+
+**Reading it** — `GET /api/admin/audit-logs` (super admin only):
+
+| Query | Meaning |
+|---|---|
+| `businessId` | only one tenant's events |
+| `category` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `source` | `admin_panel` \| `customer_portal` \| `booking_engine` \| `mobile_app` \| `system` |
+| `limit` | 1–500 (default 200) |
+
+Returns `{ ok, total, logs: AuditLogEntry[] }`, newest-first. To avoid composite Firestore indexes the read uses at most one `where` clause (`businessId`) and sorts/filters the rest in memory.
+
+The dashboard view (`components/audit-log-view.tsx`) shows stat cards (total events, customer-portal vs admin-panel split, inspections), category filter chips, a tenant + source dropdown, and a chronological feed.
+
+---
+
 ### Lib Server Functions
+
+#### `lib/audit/server.ts`
+
+| Function | Params | Does | Firestore / Auth |
+|---|---|---|---|
+| `logAuditEvent(input)` | `AuditEventInput` | Best-effort write of one event to `audit_logs`; denormalizes `businessName`; never throws | write `audit_logs`, read `businesses` |
+| `listAuditLogs(filters)` | `{ businessId?, category?, source?, limit? }` | Reads events newest-first; one `where` clause max, in-memory sort + filter | read `audit_logs` |
+
+---
 
 #### `lib/callcenter/auth.ts`
 
@@ -2331,6 +2397,10 @@ Inspection update emails are built in `lib/email/templates/inspection-customer-n
 
 ### `lib/callcenter/`
 - **`auth.ts`** — `requireCallCenterAgent()` — shared guard for all `/api/callcenter/*` data routes (call-center agents and super admins).
+
+### `lib/audit/`
+- **`types.ts`** — Audit categories, actor roles, sources, labels/icons, `AuditEventInput` / `AuditLogEntry`, and parse helpers. Safe to import in client components (no `server-only`).
+- **`server.ts`** — `logAuditEvent()` (best-effort writer) and `listAuditLogs()` (super-admin reader) for the `audit_logs` collection.
 
 ### `lib/inspection/`
 - **`types.ts`** — All inspection request statuses, types, and transitions.

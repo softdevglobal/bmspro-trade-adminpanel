@@ -1,3 +1,5 @@
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   deleteCatalogItem,
@@ -9,7 +11,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 type ItemAuth =
-  | { ok: true; uid: string; businessId: string }
+  | { ok: true; uid: string; businessId: string; role: string | null }
   | { ok: false; status: number; error: string };
 
 async function requireItemManager(request: Request): Promise<ItemAuth> {
@@ -31,7 +33,12 @@ async function requireItemManager(request: Request): Promise<ItemAuth> {
         error: "You do not have permission to manage items.",
       };
     }
-    return { ok: true, uid: decoded.uid, businessId };
+    return {
+      ok: true,
+      uid: decoded.uid,
+      businessId,
+      role: typeof role === "string" ? role : null,
+    };
   } catch {
     return { ok: false, status: 401, error: "Invalid or expired session." };
   }
@@ -77,6 +84,23 @@ export async function PATCH(
     );
   }
 
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "item",
+    action: "item.updated",
+    actor: {
+      uid: auth.uid,
+      role: actorRoleFromClaim(auth.role),
+      name: null,
+      email: null,
+    },
+    source: "admin_panel",
+    summary: `Catalog item "${result.item.name}" updated`,
+    targetId: id,
+    targetLabel: result.item.name,
+    metadata: { priceAud: result.item.priceAud, code: result.item.code ?? null },
+  });
+
   return NextResponse.json({ ok: true, item: result.item });
 }
 
@@ -100,6 +124,23 @@ export async function DELETE(
       { status: result.status },
     );
   }
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "item",
+    action: "item.deleted",
+    actor: {
+      uid: auth.uid,
+      role: actorRoleFromClaim(auth.role),
+      name: null,
+      email: null,
+    },
+    source: "admin_panel",
+    summary: `Catalog item removed`,
+    targetId: id,
+    targetLabel: null,
+    metadata: {},
+  });
 
   return NextResponse.json({ ok: true });
 }

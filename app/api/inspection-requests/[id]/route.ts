@@ -1,5 +1,11 @@
+import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { applyOwnerAction, applyAssignedEndVisit, applyStaffStart } from "@/lib/inspection/server";
+import {
+  applyOwnerAction,
+  applyAssignedEndVisit,
+  applyStaffStart,
+  type InspectionActionActor,
+} from "@/lib/inspection/server";
 import {
   isClockTime,
   isFutureOrTodayDate,
@@ -38,7 +44,9 @@ async function requireBusinessOwner(request: Request) {
     return {
       ok: true as const,
       uid: decoded.uid,
-      email: decoded.email,
+      email: decoded.email ?? null,
+      name: typeof decoded.name === "string" ? decoded.name : null,
+      role: typeof role === "string" ? role : null,
       businessId,
     };
   } catch {
@@ -307,6 +315,17 @@ export async function PATCH(
     );
   }
 
+  const ownerActor: AuditActor = {
+    uid: auth.uid,
+    role: actorRoleFromClaim(auth.role),
+    name: auth.name,
+    email: auth.email,
+  };
+  const ownerAudit: InspectionActionActor = {
+    actor: ownerActor,
+    source: "admin_panel",
+  };
+
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
 
   if (action === "accept") {
@@ -324,13 +343,18 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "accept",
-      slot,
-      startTime: window.startTime,
-      endTime: window.endTime,
-      note,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "accept",
+        slot,
+        startTime: window.startTime,
+        endTime: window.endTime,
+        note,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -348,11 +372,16 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "set_time",
-      startTime: window.startTime,
-      endTime: window.endTime,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "set_time",
+        startTime: window.startTime,
+        endTime: window.endTime,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -375,11 +404,16 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "propose",
-      slots,
-      note,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "propose",
+        slots,
+        note,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -394,7 +428,7 @@ export async function PATCH(
     let assignment: InspectionAssignment | null = null;
 
     if (assignTo === "owner") {
-      assignment = await resolveOwnerAssignment(auth.uid, auth.email);
+      assignment = await resolveOwnerAssignment(auth.uid, auth.email ?? undefined);
     } else if (assignTo === "staff") {
       const staffId = typeof payload.staffId === "string" ? payload.staffId : "";
       if (!staffId) {
@@ -419,10 +453,15 @@ export async function PATCH(
       );
     }
 
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "assign",
-      assignment,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "assign",
+        assignment,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -433,10 +472,15 @@ export async function PATCH(
   }
 
   if (action === "cancel") {
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "cancel",
-      note,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "cancel",
+        note,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -447,10 +491,15 @@ export async function PATCH(
   }
 
   if (action === "complete") {
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "complete",
-      note,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "complete",
+        note,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -482,14 +531,19 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "convert_to_booking",
-      slot,
-      startTime: window.startTime,
-      endTime: window.endTime,
-      estimatedDurationMinutes: duration.minutes,
-      note,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "convert_to_booking",
+        slot,
+        startTime: window.startTime,
+        endTime: window.endTime,
+        estimatedDurationMinutes: duration.minutes,
+        note,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -500,10 +554,15 @@ export async function PATCH(
   }
 
   if (action === "mark_awaiting_decision") {
-    const result = await applyOwnerAction(id, auth.businessId, {
-      type: "mark_awaiting_decision",
-      note,
-    });
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      {
+        type: "mark_awaiting_decision",
+        note,
+      },
+      ownerAudit,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },

@@ -6,6 +6,7 @@
  * DELETE — Remove the service document (tasks are embedded).
  */
 
+import { logAuditEvent } from "@/lib/audit/server";
 import {
   deleteBusinessService,
   getBusinessService,
@@ -64,6 +65,23 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json(result, { status: 400 });
   }
 
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "service",
+    action: "service.updated",
+    actor: {
+      uid: auth.uid,
+      role: "owner",
+      name: auth.email ?? null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: `Service "${result.service.name}" updated`,
+    targetId: id,
+    targetLabel: result.service.name,
+    metadata: { isActive: result.service.isActive },
+  });
+
   return NextResponse.json({ ok: true, service: result.service });
 }
 
@@ -78,10 +96,30 @@ export async function DELETE(request: Request, context: RouteContext) {
   }
 
   const { id } = await context.params;
+  const existing = await getBusinessService(id, auth.businessId);
+  const serviceName = existing.ok ? existing.service.name : null;
+
   const result = await deleteBusinessService(id, auth.businessId);
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "service",
+    action: "service.deleted",
+    actor: {
+      uid: auth.uid,
+      role: "owner",
+      name: auth.email ?? null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: `Service "${serviceName ?? id}" deleted`,
+    targetId: id,
+    targetLabel: serviceName,
+    metadata: {},
+  });
 
   return NextResponse.json({ ok: true });
 }

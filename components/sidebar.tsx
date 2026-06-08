@@ -77,6 +77,12 @@ const NAV_ITEMS: NavItem[] = [
     icon: "domain",
     superAdmin: true,
   },
+  {
+    href: "/dashboard/audit-log",
+    label: "Audit log",
+    icon: "history",
+    superAdmin: true,
+  },
 ];
 
 type SidebarProps = {
