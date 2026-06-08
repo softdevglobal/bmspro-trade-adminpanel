@@ -7,12 +7,19 @@ import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
-  formatAddress,
-  formatInspectionVisitReference,
-  formatSlotDate,
-  formatVisitWindow,
-  type InspectionAddress,
-} from "@/lib/inspection/types";
+  buildQuotationDocumentDeposit,
+  formatDepositSummary,
+  formatQuoteDate,
+} from "@/lib/quotations/document";
+
+function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
+  if (!url?.trim()) return null;
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const base = appBaseUrl();
+  if (base && trimmed.startsWith("/")) return `${base}${trimmed}`;
+  return null;
+}
 
 export type QuotationSentEmailInput = {
   customerEmail: string;
