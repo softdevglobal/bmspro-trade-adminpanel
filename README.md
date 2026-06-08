@@ -14,7 +14,7 @@ A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super
 | Staff **Can get quotation** | `components/team-staff-form.tsx` | `users.canget_qutaion` via `/api/team/staff` | [§5 users](#usersuid) |
 | Brand logo / favicon | `sidebar.tsx`, `app/login/page.tsx` | `public/bms_pro_blue.jpeg`, `app/icon.jpg` | [§3](#3-folder-structure) |
 | Call-center API (agents) | — (external / Postman) | `app/api/callcenter/*`, `lib/callcenter/auth.ts` | [§8 — Call-center API](#call-center-api) |
-| Super-admin audit log | `components/audit-log-view.tsx`, `app/dashboard/audit-log` | `lib/audit/*`, `GET /api/admin/audit-logs` | [§8 — Audit log](#super-admin-audit-log) |
+| Super-admin audit log | `components/audit-log-view.tsx`, `app/dashboard/audit-log/page.tsx`, nav in `sidebar.tsx` | `lib/audit/*`, `GET /api/admin/audit-logs` | [§8 — Audit log](#super-admin-audit-log) |
 
 ---
 
@@ -112,11 +112,16 @@ bmspro-trade-adminpanel/
 │   │   ├── layout.tsx            # AuthGuard + DashboardDataProviders
 │   │   ├── page.tsx              # Today dashboard
 │   │   ├── inspection-visits/    # Inspection request board
-│   │   ├── bookings/             # Placeholder (links to inspection visits)
+│   │   ├── bookings/             # Job bookings board
+│   │   ├── quotations/           # Quotation list + /new create flow
+│   │   ├── invoices/             # Create/send invoices from quotations
+│   │   ├── items/                # Price catalog (quotation line items)
+│   │   ├── calendar/             # Calendar view
 │   │   ├── customers/            # Customer board
 │   │   ├── team/                 # Staff management
 │   │   ├── services/             # Services (owner) / Templates (super admin)
 │   │   ├── tenants/              # Super-admin tenant management
+│   │   ├── audit-log/            # Super-admin activity feed (see §8)
 │   │   └── settings/             # Business settings, logo upload
 │   │
 │   ├── booknow/[slug]/           # Public customer booking engine
@@ -128,6 +133,7 @@ bmspro-trade-adminpanel/
 │       │   ├── send-reset-code/route.ts   # Send 6-digit password reset code
 │       │   └── reset-password/route.ts    # Verify code + update password
 │       ├── admin/
+│       │   ├── audit-logs/route.ts # Super-admin audit log read API
 │       │   ├── tenants/
 │       │   │   ├── list/route.ts
 │       │   │   └── create/route.ts
@@ -156,6 +162,9 @@ bmspro-trade-adminpanel/
 │       │   ├── bookings/[id]/route.ts
 │       │   ├── notifications/route.ts
 │       │   └── notifications/[id]/route.ts
+│       ├── invoices/
+│       │   ├── route.ts            # List + create invoice from quotation
+│       │   └── pdf/route.ts        # Download invoice PDF
 │       ├── callcenter/               # Call-center agent API (see §8)
 │       │   ├── agents/route.ts       # Super admin: create / list agents
 │       │   ├── auth/login/route.ts   # Agent email + password → idToken
@@ -168,13 +177,18 @@ bmspro-trade-adminpanel/
 │       └── onboarding/submit/route.ts
 │
 ├── components/                   # All React components (see §11)
+│   ├── audit-log-view.tsx        # Super-admin audit log UI (filters + feed)
 │   ├── add-inspection-modal.tsx  # Owner 4-step Add Inspection wizard
 │   ├── inspection-visits-board.tsx
 │   ├── booking-engine.tsx
 │   └── ...
 ├── lib/                          # All shared server + client logic (see §10)
+│   ├── audit/
+│   │   ├── types.ts              # Categories, sources, labels (client-safe)
+│   │   └── server.ts             # logAuditEvent() + listAuditLogs()
 │   ├── callcenter/
 │   │   └── auth.ts               # requireCallCenterAgent() — agent or super admin
+│   ├── invoices/                 # Invoice create/list/PDF from quotations
 │   └── email/                    # Transactional email (see §6 — Email templates)
 │       ├── layout.ts             # Shared HTML shell: renderEmail()
 │       ├── templates/            # One file per email (owner-welcome, customer-welcome, …)
@@ -386,7 +400,7 @@ Append-only super-admin activity trail. Written by `lib/audit/server.ts → logA
 |---|---|---|
 | `businessId` | `string \| null` | **→ `businesses/{id}`** affected tenant |
 | `businessName` | `string \| null` | Denormalized tenant name at write time |
-| `category` | `string` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `category` | `string` | `auth` \| `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
 | `action` | `string` | Dotted key, e.g. `inspection.created`, `staff.deleted` |
 | `actorUid` | `string \| null` | UID of the person who acted |
 | `actorRole` | `string` | `super_admin` \| `owner` \| `admin` \| `staff` \| `customer` \| `call_center` \| `system` |
@@ -1446,10 +1460,23 @@ Both read the same catalog via `listCatalogItems(businessId)` from `lib/items/se
 
 A platform-wide, append-only activity trail of **everything tenants do**. Only super admins can read it (sidebar → **Audit log**, route `/dashboard/audit-log`).
 
+#### UI files
+
+| File | Role |
+|---|---|
+| `app/dashboard/audit-log/page.tsx` | Page shell — `DashboardShell` + subtitle |
+| `components/audit-log-view.tsx` | Client UI — stat cards, tenant/source filters, category chips, activity feed |
+| `components/sidebar.tsx` | **Audit log** nav item (`history` icon, `superAdmin: true`) |
+
+The feed calls `GET /api/admin/audit-logs` with the super-admin Firebase ID token. Category counts on the chips are computed client-side from the loaded batch.
+
+**Category filter chips** — All, Auth, Inspection, Quotation, Booking, Customer, Service, Item. The **Staff** chip is currently hidden in the UI (`audit-log-view.tsx` filters it out); `staff` events are still written to Firestore and appear under **All**, and the API still accepts `category=staff`.
+
 **What is recorded** — one `audit_logs` document per action, across these categories:
 
 | Category | Events captured | Sources seen |
 |---|---|---|
+| `auth` | business owner, staff, and customer login / logout | Admin panel (`lib/auth/auth-context.tsx`), booking portal (`lib/customer-auth/customer-auth-context.tsx`) via `POST /api/audit/session` |
 | `inspection` | created, accept, set_time, propose, assign, cancel, complete, convert_to_booking, mark_awaiting_decision, slot_accepted | Customer portal (booking engine), Admin panel, Mobile app |
 | `quotation` | created (standalone + from inspection) | Admin panel |
 | `booking` | created (from inspection), assigned | Admin panel |
@@ -1467,13 +1494,33 @@ Each event answers **who** (actor: super admin / owner / staff / customer / call
 | Query | Meaning |
 |---|---|
 | `businessId` | only one tenant's events |
-| `category` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `category` | `auth` \| `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
 | `source` | `admin_panel` \| `customer_portal` \| `booking_engine` \| `mobile_app` \| `system` |
 | `limit` | 1–500 (default 200) |
 
 Returns `{ ok, total, logs: AuditLogEntry[] }`, newest-first. To avoid composite Firestore indexes the read uses at most one `where` clause (`businessId`) and sorts/filters the rest in memory.
 
-The dashboard view (`components/audit-log-view.tsx`) shows stat cards (total events, customer-portal vs admin-panel split, inspections), category filter chips, a tenant + source dropdown, and a chronological feed.
+The dashboard view (`components/audit-log-view.tsx`) shows:
+
+- **Stat cards** — total events, customer-portal count, admin-panel count, inspection count
+- **Filters** — tenant dropdown, source dropdown, category chips (Staff chip hidden), Refresh button
+- **Feed** — chronological list with category icon, source badge, actor, summary, and relative timestamp
+
+---
+
+### `GET /api/admin/audit-logs`
+
+**Auth:** Super admin only (`requireSuperAdmin`)  
+**File:** `app/api/admin/audit-logs/route.ts`
+
+| Query | Meaning |
+|---|---|
+| `businessId` | Only events for one tenant |
+| `category` | `auth` \| `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `source` | `admin_panel` \| `customer_portal` \| `booking_engine` \| `mobile_app` \| `system` |
+| `limit` | 1–500 (default 200) |
+
+**Returns:** `{ ok: true, total: number, logs: AuditLogEntry[] }` — newest first.
 
 ---
 
@@ -2435,7 +2482,8 @@ Inspection update emails are built in `lib/email/templates/inspection-customer-n
 | `forgot-password-modal.tsx` | 5-stage password reset flow (modal) |
 | `login-redirect.tsx` | Redirects already-authenticated users away from `/login` |
 | `dashboard-shell.tsx` | Main dashboard layout: fixed header, sidebar, content area |
-| `sidebar.tsx` | Role-filtered nav; header uses static `/bms_pro_blue.jpeg` brand logo |
+| `sidebar.tsx` | Role-filtered nav; header uses static `/bms_pro_blue.jpeg` brand logo; super-admin **Audit log** link |
+| `audit-log-view.tsx` | Super-admin activity feed: stats, tenant/source filters, category chips (Staff hidden), event list |
 | `sign-out-confirm-modal.tsx` | Confirm dialog before sign-out |
 
 ### Dashboard Features
@@ -2473,14 +2521,19 @@ Inspection update emails are built in `lib/email/templates/inspection-customer-n
 
 | URL | Role | What it shows |
 |---|---|---|
-| `/dashboard` | All | Today: KPI cards, booking link, quick actions |
+| `/dashboard` | All | Overview dashboard (`dashboard-overview.tsx` / super-admin variant) |
 | `/dashboard/inspection-visits` | Owner | Inspection request board; **Add Inspection** opens 4-step modal; auto-creates customer + emails |
-| `/dashboard/bookings` | Owner | Placeholder — links to inspection visits |
+| `/dashboard/bookings` | Owner | Job bookings board |
+| `/dashboard/quotations` | Owner | Quotation list; `/dashboard/quotations/new` to create |
+| `/dashboard/invoices` | Owner | Create and send invoices from quotations |
+| `/dashboard/items` | Owner | Price catalog for quotation line items |
+| `/dashboard/calendar` | Owner | Calendar view |
 | `/dashboard/customers` | Owner | Customer list derived from inspection data |
 | `/dashboard/team` | Owner | Staff list, add/edit, availability |
 | `/dashboard/services` | Owner | Business services with wizard |
 | `/dashboard/services` | Super admin | Global service templates |
 | `/dashboard/tenants` | Super admin | Tenant list, create new tenant |
+| `/dashboard/audit-log` | Super admin | Tenant activity feed — inspections, quotations, bookings, customers, services, items (Staff chip hidden; staff events still in **All**) |
 | `/dashboard/settings` | Owner | Booking link, logo, business settings |
 
 The dashboard `layout.tsx` wraps all pages in:

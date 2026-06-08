@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardShell } from "@/components/dashboard-shell";
+import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   computeSuperAdminOverview,
@@ -119,20 +120,20 @@ export function SuperAdminDashboardOverview() {
       const token = await user.getIdToken();
       const headers = { Authorization: `Bearer ${token}` };
       const [tenantsRes, templatesRes] = await Promise.all([
-        fetch("/api/admin/tenants/list", { headers, cache: "no-store" }),
+        fetch("/api/admin/tenants", { headers, cache: "no-store" }),
         fetch("/api/admin/service-templates", { headers, cache: "no-store" }),
       ]);
 
-      const tenantsData = (await tenantsRes.json()) as {
+      const tenantsData = await readJsonResponse<{
         ok?: boolean;
         error?: string;
         tenants?: TenantDetail[];
-      };
-      const templatesData = (await templatesRes.json()) as {
+      }>(tenantsRes);
+      const templatesData = await readJsonResponse<{
         ok?: boolean;
         error?: string;
         templates?: unknown[];
-      };
+      }>(templatesRes);
 
       if (!tenantsRes.ok || !tenantsData.ok) {
         throw new Error(tenantsData.error ?? "Could not load tenants.");

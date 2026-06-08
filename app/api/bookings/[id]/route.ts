@@ -54,6 +54,7 @@ async function resolveOwnerAssignment(
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> },
+  
 ) {
   const token =
     request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1] ??

@@ -1,5 +1,6 @@
 "use client";
 
+import { AuditLogView } from "@/components/audit-log-view";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
@@ -270,6 +271,7 @@ function AuthedAccount({
     requests: "My requests",
     bookings: "Booking history",
     notifications: "Notifications",
+    activity: "My activity",
   };
 
   return (
@@ -304,8 +306,25 @@ function AuthedAccount({
         {tab === "notifications" ? (
           <NotificationsSection slug={slug} />
         ) : null}
+        {tab === "activity" ? (
+          <ActivitySection slug={slug} />
+        ) : null}
       </div>
     </>
+  );
+}
+
+function ActivitySection({ slug }: { slug: string }) {
+  return (
+    <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm sm:p-5">
+      <p className="font-body text-[13px] text-on-surface-variant">
+        Sign-ins, inspection requests, and account updates for your profile with
+        this business.
+      </p>
+      <div className="mt-4">
+        <AuditLogView scope="customer" bookingSlug={slug} />
+      </div>
+    </div>
   );
 }
 

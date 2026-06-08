@@ -535,7 +535,10 @@ export async function PATCH(
     const assignTo =
       typeof payload.assignTo === "string" ? payload.assignTo.trim() : "";
     if (assignTo === "owner") {
-      assignedTo = await resolveOwnerAssignment(auth.uid, auth.email ?? undefined);
+      assignedTo = await resolveOwnerAssignment(
+        auth.uid,
+        auth.email ?? undefined,
+      );
     } else if (assignTo === "staff") {
       const staffId =
         typeof payload.staffId === "string" ? payload.staffId.trim() : "";
@@ -588,6 +591,7 @@ export async function PATCH(
       ownerAudit,
     );
     if (!result.ok) {
+      
       return NextResponse.json(
         { ok: false, error: result.error },
         { status: result.status },

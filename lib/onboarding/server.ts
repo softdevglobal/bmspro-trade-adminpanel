@@ -336,6 +336,11 @@ export async function getBusinessProfile(
 export async function updateBusinessProfile(
   businessId: string,
   updates: {
+    businessName?: string | null;
+    businessAddress?: string | null;
+    businessEmail?: string | null;
+    businessPhone?: string | null;
+    abn?: string | null;
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
@@ -345,6 +350,26 @@ export async function updateBusinessProfile(
   const payload: Record<string, unknown> = {
     updatedAt: FieldValue.serverTimestamp(),
   };
+
+  if ("businessName" in updates) {
+    payload.businessName = updates.businessName;
+  }
+
+  if ("businessAddress" in updates) {
+    payload.businessAddress = updates.businessAddress;
+  }
+
+  if ("businessEmail" in updates) {
+    payload.businessEmail = updates.businessEmail;
+  }
+
+  if ("businessPhone" in updates) {
+    payload.businessPhone = updates.businessPhone;
+  }
+
+  if ("abn" in updates) {
+    payload.abn = updates.abn;
+  }
 
   if ("logoUrl" in updates) {
     payload.logoUrl = updates.logoUrl;
@@ -374,6 +399,175 @@ export async function updateBusinessLogo(
   logoUrl: string | null,
 ): Promise<void> {
   await updateBusinessProfile(businessId, { logoUrl });
+}
+
+export type BusinessMemberAuth = {
+  ok: true;
+  uid: string;
+  email: string | undefined;
+  businessId: string;
+  role: string;
+};
+
+/**
+ * Verifies owner, admin, or staff with a businessId claim (admin panel users).
+ */
+export async function requireBusinessMember(req: Request): Promise<
+  BusinessMemberAuth | { ok: false; status: number; error: string }
+> {
+  const authHeader = req.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer (.+)$/);
+  if (!match) {
+    return { ok: false, status: 401, error: "Missing authorization header." };
+  }
+
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const businessId =
+      typeof decoded.businessId === "string" ? decoded.businessId : null;
+    const role = decoded.role;
+
+    if (
+      !businessId ||
+      (role !== "owner" && role !== "admin" && role !== "staff")
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Business member access required.",
+      };
+    }
+
+    return {
+      ok: true,
+      uid: decoded.uid,
+      email: decoded.email,
+      businessId,
+      role: typeof role === "string" ? role : "staff",
+    };
+  } catch {
+    return { ok: false, status: 401, error: "Invalid or expired session." };
+  }
+}
+
+async function resolveBusinessIdFromBookingSlug(
+  slug: string,
+): Promise<string | null> {
+  const trimmed = slug.trim();
+  if (!trimmed) return null;
+  const snap = await adminDb
+    .collection("businesses")
+    .where("bookingSlug", "==", trimmed)
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0].id;
+}
+
+export type AuditLogAccess =
+  | { ok: true; scope: "platform"; uid: string; email: string | undefined }
+  | {
+      ok: true;
+      scope: "tenant";
+      uid: string;
+      email: string | undefined;
+      businessId: string;
+      role: string;
+    }
+  | {
+      ok: true;
+      scope: "customer";
+      uid: string;
+      email: string | undefined;
+      businessId: string;
+    };
+
+/**
+ * Resolves who may read audit logs and how results must be scoped.
+ * Super admin → all tenants; owner/staff → own business; customer → own activity.
+ */
+export async function resolveAuditLogAccess(
+  req: Request,
+  options?: { bookingSlug?: string | null },
+): Promise<AuditLogAccess | { ok: false; status: number; error: string }> {
+  const authHeader = req.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer (.+)$/);
+  if (!match) {
+    return { ok: false, status: 401, error: "Missing authorization header." };
+  }
+
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const claimRole = decoded.role;
+    const isSuperAdminClaim =
+      decoded.superAdmin === true || claimRole === "super_admin";
+
+    if (isSuperAdminClaim) {
+      return { ok: true, scope: "platform", uid: decoded.uid, email: decoded.email };
+    }
+
+    const superSnap = await adminDb
+      .collection("super_admins")
+      .doc(decoded.uid)
+      .get();
+    if (superSnap.exists && superSnap.data()?.isActive !== false) {
+      return { ok: true, scope: "platform", uid: decoded.uid, email: decoded.email };
+    }
+
+    const businessIdClaim =
+      typeof decoded.businessId === "string" ? decoded.businessId : null;
+
+    if (
+      businessIdClaim &&
+      (claimRole === "owner" || claimRole === "admin" || claimRole === "staff")
+    ) {
+      return {
+        ok: true,
+        scope: "tenant",
+        uid: decoded.uid,
+        email: decoded.email,
+        businessId: businessIdClaim,
+        role: typeof claimRole === "string" ? claimRole : "staff",
+      };
+    }
+
+    const customerSnap = await adminDb.collection("customers").doc(decoded.uid).get();
+    if (!customerSnap.exists) {
+      return { ok: false, status: 403, error: "Access denied." };
+    }
+
+    const data = customerSnap.data() ?? {};
+    let businessId =
+      typeof data.registeredBusinessId === "string"
+        ? data.registeredBusinessId
+        : null;
+    const storedSlug =
+      typeof data.registeredBookingSlug === "string"
+        ? data.registeredBookingSlug
+        : null;
+    const slug = (options?.bookingSlug?.trim() || storedSlug || "").trim();
+
+    if (!businessId && slug) {
+      businessId = await resolveBusinessIdFromBookingSlug(slug);
+    }
+
+    if (!businessId) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Could not determine your business.",
+      };
+    }
+
+    return {
+      ok: true,
+      scope: "customer",
+      uid: decoded.uid,
+      email: decoded.email,
+      businessId,
+    };
+  } catch {
+    return { ok: false, status: 401, error: "Invalid or expired session." };
+  }
 }
 
 export async function registerSelfSignupTenant(

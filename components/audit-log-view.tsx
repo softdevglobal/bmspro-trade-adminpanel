@@ -7,11 +7,25 @@ import {
   CATEGORY_LABELS,
   SOURCE_LABELS,
   type AuditCategory,
+  isBusinessOwnerAuthEntry,
+  matchesAuditCategoryFilter,
+  normalizeAuditLogEntries,
   type AuditLogEntry,
   type AuditSource,
 } from "@/lib/audit/types";
-import { auth } from "@/lib/firebase/client";
+import { readJsonResponse } from "@/lib/api/read-json-response";
+import { useAuth } from "@/lib/auth/auth-context";
+import { customerAuth } from "@/lib/firebase/customer-client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
+export type AuditLogScope = "platform" | "tenant" | "customer";
+
+export type AuditLogViewProps = {
+  /** Defaults from signed-in role when omitted. */
+  scope?: AuditLogScope;
+  /** Required for customer scope — ties events to the booking business. */
+  bookingSlug?: string;
+};
 
 type TenantOption = { id: string; businessName: string };
 
@@ -46,7 +60,23 @@ function fullTimestamp(millis: number | null): string {
   return new Date(millis).toLocaleString();
 }
 
-export function AuditLogView() {
+export function AuditLogView({
+  scope: scopeProp,
+  bookingSlug,
+}: AuditLogViewProps = {}) {
+  const { user, role } = useAuth();
+  const scope: AuditLogScope =
+    scopeProp ??
+    (role === "super_admin"
+      ? "platform"
+      : role === "business_owner" || role === "staff"
+        ? "tenant"
+        : "tenant");
+
+  const isPlatform = scope === "platform";
+  const isCustomer = scope === "customer";
+  const isTenantOwner = scope === "tenant";
+
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,17 +87,17 @@ export function AuditLogView() {
   const [source, setSource] = useState<AuditSource | "all">("all");
 
   const loadTenants = useCallback(async () => {
+    if (!isPlatform || !user) return;
     try {
-      const user = auth.currentUser;
-      if (!user) return;
       const token = await user.getIdToken();
-      const res = await fetch("/api/admin/tenants/list", {
+      const res = await fetch("/api/admin/tenants", {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       });
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         ok?: boolean;
         tenants?: { id: string; businessName?: string }[];
-      };
+      }>(res);
       if (res.ok && data.ok) {
         setTenants(
           (data.tenants ?? []).map((t) => ({
@@ -79,32 +109,36 @@ export function AuditLogView() {
     } catch {
       /* tenant filter is optional — ignore */
     }
-  }, []);
+  }, [isPlatform, user]);
 
   const load = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const user = auth.currentUser;
-      if (!user) {
+      const sessionUser = isCustomer ? customerAuth.currentUser : user;
+      if (!sessionUser) {
         setErrorMessage("Please sign in again.");
         setIsLoading(false);
         return;
       }
-      const token = await user.getIdToken();
+      const token = await sessionUser.getIdToken();
       const params = new URLSearchParams();
-      if (businessId) params.set("businessId", businessId);
+      if (isPlatform && businessId) params.set("businessId", businessId);
+      if (isCustomer && bookingSlug?.trim()) {
+        params.set("bookingSlug", bookingSlug.trim());
+      }
       if (source !== "all") params.set("source", source);
       params.set("limit", "300");
 
-      const res = await fetch(`/api/admin/audit-logs?${params.toString()}`, {
+      const res = await fetch(`/api/audit-logs?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       });
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         ok?: boolean;
         error?: string;
         logs?: AuditLogEntry[];
-      };
+      }>(res);
       if (!res.ok || !data.ok) {
         setErrorMessage(data.error ?? "Could not load the audit log.");
         setLogs([]);
@@ -117,7 +151,7 @@ export function AuditLogView() {
     } finally {
       setIsLoading(false);
     }
-  }, [businessId, source]);
+  }, [businessId, source, isPlatform, isCustomer, bookingSlug, user]);
 
   useEffect(() => {
     void loadTenants();
@@ -128,15 +162,53 @@ export function AuditLogView() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    if (isPlatform && category === "staff") {
+      setCategory("all");
+    }
+  }, [isPlatform, category]);
+
+  const processedLogs = useMemo(
+    () => normalizeAuditLogEntries(logs),
+    [logs],
+  );
+
+  const tenantOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const t of tenants) {
+      byId.set(t.id, t.businessName);
+    }
+    for (const entry of processedLogs) {
+      if (entry.businessId && entry.businessName) {
+        byId.set(entry.businessId, entry.businessName);
+      }
+    }
+    return Array.from(byId.entries())
+      .map(([id, businessName]) => ({ id, businessName }))
+      .sort((a, b) => a.businessName.localeCompare(b.businessName));
+  }, [tenants, processedLogs]);
+
   const stats = useMemo(() => {
     const byCategory = new Map<AuditCategory, number>();
     let customerPortal = 0;
     let adminPanel = 0;
-    for (const entry of logs) {
-      byCategory.set(
-        entry.category,
-        (byCategory.get(entry.category) ?? 0) + 1,
-      );
+    let tenantAuthCount = 0;
+    for (const entry of processedLogs) {
+      const skipAuthChipCount =
+        isTenantOwner &&
+        entry.category === "auth" &&
+        !isBusinessOwnerAuthEntry(entry);
+
+      if (isTenantOwner && isBusinessOwnerAuthEntry(entry)) {
+        tenantAuthCount += 1;
+      }
+
+      if (!skipAuthChipCount) {
+        byCategory.set(
+          entry.category,
+          (byCategory.get(entry.category) ?? 0) + 1,
+        );
+      }
       if (
         entry.source === "customer_portal" ||
         entry.source === "booking_engine"
@@ -149,15 +221,21 @@ export function AuditLogView() {
         adminPanel += 1;
       }
     }
-    return { total: logs.length, byCategory, customerPortal, adminPanel };
-  }, [logs]);
+    return {
+      total: processedLogs.length,
+      byCategory,
+      customerPortal,
+      adminPanel,
+      tenantAuthCount,
+    };
+  }, [processedLogs, isTenantOwner]);
 
   const visibleLogs = useMemo(
     () =>
-      category === "all"
-        ? logs
-        : logs.filter((entry) => entry.category === category),
-    [logs, category],
+      processedLogs.filter((entry) =>
+        matchesAuditCategoryFilter(entry, category, isTenantOwner),
+      ),
+    [processedLogs, category, isTenantOwner],
   );
 
   return (
@@ -169,40 +247,71 @@ export function AuditLogView() {
           value={stats.total}
           tone="primary"
         />
-        <StatCard
-          icon="public"
-          label="Customer portal"
-          value={stats.customerPortal}
-          tone="tertiary"
-        />
-        <StatCard
-          icon="admin_panel_settings"
-          label="Admin panel"
-          value={stats.adminPanel}
-          tone="primary"
-        />
-        <StatCard
-          icon="event_available"
-          label="Inspections"
-          value={stats.byCategory.get("inspection") ?? 0}
-          tone="secondary"
-        />
+        {isCustomer ? (
+          <>
+            <StatCard
+              icon="login"
+              label="Sign-ins"
+              value={stats.byCategory.get("auth") ?? 0}
+              tone="secondary"
+            />
+            <StatCard
+              icon="event_available"
+              label="Inspections"
+              value={stats.byCategory.get("inspection") ?? 0}
+              tone="tertiary"
+            />
+            <StatCard
+              icon="group"
+              label="Account"
+              value={stats.byCategory.get("customer") ?? 0}
+              tone="primary"
+            />
+          </>
+        ) : (
+          <>
+            <StatCard
+              icon="public"
+              label="Customer portal"
+              value={stats.customerPortal}
+              tone="tertiary"
+            />
+            <StatCard
+              icon="admin_panel_settings"
+              label="Admin panel"
+              value={stats.adminPanel}
+              tone="primary"
+            />
+            <StatCard
+              icon="login"
+              label="Sign-ins"
+              value={
+                isTenantOwner
+                  ? stats.tenantAuthCount
+                  : (stats.byCategory.get("auth") ?? 0)
+              }
+              tone="secondary"
+            />
+          </>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 rounded-xl border border-outline-variant bg-surface-container-lowest p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={businessId}
-            onChange={(e) => setBusinessId(e.target.value)}
-            className="h-10 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <option value="">All tenants</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.businessName}
-              </option>
-            ))}
-          </select>
+          {isPlatform ? (
+            <select
+              value={businessId}
+              onChange={(e) => setBusinessId(e.target.value)}
+              className="h-10 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="">All tenants</option>
+              {tenantOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.businessName}
+                </option>
+              ))}
+            </select>
+          ) : null}
 
           <select
             value={source}
@@ -212,8 +321,12 @@ export function AuditLogView() {
             <option value="all">All sources</option>
             <option value="customer_portal">Customer portal</option>
             <option value="booking_engine">Booking engine</option>
-            <option value="admin_panel">Admin panel</option>
-            <option value="mobile_app">Mobile app</option>
+            {!isCustomer ? (
+              <>
+                <option value="admin_panel">Admin panel</option>
+                <option value="mobile_app">Mobile app</option>
+              </>
+            ) : null}
             <option value="system">System</option>
           </select>
         </div>
@@ -236,7 +349,20 @@ export function AuditLogView() {
           count={stats.total}
           onClick={() => setCategory("all")}
         />
-        {AUDIT_CATEGORIES.map((cat) => (
+        {AUDIT_CATEGORIES.filter((cat) => {
+          // Staff chip: business owners only (hidden for super admin)
+          if (cat === "staff") return isTenantOwner;
+          if (isCustomer) {
+            return (
+              cat === "auth" ||
+              cat === "inspection" ||
+              cat === "customer" ||
+              cat === "booking" ||
+              cat === "quotation"
+            );
+          }
+          return true;
+        }).map((cat) => (
           <CategoryChip
             key={cat}
             label={CATEGORY_LABELS[cat]}
@@ -277,7 +403,11 @@ export function AuditLogView() {
         ) : (
           <ul className="divide-y divide-outline-variant/60">
             {visibleLogs.map((entry) => (
-              <AuditRow key={entry.id} entry={entry} showTenant={!businessId} />
+              <AuditRow
+                key={entry.id}
+                entry={entry}
+                showTenant={isPlatform && !businessId}
+              />
             ))}
           </ul>
         )}

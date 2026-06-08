@@ -1,7 +1,6 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const TEXTAREA_CLASS =

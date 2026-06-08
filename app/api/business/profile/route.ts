@@ -2,7 +2,7 @@
  * Business profile API for the signed-in owner.
  *
  * GET   — returns business profile fields for the owner's business.
- * PATCH — updates logo, GST registration, or GST percentage.
+ * PATCH — updates contact details, logo, GST, or quotation terms.
  */
 
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
@@ -13,6 +13,9 @@ import {
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_PATTERN = /^\+?[\d\s()-]{6,}$/;
 
 function parseGstPercentageInput(
   raw: unknown,
@@ -65,11 +68,99 @@ export async function PATCH(request: Request) {
 
   const raw = (body ?? {}) as Record<string, unknown>;
   const updates: {
+    businessName?: string | null;
+    businessAddress?: string | null;
+    businessEmail?: string | null;
+    businessPhone?: string | null;
+    abn?: string | null;
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
     termsAndConditions?: string | null;
   } = {};
+
+  if ("businessName" in raw) {
+    if (typeof raw.businessName !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "Business name is required." },
+        { status: 400 },
+      );
+    }
+    const trimmed = raw.businessName.trim();
+    if (trimmed.length < 2) {
+      return NextResponse.json(
+        { ok: false, error: "Business name must be at least 2 characters." },
+        { status: 400 },
+      );
+    }
+    if (trimmed.length > 120) {
+      return NextResponse.json(
+        { ok: false, error: "Business name must be 120 characters or less." },
+        { status: 400 },
+      );
+    }
+    updates.businessName = trimmed;
+  }
+
+  if ("businessAddress" in raw) {
+    if (raw.businessAddress == null) {
+      updates.businessAddress = null;
+    } else if (typeof raw.businessAddress === "string") {
+      const trimmed = raw.businessAddress.trim();
+      if (trimmed.length > 300) {
+        return NextResponse.json(
+          { ok: false, error: "Business address must be 300 characters or less." },
+          { status: 400 },
+        );
+      }
+      updates.businessAddress = trimmed || null;
+    }
+  }
+
+  if ("businessEmail" in raw) {
+    if (raw.businessEmail == null) {
+      updates.businessEmail = null;
+    } else if (typeof raw.businessEmail === "string") {
+      const trimmed = raw.businessEmail.trim().toLowerCase();
+      if (trimmed && !EMAIL_PATTERN.test(trimmed)) {
+        return NextResponse.json(
+          { ok: false, error: "Enter a valid business email address." },
+          { status: 400 },
+        );
+      }
+      updates.businessEmail = trimmed || null;
+    }
+  }
+
+  if ("businessPhone" in raw) {
+    if (raw.businessPhone == null) {
+      updates.businessPhone = null;
+    } else if (typeof raw.businessPhone === "string") {
+      const trimmed = raw.businessPhone.trim();
+      if (trimmed && !PHONE_PATTERN.test(trimmed)) {
+        return NextResponse.json(
+          { ok: false, error: "Enter a valid business phone number." },
+          { status: 400 },
+        );
+      }
+      updates.businessPhone = trimmed || null;
+    }
+  }
+
+  if ("abn" in raw) {
+    if (raw.abn == null) {
+      updates.abn = null;
+    } else if (typeof raw.abn === "string") {
+      const trimmed = raw.abn.trim();
+      if (trimmed.length > 20) {
+        return NextResponse.json(
+          { ok: false, error: "ABN must be 20 characters or less." },
+          { status: 400 },
+        );
+      }
+      updates.abn = trimmed || null;
+    }
+  }
 
   if ("logoUrl" in raw) {
     updates.logoUrl =

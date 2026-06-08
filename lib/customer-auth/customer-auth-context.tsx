@@ -1,6 +1,7 @@
 "use client";
 
 import { CustomerAuthModal } from "@/components/customer-auth-modal";
+import { postSessionAudit } from "@/lib/audit/log-session-client";
 import { customerAuth } from "@/lib/firebase/customer-client";
 import {
   type CustomerProfile,
@@ -154,12 +155,18 @@ export function CustomerAuthProvider({
   const [modalOpen, setModalOpen] = useState(false);
   const [modalOptions, setModalOptions] = useState<OpenAuthOptions>({});
   const userRef = useRef<User | null>(null);
+  const profileRef = useRef<CustomerProfile | null>(null);
   const pendingCallbackRef = useRef<(() => void) | null>(null);
   const registrationSlugRef = useRef<string | undefined>(undefined);
+  const sessionBookingSlugRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(customerAuth, async (next) => {
@@ -211,7 +218,16 @@ export function CustomerAuthProvider({
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    await signInWithEmailAndPassword(customerAuth, email.trim(), password);
+    const credential = await signInWithEmailAndPassword(
+      customerAuth,
+      email.trim(),
+      password,
+    );
+    const slug =
+      sessionBookingSlugRef.current?.trim() ||
+      registrationSlugRef.current?.trim();
+    const token = await credential.user.getIdToken();
+    void postSessionAudit(token, "login", { bookingSlug: slug });
   }, []);
 
   const register = useCallback(
@@ -245,11 +261,25 @@ export function CustomerAuthProvider({
       } catch {
         /* profile saved on first PATCH attempt next time */
       }
+
+      const token = await credential.user.getIdToken();
+      const slug =
+        params.bookingSlug?.trim() || registrationSlugRef.current?.trim();
+      void postSessionAudit(token, "login", { bookingSlug: slug });
     },
     [],
   );
 
   const logout = useCallback(async () => {
+    const current = userRef.current;
+    if (current) {
+      const slug =
+        profileRef.current?.registeredBookingSlug?.trim() ||
+        sessionBookingSlugRef.current?.trim() ||
+        registrationSlugRef.current?.trim();
+      const token = await current.getIdToken();
+      await postSessionAudit(token, "logout", { bookingSlug: slug });
+    }
     clearProfileCache();
     await signOut(customerAuth);
   }, []);
@@ -273,7 +303,9 @@ export function CustomerAuthProvider({
 
   const openAuth = useCallback((options: OpenAuthOptions = {}) => {
     pendingCallbackRef.current = options.onAuthenticated ?? null;
-    registrationSlugRef.current = options.bookingSlug?.trim();
+    const slug = options.bookingSlug?.trim();
+    registrationSlugRef.current = slug;
+    sessionBookingSlugRef.current = slug;
     setModalOptions(options);
     setModalOpen(true);
   }, []);

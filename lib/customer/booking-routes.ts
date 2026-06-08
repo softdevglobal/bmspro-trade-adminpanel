@@ -11,12 +11,14 @@ export const ACCOUNT_TAB_SEGMENT: Record<
   requests: "requests",
   bookings: "history",
   notifications: "notifications",
+  activity: "activity",
 };
 
 const SEGMENT_TO_TAB: Record<string, CustomerAccountTab> = {
   requests: "requests",
   history: "bookings",
   notifications: "notifications",
+  activity: "activity",
   profile: "profile",
 };
 

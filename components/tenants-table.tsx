@@ -3,7 +3,8 @@
 import { TenantDetailDrawer } from "@/components/tenant-detail-drawer";
 import { TenantOnboardModal } from "@/components/tenant-onboard-modal";
 import { TenantViewButton } from "@/components/tenant-view-button";
-import { auth } from "@/lib/firebase/client";
+import { readJsonResponse } from "@/lib/api/read-json-response";
+import { useAuth } from "@/lib/auth/auth-context";
 import type { TenantDetail } from "@/lib/onboarding/tenant-display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { useCallback, useEffect, useState } from "react";
@@ -36,6 +37,7 @@ const STATUS_LABEL: Record<TenantDetail["status"], string> = {
 type TenantFilter = "all" | "active" | "suspended";
 
 export function TenantsTable() {
+  const { user } = useAuth();
   const [tenants, setTenants] = useState<TenantDetail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -49,33 +51,35 @@ export function TenantsTable() {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const user = auth.currentUser;
       if (!user) {
         setErrorMessage("Please sign in again.");
         setIsLoading(false);
         return;
       }
       const token = await user.getIdToken();
-      const response = await fetch("/api/admin/tenants/list", {
+      const response = await fetch("/api/admin/tenants", {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       });
-      const data = (await response.json()) as {
+      const data = await readJsonResponse<{
         ok?: boolean;
         error?: string;
         tenants?: TenantDetail[];
-      };
+      }>(response);
       if (!response.ok || !data.ok) {
         setErrorMessage(data.error ?? "Could not load tenants.");
         setIsLoading(false);
         return;
       }
       setTenants(data.tenants ?? []);
-    } catch {
-      setErrorMessage("Network error loading tenants.");
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Network error loading tenants.",
+      );
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

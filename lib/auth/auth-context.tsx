@@ -1,5 +1,6 @@
 "use client";
 
+import { postSessionAudit } from "@/lib/audit/log-session-client";
 import { auth, db } from "@/lib/firebase/client";
 import {
   onAuthStateChanged,
@@ -20,7 +21,7 @@ import {
 } from "react";
 
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
-export type AuthRole = "super_admin" | "business_owner" | null;
+export type AuthRole = "super_admin" | "business_owner" | "staff" | null;
 
 type AuthContextValue = {
   status: AuthStatus;
@@ -56,6 +57,10 @@ async function resolveAuthRole(
     (claimRole === "owner" || claimRole === "admin")
   ) {
     return { role: "business_owner", businessId };
+  }
+
+  if (businessId && claimRole === "staff") {
+    return { role: "staff", businessId };
   }
 
   if (superAdminClaim) {
@@ -240,10 +245,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(resolved.role);
     setBusinessId(resolved.businessId);
     setStatus("authenticated");
+    if (resolved.role === "business_owner" || resolved.role === "staff") {
+      const token = await credential.user.getIdToken();
+      void postSessionAudit(token, "login");
+    }
     router.replace("/dashboard");
   }, [router]);
 
   const logout = useCallback(async () => {
+    const currentUser = userRef.current;
+    if (
+      (role === "business_owner" || role === "staff") &&
+      currentUser
+    ) {
+      const token = await currentUser.getIdToken();
+      await postSessionAudit(token, "logout");
+    }
     clearAuthCache();
     await signOut(auth);
     await waitForAuthSignedOut();
@@ -252,7 +269,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setBusinessId(null);
     setStatus("unauthenticated");
     router.replace("/login");
-  }, [router]);
+  }, [router, role]);
 
   const value = useMemo(
     () => ({ status, user, role, businessId, login, logout }),

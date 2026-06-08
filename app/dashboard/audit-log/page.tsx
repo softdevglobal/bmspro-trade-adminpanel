@@ -10,7 +10,7 @@ export default function AuditLogPage() {
   return (
     <DashboardShell
       title="Audit log"
-      subtitle="Every action tenants take — inspections, quotations, bookings, staff, customers, services and items — with who did it and whether it came from the customer portal or the admin panel."
+      subtitle="Super admins see all tenants. Business owners see their activity — Auth shows owner and customer sign-ins, Staff shows staff sign-ins, plus inspections, bookings, and more."
     >
       <AuditLogView />
     </DashboardShell>
