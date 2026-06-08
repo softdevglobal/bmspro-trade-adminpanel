@@ -13,8 +13,8 @@ import {
   type AuditLogEntry,
   type AuditSource,
 } from "@/lib/audit/types";
+import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
-import { auth } from "@/lib/firebase/client";
 import { customerAuth } from "@/lib/firebase/customer-client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -64,7 +64,7 @@ export function AuditLogView({
   scope: scopeProp,
   bookingSlug,
 }: AuditLogViewProps = {}) {
-  const { role } = useAuth();
+  const { user, role } = useAuth();
   const scope: AuditLogScope =
     scopeProp ??
     (role === "super_admin"
@@ -87,18 +87,17 @@ export function AuditLogView({
   const [source, setSource] = useState<AuditSource | "all">("all");
 
   const loadTenants = useCallback(async () => {
-    if (!isPlatform) return;
+    if (!isPlatform || !user) return;
     try {
-      const user = auth.currentUser;
-      if (!user) return;
       const token = await user.getIdToken();
-      const res = await fetch("/api/admin/tenants/list", {
+      const res = await fetch("/api/admin/tenants", {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       });
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         ok?: boolean;
         tenants?: { id: string; businessName?: string }[];
-      };
+      }>(res);
       if (res.ok && data.ok) {
         setTenants(
           (data.tenants ?? []).map((t) => ({
@@ -110,19 +109,19 @@ export function AuditLogView({
     } catch {
       /* tenant filter is optional — ignore */
     }
-  }, [isPlatform]);
+  }, [isPlatform, user]);
 
   const load = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const user = isCustomer ? customerAuth.currentUser : auth.currentUser;
-      if (!user) {
+      const sessionUser = isCustomer ? customerAuth.currentUser : user;
+      if (!sessionUser) {
         setErrorMessage("Please sign in again.");
         setIsLoading(false);
         return;
       }
-      const token = await user.getIdToken();
+      const token = await sessionUser.getIdToken();
       const params = new URLSearchParams();
       if (isPlatform && businessId) params.set("businessId", businessId);
       if (isCustomer && bookingSlug?.trim()) {
@@ -133,12 +132,13 @@ export function AuditLogView({
 
       const res = await fetch(`/api/audit-logs?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
       });
-      const data = (await res.json()) as {
+      const data = await readJsonResponse<{
         ok?: boolean;
         error?: string;
         logs?: AuditLogEntry[];
-      };
+      }>(res);
       if (!res.ok || !data.ok) {
         setErrorMessage(data.error ?? "Could not load the audit log.");
         setLogs([]);
@@ -151,7 +151,7 @@ export function AuditLogView({
     } finally {
       setIsLoading(false);
     }
-  }, [businessId, source, isPlatform, isCustomer, bookingSlug]);
+  }, [businessId, source, isPlatform, isCustomer, bookingSlug, user]);
 
   useEffect(() => {
     void loadTenants();
@@ -172,6 +172,21 @@ export function AuditLogView({
     () => normalizeAuditLogEntries(logs),
     [logs],
   );
+
+  const tenantOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const t of tenants) {
+      byId.set(t.id, t.businessName);
+    }
+    for (const entry of processedLogs) {
+      if (entry.businessId && entry.businessName) {
+        byId.set(entry.businessId, entry.businessName);
+      }
+    }
+    return Array.from(byId.entries())
+      .map(([id, businessName]) => ({ id, businessName }))
+      .sort((a, b) => a.businessName.localeCompare(b.businessName));
+  }, [tenants, processedLogs]);
 
   const stats = useMemo(() => {
     const byCategory = new Map<AuditCategory, number>();
@@ -290,7 +305,7 @@ export function AuditLogView({
               className="h-10 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
             >
               <option value="">All tenants</option>
-              {tenants.map((t) => (
+              {tenantOptions.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.businessName}
                 </option>
