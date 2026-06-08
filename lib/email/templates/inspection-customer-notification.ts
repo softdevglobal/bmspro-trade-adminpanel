@@ -23,6 +23,7 @@ const EMAIL_PRESENTATION: Record<
   request_proposed: { eyebrow: "New times proposed", tone: "warning" },
   request_assigned: { eyebrow: "Inspector assigned", tone: "success" },
   visit_on_the_way: { eyebrow: "On the way", tone: "brand" },
+  booking_on_the_way: { eyebrow: "Job on the way", tone: "brand" },
   request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },
   request_completed: { eyebrow: "Visit completed", tone: "success" },
 };
@@ -93,9 +94,14 @@ export async function sendInspectionCustomerNotificationEmail(
       highlight: input.emailHighlight ?? null,
       highlightLabel: input.emailHighlightLabel ?? null,
       ctaUrl,
-      ctaLabel: "View my request",
+      ctaLabel:
+        input.type === "booking_on_the_way"
+          ? "View my booking"
+          : "View my request",
       footnote:
-        "You're receiving this because you booked through BMS Pro Trade.",
+        input.type === "booking_on_the_way"
+          ? "You're receiving this about your scheduled job with BMS Pro Trade."
+          : "You're receiving this because you booked through BMS Pro Trade.",
       businessName: input.businessName,
       logoUrl: null,
     });

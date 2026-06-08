@@ -10,7 +10,9 @@ export default function QuotationsPage() {
       icon="request_quote"
     >
       <BusinessOwnerGuard>
-        <QuotationsBoard />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <QuotationsBoard />
+        </div>
       </BusinessOwnerGuard>
     </DashboardShell>
   );

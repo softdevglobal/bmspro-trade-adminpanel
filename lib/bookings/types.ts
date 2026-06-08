@@ -12,6 +12,7 @@ export const BOOKING_COLLECTION = "bookings";
 export const BOOKING_STATUSES = [
   "awaiting",
   "scheduled",
+  "ongoing",
   "cancelled",
   "completed",
 ] as const;
@@ -20,6 +21,7 @@ export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   awaiting: "Awaiting booking",
   scheduled: "Scheduled",
+  ongoing: "Ongoing",
   cancelled: "Cancelled",
   completed: "Completed",
 };
@@ -29,6 +31,7 @@ export const BOOKING_STATUS_TONE: Record<BookingStatus, string> = {
     "bg-orange-50 text-orange-800 border border-orange-200",
   scheduled:
     "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  ongoing: "bg-amber-50 text-amber-800 border border-amber-200",
   cancelled:
     "bg-stone-100 text-stone-600 border border-stone-200",
   completed: "bg-sky-50 text-sky-700 border border-sky-200",
@@ -67,6 +70,8 @@ export type BookingDetail = {
   assignedTo: InspectionAssignment | null;
   ownerNote: string | null;
   quotation: InspectionQuotationSummary | null;
+  visitStartedAt: number | null;
+  bookingStartedAt: number | null;
   createdAt: number | null;
   updatedAt: number | null;
 };

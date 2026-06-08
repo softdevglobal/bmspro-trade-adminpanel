@@ -1,5 +1,11 @@
 import { logAuditEvent } from "@/lib/audit/server";
-import { assignBusinessBooking, getBusinessBooking } from "@/lib/bookings/server";
+import {
+  assignBusinessBooking,
+  completeBusinessBooking,
+  getBusinessBooking,
+  startBusinessBookingJob,
+  startBusinessBookingVisit,
+} from "@/lib/bookings/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import type { InspectionAssignment } from "@/lib/inspection/types";
 import {
@@ -72,21 +78,77 @@ export async function GET(
   return NextResponse.json({ ok: true, booking });
 }
 
+async function requireAssignedBookingOperator(
+  request: Request,
+  bookingId: string,
+) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer (.+)$/);
+  if (!match) {
+    return {
+      ok: false as const,
+      status: 401,
+      error: "Missing authorization header.",
+    };
+  }
+
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const businessId =
+      typeof decoded.businessId === "string" ? decoded.businessId : null;
+    const role = decoded.role;
+    if (
+      !businessId ||
+      (role !== "staff" && role !== "owner" && role !== "admin")
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "You do not have permission to start this visit.",
+      };
+    }
+
+    const snap = await adminDb.collection("bookings").doc(bookingId).get();
+    if (!snap.exists) {
+      return {
+        ok: false as const,
+        status: 404,
+        error: "Booking not found.",
+      };
+    }
+
+    const data = snap.data();
+    const assigned = data?.assignedTo as { uid?: string } | null;
+    if (
+      !data ||
+      data.businessId !== businessId ||
+      assigned?.uid !== decoded.uid
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "This job is not assigned to you.",
+      };
+    }
+
+    return {
+      ok: true as const,
+      uid: decoded.uid,
+      businessId,
+    };
+  } catch {
+    return {
+      ok: false as const,
+      status: 401,
+      error: "Invalid or expired session.",
+    };
+  }
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const token =
-    request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1] ??
-    extractBearerToken(request);
-  const auth = await requireBusinessOwnerFromToken(token);
-  if (!auth.ok) {
-    return NextResponse.json(
-      { ok: false, error: auth.error },
-      { status: auth.status },
-    );
-  }
-
   let payload: Record<string, unknown>;
   try {
     payload = (await request.json()) as Record<string, unknown>;
@@ -99,6 +161,86 @@ export async function PATCH(
 
   const action = typeof payload.action === "string" ? payload.action : "";
   const { id } = await context.params;
+
+  if (action === "start") {
+    const operatorAuth = await requireAssignedBookingOperator(request, id);
+    if (!operatorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: operatorAuth.error },
+        { status: operatorAuth.status },
+      );
+    }
+
+    const result = await startBusinessBookingVisit(
+      id,
+      operatorAuth.businessId,
+      operatorAuth.uid,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "start_booking") {
+    const operatorAuth = await requireAssignedBookingOperator(request, id);
+    if (!operatorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: operatorAuth.error },
+        { status: operatorAuth.status },
+      );
+    }
+
+    const result = await startBusinessBookingJob(
+      id,
+      operatorAuth.businessId,
+      operatorAuth.uid,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "complete") {
+    const operatorAuth = await requireAssignedBookingOperator(request, id);
+    if (!operatorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: operatorAuth.error },
+        { status: operatorAuth.status },
+      );
+    }
+
+    const result = await completeBusinessBooking(
+      id,
+      operatorAuth.businessId,
+      operatorAuth.uid,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  const token =
+    request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1] ??
+    extractBearerToken(request);
+  const auth = await requireBusinessOwnerFromToken(token);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
 
   if (action === "assign") {
     const authHeader = request.headers.get("authorization") ?? "";

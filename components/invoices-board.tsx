@@ -1,27 +1,525 @@
 "use client";
 
+import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
+import { useAuth } from "@/lib/auth/auth-context";
+import type { InvoiceDetail } from "@/lib/invoices/types";
+import { formatAddress } from "@/lib/inspection/types";
+import { formatQuoteDate } from "@/lib/quotations/document";
+import { displayBookingCode } from "@/lib/reference-codes";
+import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-export function InvoicesBoard() {
-  const searchParams = useSearchParams();
-  const quotationId = searchParams.get("quotation");
+type InvoiceFilter = "all" | "sent" | "draft";
+
+const BOARD_SHELL_CLASS = "flex min-h-0 flex-1 flex-col";
+
+function formatAud(value: number | null): string {
+  if (value == null) return "—";
+  return `Aus $${value.toFixed(2)}`;
+}
+
+function formatWhen(timestamp: number | null): string {
+  if (!timestamp) return "—";
+  return new Date(timestamp).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function FilterChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 font-body text-[13px] font-semibold transition-colors ${
+        active
+          ? "border-primary bg-primary text-on-primary"
+          : "border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:border-primary/40 hover:text-primary"
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-2 py-0.5 text-[11px] ${
+          active ? "bg-white/20 text-on-primary" : "bg-surface-container-low"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function InvoiceCard({
+  invoice,
+  isPreviewOpen,
+  onOpen,
+}: {
+  invoice: InvoiceDetail;
+  isPreviewOpen: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`group relative flex w-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 sm:hover:-translate-y-0.5 ${
+        isPreviewOpen
+          ? "border-primary/40 ring-2 ring-primary/15"
+          : "border-outline-variant/60 hover:border-primary/30 hover:shadow-md"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-800">
+            {invoice.invoiceCode}
+          </span>
+          <span
+            className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
+              invoice.status === "sent"
+                ? "border-sky-200 bg-sky-50 text-sky-700"
+                : "border-stone-200 bg-stone-100 text-stone-600"
+            }`}
+          >
+            {invoice.status}
+          </span>
+        </div>
+      </div>
+
+      <h4 className="font-display text-[16px] font-semibold text-on-surface">
+        {invoice.serviceTitle || "Invoice"}
+      </h4>
+      <p className="font-body text-[13px] text-on-surface-variant">
+        {invoice.customer.fullName} · {invoice.customer.phone}
+      </p>
+      <p className="font-body text-[12px] text-on-surface-variant">
+        {formatAddress(invoice.address)}
+      </p>
+
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
+        <span className="font-numeric text-[15px] font-semibold text-primary">
+          {formatAud(invoice.finalPriceAud)}
+        </span>
+        {invoice.depositRequest ? (
+          <span className="font-body text-[11px] text-on-surface-variant">
+            Balance {formatAud(invoice.balanceDueAud)}
+          </span>
+        ) : null}
+        <span className="font-body text-[11px] text-on-surface-variant sm:ml-auto">
+          Due {formatQuoteDate(invoice.dueDate)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function InvoicePreviewDrawer({
+  invoice,
+  onClose,
+}: {
+  invoice: InvoiceDetail | null;
+  onClose: () => void;
+}) {
+  const { user } = useAuth();
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfSource, setPdfSource] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const open = invoice !== null;
+
+  function closePdf() {
+    setPdfOpen(false);
+    if (pdfSource?.startsWith("blob:")) {
+      URL.revokeObjectURL(pdfSource);
+    }
+    setPdfSource(null);
+    setPdfError(null);
+  }
+
+  async function openPdf() {
+    if (!invoice) return;
+    setPdfError(null);
+
+    if (invoice.pdfUrl) {
+      setPdfSource(invoice.pdfUrl);
+      setPdfOpen(true);
+      return;
+    }
+
+    if (!user) {
+      setPdfError("Could not open invoice PDF.");
+      return;
+    }
+
+    setPdfLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/invoices/pdf?quotationId=${encodeURIComponent(invoice.id)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Could not load invoice PDF.");
+      }
+      const blob = await response.blob();
+      setPdfSource(URL.createObjectURL(blob));
+      setPdfOpen(true);
+    } catch (error) {
+      setPdfError(
+        error instanceof Error ? error.message : "Could not open invoice PDF.",
+      );
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   return (
-    <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-6 py-14 text-center sm:rounded-2xl sm:py-16">
-      <span className="material-symbols-outlined text-[40px] text-outline-variant">
-        receipt_long
-      </span>
-      <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
-        {quotationId ? "Invoice coming soon" : "No invoices yet"}
-      </p>
-      <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
-        {quotationId
-          ? "Invoicing from quotations is on the way. For now, return to the quotation or schedule the job first."
-          : "Create invoices from completed jobs or quotations and send them to your customers."}
-      </p>
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-        {quotationId ? (
+    <AnimatePresence>
+      {open && invoice ? (
+        <motion.div
+          key="invoice-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-40 overflow-hidden bg-black/40 backdrop-blur-sm"
+          onClick={onClose}
+        >
+          <motion.aside
+            key="invoice-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Invoice preview: ${invoice.invoiceCode}`}
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+            onClick={(event) => event.stopPropagation()}
+            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
+          >
+            <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant/60 px-4 py-4 sm:px-5">
+              <div className="min-w-0 flex-1">
+                <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Invoice preview
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-800">
+                    {invoice.invoiceCode}
+                  </span>
+                  <span
+                    className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
+                      invoice.status === "sent"
+                        ? "border-sky-200 bg-sky-50 text-sky-700"
+                        : "border-stone-200 bg-stone-100 text-stone-600"
+                    }`}
+                  >
+                    {invoice.status}
+                  </span>
+                </div>
+                <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
+                  {invoice.serviceTitle || "Invoice"}
+                </h3>
+                <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                  Issued {formatQuoteDate(invoice.invoiceDate)} · Due{" "}
+                  {formatQuoteDate(invoice.dueDate)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close preview"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+              >
+                <span className="material-symbols-outlined text-[22px]">close</span>
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 sm:px-5">
+              <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Customer
+                </p>
+                <p className="mt-0.5 font-display text-[15px] font-semibold text-on-surface">
+                  {invoice.customer.fullName}
+                </p>
+                <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+                  {invoice.customer.phone}
+                  {invoice.customer.email ? ` · ${invoice.customer.email}` : ""}
+                </p>
+                <p className="mt-2 font-body text-[13px] text-on-surface">
+                  {formatAddress(invoice.address)}
+                </p>
+              </section>
+
+              <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
+                <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Line items
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {invoice.lineItems.map((item, index) => (
+                    <li
+                      key={`${item.name}-${index}`}
+                      className="flex items-center justify-between gap-3 font-body text-[13px]"
+                    >
+                      <span className="text-on-surface">{item.name}</span>
+                      <span className="font-numeric shrink-0 font-semibold text-on-surface">
+                        {formatAud(item.priceAud)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex items-center justify-between border-t border-outline-variant/40 pt-2 font-body text-[13px] font-semibold">
+                  <span>Subtotal</span>
+                  <span className="font-numeric">{formatAud(invoice.subtotalAud)}</span>
+                </div>
+                {invoice.discountAud > 0 ? (
+                  <div className="mt-1 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                    <span>Discount</span>
+                    <span className="font-numeric">
+                      -{formatAud(invoice.discountAud)}
+                    </span>
+                  </div>
+                ) : null}
+                {invoice.gstAud > 0 ? (
+                  <div className="mt-1 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                    <span>GST</span>
+                    <span className="font-numeric">{formatAud(invoice.gstAud)}</span>
+                  </div>
+                ) : null}
+                <div className="mt-3 flex items-center justify-between rounded-lg bg-primary/5 px-3 py-2 font-body text-[14px] font-bold text-primary">
+                  <span>Total</span>
+                  <span className="font-numeric">{formatAud(invoice.finalPriceAud)}</span>
+                </div>
+                {invoice.depositRequest ? (
+                  <div className="mt-2 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                    <span>Balance due</span>
+                    <span className="font-numeric font-semibold text-on-surface">
+                      {formatAud(invoice.balanceDueAud)}
+                    </span>
+                  </div>
+                ) : null}
+              </section>
+
+              {invoice.notes ? (
+                <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    Notes
+                  </p>
+                  <p className="mt-1 whitespace-pre-line font-body text-[13px] text-on-surface">
+                    {invoice.notes}
+                  </p>
+                </section>
+              ) : null}
+
+              {invoice.quotationCode ? (
+                <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-3">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    Linked quotation
+                  </p>
+                  <Link
+                    href="/dashboard/quotations"
+                    onClick={onClose}
+                    className="mt-1 inline-flex font-mono text-[13px] font-semibold text-primary hover:underline"
+                  >
+                    {invoice.quotationCode}
+                  </Link>
+                </section>
+              ) : null}
+
+              {invoice.bookingId ? (
+                <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
+                    Linked booking
+                  </p>
+                  <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
+                    {displayBookingCode({
+                      id: invoice.bookingId,
+                      bookingCode: invoice.bookingCode,
+                    })}
+                  </p>
+                </section>
+              ) : null}
+            </div>
+
+            <footer className="shrink-0 space-y-2 border-t border-outline-variant/40 px-4 py-4 sm:px-5">
+              <button
+                type="button"
+                onClick={() => void openPdf()}
+                disabled={pdfLoading}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  {pdfLoading ? "progress_activity" : "picture_as_pdf"}
+                </span>
+                {pdfLoading ? "Loading PDF…" : "View invoice PDF"}
+              </button>
+              {pdfError ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-700"
+                >
+                  {pdfError}
+                </p>
+              ) : null}
+              <p className="text-center font-body text-[11px] text-on-surface-variant">
+                Created {formatWhen(invoice.createdAt)}
+              </p>
+            </footer>
+          </motion.aside>
+        </motion.div>
+      ) : null}
+
+      {pdfSource ? (
+        <QuotationPdfViewerModal
+          open={pdfOpen}
+          onClose={closePdf}
+          pdfUrl={pdfSource}
+          title={`Invoice — ${invoice?.invoiceCode ?? "Invoice"}`}
+          downloadFilename={`${(invoice?.invoiceCode ?? "invoice")
+            .replace(/[^a-z0-9.\-]+/gi, "-")
+            .toLowerCase()}.pdf`}
+        />
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+export function InvoicesBoard() {
+  const { user, status: authStatus } = useAuth();
+  const [invoices, setInvoices] = useState<InvoiceDetail[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<InvoiceFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/invoices", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const raw = await response.text();
+      let data: {
+        ok?: boolean;
+        error?: string;
+        invoices?: InvoiceDetail[];
+      } = {};
+      if (raw.trim()) {
+        try {
+          data = JSON.parse(raw) as typeof data;
+        } catch {
+          throw new Error("Could not load invoices.");
+        }
+      }
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not load invoices.");
+      }
+      setInvoices(data.invoices ?? []);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load invoices.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return invoices;
+    return invoices.filter((invoice) => invoice.status === filter);
+  }, [invoices, filter]);
+
+  const counts = useMemo(
+    () => ({
+      all: invoices.length,
+      sent: invoices.filter((invoice) => invoice.status === "sent").length,
+      draft: invoices.filter((invoice) => invoice.status === "draft").length,
+    }),
+    [invoices],
+  );
+
+  const selected = useMemo(
+    () => invoices.find((invoice) => invoice.id === selectedId) ?? null,
+    [invoices, selectedId],
+  );
+
+  if (authStatus === "loading" || loading) {
+    return (
+      <div className={BOARD_SHELL_CLASS}>
+        <div className="space-y-3">
+          {[0, 1, 2].map((idx) => (
+            <div
+              key={idx}
+              className="h-28 animate-pulse rounded-xl border border-outline-variant/40 bg-surface-container-lowest"
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={BOARD_SHELL_CLASS}>
+        <div
+          role="alert"
+          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
+        >
+          {error}
+        </div>
+      </div>
+    );
+  }
+
+  if (invoices.length === 0) {
+    return (
+      <div className={BOARD_SHELL_CLASS}>
+      <div className="flex flex-1 flex-col justify-center rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-6 py-14 text-center sm:rounded-2xl sm:py-16">
+        <span className="material-symbols-outlined text-[40px] text-outline-variant">
+          receipt_long
+        </span>
+        <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
+          No invoices yet
+        </p>
+        <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
+          Issue an invoice from a sent quotation, or create one after a job is
+          complete.
+        </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/dashboard/quotations"
             className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
@@ -29,20 +527,86 @@ export function InvoicesBoard() {
             <span className="material-symbols-outlined text-[20px]">
               request_quote
             </span>
-            Back to quotations
+            View quotations
           </Link>
-        ) : (
           <Link
             href="/dashboard/inspection-visits"
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+            className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
           >
             <span className="material-symbols-outlined text-[20px]">
               event_available
             </span>
             Inspection visits
           </Link>
-        )}
+        </div>
       </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={BOARD_SHELL_CLASS}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="font-body text-[12px] text-on-surface-variant">
+          {filtered.length} invoice{filtered.length === 1 ? "" : "s"} · tap a
+          card to open the side preview
+        </p>
+        <Link
+          href="/dashboard/quotations"
+          className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-4 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+        >
+          <span className="material-symbols-outlined text-[18px]">
+            request_quote
+          </span>
+          From quotation
+        </Link>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <FilterChip
+          label="All"
+          count={counts.all}
+          active={filter === "all"}
+          onClick={() => setFilter("all")}
+        />
+        <FilterChip
+          label="Sent"
+          count={counts.sent}
+          active={filter === "sent"}
+          onClick={() => setFilter("sent")}
+        />
+        <FilterChip
+          label="Draft"
+          count={counts.draft}
+          active={filter === "draft"}
+          onClick={() => setFilter("draft")}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low px-5 py-10 text-center">
+          <p className="font-body text-[14px] text-on-surface-variant">
+            No {filter} invoices.
+          </p>
+        </div>
+      ) : (
+        <ul className="space-y-3">
+          {filtered.map((invoice) => (
+            <li key={invoice.id}>
+              <InvoiceCard
+                invoice={invoice}
+                isPreviewOpen={selectedId === invoice.id}
+                onOpen={() => setSelectedId(invoice.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <InvoicePreviewDrawer
+        invoice={selected}
+        onClose={() => setSelectedId(null)}
+      />
     </div>
   );
 }

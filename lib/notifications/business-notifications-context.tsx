@@ -58,19 +58,22 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
     Boolean(user) &&
     isDashboardRoute(pathname);
 
+  const hasLoadedRef = useRef(false);
+
   const reload = useCallback(async () => {
     if (!enabled || !user) return;
-    setLoading((current) => current || notifications.length === 0);
+    setLoading((current) => current || !hasLoadedRef.current);
     try {
       const token = await user.getIdToken();
       const records = await fetchBusinessNotifications(token);
       setNotifications(records);
+      hasLoadedRef.current = true;
     } catch {
       /* keep previous list */
     } finally {
       setLoading(false);
     }
-  }, [enabled, user, notifications.length]);
+  }, [enabled, user]);
 
   reloadRef.current = reload;
 
@@ -79,6 +82,7 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
       if (!enabled) {
         setNotifications([]);
         setLoading(false);
+        hasLoadedRef.current = false;
       }
       return;
     }

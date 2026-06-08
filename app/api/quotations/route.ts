@@ -4,6 +4,7 @@ import { adminAuth } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
   createStandaloneQuotation,
+  getBusinessQuotationById,
   listBusinessQuotations,
   listQuotationsForInspection,
 } from "@/lib/quotations/server";
@@ -333,6 +334,21 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
+  const quotationId = url.searchParams.get("quotationId")?.trim() ?? "";
+  if (quotationId) {
+    const quotation = await getBusinessQuotationById(
+      auth.businessId,
+      quotationId,
+    );
+    if (!quotation) {
+      return NextResponse.json(
+        { ok: false, error: "Quotation not found." },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({ ok: true, quotation });
+  }
+
   const inspectionRequestId =
     url.searchParams.get("inspectionRequestId")?.trim() ?? "";
 

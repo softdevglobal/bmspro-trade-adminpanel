@@ -212,6 +212,7 @@ type OwnerAction =
       endTime: string;
       estimatedDurationMinutes: number;
       note?: string;
+      assignedTo?: InspectionAssignment | null;
     }
   | { type: "mark_awaiting_decision"; note?: string };
 
@@ -295,6 +296,7 @@ export async function applyOwnerAction(
       endTime: action.endTime,
       estimatedDurationMinutes: action.estimatedDurationMinutes,
       note: action.note,
+      assignedTo: action.assignedTo ?? null,
     });
     if (!created.ok) {
       return {

@@ -167,26 +167,26 @@ export function DashboardShell({
               </h1>
             </div>
 
-            <div className="hidden items-center gap-2 rounded-full border border-outline-variant bg-surface-container-low px-4 py-1.5 md:flex">
-              <span className="material-symbols-outlined text-[20px] text-outline">
-                search
-              </span>
-              <input
-                type="search"
-                placeholder="Search bookings..."
-                className="w-48 border-none bg-transparent font-body text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-0 lg:w-64"
-              />
-            </div>
+            {role === "business_owner" ? (
+              <div className="hidden items-center gap-2 rounded-full border border-outline-variant bg-surface-container-low px-4 py-1.5 md:flex">
+                <span className="material-symbols-outlined text-[20px] text-outline">
+                  search
+                </span>
+                <input
+                  type="search"
+                  placeholder="Search bookings..."
+                  className="w-48 border-none bg-transparent font-body text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-0 lg:w-64"
+                />
+              </div>
+            ) : (
+              <p className="hidden font-body text-[13px] font-medium text-on-surface-variant md:block">
+                Platform administration
+              </p>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <BusinessNotificationBell />
-            <button
-              type="button"
-              className="hidden rounded-lg bg-primary px-5 py-2 font-body text-label-bold text-label-bold text-on-primary transition-all hover:bg-primary/90 sm:inline-flex"
-            >
-              Add Booking
-            </button>
+            {role === "business_owner" ? <BusinessNotificationBell /> : null}
             <div
               className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-container font-body text-[14px] font-bold text-on-primary ring-1 ring-outline-variant"
               title={brandLogo ? brandName : email}
@@ -206,9 +206,9 @@ export function DashboardShell({
         </header>
 
         <main
-          className={`mx-auto w-full min-w-0 max-w-full flex-1 overflow-x-hidden ${
+          className={`mx-auto flex w-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden ${
             fullBleed
-              ? "flex flex-col px-0 pb-0 pt-[calc(3.5rem+0px)] sm:pt-[calc(4rem+0px)] lg:pt-0"
+              ? "px-0 pb-0 pt-[calc(3.5rem+0px)] sm:pt-[calc(4rem+0px)] lg:pt-0"
               : "px-3 pb-4 pt-[calc(3.5rem+1rem)] sm:max-w-container-max sm:pb-gutter sm:pt-[calc(4rem+1rem)] sm:px-gutter lg:px-3 lg:py-4 lg:pt-4"
           }`}
         >

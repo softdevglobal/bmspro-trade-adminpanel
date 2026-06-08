@@ -20,6 +20,7 @@ const BOOKING_ROUTES = [
 
 function needsBookingsFeed(pathname: string | null): boolean {
   if (!pathname) return false;
+  if (pathname === "/dashboard" || pathname === "/dashboard/") return true;
   return BOOKING_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
