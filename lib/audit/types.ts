@@ -15,6 +15,7 @@ export const AUDIT_COLLECTION = "audit_logs";
 
 /** High-level area an event belongs to (drives the UI filter chips + icons). */
 export const AUDIT_CATEGORIES = [
+  "auth",
   "inspection",
   "quotation",
   "booking",
@@ -48,6 +49,7 @@ export const AUDIT_SOURCES = [
 export type AuditSource = (typeof AUDIT_SOURCES)[number];
 
 export const CATEGORY_LABELS: Record<AuditCategory, string> = {
+  auth: "Auth",
   inspection: "Inspection",
   quotation: "Quotation",
   booking: "Booking",
@@ -58,6 +60,7 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
 };
 
 export const CATEGORY_ICONS: Record<AuditCategory, string> = {
+  auth: "login",
   inspection: "event_available",
   quotation: "request_quote",
   booking: "assignment",

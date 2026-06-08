@@ -116,6 +116,26 @@ function clearAuthCache(): void {
   }
 }
 
+/** Best-effort audit trail for business-owner sign-in / sign-out. */
+async function logOwnerSessionEvent(
+  user: User,
+  event: "login" | "logout",
+): Promise<void> {
+  try {
+    const token = await user.getIdToken();
+    await fetch("/api/audit/session", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ event }),
+    });
+  } catch {
+    /* audit is best-effort */
+  }
+}
+
 function waitForAuthSignedOut(): Promise<void> {
   if (!auth.currentUser) return Promise.resolve();
 
@@ -240,10 +260,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(resolved.role);
     setBusinessId(resolved.businessId);
     setStatus("authenticated");
+    if (resolved.role === "business_owner") {
+      void logOwnerSessionEvent(credential.user, "login");
+    }
     router.replace("/dashboard");
   }, [router]);
 
   const logout = useCallback(async () => {
+    const currentUser = userRef.current;
+    if (role === "business_owner" && currentUser) {
+      await logOwnerSessionEvent(currentUser, "logout");
+    }
     clearAuthCache();
     await signOut(auth);
     await waitForAuthSignedOut();

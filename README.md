@@ -400,7 +400,7 @@ Append-only super-admin activity trail. Written by `lib/audit/server.ts → logA
 |---|---|---|
 | `businessId` | `string \| null` | **→ `businesses/{id}`** affected tenant |
 | `businessName` | `string \| null` | Denormalized tenant name at write time |
-| `category` | `string` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `category` | `string` | `auth` \| `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
 | `action` | `string` | Dotted key, e.g. `inspection.created`, `staff.deleted` |
 | `actorUid` | `string \| null` | UID of the person who acted |
 | `actorRole` | `string` | `super_admin` \| `owner` \| `admin` \| `staff` \| `customer` \| `call_center` \| `system` |
@@ -1470,12 +1470,13 @@ A platform-wide, append-only activity trail of **everything tenants do**. Only s
 
 The feed calls `GET /api/admin/audit-logs` with the super-admin Firebase ID token. Category counts on the chips are computed client-side from the loaded batch.
 
-**Category filter chips** — All, Inspection, Quotation, Booking, Customer, Service, Item. The **Staff** chip is currently hidden in the UI (`audit-log-view.tsx` filters it out); `staff` events are still written to Firestore and appear under **All**, and the API still accepts `category=staff`.
+**Category filter chips** — All, Auth, Inspection, Quotation, Booking, Customer, Service, Item. The **Staff** chip is currently hidden in the UI (`audit-log-view.tsx` filters it out); `staff` events are still written to Firestore and appear under **All**, and the API still accepts `category=staff`.
 
 **What is recorded** — one `audit_logs` document per action, across these categories:
 
 | Category | Events captured | Sources seen |
 |---|---|---|
+| `auth` | business owner login, logout | Admin panel (`POST /api/audit/session` from `lib/auth/auth-context.tsx`) |
 | `inspection` | created, accept, set_time, propose, assign, cancel, complete, convert_to_booking, mark_awaiting_decision, slot_accepted | Customer portal (booking engine), Admin panel, Mobile app |
 | `quotation` | created (standalone + from inspection) | Admin panel |
 | `booking` | created (from inspection), assigned | Admin panel |
@@ -1493,7 +1494,7 @@ Each event answers **who** (actor: super admin / owner / staff / customer / call
 | Query | Meaning |
 |---|---|
 | `businessId` | only one tenant's events |
-| `category` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `category` | `auth` \| `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
 | `source` | `admin_panel` \| `customer_portal` \| `booking_engine` \| `mobile_app` \| `system` |
 | `limit` | 1–500 (default 200) |
 
@@ -1515,7 +1516,7 @@ The dashboard view (`components/audit-log-view.tsx`) shows:
 | Query | Meaning |
 |---|---|
 | `businessId` | Only events for one tenant |
-| `category` | `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
+| `category` | `auth` \| `inspection` \| `quotation` \| `booking` \| `staff` \| `customer` \| `service` \| `item` |
 | `source` | `admin_panel` \| `customer_portal` \| `booking_engine` \| `mobile_app` \| `system` |
 | `limit` | 1–500 (default 200) |
 

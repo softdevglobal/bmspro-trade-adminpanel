@@ -336,6 +336,11 @@ export async function getBusinessProfile(
 export async function updateBusinessProfile(
   businessId: string,
   updates: {
+    businessName?: string | null;
+    businessAddress?: string | null;
+    businessEmail?: string | null;
+    businessPhone?: string | null;
+    abn?: string | null;
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
@@ -345,6 +350,26 @@ export async function updateBusinessProfile(
   const payload: Record<string, unknown> = {
     updatedAt: FieldValue.serverTimestamp(),
   };
+
+  if ("businessName" in updates) {
+    payload.businessName = updates.businessName;
+  }
+
+  if ("businessAddress" in updates) {
+    payload.businessAddress = updates.businessAddress;
+  }
+
+  if ("businessEmail" in updates) {
+    payload.businessEmail = updates.businessEmail;
+  }
+
+  if ("businessPhone" in updates) {
+    payload.businessPhone = updates.businessPhone;
+  }
+
+  if ("abn" in updates) {
+    payload.abn = updates.abn;
+  }
 
   if ("logoUrl" in updates) {
     payload.logoUrl = updates.logoUrl;
