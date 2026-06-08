@@ -1476,7 +1476,7 @@ The feed calls `GET /api/admin/audit-logs` with the super-admin Firebase ID toke
 
 | Category | Events captured | Sources seen |
 |---|---|---|
-| `auth` | business owner login, logout | Admin panel (`POST /api/audit/session` from `lib/auth/auth-context.tsx`) |
+| `auth` | business owner, staff, and customer login / logout | Admin panel (`lib/auth/auth-context.tsx`), booking portal (`lib/customer-auth/customer-auth-context.tsx`) via `POST /api/audit/session` |
 | `inspection` | created, accept, set_time, propose, assign, cancel, complete, convert_to_booking, mark_awaiting_decision, slot_accepted | Customer portal (booking engine), Admin panel, Mobile app |
 | `quotation` | created (standalone + from inspection) | Admin panel |
 | `booking` | created (from inspection), assigned | Admin panel |

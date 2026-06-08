@@ -18,6 +18,7 @@ const TAB_TITLES: Record<CustomerAccountTab, string> = {
   requests: "My requests",
   bookings: "Booking history",
   notifications: "Notifications",
+  activity: "My activity",
 };
 
 export function accountPageTitle(

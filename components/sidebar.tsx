@@ -1,7 +1,7 @@
 "use client";
 
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
-import { useAuth } from "@/lib/auth/auth-context";
+import { useAuth, type AuthRole } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -22,6 +22,8 @@ type NavItem = {
   icon: string;
   superAdmin?: boolean;
   businessOwner?: boolean;
+  /** When set, only these dashboard roles see the link. */
+  roles?: Exclude<AuthRole, null>[];
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -84,9 +86,9 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/audit-log",
-    label: "Audit log",
+    label: "Activity log",
     icon: "history",
-    superAdmin: true,
+    roles: ["super_admin", "business_owner", "staff"],
   },
 ];
 
@@ -115,7 +117,9 @@ export function Sidebar({
       ? "Super Admin"
       : role === "business_owner"
         ? "Business Owner"
-        : "User";
+        : role === "staff"
+          ? "Staff"
+          : "User";
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
@@ -207,6 +211,9 @@ export function Sidebar({
           }`}
         >
           {NAV_ITEMS.filter((item) => {
+            if (item.roles) {
+              return role != null && item.roles.includes(role);
+            }
             if (item.superAdmin && role !== "super_admin") return false;
             if (item.businessOwner && role !== "business_owner") return false;
             return true;

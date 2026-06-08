@@ -111,6 +111,8 @@ export async function listAuditLogs(filters: {
   businessId?: string | null;
   category?: AuditCategory | null;
   source?: AuditSource | null;
+  /** When set, only events where this uid acted or was the target. */
+  participantUid?: string | null;
   limit?: number;
 }): Promise<AuditLogEntry[]> {
   const limit = Math.min(Math.max(filters.limit ?? 200, 1), 500);
@@ -137,6 +139,16 @@ export async function listAuditLogs(filters: {
   }
   if (filters.source) {
     entries = entries.filter((entry) => entry.source === filters.source);
+  }
+  if (filters.participantUid) {
+    const uid = filters.participantUid;
+    entries = entries.filter(
+      (entry) =>
+        entry.actorUid === uid ||
+        entry.targetId === uid ||
+        (typeof entry.metadata?.customerId === "string" &&
+          entry.metadata.customerId === uid),
+    );
   }
 
   entries.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));

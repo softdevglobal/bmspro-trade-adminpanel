@@ -166,3 +166,49 @@ export function parseAuditCategory(value: unknown): AuditCategory | null {
 export function parseAuditSource(value: unknown): AuditSource | null {
   return isAuditSource(value) ? value : null;
 }
+
+/** Legacy staff sessions were stored under Auth — show them under Staff instead. */
+export function normalizeAuditLogEntries(
+  entries: AuditLogEntry[],
+): AuditLogEntry[] {
+  return entries.map((entry) => {
+    if (
+      entry.category === "auth" &&
+      entry.actorRole === "staff" &&
+      (entry.action === "auth.login" || entry.action === "auth.logout")
+    ) {
+      return {
+        ...entry,
+        category: "staff",
+        action: entry.action === "auth.login" ? "staff.login" : "staff.logout",
+      };
+    }
+    return entry;
+  });
+}
+
+/**
+ * Business-owner Auth filter: owner, admin, and customer portal sign-ins.
+ * Staff sign-ins belong under the Staff chip (see normalizeAuditLogEntries).
+ */
+export function isBusinessOwnerAuthEntry(entry: AuditLogEntry): boolean {
+  if (entry.category !== "auth") return false;
+  if (entry.actorRole === "staff") return false;
+  return (
+    entry.actorRole === "owner" ||
+    entry.actorRole === "admin" ||
+    entry.actorRole === "customer"
+  );
+}
+
+export function matchesAuditCategoryFilter(
+  entry: AuditLogEntry,
+  category: AuditCategory | "all",
+  tenantOwnerView: boolean,
+): boolean {
+  if (category === "all") return true;
+  if (tenantOwnerView && category === "auth") {
+    return isBusinessOwnerAuthEntry(entry);
+  }
+  return entry.category === category;
+}

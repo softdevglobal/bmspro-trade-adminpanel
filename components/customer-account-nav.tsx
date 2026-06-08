@@ -24,7 +24,8 @@ export type CustomerAccountTab =
   | "profile"
   | "requests"
   | "bookings"
-  | "notifications";
+  | "notifications"
+  | "activity";
 
 const ICON_BTN =
   "relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-sm transition-all hover:border-primary/30 hover:bg-primary/5 hover:text-primary active:scale-95 sm:h-11 sm:w-11";
@@ -129,6 +130,13 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
         icon: "person",
         href: accountPath(slug, "profile"),
         isActive: onAccount && activeTab === "profile",
+      },
+      {
+        id: "activity",
+        label: "Activity",
+        icon: "history",
+        href: accountPath(slug, "activity"),
+        isActive: onAccount && activeTab === "activity",
       },
     ];
   }, [slug, onAccount, activeTab]);
