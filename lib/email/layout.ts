@@ -121,13 +121,15 @@ function escapeHtml(value: string): string {
 }
 
 function paragraphs(body: string, color: string): string {
+  const font =
+    "'Finlandica','Saira',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   return body
     .split(/\n{2,}/)
     .map((para) => para.trim())
     .filter(Boolean)
     .map(
       (para) =>
-        `<p style="margin:0 0 12px;font-size:15px;line-height:1.65;color:${color};">${escapeHtml(
+        `<p style="margin:0 0 12px;font-size:15px;line-height:1.65;color:${color};font-family:${font};">${escapeHtml(
           para,
         ).replace(/\n/g, "<br />")}</p>`,
     )
@@ -312,6 +314,13 @@ export function renderEmail(content: EmailTemplateContent): string {
       )}</p>`
     : "";
 
+  const FONT_SANS =
+    "'Saira','Finlandica',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  const FONT_DISPLAY =
+    "'Bitter','Saira',Georgia,'Times New Roman',Times,serif";
+  const FONT_BODY =
+    "'Finlandica','Saira',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -320,7 +329,7 @@ export function renderEmail(content: EmailTemplateContent): string {
     <meta name="color-scheme" content="light only" />
     <title>${title}</title>
   </head>
-  <body style="margin:0;padding:0;background:${SURFACE};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <body style="margin:0;padding:0;background:${SURFACE};font-family:${FONT_SANS};-webkit-font-smoothing:antialiased;">
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(
       content.body.slice(0, 120),
     )}</div>
@@ -331,10 +340,10 @@ export function renderEmail(content: EmailTemplateContent): string {
             <tr>
               <td align="${headerCentered ? "center" : "left"}" style="background:linear-gradient(135deg,${tone.headerFrom},${tone.headerTo});padding:26px 30px;text-align:${headerCentered ? "center" : "left"};">
                 ${logoBlock}
-                <p style="margin:0;font-size:17px;font-weight:800;letter-spacing:0.04em;color:#ffffff;text-align:${headerCentered ? "center" : "left"};">${headerHeadlineText}</p>
+                <p style="margin:0;font-size:17px;line-height:1.25;font-weight:800;letter-spacing:0.04em;color:#ffffff;text-align:${headerCentered ? "center" : "left"};font-family:${FONT_DISPLAY};">${headerHeadlineText}</p>
                 ${
                   eyebrow
-                    ? `<p style="margin:6px 0 0;font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.78);text-align:${headerCentered ? "center" : "left"};">${eyebrow}</p>`
+                    ? `<p style="margin:6px 0 0;font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.78);text-align:${headerCentered ? "center" : "left"};font-family:${FONT_SANS};">${eyebrow}</p>`
                     : ""
                 }
               </td>
@@ -342,7 +351,7 @@ export function renderEmail(content: EmailTemplateContent): string {
             <tr>
               <td style="padding:30px;">
                 ${bodyLogoBlock}
-                <h1 style="margin:0 0 16px;font-size:21px;line-height:1.3;color:${TEXT};font-weight:700;">${title}</h1>
+                <h1 style="margin:0 0 16px;font-size:21px;line-height:1.25;color:${TEXT};font-weight:700;font-family:${FONT_DISPLAY};">${title}</h1>
                 ${greeting}
                 ${paragraphs(content.body, MUTED)}
                 ${credentialsBlock}

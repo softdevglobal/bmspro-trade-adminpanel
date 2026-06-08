@@ -1,5 +1,6 @@
 import { sendPasswordResetCodeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -17,11 +18,27 @@ export async function POST(req: NextRequest) {
     }
 
     // Check the user exists in Firebase Auth
+    let authUid: string;
     try {
-      await adminAuth.getUserByEmail(trimmed);
+      const authUser = await adminAuth.getUserByEmail(trimmed);
+      authUid = authUser.uid;
     } catch {
       // Return success even for unknown emails to avoid user enumeration
       return NextResponse.json({ ok: true });
+    }
+
+    let businessName: string | null = null;
+    let logoUrl: string | null = null;
+    const userSnap = await adminDb.collection("users").doc(authUid).get();
+    const userData = userSnap.data();
+    const businessId =
+      typeof userData?.businessId === "string" ? userData.businessId : null;
+    if (businessId) {
+      const profile = await getBusinessProfile(businessId);
+      if (profile) {
+        businessName = profile.businessName;
+        logoUrl = profile.logoUrl;
+      }
     }
 
     // Rate-limit: only one code per email per 60 seconds
@@ -49,7 +66,12 @@ export async function POST(req: NextRequest) {
       used: false,
     });
 
-    await sendPasswordResetCodeEmail({ email: trimmed, code });
+    await sendPasswordResetCodeEmail({
+      email: trimmed,
+      code,
+      businessName,
+      logoUrl,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

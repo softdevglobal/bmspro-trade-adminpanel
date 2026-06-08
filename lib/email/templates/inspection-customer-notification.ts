@@ -7,7 +7,10 @@ import {
 } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
+import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
+import { formatInspectionVisitReference } from "@/lib/inspection/types";
 import type { NotificationType } from "@/lib/notifications/types";
 
 /** Eyebrow + tone shown in the customer email for each notification type. */
@@ -31,6 +34,7 @@ export type InspectionCustomerNotificationEmailInput = {
   bookingSlug?: string | null;
   businessName?: string | null;
   logoUrl?: string | null;
+  inspectionRequestId?: string | null;
   type: NotificationType;
   title: string;
   body: string;
@@ -38,6 +42,15 @@ export type InspectionCustomerNotificationEmailInput = {
   emailHighlight?: string | null;
   emailHighlightLabel?: string | null;
 };
+
+function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
+  if (!url?.trim()) return null;
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const base = appBaseUrl();
+  if (base && trimmed.startsWith("/")) return `${base}${trimmed}`;
+  return null;
+}
 
 function customerRequestUrl(bookingSlug: string | null | undefined): string | null {
   if (!bookingSlug) return null;
@@ -57,13 +70,27 @@ export async function sendInspectionCustomerNotificationEmail(
   try {
     const ctaUrl = customerRequestUrl(input.bookingSlug);
     const presentation = EMAIL_PRESENTATION[input.type];
+    const details: EmailDetailRow[] = [];
+    const inspectionId = input.inspectionRequestId?.trim();
+    if (inspectionId) {
+      details.push({
+        label: "Inspection",
+        value: formatInspectionVisitReference(inspectionId),
+      });
+    }
+    if (input.emailDetails?.length) details.push(...input.emailDetails);
+
     const html = renderEmail({
       eyebrow: presentation?.eyebrow ?? "Inspection request",
       tone: presentation?.tone ?? "brand",
+      headerAlign: "center",
+      headerHeadline: "BMS Pro Trade",
+      platformLogoUrl: platformBrandLogoDataUri(),
+      bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
       title: input.title,
       greetingName: firstName(input.customerName),
       body: input.body,
-      details: input.emailDetails,
+      details,
       highlight: input.emailHighlight ?? null,
       highlightLabel: input.emailHighlightLabel ?? null,
       ctaUrl,
@@ -76,7 +103,7 @@ export async function sendInspectionCustomerNotificationEmail(
           ? "You're receiving this about your scheduled job with BMS Pro Trade."
           : "You're receiving this because you booked through BMS Pro Trade.",
       businessName: input.businessName,
-      logoUrl: input.logoUrl ?? null,
+      logoUrl: null,
     });
     await sendEmail({
       sender: "request",

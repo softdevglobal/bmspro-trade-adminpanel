@@ -31,6 +31,11 @@ export {
 } from "@/lib/email/templates/password-reset-code";
 
 export {
+  sendCustomerPasswordResetCodeEmail,
+  type CustomerPasswordResetCodeEmailInput,
+} from "@/lib/email/templates/customer-password-reset-code";
+
+export {
   sendInspectionCustomerNotificationEmail,
   type InspectionCustomerNotificationEmailInput,
 } from "@/lib/email/templates/inspection-customer-notification";

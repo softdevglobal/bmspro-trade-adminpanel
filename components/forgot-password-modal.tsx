@@ -5,15 +5,33 @@ import { FormEvent, useEffect, useRef, useState, KeyboardEvent, ClipboardEvent }
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** Pre-fill email (e.g. from sign-in form). */
+  initialEmail?: string;
+  sendCodeUrl?: string;
+  resetPasswordUrl?: string;
+  /** Merged into the send-code POST body (e.g. bookingSlug for customers). */
+  sendExtraBody?: Record<string, unknown>;
+  minPasswordLength?: number;
+  /** Stack above nested modals (customer auth uses z-[200]). */
+  zIndexClass?: string;
 };
 
 type Stage = "form" | "sent" | "code" | "password" | "done";
 
 const CODE_LENGTH = 6;
 
-export function ForgotPasswordModal({ open, onClose }: Props) {
+export function ForgotPasswordModal({
+  open,
+  onClose,
+  initialEmail = "",
+  sendCodeUrl = "/api/auth/send-reset-code",
+  resetPasswordUrl = "/api/auth/reset-password",
+  sendExtraBody,
+  minPasswordLength = 8,
+  zIndexClass = "z-50",
+}: Props) {
   const [stage, setStage] = useState<Stage>("form");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(""));
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -29,7 +47,7 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
   useEffect(() => {
     if (open) {
       setStage("form");
-      setEmail("");
+      setEmail(initialEmail);
       setDigits(Array(CODE_LENGTH).fill(""));
       setNewPassword("");
       setConfirmPassword("");
@@ -39,7 +57,7 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
       setIsSubmitting(false);
       setTimeout(() => emailRef.current?.focus(), 50);
     }
-  }, [open]);
+  }, [open, initialEmail]);
 
   useEffect(() => {
     if (!open) return;
@@ -67,10 +85,10 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/auth/send-reset-code", {
+      const res = await fetch(sendCodeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed }),
+        body: JSON.stringify({ email: trimmed, ...sendExtraBody }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -128,8 +146,10 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
   // ── Reset password ────────────────────────────────────────────
   async function handleResetPassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters.");
+    if (newPassword.length < minPasswordLength) {
+      setError(
+        `Password must be at least ${minPasswordLength} characters.`,
+      );
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -139,7 +159,7 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/auth/reset-password", {
+      const res = await fetch(resetPasswordUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -179,7 +199,7 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className={`fixed inset-0 ${zIndexClass} flex items-center justify-center p-4`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="forgot-password-title"
@@ -417,7 +437,7 @@ export function ForgotPasswordModal({ open, onClose }: Props) {
                     id="new-password"
                     type={showNewPw ? "text" : "password"}
                     required
-                    placeholder="Min. 8 characters"
+                    placeholder={`Min. ${minPasswordLength} characters`}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     suppressHydrationWarning

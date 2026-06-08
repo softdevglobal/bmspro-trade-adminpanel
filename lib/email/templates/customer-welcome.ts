@@ -36,6 +36,9 @@ export async function sendCustomerWelcomeEmail(
   input: CustomerWelcomeEmailInput,
 ): Promise<boolean> {
   const business = input.businessName?.trim() || "your trade provider";
+  const businessTitle = input.businessName?.trim()
+    ? `${input.businessName.trim()} customer account`
+    : "customer account";
   const slug = input.bookingSlug?.trim();
   const base = appBaseUrl();
   const accountUrl = slug
@@ -65,7 +68,7 @@ export async function sendCustomerWelcomeEmail(
     headerHeadline: "Welcome to BMS Pro Trade",
     platformLogoUrl: platformBrandLogoDataUri(),
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
-    title: "Your customer account is ready",
+    title: `Your ${businessTitle} is ready`,
     greetingName: firstName(input.fullName),
     body: input.temporaryPassword
       ? `${business} created a BMS Pro Trade account for you so you can ${portalLine}. Sign in with the credentials below, then change your password from your account.`

@@ -99,6 +99,7 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
       bookingSlug: input.bookingSlug,
       businessName: input.businessName,
       logoUrl: input.logoUrl,
+      inspectionRequestId: input.requestId,
       type: input.type,
       title: input.title,
       body: input.body,

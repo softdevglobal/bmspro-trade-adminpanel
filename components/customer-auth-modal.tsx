@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomerForgotPasswordModal } from "@/components/customer-forgot-password-modal";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -226,6 +227,7 @@ export function CustomerAuthPanel({
       <SignInForm
         layout={variant === "modal" ? "modal" : "default"}
         defaultEmail={defaults?.email}
+        bookingSlug={bookingSlug}
         onAuthenticated={onAuthenticated}
       />
     ) : (
@@ -413,24 +415,25 @@ export function CustomerAuthModal({
 function SignInForm({
   layout = "default",
   defaultEmail,
+  bookingSlug,
   onAuthenticated,
 }: {
   layout?: "default" | "modal";
   defaultEmail?: string;
+  bookingSlug?: string;
   onAuthenticated?: () => void;
 }) {
-  const { login, resetPassword } = useCustomerAuth();
+  const { login } = useCustomerAuth();
   const [email, setEmail] = useState(defaultEmail ?? "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
-    setInfo(null);
     setSubmitting(true);
     try {
       await login(email, password);
@@ -442,19 +445,13 @@ function SignInForm({
     }
   }
 
-  async function handleReset() {
+  function handleForgot() {
     setError(null);
-    setInfo(null);
     if (!email.trim()) {
-      setError("Enter your email to receive a reset link.");
+      setError("Enter your email first, then tap Forgot.");
       return;
     }
-    try {
-      await resetPassword(email);
-      setInfo("Password reset email sent. Check your inbox.");
-    } catch (err) {
-      setError(readError(err));
-    }
+    setForgotOpen(true);
   }
 
   const compact = layout === "modal";
@@ -463,9 +460,9 @@ function SignInForm({
   const gap = compact ? "gap-3" : "gap-4";
 
   return (
+    <>
     <form className={`flex flex-col ${gap}`} onSubmit={handleSubmit} noValidate>
       {error ? <AuthMessage variant="error">{error}</AuthMessage> : null}
-      {info ? <AuthMessage variant="info">{info}</AuthMessage> : null}
 
       <AuthField label="Email address" icon="mail" htmlFor="customer-signin-email">
         <input
@@ -487,7 +484,7 @@ function SignInForm({
         action={
           <button
             type="button"
-            onClick={handleReset}
+            onClick={handleForgot}
             className="font-body text-[13px] font-semibold text-primary hover:text-primary/80"
           >
             Forgot?
@@ -524,6 +521,13 @@ function SignInForm({
         icon="arrow_forward"
       />
     </form>
+    <CustomerForgotPasswordModal
+      open={forgotOpen}
+      onClose={() => setForgotOpen(false)}
+      initialEmail={email}
+      bookingSlug={bookingSlug}
+    />
+    </>
   );
 }
 

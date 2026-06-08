@@ -3,12 +3,16 @@ import "server-only";
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
+import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
-  buildQuotationDocumentDeposit,
-  formatDepositSummary,
-  formatQuoteDate,
-} from "@/lib/quotations/document";
+  formatAddress,
+  formatInspectionVisitReference,
+  formatSlotDate,
+  formatVisitWindow,
+  type InspectionAddress,
+} from "@/lib/inspection/types";
 
 export type QuotationSentEmailInput = {
   customerEmail: string;
@@ -105,7 +109,11 @@ export async function sendQuotationSentEmail(
     const html = renderEmail({
       eyebrow: "Quotation",
       tone: "brand",
-      title: "Your quotation is ready",
+      headerAlign: "center",
+      headerHeadline: "BMS Pro Trade",
+      platformLogoUrl: platformBrandLogoDataUri(),
+      bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
+      title: `Quotation for ${input.serviceTitle}`,
       greetingName: firstName(input.customerFullName),
       body: `Please find your quotation from ${businessLabel} for ${serviceTitle} attached as a PDF.\n\nThe summary below matches the attached document. Open the PDF for the full line-item breakdown, terms, and conditions.`,
       details,
@@ -118,7 +126,7 @@ export async function sendQuotationSentEmail(
       footnote:
         "The full quotation is attached as a PDF. If you have any questions, reply to this email.",
       businessName: input.businessName,
-      logoUrl: input.logoUrl,
+      logoUrl: null,
     });
 
     const subjectBusiness = input.businessName?.trim();
