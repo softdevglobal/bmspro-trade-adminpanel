@@ -38,6 +38,8 @@ async function requireInvoiceAuthor(request: Request) {
       ok: true as const,
       uid: decoded.uid,
       businessId,
+      email: decoded.email ?? null,
+      role: typeof role === "string" ? role : null,
     };
   } catch {
     return {
@@ -116,7 +118,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await createInvoiceFromQuotation(auth.businessId, auth.uid, {
+  const result = await createInvoiceFromQuotation(auth.businessId, auth, {
     quotationId,
     lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
     finalPriceAud:
