@@ -85,7 +85,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/audit-log",
-    label: "Activity log",
+    label: "Audit logs",
     icon: "history",
     roles: ["super_admin", "business_owner", "staff"],
   },
