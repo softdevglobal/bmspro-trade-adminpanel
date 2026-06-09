@@ -524,6 +524,7 @@ async function sendInvoiceEmailForDetail(
 
   await sendInvoiceSentEmail({
     customerEmail: email,
+    customerPhone: invoice.customer.phone ?? null,
     customerFullName: invoice.customer.fullName,
     invoiceNo: invoice.invoiceCode,
     serviceTitle: invoice.serviceTitle,

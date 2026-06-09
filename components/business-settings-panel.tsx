@@ -1,6 +1,7 @@
 "use client";
 
 import { BookingLinkCard } from "@/components/booking-link-card";
+import { BusinessGstSettings } from "@/components/business-gst-settings";
 import { BusinessLogoSettings } from "@/components/business-logo-settings";
 import { BusinessProfileSettings } from "@/components/business-profile-settings";
 import { BusinessProfileSummaryCard } from "@/components/business-profile-summary-card";
@@ -188,6 +189,7 @@ export function BusinessSettingsPanel() {
           onFormChange={setForm}
           onSaved={handleProfileSaved}
         />
+        <BusinessGstSettings />
         <BusinessSecuritySettings />
         <BusinessTermsSettings />
 

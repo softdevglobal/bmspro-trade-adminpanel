@@ -2,6 +2,7 @@ import "server-only";
 
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl, loginUrl } from "@/lib/email/templates/_shared/urls";
@@ -17,6 +18,7 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
 
 export type OwnerWelcomeEmailInput = {
   email: string;
+  phone?: string | null;
   ownerName?: string | null;
   businessName: string;
   bookingSlug?: string | null;
@@ -72,11 +74,22 @@ export async function sendOwnerWelcomeEmail(
     logoUrl: null,
   });
 
-  return sendEmail({
+  const sent = await sendEmail({
     sender: "system",
     to: input.email,
     toName: input.ownerName ?? null,
     subject: `Welcome to BMS Pro Trade — ${input.businessName}`,
     htmlBody: html,
   });
+
+  if (input.phone) {
+    await sendSms({
+      to: input.phone,
+      message: input.temporaryPassword
+        ? `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in with ${input.email} — check your email for your temporary password.`
+        : `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in anytime with ${input.email}.`,
+    });
+  }
+
+  return sent;
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
@@ -17,6 +18,7 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
 
 export type CustomerWelcomeEmailInput = {
   email: string;
+  phone?: string | null;
   fullName?: string | null;
   /** Business they signed up from (e.g. PD Plumbing). */
   businessName?: string | null;
@@ -89,11 +91,22 @@ export async function sendCustomerWelcomeEmail(
     logoUrl: null,
   });
 
-  return sendEmail({
+  const sent = await sendEmail({
     sender: "system",
     to: input.email,
     toName: input.fullName ?? null,
     subject: `Welcome — your ${business} booking account`,
     htmlBody: html,
   });
+
+  if (input.phone) {
+    await sendSms({
+      to: input.phone,
+      message: input.temporaryPassword
+        ? `Welcome to ${business} on BMS Pro Trade. A customer account was created for ${input.email}. Check your email for your login details.`
+        : `Welcome to ${business} on BMS Pro Trade. Your customer account for ${input.email} is ready. Check your email for details.`,
+    });
+  }
+
+  return sent;
 }

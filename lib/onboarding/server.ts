@@ -176,6 +176,7 @@ async function createTenantWithOwnerAccount(
       null;
     await sendOwnerWelcomeEmail({
       email: value.accountEmail,
+      phone: value.businessPhone || null,
       ownerName: value.ownerFullName || null,
       businessName: value.businessName,
       bookingSlug,

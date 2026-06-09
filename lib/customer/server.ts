@@ -294,6 +294,7 @@ export async function ensureCustomerAccount(input: {
     try {
       welcomeEmailSent = await sendCustomerWelcomeEmail({
         email,
+        phone: phone ?? null,
         fullName,
         businessName: input.businessName ?? null,
         bookingSlug: input.bookingSlug ?? null,
@@ -358,6 +359,7 @@ export async function updateCustomerProfile(
         : null;
       await sendCustomerWelcomeEmail({
         email: customer.email,
+        phone: profile.phone ?? input.phone ?? null,
         fullName: profile.fullName,
         businessName: profile.registeredBusinessName,
         bookingSlug: welcomeSlug,

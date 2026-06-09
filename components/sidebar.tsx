@@ -77,7 +77,6 @@ const NAV_ITEMS: NavItem[] = [
     icon: "inventory_2",
     businessOwner: true,
   },
-  { href: "/dashboard/settings", label: "Settings", icon: "settings" },
   {
     href: "/dashboard/tenants",
     label: "Tenants",
@@ -90,6 +89,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: "history",
     roles: ["super_admin", "business_owner", "staff"],
   },
+  { href: "/dashboard/settings", label: "Settings", icon: "settings" },
 ];
 
 type SidebarProps = {

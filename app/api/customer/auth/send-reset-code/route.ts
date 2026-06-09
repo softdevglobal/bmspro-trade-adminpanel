@@ -86,8 +86,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    const customerData = customerSnap.data() ?? {};
+    const phone =
+      typeof customerData.phone === "string" ? customerData.phone : null;
     const { businessName, logoUrl } = await resolveBusinessBranding(
-      customerSnap.data() ?? {},
+      customerData,
       bookingSlug,
     );
 
@@ -121,6 +124,7 @@ export async function POST(req: NextRequest) {
 
     await sendCustomerPasswordResetCodeEmail({
       email: trimmed,
+      phone,
       code,
       businessName,
       logoUrl,

@@ -40,6 +40,7 @@ type CreateNotificationInput = {
   businessId: string | null;
   customerId?: string | null;
   customerEmail?: string | null;
+  customerPhone?: string | null;
   customerName?: string | null;
   requestId: string;
   bookingSlug?: string | null;
@@ -95,6 +96,7 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
   if (input.audience === "customer" && input.customerEmail) {
     await sendInspectionCustomerNotificationEmail({
       customerEmail: input.customerEmail,
+      customerPhone: input.customerPhone,
       customerName: input.customerName,
       bookingSlug: input.bookingSlug,
       businessName: input.businessName,
@@ -166,6 +168,7 @@ export async function notifyCustomerOfNewRequest(
       businessId: request.businessId,
       customerId: request.customerId,
       customerEmail: email,
+      customerPhone: request.customer.phone || null,
       customerName: request.customer.fullName || null,
       bookingSlug: context.bookingSlug ?? null,
       businessName: context.businessName ?? null,
@@ -199,6 +202,7 @@ export async function notifyBusinessOfNewRequest(
       businessId: request.businessId,
       customerId: request.customerId,
       customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
       customerName: request.customer.fullName || null,
       bookingSlug: context.bookingSlug ?? null,
       businessName: context.businessName ?? null,
@@ -333,6 +337,7 @@ export async function notifyCustomerOfStatusChange(
       businessId: request.businessId,
       customerId: request.customerId,
       customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
       customerName: request.customer.fullName || null,
       requestId: request.id,
       bookingSlug: context.bookingSlug ?? null,
@@ -382,6 +387,7 @@ export async function notifyCustomerOfAssignment(
       businessId: request.businessId,
       customerId: request.customerId,
       customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
       customerName: request.customer.fullName || null,
       requestId: request.id,
       bookingSlug: context.bookingSlug ?? null,
@@ -453,6 +459,7 @@ export async function notifyCustomerOfBookingOnTheWay(
       businessId: booking.businessId,
       customerId: booking.customerId,
       customerEmail: booking.customer.email || null,
+      customerPhone: booking.customer.phone || null,
       customerName: booking.customer.fullName || null,
       requestId: booking.inspectionRequestId || booking.id,
       bookingSlug: context.bookingSlug ?? null,
@@ -511,6 +518,7 @@ export async function notifyCustomerOfVisitOnTheWay(
       businessId: request.businessId,
       customerId: request.customerId,
       customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
       customerName: request.customer.fullName || null,
       requestId: request.id,
       bookingSlug: context.bookingSlug ?? null,
@@ -545,6 +553,7 @@ export async function notifyBusinessOfCustomerAcceptance(
       businessId: request.businessId,
       customerId: request.customerId,
       customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
       customerName: request.customer.fullName || null,
       bookingSlug: context.bookingSlug ?? null,
       businessName: context.businessName ?? null,

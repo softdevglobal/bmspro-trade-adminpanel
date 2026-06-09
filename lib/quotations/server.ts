@@ -1381,6 +1381,7 @@ async function sendQuotationCreatedEmail(
 
   await sendQuotationSentEmail({
     customerEmail: email,
+    customerPhone: customer.phone ?? null,
     customerFullName: customer.fullName,
     quoteNo: quoteCode,
     serviceTitle: quotation.serviceTitle,

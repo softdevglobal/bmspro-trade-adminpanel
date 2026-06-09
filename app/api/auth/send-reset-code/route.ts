@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
     let logoUrl: string | null = null;
     const userSnap = await adminDb.collection("users").doc(authUid).get();
     const userData = userSnap.data();
+    const phone =
+      typeof userData?.phone === "string" ? userData.phone : null;
     const businessId =
       typeof userData?.businessId === "string" ? userData.businessId : null;
     if (businessId) {
@@ -68,6 +70,7 @@ export async function POST(req: NextRequest) {
 
     await sendPasswordResetCodeEmail({
       email: trimmed,
+      phone,
       code,
       businessName,
       logoUrl,

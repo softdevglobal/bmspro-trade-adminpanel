@@ -2,6 +2,7 @@ import "server-only";
 
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
@@ -23,6 +24,7 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
 
 export type QuotationSentEmailInput = {
   customerEmail: string;
+  customerPhone?: string | null;
   customerFullName?: string | null;
   quoteNo: string;
   serviceTitle: string;
@@ -154,7 +156,15 @@ export async function sendQuotationSentEmail(
         },
       ],
     });
+
+    if (input.customerPhone) {
+      const total = formatEmailAud(input.totalAud);
+      await sendSms({
+        to: input.customerPhone,
+        message: `${businessLabel}: Your quotation ${input.quoteNo.trim() || ""} for ${serviceTitle} is ready (${total}). We've emailed you the PDF.`,
+      });
+    }
   } catch {
-    /* email is best-effort */
+    /* email/SMS is best-effort */
   }
 }

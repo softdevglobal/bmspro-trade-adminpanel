@@ -2,6 +2,7 @@ import "server-only";
 
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
@@ -12,6 +13,7 @@ import {
 
 export type InvoiceSentEmailInput = {
   customerEmail: string;
+  customerPhone?: string | null;
   customerFullName?: string | null;
   invoiceNo: string;
   serviceTitle: string;
@@ -137,7 +139,18 @@ export async function sendInvoiceSentEmail(
         },
       ],
     });
+
+    if (input.customerPhone) {
+      const amount = formatEmailAud(
+        deposit ? input.balanceDueAud : input.totalAud,
+      );
+      const amountLabel = deposit ? "balance due" : "total due";
+      await sendSms({
+        to: input.customerPhone,
+        message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
+      });
+    }
   } catch {
-    /* email is best-effort */
+    /* email/SMS is best-effort */
   }
 }

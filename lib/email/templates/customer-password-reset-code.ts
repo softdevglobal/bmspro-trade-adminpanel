@@ -2,6 +2,7 @@ import "server-only";
 
 import { renderEmail } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 
@@ -16,6 +17,7 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
 
 export type CustomerPasswordResetCodeEmailInput = {
   email: string;
+  phone?: string | null;
   code: string;
   businessName?: string | null;
   logoUrl?: string | null;
@@ -54,10 +56,19 @@ export async function sendCustomerPasswordResetCodeEmail(
 
   const subjectBusiness = business ? `${business} · ` : "";
 
-  return sendEmail({
+  const sent = await sendEmail({
     sender: "system",
     to: input.email,
     subject: `${input.code} — ${subjectBusiness}BMS Pro Trade customer password reset`,
     htmlBody: html,
   });
+
+  if (input.phone) {
+    await sendSms({
+      to: input.phone,
+      message: `${input.code} is your BMS Pro Trade${business ? ` (${business})` : ""} customer password reset code. It expires in 15 minutes.`,
+    });
+  }
+
+  return sent;
 }

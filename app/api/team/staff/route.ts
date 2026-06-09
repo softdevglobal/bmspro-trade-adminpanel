@@ -433,6 +433,7 @@ export async function POST(request: Request) {
       const business = await getBusinessProfile(auth.businessId);
       welcomeEmailSent = await sendStaffWelcomeEmail({
         email: parsed.value.email,
+        phone: parsed.value.phone ?? null,
         fullName: parsed.value.fullName,
         businessName: business?.businessName?.trim() || "your business",
         staffType: parsed.value.staffType,

@@ -2,6 +2,7 @@ import "server-only";
 
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl, loginUrl } from "@/lib/email/templates/_shared/urls";
@@ -17,6 +18,7 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
 
 export type StaffWelcomeEmailInput = {
   email: string;
+  phone?: string | null;
   fullName: string;
   businessName: string;
   staffType: string;
@@ -64,11 +66,20 @@ export async function sendStaffWelcomeEmail(
     logoUrl: null,
   });
 
-  return sendEmail({
+  const sent = await sendEmail({
     sender: "system",
     to: input.email,
     toName: input.fullName,
     subject: `Welcome to the team — ${input.businessName}`,
     htmlBody: html,
   });
+
+  if (input.phone) {
+    await sendSms({
+      to: input.phone,
+      message: `${input.businessName} added you to their team on BMS Pro Trade as ${input.staffType}. Check your email (${input.email}) for your login details.`,
+    });
+  }
+
+  return sent;
 }

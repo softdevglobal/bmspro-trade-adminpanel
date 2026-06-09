@@ -6,6 +6,7 @@ import {
   type EmailTone,
 } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
+import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
@@ -30,6 +31,7 @@ const EMAIL_PRESENTATION: Record<
 
 export type InspectionCustomerNotificationEmailInput = {
   customerEmail: string;
+  customerPhone?: string | null;
   customerName?: string | null;
   bookingSlug?: string | null;
   businessName?: string | null;
@@ -112,7 +114,18 @@ export async function sendInspectionCustomerNotificationEmail(
       subject: input.title,
       htmlBody: html,
     });
+
+    if (input.customerPhone) {
+      const smsBody = input.body
+        ?.replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 220);
+      await sendSms({
+        to: input.customerPhone,
+        message: smsBody ? `${input.title}. ${smsBody}` : input.title,
+      });
+    }
   } catch {
-    /* email is best-effort */
+    /* email/SMS is best-effort */
   }
 }
