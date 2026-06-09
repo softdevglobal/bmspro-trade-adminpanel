@@ -7,6 +7,9 @@ import { useEffect, useState } from "react";
 const INPUT_CLASS =
   "mt-2 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
+const READONLY_INPUT_CLASS =
+  "mt-2 w-full cursor-default rounded-lg border border-outline-variant/70 bg-surface-container/80 px-3 py-2.5 font-body text-[14px] text-on-surface-variant";
+
 type ProfileForm = {
   businessName: string;
   businessAddress: string;
@@ -91,7 +94,7 @@ export function BusinessProfileSettings() {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [user?.uid]);
 
   function updateField<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -114,7 +117,6 @@ export function BusinessProfileSettings() {
         body: JSON.stringify({
           businessName: form.businessName.trim(),
           businessAddress: form.businessAddress.trim() || null,
-          businessEmail: form.businessEmail.trim() || null,
           businessPhone: form.businessPhone.trim() || null,
           abn: form.abn.trim() || null,
         }),
@@ -153,6 +155,9 @@ export function BusinessProfileSettings() {
 
   const displayName =
     liveProfile?.businessName?.trim() || form.businessName.trim() || "Your business";
+
+  const accountEmail =
+    user?.email?.trim() || form.businessEmail.trim() || "—";
 
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
@@ -216,13 +221,15 @@ export function BusinessProfileSettings() {
               </span>
               <input
                 type="email"
-                value={form.businessEmail}
-                disabled={saving}
-                onChange={(e) => updateField("businessEmail", e.target.value)}
-                className={INPUT_CLASS}
-                maxLength={120}
-                placeholder="contact@yourbusiness.com.au"
+                readOnly
+                tabIndex={-1}
+                value={accountEmail}
+                className={READONLY_INPUT_CLASS}
+                aria-readonly="true"
               />
+              <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                Your sign-in email. Shown on quotations and invoices.
+              </span>
             </label>
 
             <label className="block">

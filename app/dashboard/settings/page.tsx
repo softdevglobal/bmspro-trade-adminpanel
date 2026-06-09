@@ -64,7 +64,7 @@ export default function SettingsPage() {
 
           <BusinessProfileSettings />
           <BusinessLogoSettings />
-          <BusinessGstSettings />
+         {/* // <BusinessGstSettings /> */}
           <BusinessTermsSettings />
 
           <section>
