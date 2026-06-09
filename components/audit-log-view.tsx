@@ -190,18 +190,11 @@ export function AuditLogView({
 
   const stats = useMemo(() => {
     const byCategory = new Map<AuditCategory, number>();
-    let customerPortal = 0;
-    let adminPanel = 0;
-    let tenantAuthCount = 0;
     for (const entry of processedLogs) {
       const skipAuthChipCount =
         isTenantOwner &&
         entry.category === "auth" &&
         !isBusinessOwnerAuthEntry(entry);
-
-      if (isTenantOwner && isBusinessOwnerAuthEntry(entry)) {
-        tenantAuthCount += 1;
-      }
 
       if (!skipAuthChipCount) {
         byCategory.set(
@@ -209,24 +202,10 @@ export function AuditLogView({
           (byCategory.get(entry.category) ?? 0) + 1,
         );
       }
-      if (
-        entry.source === "customer_portal" ||
-        entry.source === "booking_engine"
-      ) {
-        customerPortal += 1;
-      } else if (
-        entry.source === "admin_panel" ||
-        entry.source === "mobile_app"
-      ) {
-        adminPanel += 1;
-      }
     }
     return {
       total: processedLogs.length,
       byCategory,
-      customerPortal,
-      adminPanel,
-      tenantAuthCount,
     };
   }, [processedLogs, isTenantOwner]);
 
@@ -240,69 +219,47 @@ export function AuditLogView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          icon="bar_chart"
-          label="Total events"
-          value={stats.total}
-          tone="primary"
-        />
-        {isCustomer ? (
-          <>
-            <StatCard
-              icon="login"
-              label="Sign-ins"
-              value={stats.byCategory.get("auth") ?? 0}
-              tone="secondary"
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-2">
+          <CategoryChip
+            label="All"
+            icon="apps"
+            active={category === "all"}
+            count={stats.total}
+            onClick={() => setCategory("all")}
+          />
+          {AUDIT_CATEGORIES.filter((cat) => {
+            // Staff chip: business owners only (hidden for super admin)
+            if (cat === "staff") return isTenantOwner;
+            if (isCustomer) {
+              return (
+                cat === "auth" ||
+                cat === "inspection" ||
+                cat === "customer" ||
+                cat === "booking" ||
+                cat === "quotation"
+              );
+            }
+            return true;
+          }).map((cat) => (
+            <CategoryChip
+              key={cat}
+              label={CATEGORY_LABELS[cat]}
+              icon={CATEGORY_ICONS[cat]}
+              active={category === cat}
+              count={stats.byCategory.get(cat) ?? 0}
+              onClick={() => setCategory(cat)}
             />
-            <StatCard
-              icon="event_available"
-              label="Inspections"
-              value={stats.byCategory.get("inspection") ?? 0}
-              tone="tertiary"
-            />
-            <StatCard
-              icon="group"
-              label="Account"
-              value={stats.byCategory.get("customer") ?? 0}
-              tone="primary"
-            />
-          </>
-        ) : (
-          <>
-            <StatCard
-              icon="public"
-              label="Customer portal"
-              value={stats.customerPortal}
-              tone="tertiary"
-            />
-            <StatCard
-              icon="admin_panel_settings"
-              label="Admin panel"
-              value={stats.adminPanel}
-              tone="primary"
-            />
-            <StatCard
-              icon="login"
-              label="Sign-ins"
-              value={
-                isTenantOwner
-                  ? stats.tenantAuthCount
-                  : (stats.byCategory.get("auth") ?? 0)
-              }
-              tone="secondary"
-            />
-          </>
-        )}
-      </div>
+          ))}
+        </div>
 
-      <div className="flex flex-col gap-3 rounded-xl border border-outline-variant bg-surface-container-lowest p-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
           {isPlatform ? (
-            <select
+            <AuditFilterSelect
               value={businessId}
-              onChange={(e) => setBusinessId(e.target.value)}
-              className="h-10 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+              onChange={(value) => setBusinessId(value)}
+              ariaLabel="Filter by tenant"
+              className="sm:w-52"
             >
               <option value="">All tenants</option>
               {tenantOptions.map((t) => (
@@ -310,13 +267,14 @@ export function AuditLogView({
                   {t.businessName}
                 </option>
               ))}
-            </select>
+            </AuditFilterSelect>
           ) : null}
 
-          <select
+          <AuditFilterSelect
             value={source}
-            onChange={(e) => setSource(e.target.value as AuditSource | "all")}
-            className="h-10 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-medium text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40"
+            onChange={(value) => setSource(value as AuditSource | "all")}
+            ariaLabel="Filter by source"
+            className="sm:w-44"
           >
             <option value="all">All sources</option>
             <option value="customer_portal">Customer portal</option>
@@ -328,50 +286,17 @@ export function AuditLogView({
               </>
             ) : null}
             <option value="system">System</option>
-          </select>
+          </AuditFilterSelect>
+
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+          >
+            <span className="material-symbols-outlined text-[18px]">refresh</span>
+            Refresh
+          </button>
         </div>
-
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="flex h-10 items-center gap-2 self-start rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low sm:self-auto"
-        >
-          <span className="material-symbols-outlined text-[18px]">refresh</span>
-          Refresh
-        </button>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <CategoryChip
-          label="All"
-          icon="apps"
-          active={category === "all"}
-          count={stats.total}
-          onClick={() => setCategory("all")}
-        />
-        {AUDIT_CATEGORIES.filter((cat) => {
-          // Staff chip: business owners only (hidden for super admin)
-          if (cat === "staff") return isTenantOwner;
-          if (isCustomer) {
-            return (
-              cat === "auth" ||
-              cat === "inspection" ||
-              cat === "customer" ||
-              cat === "booking" ||
-              cat === "quotation"
-            );
-          }
-          return true;
-        }).map((cat) => (
-          <CategoryChip
-            key={cat}
-            label={CATEGORY_LABELS[cat]}
-            icon={CATEGORY_ICONS[cat]}
-            active={category === cat}
-            count={stats.byCategory.get(cat) ?? 0}
-            onClick={() => setCategory(cat)}
-          />
-        ))}
       </div>
 
       {errorMessage && (
@@ -473,41 +398,33 @@ function AuditRow({
   );
 }
 
-function StatCard({
-  icon,
-  label,
+function AuditFilterSelect({
   value,
-  tone,
+  onChange,
+  ariaLabel,
+  className,
+  children,
 }: {
-  icon: string;
-  label: string;
-  value: number;
-  tone: "primary" | "secondary" | "tertiary";
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  className?: string;
+  children: React.ReactNode;
 }) {
-  const toneClass =
-    tone === "tertiary"
-      ? "bg-tertiary-fixed text-on-tertiary-fixed-variant"
-      : tone === "secondary"
-        ? "bg-secondary-fixed text-on-secondary-fixed-variant"
-        : "bg-primary-fixed text-primary";
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-outline-variant bg-surface-container-lowest p-3">
-      <div
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneClass}`}
+    <label className={`relative flex h-10 w-full shrink-0 items-center ${className ?? ""}`}>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={ariaLabel}
+        className="h-full w-full appearance-none rounded-lg border border-outline-variant bg-surface-container-lowest py-2 pl-3 pr-10 font-body text-[13px] font-medium text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
       >
-        <span className="material-symbols-outlined material-symbols-filled text-[20px]">
-          {icon}
-        </span>
-      </div>
-      <div className="min-w-0">
-        <p className="font-display text-[20px] font-bold leading-none text-on-surface">
-          {value}
-        </p>
-        <p className="mt-1 truncate font-body text-[12px] text-on-surface-variant">
-          {label}
-        </p>
-      </div>
-    </div>
+        {children}
+      </select>
+      <span className="material-symbols-outlined pointer-events-none absolute right-3 text-[20px] text-outline">
+        expand_more
+      </span>
+    </label>
   );
 }
 
