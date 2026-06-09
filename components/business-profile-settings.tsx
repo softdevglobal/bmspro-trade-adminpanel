@@ -1,100 +1,40 @@
 "use client";
 
+import type { ProfileFormState } from "@/components/business-settings-panel";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const INPUT_CLASS =
   "mt-2 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
-type ProfileForm = {
-  businessName: string;
-  businessAddress: string;
-  businessEmail: string;
-  businessPhone: string;
-  abn: string;
+const READONLY_INPUT_CLASS =
+  "mt-2 w-full cursor-default rounded-lg border border-outline-variant/70 bg-surface-container/80 px-3 py-2.5 font-body text-[14px] text-on-surface-variant";
+
+type Props = {
+  form: ProfileFormState;
+  onFormChange: (form: ProfileFormState) => void;
+  onSaved: (form: ProfileFormState) => void;
+  loading?: boolean;
 };
 
-function emptyForm(): ProfileForm {
-  return {
-    businessName: "",
-    businessAddress: "",
-    businessEmail: "",
-    businessPhone: "",
-    abn: "",
-  };
-}
-
-export function BusinessProfileSettings() {
+export function BusinessProfileSettings({
+  form,
+  onFormChange,
+  onSaved,
+  loading = false,
+}: Props) {
   const { user } = useAuth();
   const liveProfile = useBusinessProfile();
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<ProfileForm>(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError(null);
-      try {
-        const token = await user.getIdToken();
-        const response = await fetch("/api/business/profile", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          profile?: {
-            businessName?: string | null;
-            businessAddress?: string | null;
-            businessEmail?: string | null;
-            businessPhone?: string | null;
-            abn?: string | null;
-          };
-        };
-        if (!response.ok || !payload.ok || !payload.profile) {
-          throw new Error(payload.error ?? "Could not load business profile.");
-        }
-        if (!active) return;
-        const p = payload.profile;
-        setForm({
-          businessName: p.businessName ?? "",
-          businessAddress: p.businessAddress ?? "",
-          businessEmail: p.businessEmail ?? "",
-          businessPhone: p.businessPhone ?? "",
-          abn: p.abn ?? "",
-        });
-      } catch (err) {
-        if (active) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Could not load business profile.",
-          );
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [user]);
-
-  function updateField<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+  function updateField<K extends keyof ProfileFormState>(
+    key: K,
+    value: ProfileFormState[K],
+  ) {
+    onFormChange({ ...form, [key]: value });
   }
 
   async function handleSave() {
@@ -114,7 +54,6 @@ export function BusinessProfileSettings() {
         body: JSON.stringify({
           businessName: form.businessName.trim(),
           businessAddress: form.businessAddress.trim() || null,
-          businessEmail: form.businessEmail.trim() || null,
           businessPhone: form.businessPhone.trim() || null,
           abn: form.abn.trim() || null,
         }),
@@ -134,13 +73,14 @@ export function BusinessProfileSettings() {
         throw new Error(payload.error ?? "Could not save business profile.");
       }
       const p = payload.profile;
-      setForm({
+      const next: ProfileFormState = {
         businessName: p.businessName ?? "",
         businessAddress: p.businessAddress ?? "",
         businessEmail: p.businessEmail ?? "",
         businessPhone: p.businessPhone ?? "",
         abn: p.abn ?? "",
-      });
+      };
+      onSaved(next);
       setNotice("Business profile saved.");
     } catch (err) {
       setError(
@@ -154,6 +94,9 @@ export function BusinessProfileSettings() {
   const displayName =
     liveProfile?.businessName?.trim() || form.businessName.trim() || "Your business";
 
+  const accountEmail =
+    user?.email?.trim() || form.businessEmail.trim() || "—";
+
   return (
     <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
       <div className="flex items-start gap-3">
@@ -161,7 +104,7 @@ export function BusinessProfileSettings() {
           <span className="material-symbols-outlined">store</span>
         </div>
         <div>
-          <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
+          <h3 className="font-display text-headline-sm font-semibold text-on-surface">
             Business profile
           </h3>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">
@@ -216,13 +159,15 @@ export function BusinessProfileSettings() {
               </span>
               <input
                 type="email"
-                value={form.businessEmail}
-                disabled={saving}
-                onChange={(e) => updateField("businessEmail", e.target.value)}
-                className={INPUT_CLASS}
-                maxLength={120}
-                placeholder="contact@yourbusiness.com.au"
+                readOnly
+                tabIndex={-1}
+                value={accountEmail}
+                className={READONLY_INPUT_CLASS}
+                aria-readonly="true"
               />
+              <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                Your sign-in email. Shown on quotations and invoices.
+              </span>
             </label>
 
             <label className="block">
