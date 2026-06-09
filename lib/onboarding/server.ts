@@ -273,6 +273,12 @@ function businessDocument(
   };
 }
 
+export type BusinessProfilePlan = {
+  name: string;
+  price: number;
+  period: string;
+};
+
 /** Reads a small profile for the current owner's business. */
 export type BusinessProfile = {
   businessName: string | null;
@@ -285,6 +291,10 @@ export type BusinessProfile = {
   businessEmail: string | null;
   businessPhone: string | null;
   abn: string | null;
+  businessType: string | null;
+  state: string | null;
+  timezone: string | null;
+  plan: BusinessProfilePlan | null;
   termsAndConditions: string | null;
 };
 
@@ -304,6 +314,24 @@ export async function getBusinessProfile(
     typeof data.bookingSlug === "string" ? data.bookingSlug : null;
   const registeredForGst = Boolean(data.registeredForGst);
   const parsedGst = parseGstPercentage(data.gstPercentage);
+  const planRaw = data.plan as
+    | { name?: string; price?: number; period?: string }
+    | null
+    | undefined;
+  const plan =
+    planRaw && typeof planRaw.name === "string" && planRaw.name.trim()
+      ? {
+          name: planRaw.name.trim(),
+          price:
+            typeof planRaw.price === "number" && Number.isFinite(planRaw.price)
+              ? planRaw.price
+              : 0,
+          period:
+            typeof planRaw.period === "string" && planRaw.period.trim()
+              ? planRaw.period.trim()
+              : "mo",
+        }
+      : null;
   return {
     businessName:
       typeof data.businessName === "string" ? data.businessName : null,
@@ -324,6 +352,11 @@ export async function getBusinessProfile(
     businessPhone:
       typeof data.businessPhone === "string" ? data.businessPhone : null,
     abn: typeof data.abn === "string" ? data.abn : null,
+    businessType:
+      typeof data.businessType === "string" ? data.businessType : null,
+    state: typeof data.state === "string" ? data.state : null,
+    timezone: typeof data.timezone === "string" ? data.timezone : null,
+    plan,
     termsAndConditions:
       typeof data.termsAndConditions === "string" &&
       data.termsAndConditions.trim()
