@@ -5,6 +5,7 @@ export type StaffSummary = {
   fullName: string;
   email: string;
   staffType: string;
+  canget_qutaion: boolean;
 };
 
 const CACHE_PREFIX = "bms.staff.summary.";

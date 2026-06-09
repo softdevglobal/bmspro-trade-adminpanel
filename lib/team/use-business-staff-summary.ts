@@ -33,7 +33,12 @@ export function useBusinessStaffSummary(): {
       if (!force) {
         const cached = readStaffSummaryCache(businessId);
         if (cached) {
-          setStaff(cached);
+          setStaff(
+            cached.map((member) => ({
+              ...member,
+              canget_qutaion: member.canget_qutaion === true,
+            })),
+          );
           return;
         }
       }
@@ -52,6 +57,7 @@ export function useBusinessStaffSummary(): {
             email: string;
             staffType?: string;
             status?: string;
+            canget_qutaion?: boolean;
           }[];
         };
         if (!response.ok || !payload.ok) return;
@@ -62,6 +68,7 @@ export function useBusinessStaffSummary(): {
             fullName: member.fullName,
             email: member.email,
             staffType: member.staffType?.trim() || "Team member",
+            canget_qutaion: member.canget_qutaion === true,
           }));
         setStaff(next);
         writeStaffSummaryCache(businessId, next);

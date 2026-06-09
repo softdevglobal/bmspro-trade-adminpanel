@@ -436,6 +436,12 @@ export async function createQuotationForInspection(
   businessId: string,
   createdBy: string,
   input: CreateQuotationInput,
+  /**
+   * Role of the author. Business owners/admins may quote any visit in their
+   * business (e.g. when the assigned staff member cannot create quotations);
+   * everyone else may only quote visits assigned to them.
+   */
+  authorRole?: string | null,
 ): Promise<
   | { ok: true; quotation: QuotationDetail }
   | { ok: false; status: number; error: string }
@@ -469,7 +475,8 @@ export async function createQuotationForInspection(
 
   const assigned = requestData.assignedTo as { uid?: string } | null;
   const isAssigned = assigned?.uid === createdBy;
-  if (!isAssigned) {
+  const isOwnerOrAdmin = authorRole === "owner" || authorRole === "admin";
+  if (!isAssigned && !isOwnerOrAdmin) {
     return {
       ok: false,
       status: 403,

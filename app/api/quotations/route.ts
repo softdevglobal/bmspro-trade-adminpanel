@@ -309,6 +309,7 @@ export async function POST(request: Request) {
           }
         : {}),
     },
+    auth.role,
   );
 
   if (!result.ok) {

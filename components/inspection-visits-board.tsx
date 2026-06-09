@@ -19,6 +19,7 @@ import {
 } from "@/lib/bookings/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
+import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 import {
   formatAddress,
   formatBudgetAud,
@@ -42,14 +43,8 @@ import {
   displayQuotationCode,
 } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-type StaffSummary = {
-  id: string;
-  fullName: string;
-  email: string;
-  staffType: string;
-};
 
 function CreatedSourcePill({
   source,
@@ -789,8 +784,29 @@ function DrawerReviewFooter({
   const hasVisitWindow =
     !!request.scheduledStartTime || !!request.scheduledEndTime;
 
+  // The visit happened (staff ended it or it was marked complete) but no
+  // quotation exists yet — let the owner create one for this visit. This
+  // covers visits run by staff who cannot create quotations themselves.
+  const needsOwnerQuotation =
+    !request.quotation &&
+    request.status !== "cancelled" &&
+    request.status !== "pending" &&
+    request.status !== "owner_proposed" &&
+    (!!request.visitEndedAt || request.status === "completed");
+
   return (
     <div className="border-t border-outline-variant/40 pt-4">
+      {needsOwnerQuotation ? (
+        <Link
+          href={`/dashboard/quotations/new?inspectionRequestId=${encodeURIComponent(request.id)}`}
+          className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+        >
+          <span className="material-symbols-outlined text-[18px]">
+            request_quote
+          </span>
+          Create quotation
+        </Link>
+      ) : null}
       {request.status === "scheduled" ? (
         <div className="space-y-3">
           {hasVisitWindow ? (
@@ -2841,6 +2857,27 @@ function ProposeForm({
   );
 }
 
+function StaffQuotationAccessBadge({
+  cangetQuotation,
+}: {
+  cangetQuotation: boolean;
+}) {
+  return (
+    <span
+      className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-[10px] font-semibold ${
+        cangetQuotation
+          ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200"
+          : "bg-amber-50 text-amber-900 ring-1 ring-amber-200"
+      }`}
+    >
+      <span className="material-symbols-outlined text-[12px]">
+        {cangetQuotation ? "request_quote" : "support_agent"}
+      </span>
+      {cangetQuotation ? "Can get quotation" : "Cannot get quotation"}
+    </span>
+  );
+}
+
 function StaffMemberPicker({
   staff,
   value,
@@ -2882,6 +2919,9 @@ function StaffMemberPicker({
                   {member.staffType}
                   {member.email ? ` · ${member.email}` : ""}
                 </span>
+                <StaffQuotationAccessBadge
+                  cangetQuotation={member.canget_qutaion}
+                />
               </span>
               <span
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
@@ -2937,8 +2977,9 @@ function AssignForm({
         Assign the inspection
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        The assigned person will visit the customer location and create the
-        quotation.
+        The assigned person will visit the customer location. Staff marked
+        &ldquo;Can get quotation&rdquo; create the quote on site; otherwise you
+        create it after the visit.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">

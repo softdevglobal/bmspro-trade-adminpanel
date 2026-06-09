@@ -365,6 +365,55 @@ export function CreateQuotationPage() {
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
 
+  // When opened from an inspection visit (e.g. a visit run by staff who can't
+  // create quotations), bind the quotation to that existing visit and prefill
+  // the customer/service instead of creating a brand-new standalone visit.
+  const [inspectionRequestId, setInspectionRequestId] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("inspectionRequestId")?.trim();
+    if (id) setInspectionRequestId(id);
+  }, []);
+
+  const boundInspection = useMemo(
+    () =>
+      inspectionRequestId
+        ? (requests.find((r) => r.id === inspectionRequestId) ?? null)
+        : null,
+    [inspectionRequestId, requests],
+  );
+
+  const inspectionPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (inspectionPrefilledRef.current || !boundInspection) return;
+    inspectionPrefilledRef.current = true;
+    setCustomer({
+      fullName: boundInspection.customer.fullName ?? "",
+      email: boundInspection.customer.email ?? "",
+      phone: boundInspection.customer.phone ?? "",
+    });
+    setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
+    if (
+      boundInspection.requestType === "existing_service" &&
+      boundInspection.serviceId
+    ) {
+      setRequestType("existing_service");
+      setSelectedServiceId(boundInspection.serviceId);
+    } else {
+      setRequestType("custom_quote");
+      setCustomServiceTitle(
+        boundInspection.customRequest?.title ??
+          boundInspection.serviceName ??
+          "",
+      );
+      setCustomServiceDescription(
+        boundInspection.customRequest?.description ?? "",
+      );
+    }
+  }, [boundInspection]);
+
   const customerOptions = useMemo(
     () => buildCustomerOptions(requests),
     [requests],
@@ -848,14 +897,18 @@ export function CreateQuotationPage() {
       return "Enter a valid client mobile number.";
     }
     if (address.street.trim().length < 3) return "Enter a complete address.";
-    if (requestType === "existing_service") {
-      if (!selectedServiceId) return "Select a service from the list.";
-    } else {
-      if (customServiceTitle.trim().length < 3) {
-        return "Add a job title (at least 3 characters).";
-      }
-      if (customServiceDescription.trim().length < 10) {
-        return "Describe the work needed (at least 10 characters).";
+    // Inspection-bound quotations inherit the service/job details from the
+    // existing visit, so only validate them for standalone quotations.
+    if (!inspectionRequestId) {
+      if (requestType === "existing_service") {
+        if (!selectedServiceId) return "Select a service from the list.";
+      } else {
+        if (customServiceTitle.trim().length < 3) {
+          return "Add a job title (at least 3 characters).";
+        }
+        if (customServiceDescription.trim().length < 10) {
+          return "Describe the work needed (at least 10 characters).";
+        }
       }
     }
     if (lineItems.length === 0) return "Add at least one line item.";
@@ -868,6 +921,7 @@ export function CreateQuotationPage() {
     selectedServiceId,
     customServiceTitle,
     customServiceDescription,
+    inspectionRequestId,
   ]);
 
   async function save() {
@@ -889,66 +943,72 @@ export function CreateQuotationPage() {
           : customServiceTitle.trim() ||
             lineItems[0]?.name.trim() ||
             "Custom quotation";
+      const sharedBody = {
+        customer: {
+          fullName: customer.fullName.trim(),
+          email: customer.email.trim().toLowerCase(),
+          phone: customer.phone,
+        },
+        address,
+        lineItems: lineItems.map((item) => ({
+          code: (item.code ?? "").trim() || null,
+          name: item.name,
+          description: item.description || null,
+          quantity: item.quantity,
+          rateAud: item.rate,
+          gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
+          priceAud: item.amountAud,
+        })),
+        finalPriceAud: total,
+        discountAud: discountAmount,
+        termsAndConditions: termsAndConditions.trim() || null,
+        notes: comment.trim() || null,
+        validUntil: dueDate,
+        imageUrls,
+        depositRequest: depositRequest
+          ? {
+              mode: depositRequest.mode,
+              percent: depositRequest.percent,
+              amountAud: depositRequest.amountAud,
+              dueDate: depositRequest.dueDate,
+            }
+          : null,
+      };
+
+      // Bound to an existing inspection visit → attach the quotation to it.
+      // Otherwise create a standalone quotation (with its own visit record).
+      const quotationBody = inspectionRequestId
+        ? { inspectionRequestId, ...sharedBody }
+        : {
+            standalone: true,
+            requestType,
+            serviceId:
+              requestType === "existing_service" ? selectedServiceId : null,
+            customRequest:
+              requestType === "custom_quote"
+                ? {
+                    title: customServiceTitle.trim(),
+                    description: customServiceDescription.trim(),
+                  }
+                : null,
+            title,
+            description: lineItems
+              .map((item) =>
+                item.description
+                  ? `${item.name} — ${item.description}`
+                  : item.name,
+              )
+              .join("; "),
+            ...sharedBody,
+          };
+
       const response = await fetch("/api/quotations", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          standalone: true,
-          customer: {
-            fullName: customer.fullName.trim(),
-            email: customer.email.trim().toLowerCase(),
-            phone: customer.phone,
-          },
-          address,
-          requestType,
-          serviceId:
-            requestType === "existing_service" ? selectedServiceId : null,
-          customRequest:
-            requestType === "custom_quote"
-              ? {
-                  title: customServiceTitle.trim(),
-                  description: customServiceDescription.trim(),
-                }
-              : null,
-          title,
-          description: lineItems
-            .map((item) =>
-              item.description
-                ? `${item.name} — ${item.description}`
-                : item.name,
-            )
-            .join("; "),
-          lineItems: lineItems.map((item) => ({
-            code: (item.code ?? "").trim() || null,
-            name: item.name,
-            description: item.description || null,
-            quantity: item.quantity,
-            rateAud: item.rate,
-            gstPercent: lineGstPercent(
-              item.applyGst,
-              gstEnabled,
-              gstPercentage,
-            ),
-            priceAud: item.amountAud,
-          })),
-          finalPriceAud: total,
-          discountAud: discountAmount,
-          termsAndConditions: termsAndConditions.trim() || null,
-          notes: comment.trim() || null,
-          validUntil: dueDate,
-          imageUrls,
-          depositRequest: depositRequest
-            ? {
-                mode: depositRequest.mode,
-                percent: depositRequest.percent,
-                amountAud: depositRequest.amountAud,
-                dueDate: depositRequest.dueDate,
-              }
-            : null,
-        }),
+        body: JSON.stringify(quotationBody),
       });
       const responseText = await response.text();
       let payload: { ok?: boolean; error?: string };
@@ -1051,7 +1111,7 @@ export function CreateQuotationPage() {
               <span className="material-symbols-outlined">arrow_back</span>
             </Link>
             <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
-              Create a quotation
+              {boundInspection ? "Quotation for visit" : "Create a quotation"}
             </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -1099,6 +1159,21 @@ export function CreateQuotationPage() {
           ))}
         </nav>
       </header>
+
+      {boundInspection ? (
+        <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 font-body text-[13px] text-on-surface sm:mx-6">
+          <span className="material-symbols-outlined mt-0.5 text-[18px] text-primary">
+            assignment_turned_in
+          </span>
+          <span>
+            This quotation will be attached to inspection visit{" "}
+            <span className="font-semibold">
+              {boundInspection.requestCode ?? boundInspection.id}
+            </span>
+            . The customer details are pre-filled from the visit.
+          </span>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container sm:mx-6">
