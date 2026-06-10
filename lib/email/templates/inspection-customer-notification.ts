@@ -116,10 +116,7 @@ export async function sendInspectionCustomerNotificationEmail(
     });
 
     if (input.customerPhone) {
-      const smsBody = input.body
-        ?.replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 220);
+      const smsBody = input.body?.replace(/\s+/g, " ").trim();
       await sendSms({
         to: input.customerPhone,
         message: smsBody ? `${input.title}. ${smsBody}` : input.title,
