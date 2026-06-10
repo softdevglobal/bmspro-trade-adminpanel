@@ -308,9 +308,17 @@ export function QuotationDocumentPreview({
             <>
               <div className="space-y-0.5 border-t border-[#c5d0e0] px-4 py-3 text-[12px]">
                 <div className="flex justify-between gap-4 text-[#6b7280]">
-                  <span>Deposit due</span>
-                  <span className="font-numeric font-medium text-[#1e2430]">
-                    {formatQuoteMoney(document.deposit.amountAud)}
+                  <span>
+                    {document.deposit.paid ? "Deposit paid" : "Deposit due"}
+                  </span>
+                  <span
+                    className={`font-numeric font-medium ${
+                      document.deposit.paid ? "text-[#047857]" : "text-[#1e2430]"
+                    }`}
+                  >
+                    {document.deposit.paid
+                      ? `−${formatQuoteMoney(document.deposit.amountAud)}`
+                      : formatQuoteMoney(document.deposit.amountAud)}
                   </span>
                 </div>
                 <p className="text-[10px] text-[#9ca3af]">

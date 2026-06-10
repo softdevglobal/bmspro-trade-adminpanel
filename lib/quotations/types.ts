@@ -22,6 +22,8 @@ export type QuotationDepositRequest = {
   percent: number;
   amountAud: number;
   dueDate: string;
+  /** Invoices only: true when the deposit has already been received. */
+  paid?: boolean;
 };
 
 export type QuotationDetail = {

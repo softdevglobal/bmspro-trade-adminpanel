@@ -73,3 +73,21 @@ export const NOTIFICATION_STATUS_TONE: Record<
   cancelled: "text-rose-600",
   completed: "text-primary",
 };
+
+const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
+  quotation_accepted: "check_circle",
+  quotation_rejected: "cancel",
+};
+
+const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
+  quotation_accepted: "text-emerald-600",
+  quotation_rejected: "text-rose-600",
+};
+
+export function notificationCardIcon(note: Pick<NotificationRecord, "type" | "status">): string {
+  return NOTIFICATION_TYPE_ICON[note.type] ?? NOTIFICATION_STATUS_ICON[note.status];
+}
+
+export function notificationCardTone(note: Pick<NotificationRecord, "type" | "status">): string {
+  return NOTIFICATION_TYPE_TONE[note.type] ?? NOTIFICATION_STATUS_TONE[note.status];
+}

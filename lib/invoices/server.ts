@@ -36,6 +36,7 @@ function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
     percent: mode === "percent" ? percent : 0,
     amountAud: Math.round(amountAud * 100) / 100,
     dueDate,
+    paid: data.paid === true,
   };
 }
 
@@ -424,9 +425,12 @@ export async function createInvoiceFromQuotation(
   const finalPriceAud = Math.max(0, input.finalPriceAud);
 
   const depositRequest = parseDepositRequest(input.depositRequest);
-  const depositAmount = depositRequest
-    ? Math.min(depositRequest.amountAud, finalPriceAud)
-    : 0;
+  // Only a deposit that has actually been received reduces the balance due;
+  // otherwise the invoice is issued for the full amount.
+  const depositAmount =
+    depositRequest?.paid === true
+      ? Math.min(depositRequest.amountAud, finalPriceAud)
+      : 0;
   const balanceDueAud =
     Math.round(Math.max(0, finalPriceAud - depositAmount) * 100) / 100;
 
@@ -471,6 +475,7 @@ export async function createInvoiceFromQuotation(
           percent: depositRequest.percent,
           amountAud: depositRequest.amountAud,
           dueDate: depositRequest.dueDate,
+          paid: depositRequest.paid === true,
         }
       : null,
     notes: input.notes?.trim() || null,

@@ -99,6 +99,8 @@ const ACTIVITY_ICONS: Record<string, string> = {
   request_assigned: "person_check",
   request_cancelled: "event_busy",
   request_completed: "check_circle",
+  quotation_accepted: "check_circle",
+  quotation_rejected: "cancel",
   visit_on_the_way: "directions_car",
   booking_on_the_way: "engineering",
 };

@@ -3,8 +3,8 @@
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessNotifications } from "@/lib/notifications/use-business-notifications";
 import {
-  NOTIFICATION_STATUS_ICON,
-  NOTIFICATION_STATUS_TONE,
+  notificationCardIcon,
+  notificationCardTone,
   type NotificationRecord,
 } from "@/lib/notifications/types";
 import { useRouter } from "next/navigation";
@@ -187,9 +187,9 @@ export function BusinessNotificationBell() {
                       className="flex min-w-0 flex-1 gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-container-low"
                     >
                       <span
-                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${notificationCardTone(note)}`}
                       >
-                        {NOTIFICATION_STATUS_ICON[note.status]}
+                        {notificationCardIcon(note)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block font-body text-[13px] font-bold text-on-surface">

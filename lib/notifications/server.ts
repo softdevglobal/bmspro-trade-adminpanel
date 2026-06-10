@@ -71,7 +71,9 @@ function withoutEmpty(
   return result;
 }
 
-async function createNotification(input: CreateNotificationInput): Promise<void> {
+async function createNotification(
+  input: CreateNotificationInput,
+): Promise<string> {
   const collection = notificationCollectionFor(input.audience);
   const ref = adminDb.collection(collection).doc();
   await ref.set(
@@ -116,6 +118,8 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
   } else if (input.audience === "customer" && input.customerId) {
     notifyCustomerNotificationsChanged(input.customerId);
   }
+
+  return ref.id;
 }
 
 function requestHeadline(request: InspectionRequestDetail): string {
@@ -556,7 +560,9 @@ export async function notifyBusinessOfQuotationDecision(
       ? `${who} accepted ${quoteLabel} for ${headline}. You can now schedule the job or issue an invoice.`
       : `${who} rejected ${quoteLabel} for ${headline}.`;
   try {
-    await createNotification({
+    const notificationType =
+      decision === "accepted" ? "quotation_accepted" : "quotation_rejected";
+    const notificationId = await createNotification({
       audience: "business",
       businessId: request.businessId,
       customerId: request.customerId,
@@ -567,8 +573,7 @@ export async function notifyBusinessOfQuotationDecision(
       businessName: context.businessName ?? null,
       requestId: request.id,
       status: request.status,
-      type:
-        decision === "accepted" ? "quotation_accepted" : "quotation_rejected",
+      type: notificationType,
       title,
       body,
     });
@@ -580,8 +585,9 @@ export async function notifyBusinessOfQuotationDecision(
         title,
         body,
         data: {
-          type: "quotation_decision",
+          type: notificationType,
           requestId: request.id,
+          notificationId,
         },
       });
     }

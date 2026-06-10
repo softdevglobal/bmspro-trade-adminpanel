@@ -35,6 +35,8 @@ export type QuotationDocumentDeposit = {
   balanceDueAud: number;
   mode: "percent" | "fixed";
   percent: number;
+  /** Invoices only: true when the deposit has already been received. */
+  paid: boolean;
 };
 
 /** Shared view-model for quotation PDF generation and the admin preview. */
@@ -65,6 +67,7 @@ export function buildQuotationDocumentDeposit(
         dueDate: string;
         mode?: "percent" | "fixed";
         percent?: number;
+        paid?: boolean;
       }
     | null
     | undefined,
@@ -89,10 +92,16 @@ export function buildQuotationDocumentDeposit(
       typeof deposit.percent === "number" && Number.isFinite(deposit.percent)
         ? deposit.percent
         : 0,
+    paid: deposit.paid === true,
   };
 }
 
 export function formatDepositSummary(deposit: QuotationDocumentDeposit): string {
+  if (deposit.paid) {
+    return deposit.mode === "percent" && deposit.percent > 0
+      ? `${deposit.percent}% deposit · received`
+      : "Received — thank you";
+  }
   const due = formatQuoteDate(deposit.dueDate);
   if (deposit.mode === "percent" && deposit.percent > 0) {
     return `${deposit.percent}% deposit · due ${due}`;
@@ -106,16 +115,20 @@ export function formatDepositPaymentNote(deposit: {
   percent: number;
   amountAud: number;
   dueDate: string;
+  paid?: boolean;
 }): string {
   const amount = deposit.amountAud.toLocaleString("en-AU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  const due = formatQuoteDate(deposit.dueDate);
   const basis =
     deposit.mode === "percent" && deposit.percent > 0
       ? `${deposit.percent}% deposit`
       : "Deposit";
+  if (deposit.paid) {
+    return `${basis}: $${amount} received — deducted from the balance due.`;
+  }
+  const due = formatQuoteDate(deposit.dueDate);
   return `${basis}: $${amount} due by ${due}.`;
 }
 

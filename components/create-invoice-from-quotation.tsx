@@ -213,6 +213,7 @@ export function CreateInvoiceFromQuotation({
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [discount, setDiscount] = useState<DocumentDiscount | null>(null);
   const [deposit, setDeposit] = useState<DepositRequest | null>(null);
+  const [depositPaid, setDepositPaid] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState("");
   const [notes, setNotes] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(todayIso());
@@ -419,11 +420,20 @@ export function CreateInvoiceFromQuotation({
   );
 
   const documentDeposit = useMemo(
-    () => buildQuotationDocumentDeposit(totalAud, deposit),
-    [totalAud, deposit],
+    () =>
+      buildQuotationDocumentDeposit(
+        totalAud,
+        deposit ? { ...deposit, paid: depositPaid } : null,
+      ),
+    [totalAud, deposit, depositPaid],
   );
 
-  const balanceDueAud = documentDeposit?.balanceDueAud ?? totalAud;
+  // Only a received deposit reduces what the customer owes; an unpaid
+  // deposit means the invoice is issued for the full amount.
+  const balanceDueAud =
+    documentDeposit && documentDeposit.paid
+      ? documentDeposit.balanceDueAud
+      : totalAud;
 
   const invoiceCode = useMemo(() => {
     if (!quotation) return "Draft";
@@ -534,6 +544,7 @@ export function CreateInvoiceFromQuotation({
                 percent: documentDeposit.percent,
                 amountAud: documentDeposit.amountAud,
                 dueDate: documentDeposit.dueDate,
+                paid: documentDeposit.paid,
               }
             : null,
           notes: notes.trim() || null,
@@ -778,7 +789,9 @@ export function CreateInvoiceFromQuotation({
   const quotationCode = displayQuotationCode(quotation);
   const businessName = business?.businessName ?? "Your business";
   const sendMessage = documentDeposit
-    ? `Thank you for your business. Please find your invoice details below.\n\nTotal: ${formatAud(totalAud)}\nDeposit due: ${formatAud(documentDeposit.amountAud)}\nBalance due: ${formatAud(balanceDueAud)}`
+    ? documentDeposit.paid
+      ? `Thank you for your business. Please find your invoice details below.\n\nTotal: ${formatAud(totalAud)}\nDeposit received: ${formatAud(documentDeposit.amountAud)}\nBalance due: ${formatAud(balanceDueAud)}`
+      : `Thank you for your business. Please find your invoice details below.\n\nTotal due: ${formatAud(totalAud)}\nDeposit: ${formatAud(documentDeposit.amountAud)} due by ${formatQuoteDate(documentDeposit.dueDate)}`
     : `Thank you for your business. Please find your invoice details below.\n\nTotal due: ${formatAud(totalAud)}`;
 
   return (
@@ -1341,20 +1354,61 @@ export function CreateInvoiceFromQuotation({
               </div>
               {documentDeposit ? (
                 <>
-                  <div className="space-y-0.5 border-t border-outline-variant/40 px-3 py-2.5 font-body text-[12px]">
+                  <div className="space-y-1.5 border-t border-outline-variant/40 px-3 py-2.5 font-body text-[12px]">
                     <div className="flex justify-between text-on-surface-variant">
-                      <span>Deposit requested</span>
-                      <span className="font-numeric font-medium text-on-surface">
-                        {formatAud(documentDeposit.amountAud)}
+                      <span>
+                        {documentDeposit.paid
+                          ? "Deposit paid"
+                          : "Deposit requested"}
+                      </span>
+                      <span
+                        className={`font-numeric font-medium ${
+                          documentDeposit.paid
+                            ? "text-emerald-600"
+                            : "text-on-surface"
+                        }`}
+                      >
+                        {documentDeposit.paid
+                          ? `−${formatAud(documentDeposit.amountAud)}`
+                          : formatAud(documentDeposit.amountAud)}
                       </span>
                     </div>
                     <p className="text-[10px] text-on-surface-variant">
-                      {formatDepositPaymentNote(deposit!)}
+                      {formatDepositPaymentNote(documentDeposit)}
                     </p>
+                    <div className="flex items-center justify-between gap-2 pt-0.5">
+                      <span className="text-[11px] font-semibold text-on-surface-variant">
+                        Deposit payment
+                      </span>
+                      <div className="flex overflow-hidden rounded-full border border-outline-variant/60">
+                        <button
+                          type="button"
+                          onClick={() => setDepositPaid(false)}
+                          className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                            !depositPaid
+                              ? "bg-primary text-on-primary"
+                              : "bg-transparent text-on-surface-variant hover:bg-surface-container-low"
+                          }`}
+                        >
+                          Not paid
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDepositPaid(true)}
+                          className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                            depositPaid
+                              ? "bg-emerald-600 text-white"
+                              : "bg-transparent text-on-surface-variant hover:bg-surface-container-low"
+                          }`}
+                        >
+                          Paid
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between bg-primary px-3 py-2.5">
                     <span className="font-body text-[13px] font-bold text-on-primary">
-                      Balance due
+                      {documentDeposit.paid ? "Balance due" : "Amount due"}
                     </span>
                     <span className="font-numeric text-[15px] font-bold text-on-primary">
                       {formatAud(balanceDueAud)}

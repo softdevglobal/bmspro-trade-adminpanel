@@ -313,12 +313,32 @@ function InvoicePreviewDrawer({
                   <span className="font-numeric">{formatAud(invoice.finalPriceAud)}</span>
                 </div>
                 {invoice.depositRequest ? (
-                  <div className="mt-2 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
-                    <span>Balance due</span>
-                    <span className="font-numeric font-semibold text-on-surface">
-                      {formatAud(invoice.balanceDueAud)}
-                    </span>
-                  </div>
+                  <>
+                    <div className="mt-2 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                      <span>
+                        {invoice.depositRequest.paid
+                          ? "Deposit paid"
+                          : "Deposit requested"}
+                      </span>
+                      <span
+                        className={`font-numeric font-semibold ${
+                          invoice.depositRequest.paid
+                            ? "text-emerald-600"
+                            : "text-on-surface"
+                        }`}
+                      >
+                        {invoice.depositRequest.paid
+                          ? `−${formatAud(invoice.depositRequest.amountAud)}`
+                          : formatAud(invoice.depositRequest.amountAud)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                      <span>Balance due</span>
+                      <span className="font-numeric font-semibold text-on-surface">
+                        {formatAud(invoice.balanceDueAud)}
+                      </span>
+                    </div>
+                  </>
                 ) : null}
               </section>
 
