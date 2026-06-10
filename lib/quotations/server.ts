@@ -265,6 +265,12 @@ function mapQuotationDoc(
         ? data.pdfUrl.trim()
         : null,
     status: data.status === "sent" ? "sent" : "draft",
+    customerDecision:
+      data.customerDecision === "accepted" ||
+      data.customerDecision === "rejected"
+        ? data.customerDecision
+        : null,
+    customerDecisionAt: toMillis(data.customerDecisionAt),
     bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
     bookingCode:
       typeof data.bookingCode === "string" && data.bookingCode.trim()
@@ -624,12 +630,15 @@ export async function createQuotationForInspection(
     console.error("quotation PDF generation failed:", error);
   }
 
-  // Mirror quotation onto the request and mark the visit complete.
+  const shouldSend = input.send === true;
+
+  // Mirror quotation summary onto the linked request.
   try {
     const currentStatus =
       typeof requestData.status === "string" ? requestData.status : "";
     const shouldComplete =
-      currentStatus === "scheduled" || currentStatus === "owner_proposed";
+      shouldSend &&
+      (currentStatus === "scheduled" || currentStatus === "owner_proposed");
 
     await requestSnap.ref.set(
       {
@@ -640,49 +649,53 @@ export async function createQuotationForInspection(
           subtotalAud,
           balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
-          status: "sent",
+          status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...awaitingBookingFields(),
+        ...(shouldSend ? awaitingBookingFields() : {}),
         ...(shouldComplete ? { status: "completed" as const } : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
 
-    await ref.set(
-      {
-        status: "sent",
-        ...awaitingBookingFields(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
-
-    if (shouldComplete) {
-      const after = await requestSnap.ref.get();
-      const updatedRequest = mapInspectionDoc(
-        inspectionId,
-        after.data() ?? {},
+    if (shouldSend) {
+      await ref.set(
+        {
+          status: "sent",
+          ...awaitingBookingFields(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
       );
-      const businessSnap = await adminDb
-        .collection("businesses")
-        .doc(businessId)
-        .get();
-      const businessData = businessSnap.data() ?? {};
-      await notifyCustomerOfStatusChange(updatedRequest, "completed", {
-        businessName:
-          typeof businessData.businessName === "string"
-            ? businessData.businessName
-            : null,
-        bookingSlug:
-          typeof businessData.bookingSlug === "string"
-            ? businessData.bookingSlug
-            : null,
-        logoUrl:
-          typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
-      });
+      quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+
+      if (shouldComplete) {
+        const after = await requestSnap.ref.get();
+        const updatedRequest = mapInspectionDoc(
+          inspectionId,
+          after.data() ?? {},
+        );
+        const businessSnap = await adminDb
+          .collection("businesses")
+          .doc(businessId)
+          .get();
+        const businessData = businessSnap.data() ?? {};
+        await notifyCustomerOfStatusChange(updatedRequest, "completed", {
+          businessName:
+            typeof businessData.businessName === "string"
+              ? businessData.businessName
+              : null,
+          bookingSlug:
+            typeof businessData.bookingSlug === "string"
+              ? businessData.bookingSlug
+              : null,
+          logoUrl:
+            typeof businessData.logoUrl === "string"
+              ? businessData.logoUrl
+              : null,
+        });
+      }
     }
   } catch (error) {
     console.error("quotation mirror to request failed:", error);
@@ -701,7 +714,9 @@ export async function createQuotationForInspection(
     /* catalog auto-save is best-effort */
   }
 
-  await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+  if (shouldSend) {
+    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+  }
 
   return { ok: true, quotation };
 }
@@ -725,6 +740,8 @@ export type StandaloneQuotationInput = {
   validUntil?: string | null;
   imageUrls?: string[];
   depositRequest?: unknown;
+  /** When true, emails/SMS the customer and marks the quotation as sent. */
+  send?: boolean;
 };
 
 type ServiceLookup = { name: string; businessType: string };
@@ -1101,7 +1118,9 @@ export async function createStandaloneQuotation(
     console.error("standalone quotation PDF generation failed:", error);
   }
 
-  // 4. Mirror the quotation summary onto the request and mark sent.
+  const shouldSend = input.send === true;
+
+  // 4. Mirror the quotation summary onto the request.
   try {
     await inspectionRef.set(
       {
@@ -1112,23 +1131,25 @@ export async function createStandaloneQuotation(
           subtotalAud,
           balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
-          status: "sent",
+          status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...awaitingBookingFields(),
+        ...(shouldSend ? awaitingBookingFields() : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
-    await ref.set(
-      {
-        status: "sent",
-        ...awaitingBookingFields(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    if (shouldSend) {
+      await ref.set(
+        {
+          status: "sent",
+          ...awaitingBookingFields(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    }
   } catch (error) {
     console.error("standalone quotation mirror to inspection failed:", error);
   }
@@ -1146,11 +1167,13 @@ export async function createStandaloneQuotation(
     /* catalog auto-save is best-effort */
   }
 
-  // 6. Email the customer their quotation PDF.
-  try {
-    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
-  } catch (error) {
-    console.error("standalone quotation email failed:", error);
+  // 6. Email the customer their quotation PDF when explicitly sending.
+  if (shouldSend) {
+    try {
+      await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    } catch (error) {
+      console.error("standalone quotation email failed:", error);
+    }
   }
 
   return { ok: true, quotation };
@@ -1359,6 +1382,210 @@ export async function listBusinessQuotations(
     "@/lib/invoices/enrich-quotations"
   );
   return enrichQuotationsWithInvoices(enriched);
+}
+
+async function applyQuotationCustomerDecision(
+  requestSnap: FirebaseFirestore.DocumentSnapshot,
+  quotationId: string,
+  decision: "accepted" | "rejected",
+  options: { notifyBusiness?: boolean } = {},
+): Promise<
+  | { ok: true; request: ReturnType<typeof mapInspectionDoc> }
+  | { ok: false; status: number; error: string }
+> {
+  const data = requestSnap.data() ?? {};
+  const request = mapInspectionDoc(requestSnap.id, data);
+  const summary = request.quotation;
+
+  if (!summary || summary.id !== quotationId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  // Legacy mirrors may lack `status`; they were always sent on creation.
+  if (summary.status === "draft") {
+    return {
+      ok: false,
+      status: 400,
+      error: "There is no sent quotation awaiting a decision.",
+    };
+  }
+  if (request.bookingId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This quotation has already been converted into a job.",
+    };
+  }
+  if (summary.customerDecision === decision) {
+    return { ok: true, request };
+  }
+
+  const decidedAt = FieldValue.serverTimestamp();
+  await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .doc(quotationId)
+    .set(
+      {
+        customerDecision: decision,
+        customerDecisionAt: decidedAt,
+        updatedAt: decidedAt,
+      },
+      { merge: true },
+    );
+  await requestSnap.ref.set(
+    {
+      quotation: {
+        ...(typeof data.quotation === "object" && data.quotation
+          ? data.quotation
+          : {}),
+        customerDecision: decision,
+        customerDecisionAt: decidedAt,
+      },
+      updatedAt: decidedAt,
+    },
+    { merge: true },
+  );
+
+  const updatedRequest = {
+    ...request,
+    quotation: summary
+      ? {
+          ...summary,
+          customerDecision: decision,
+          customerDecisionAt: Date.now(),
+        }
+      : null,
+  };
+
+  if (options.notifyBusiness) {
+    try {
+      const { notifyBusinessOfQuotationDecision } = await import(
+        "@/lib/notifications/server"
+      );
+      const businessSnap = await adminDb
+        .collection("businesses")
+        .doc(request.businessId)
+        .get();
+      const businessData = businessSnap.data() ?? {};
+      await notifyBusinessOfQuotationDecision(updatedRequest, decision, {
+        businessName:
+          typeof businessData.businessName === "string"
+            ? businessData.businessName
+            : null,
+        bookingSlug:
+          typeof businessData.bookingSlug === "string"
+            ? businessData.bookingSlug
+            : null,
+      });
+    } catch (error) {
+      console.error("quotation decision notification failed:", error);
+    }
+  }
+
+  return { ok: true, request: updatedRequest };
+}
+
+/**
+ * Records the customer's accept/reject decision on a sent quotation. The
+ * business cannot schedule a job or issue an invoice until it is accepted.
+ */
+export async function customerDecideQuotation(
+  requestId: string,
+  identity: { customerId: string; customerEmail: string },
+  decision: "accepted" | "rejected",
+): Promise<
+  | { ok: true }
+  | { ok: false; status: number; error: string }
+> {
+  const { getRequestDocument } = await import(
+    "@/lib/inspection/request-document"
+  );
+  const snap = await getRequestDocument(requestId);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+  const data = snap.data() ?? {};
+  const request = mapInspectionDoc(snap.id, data);
+
+  const ownsById =
+    !!request.customerId && request.customerId === identity.customerId;
+  const ownsByEmail =
+    !!identity.customerEmail &&
+    request.customer.email.toLowerCase() ===
+      identity.customerEmail.toLowerCase();
+  if (!ownsById && !ownsByEmail) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const summary = request.quotation;
+  if (!summary) {
+    return {
+      ok: false,
+      status: 400,
+      error: "There is no quotation awaiting your decision.",
+    };
+  }
+
+  const result = await applyQuotationCustomerDecision(
+    snap,
+    summary.id,
+    decision,
+    { notifyBusiness: true },
+  );
+  if (!result.ok) return result;
+  return { ok: true };
+}
+
+/**
+ * Lets the business owner record the customer's accept/reject decision when
+ * the customer confirms verbally or outside the booking engine.
+ */
+export async function businessRecordQuotationCustomerDecision(
+  quotationId: string,
+  businessId: string,
+  decision: "accepted" | "rejected",
+): Promise<
+  | { ok: true; request: ReturnType<typeof mapInspectionDoc> }
+  | { ok: false; status: number; error: string }
+> {
+  const quotationSnap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .doc(quotationId.trim())
+    .get();
+  if (!quotationSnap.exists) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  const quotationData = quotationSnap.data() ?? {};
+  if (quotationData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const inspectionRequestId =
+    typeof quotationData.inspectionRequestId === "string"
+      ? quotationData.inspectionRequestId.trim()
+      : "";
+  if (!inspectionRequestId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This quotation is not linked to a visit.",
+    };
+  }
+
+  const { getRequestDocument } = await import(
+    "@/lib/inspection/request-document"
+  );
+  const requestSnap = await getRequestDocument(inspectionRequestId);
+  if (!requestSnap) {
+    return { ok: false, status: 404, error: "Linked request not found." };
+  }
+
+  return applyQuotationCustomerDecision(
+    requestSnap,
+    quotationSnap.id,
+    decision,
+    { notifyBusiness: false },
+  );
 }
 
 async function sendQuotationCreatedEmail(

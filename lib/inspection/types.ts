@@ -175,6 +175,15 @@ export type InspectionRequestDetail = {
   bookingConfirmedAt: number | null;
 };
 
+/** Customer's response to a sent quotation. */
+export type QuotationCustomerDecision = "accepted" | "rejected";
+
+export function parseQuotationCustomerDecision(
+  raw: unknown,
+): QuotationCustomerDecision | null {
+  return raw === "accepted" || raw === "rejected" ? raw : null;
+}
+
 /** Quotation summary stored on requests after a quote is created. */
 export type InspectionQuotationSummary = {
   id: string;
@@ -185,6 +194,9 @@ export type InspectionQuotationSummary = {
   balanceDueAud: number | null;
   status: string | null;
   createdAt: number | null;
+  /** Customer accept/reject response (null until the customer decides). */
+  customerDecision: QuotationCustomerDecision | null;
+  customerDecisionAt: number | null;
 };
 
 export function parseInspectionQuotation(
@@ -214,6 +226,8 @@ export function parseInspectionQuotation(
     balanceDueAud: readPrice(item.balanceDueAud),
     status: typeof item.status === "string" ? item.status : null,
     createdAt: toMillis(item.createdAt),
+    customerDecision: parseQuotationCustomerDecision(item.customerDecision),
+    customerDecisionAt: toMillis(item.customerDecisionAt),
   };
 }
 

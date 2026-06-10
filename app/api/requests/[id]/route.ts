@@ -14,6 +14,7 @@ import {
   type InspectionAssignment,
   type InspectionSlot,
 } from "@/lib/inspection/types";
+import { getRequestDocument } from "@/lib/inspection/request-document";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -189,11 +190,8 @@ async function requireAssignedInspector(request: Request, requestId: string) {
       };
     }
 
-    const snap = await adminDb
-      .collection("requests")
-      .doc(requestId)
-      .get();
-    if (!snap.exists) {
+    const snap = await getRequestDocument(requestId);
+    if (!snap) {
       return {
         ok: false as const,
         status: 404,

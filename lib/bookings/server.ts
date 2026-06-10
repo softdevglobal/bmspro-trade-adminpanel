@@ -105,6 +105,17 @@ export async function createBookingFromInspection(
     };
   }
 
+  if (current.quotation.customerDecision !== "accepted") {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        current.quotation.customerDecision === "rejected"
+          ? "The customer rejected this quotation, so it cannot become a job."
+          : "Wait for the customer to accept the quotation before creating a job.",
+    };
+  }
+
   if (current.bookingId) {
     return {
       ok: false,

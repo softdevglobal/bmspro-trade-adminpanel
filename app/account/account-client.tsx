@@ -641,7 +641,7 @@ function useBookings(): {
       });
       const payload = (await response.json()) as {
         ok?: boolean;
-        bookings?: CustomerBooking[];
+        jobs?: CustomerBooking[];
         error?: string;
       };
       if (!response.ok || !payload.ok) {
@@ -1015,6 +1015,10 @@ function BookingCard({
   );
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<"accepted" | "rejected" | null>(
+    null,
+  );
+  const [decisionError, setDecisionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -1060,6 +1064,36 @@ function BookingCard({
       );
     } finally {
       setAccepting(false);
+    }
+  }
+
+  async function decideQuotation(decision: "accepted" | "rejected") {
+    setDeciding(decision);
+    setDecisionError(null);
+    try {
+      const idToken = await getIdToken();
+      const response = await fetch(`/api/customer/jobs/${booking.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ action: "quotation_decision", decision }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not save your decision.");
+      }
+      onChanged();
+    } catch (err) {
+      setDecisionError(
+        err instanceof Error ? err.message : "Could not save your decision.",
+      );
+    } finally {
+      setDeciding(null);
     }
   }
 
@@ -1217,6 +1251,77 @@ function BookingCard({
                     pdfUrl={booking.quotation.pdfUrl}
                     title={headline}
                   />
+
+                  {booking.quotation.customerDecision === "accepted" ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-body text-[12px] font-bold text-emerald-700">
+                      <span className="material-symbols-outlined text-[16px]">
+                        check_circle
+                      </span>
+                      You accepted this quotation
+                    </p>
+                  ) : booking.quotation.customerDecision === "rejected" ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 font-body text-[12px] font-bold text-rose-700">
+                      <span className="material-symbols-outlined text-[16px]">
+                        cancel
+                      </span>
+                      You rejected this quotation
+                    </p>
+                  ) : !booking.bookingId &&
+                    booking.quotation.status !== "draft" ? (
+                    <div className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3">
+                      <p className="font-body text-[12px] font-bold text-amber-900">
+                        Do you accept this quotation?
+                      </p>
+                      <p className="mt-0.5 font-body text-[11px] text-amber-800/90">
+                        The business can only schedule the job once you accept.
+                      </p>
+                      {decisionError ? (
+                        <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
+                          {decisionError}
+                        </p>
+                      ) : null}
+                      <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          disabled={deciding !== null}
+                          onClick={() => void decideQuotation("accepted")}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span
+                            className={`material-symbols-outlined text-[18px] ${
+                              deciding === "accepted" ? "animate-spin" : ""
+                            }`}
+                          >
+                            {deciding === "accepted"
+                              ? "progress_activity"
+                              : "check_circle"}
+                          </span>
+                          {deciding === "accepted"
+                            ? "Accepting…"
+                            : "Accept quotation"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deciding !== null}
+                          onClick={() => void decideQuotation("rejected")}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white py-2.5 font-body text-[13px] font-bold text-rose-600 shadow-sm transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span
+                            className={`material-symbols-outlined text-[18px] ${
+                              deciding === "rejected" ? "animate-spin" : ""
+                            }`}
+                          >
+                            {deciding === "rejected"
+                              ? "progress_activity"
+                              : "cancel"}
+                          </span>
+                          {deciding === "rejected"
+                            ? "Rejecting…"
+                            : "Reject quotation"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </section>

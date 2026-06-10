@@ -393,6 +393,20 @@ export async function createInvoiceFromQuotation(
     return { ok: true, invoice };
   }
 
+  if (
+    quotation.status === "sent" &&
+    quotation.customerDecision !== "accepted"
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        quotation.customerDecision === "rejected"
+          ? "The customer rejected this quotation, so it cannot be invoiced."
+          : "Wait for the customer to accept the quotation before issuing an invoice.",
+    };
+  }
+
   const lineItems = input.lineItems.filter(
     (item) => item.name.trim() && item.priceAud >= 0,
   );

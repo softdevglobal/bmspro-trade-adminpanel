@@ -537,6 +537,59 @@ export async function notifyCustomerOfVisitOnTheWay(
   }
 }
 
+/** Notify the business owner that the customer accepted or rejected a quotation. */
+export async function notifyBusinessOfQuotationDecision(
+  request: InspectionRequestDetail,
+  decision: "accepted" | "rejected",
+  context: { bookingSlug?: string | null; businessName?: string | null } = {},
+): Promise<void> {
+  const who = request.customer.fullName?.trim() || "The customer";
+  const headline = requestHeadline(request);
+  const quoteCode = request.quotation?.quotationCode?.trim();
+  const quoteLabel = quoteCode ? `quotation ${quoteCode}` : "the quotation";
+  const title =
+    decision === "accepted"
+      ? "Quotation accepted"
+      : "Quotation rejected";
+  const body =
+    decision === "accepted"
+      ? `${who} accepted ${quoteLabel} for ${headline}. You can now schedule the job or issue an invoice.`
+      : `${who} rejected ${quoteLabel} for ${headline}.`;
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      requestId: request.id,
+      status: request.status,
+      type:
+        decision === "accepted" ? "quotation_accepted" : "quotation_rejected",
+      title,
+      body,
+    });
+
+    const ownerUid = await resolveBusinessOwnerUid(request.businessId);
+    if (ownerUid) {
+      await sendOwnerMobilePush({
+        ownerUid,
+        title,
+        body,
+        data: {
+          type: "quotation_decision",
+          requestId: request.id,
+        },
+      });
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 /**
  * Notify the business owner that the customer accepted one of the proposed
  * times. The owner still needs to set a specific visit window.

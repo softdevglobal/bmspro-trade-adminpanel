@@ -141,6 +141,7 @@ export async function POST(request: Request) {
       state?: string;
       postcode?: string;
     };
+    const send = payload.send === true;
     const result = await createStandaloneQuotation(auth.businessId, auth.uid, {
       customer: {
         fullName: typeof customer.fullName === "string" ? customer.fullName : "",
@@ -201,6 +202,7 @@ export async function POST(request: Request) {
         typeof payload.validUntil === "string" ? payload.validUntil : null,
       imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],
       depositRequest: payload.depositRequest ?? null,
+      send,
     });
 
     if (!result.ok) {
@@ -244,6 +246,7 @@ export async function POST(request: Request) {
 
   const customerPayload = payload.customer;
   const addressPayload = payload.address;
+  const send = payload.send === true;
 
   const result = await createQuotationForInspection(
     auth.businessId,
@@ -309,6 +312,7 @@ export async function POST(request: Request) {
             },
           }
         : {}),
+      send,
     },
     auth.role,
   );

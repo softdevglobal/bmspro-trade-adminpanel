@@ -27,6 +27,8 @@ const EMAIL_PRESENTATION: Record<
   booking_on_the_way: { eyebrow: "Job on the way", tone: "brand" },
   request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },
   request_completed: { eyebrow: "Visit completed", tone: "success" },
+  quotation_accepted: { eyebrow: "Quotation accepted", tone: "success" },
+  quotation_rejected: { eyebrow: "Quotation rejected", tone: "danger" },
 };
 
 export type InspectionCustomerNotificationEmailInput = {
