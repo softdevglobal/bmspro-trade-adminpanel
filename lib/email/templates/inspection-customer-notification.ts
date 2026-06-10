@@ -114,15 +114,16 @@ export async function sendInspectionCustomerNotificationEmail(
       subject: input.title,
       htmlBody: html,
     });
-
-    if (input.customerPhone) {
-      const smsBody = input.body?.replace(/\s+/g, " ").trim();
-      await sendSms({
-        to: input.customerPhone,
-        message: smsBody ? `${input.title}. ${smsBody}` : input.title,
-      });
-    }
   } catch {
-    /* email/SMS is best-effort */
+    /* email is best-effort */
+  }
+
+  // SMS is sent independently so an email failure never skips the SMS.
+  if (input.customerPhone) {
+    const smsBody = input.body?.replace(/\s+/g, " ").trim();
+    await sendSms({
+      to: input.customerPhone,
+      message: smsBody ? `${input.title}. ${smsBody}` : input.title,
+    });
   }
 }

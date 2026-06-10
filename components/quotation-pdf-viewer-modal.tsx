@@ -96,7 +96,11 @@ export function QuotationPdfViewerModal({
             disabled={downloading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <span className="material-symbols-outlined text-[18px]">
+            <span
+              className={`material-symbols-outlined text-[18px] ${
+                downloading ? "animate-spin" : ""
+              }`}
+            >
               {downloading ? "progress_activity" : "download"}
             </span>
             <span className="hidden sm:inline">

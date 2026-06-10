@@ -1,5 +1,6 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import type { ProfileFormState } from "@/components/business-settings-panel";
 import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -166,14 +167,12 @@ export function BusinessProfileSettings({
               <span className="font-body text-[13px] font-semibold text-on-surface">
                 Business phone
               </span>
-              <input
-                type="tel"
+              <AuPhoneInput
                 value={form.businessPhone}
                 disabled={saving}
-                onChange={(e) => updateField("businessPhone", e.target.value)}
-                className={INPUT_CLASS}
-                maxLength={30}
-                placeholder="04xx xxx xxx"
+                onChange={(value) => updateField("businessPhone", value)}
+                size="md"
+                className="mt-1"
               />
             </label>
 

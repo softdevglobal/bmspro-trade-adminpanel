@@ -1,6 +1,8 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { AuditLogView } from "@/components/audit-log-view";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
@@ -552,14 +554,13 @@ function ProfileSection({ slug }: { slug: string }) {
           </ProfileField>
 
           <ProfileField label="Mobile number" icon="call">
-            <input
-              type="tel"
-              inputMode="tel"
+            <AuPhoneInput
               value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="07XXXXXXXX"
+              onChange={setPhone}
               autoComplete="tel"
-              className={PROFILE_INPUT_CLASS}
+              size="lg"
+              leadingIconPadding="pl-10"
+              className="rounded-xl border-stone-200 bg-white shadow-sm focus-within:border-primary/40 focus-within:ring-primary/10"
             />
           </ProfileField>
 
@@ -1346,6 +1347,8 @@ function NotificationsSection({ slug }: { slug: string }) {
   const router = useRouter();
   const { notifications, loading, error, unread, reload, markAllRead, clearOne, clearAll } =
     useCustomerNotifications();
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
 
   function openRequest(note: NotificationRecord) {
     if (!note.requestId) return;
@@ -1407,8 +1410,31 @@ function NotificationsSection({ slug }: { slug: string }) {
     );
   }
 
+  async function handleClearAll() {
+    setClearingAll(true);
+    try {
+      await clearAll();
+      setShowClearConfirm(false);
+    } finally {
+      setClearingAll(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
+      <DeleteConfirmModal
+        open={showClearConfirm}
+        title="Clear all notifications?"
+        description="This will permanently remove all updates from your notification list. You can still view your requests from the Requests and History tabs."
+        confirmLabel="Yes, clear all"
+        cancelLabel="Cancel"
+        isLoading={clearingAll}
+        onCancel={() => {
+          if (!clearingAll) setShowClearConfirm(false);
+        }}
+        onConfirm={() => void handleClearAll()}
+      />
+
       <div className="flex items-center justify-between gap-2">
         <p className="font-body text-[12px] text-on-surface-variant">
           {unread > 0
@@ -1417,7 +1443,7 @@ function NotificationsSection({ slug }: { slug: string }) {
         </p>
         <button
           type="button"
-          onClick={() => void clearAll()}
+          onClick={() => setShowClearConfirm(true)}
           className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:border-rose-200 hover:text-rose-600"
         >
           <span className="material-symbols-outlined text-[15px]">clear_all</span>

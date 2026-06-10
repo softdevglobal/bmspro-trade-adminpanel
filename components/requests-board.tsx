@@ -798,7 +798,7 @@ function DrawerReviewFooter({
     <div className="border-t border-outline-variant/40 pt-4">
       {needsOwnerQuotation ? (
         <Link
-          href={`/dashboard/quotations/new?inspectionRequestId=${encodeURIComponent(request.id)}`}
+          href={`/dashboard/quotations/new?requestId=${encodeURIComponent(request.id)}`}
           className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
         >
           <span className="material-symbols-outlined text-[18px]">
@@ -1449,7 +1449,7 @@ function QuotationSection({ requestId }: { requestId: string }) {
       try {
         const token = await user.getIdToken();
         const response = await fetch(
-          `/api/quotations?inspectionRequestId=${encodeURIComponent(requestId)}`,
+          `/api/quotations?requestId=${encodeURIComponent(requestId)}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         const data = (await response.json()) as {
@@ -3099,7 +3099,11 @@ function FormActions({
         disabled={disabled}
         className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        <span className="material-symbols-outlined text-[18px]">
+        <span
+          className={`material-symbols-outlined text-[18px] ${
+            disabled ? "animate-spin" : ""
+          }`}
+        >
           {disabled ? "progress_activity" : confirmIcon}
         </span>
         {disabled ? "Saving…" : confirmLabel}

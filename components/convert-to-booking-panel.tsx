@@ -370,7 +370,11 @@ export function ConvertToBookingPanel({
           disabled={submitting}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <span className="material-symbols-outlined text-[18px]">
+          <span
+            className={`material-symbols-outlined text-[18px] ${
+              submitting ? "animate-spin" : ""
+            }`}
+          >
             {submitting ? "progress_activity" : "assignment"}
           </span>
           {submitting ? "Saving…" : "Save booking"}

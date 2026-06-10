@@ -217,9 +217,10 @@ export async function POST(request: Request) {
   }
 
   const inspectionRequestId =
-    typeof payload.inspectionRequestId === "string"
+    (typeof payload.requestId === "string" ? payload.requestId : "") ||
+    (typeof payload.inspectionRequestId === "string"
       ? payload.inspectionRequestId
-      : "";
+      : "");
   const lineItems = payload.lineItems;
   const finalPriceAud =
     typeof payload.finalPriceAud === "number" &&
@@ -351,7 +352,9 @@ export async function GET(request: Request) {
   }
 
   const inspectionRequestId =
-    url.searchParams.get("inspectionRequestId")?.trim() ?? "";
+    url.searchParams.get("requestId")?.trim() ||
+    url.searchParams.get("inspectionRequestId")?.trim() ||
+    "";
 
   if (!inspectionRequestId) {
     const quotations = await listBusinessQuotations(auth.businessId);

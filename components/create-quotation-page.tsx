@@ -1,5 +1,6 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import {
   DiscountEditModal,
@@ -373,7 +374,9 @@ export function CreateQuotationPage() {
   );
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("inspectionRequestId")?.trim();
+    const id =
+      params.get("requestId")?.trim() ||
+      params.get("inspectionRequestId")?.trim();
     if (id) setInspectionRequestId(id);
   }, []);
 
@@ -978,7 +981,7 @@ export function CreateQuotationPage() {
       // Bound to an existing request → attach the quotation to it.
       // Otherwise create a standalone quotation (with its own visit record).
       const quotationBody = inspectionRequestId
-        ? { inspectionRequestId, ...sharedBody }
+        ? { requestId: inspectionRequestId, ...sharedBody }
         : {
             standalone: true,
             requestType,
@@ -1260,16 +1263,15 @@ export function CreateQuotationPage() {
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="block">
                       <span className={LABEL_CLASS}>Mobile</span>
-                      <input
-                        type="tel"
+                      <AuPhoneInput
                         value={customer.phone}
-                        onChange={(e) =>
+                        onChange={(phone) =>
                           setCustomer((prev) => ({
                             ...prev,
-                            phone: e.target.value.replace(/\D/g, ""),
+                            phone,
                           }))
                         }
-                        className={INPUT_CLASS}
+                        className="mt-1"
                       />
                     </label>
                     <label className="block">

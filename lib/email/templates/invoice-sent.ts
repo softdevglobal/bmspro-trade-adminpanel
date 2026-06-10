@@ -89,17 +89,17 @@ export async function sendInvoiceSentEmail(
   const email = input.customerEmail.trim();
   if (!email || !input.pdfBytes?.length) return;
 
+  const businessLabel = input.businessName?.trim() || "your trade provider";
+  const serviceTitle = input.serviceTitle.trim() || "your job";
+  const deposit = buildQuotationDocumentDeposit(
+    input.totalAud,
+    input.depositRequest,
+  );
+
   try {
-    const businessLabel = input.businessName?.trim() || "your trade provider";
-    const serviceTitle = input.serviceTitle.trim() || "your job";
     const bookingEngineUrl = input.bookingSlug
       ? buildBookingUrl(input.bookingSlug)
       : null;
-
-    const deposit = buildQuotationDocumentDeposit(
-      input.totalAud,
-      input.depositRequest,
-    );
     const details = buildInvoiceEmailDetails(input);
 
     const html = renderEmail({
@@ -139,18 +139,19 @@ export async function sendInvoiceSentEmail(
         },
       ],
     });
-
-    if (input.customerPhone) {
-      const amount = formatEmailAud(
-        deposit ? input.balanceDueAud : input.totalAud,
-      );
-      const amountLabel = deposit ? "balance due" : "total due";
-      await sendSms({
-        to: input.customerPhone,
-        message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
-      });
-    }
   } catch {
-    /* email/SMS is best-effort */
+    /* email is best-effort */
+  }
+
+  // SMS is sent independently so an email failure never skips the SMS.
+  if (input.customerPhone) {
+    const amount = formatEmailAud(
+      deposit ? input.balanceDueAud : input.totalAud,
+    );
+    const amountLabel = deposit ? "balance due" : "total due";
+    await sendSms({
+      to: input.customerPhone,
+      message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
+    });
   }
 }

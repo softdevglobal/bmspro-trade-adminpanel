@@ -370,7 +370,11 @@ function InvoicePreviewDrawer({
                 disabled={pdfLoading}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <span className="material-symbols-outlined text-[20px]">
+                <span
+                  className={`material-symbols-outlined text-[20px] ${
+                    pdfLoading ? "animate-spin" : ""
+                  }`}
+                >
                   {pdfLoading ? "progress_activity" : "picture_as_pdf"}
                 </span>
                 {pdfLoading ? "Loading PDF…" : "View invoice PDF"}

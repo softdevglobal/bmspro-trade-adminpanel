@@ -1,5 +1,7 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
+
 import {
   DepositRequestModal,
   type DepositRequest,
@@ -875,11 +877,10 @@ export function CreateInvoiceFromQuotation({
                   </label>
                   <label className="block">
                     <span className={LABEL_CLASS}>Phone</span>
-                    <input
-                      type="tel"
+                    <AuPhoneInput
                       value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      className={INPUT_CLASS}
+                      onChange={setCustomerPhone}
+                      className="mt-1"
                     />
                   </label>
                   <p className="font-body text-[13px] text-on-surface-variant sm:col-span-2">

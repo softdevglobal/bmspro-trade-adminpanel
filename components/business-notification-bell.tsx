@@ -141,7 +141,11 @@ export function BusinessNotificationBell() {
                 disabled={clearingAll}
                 className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-rose-600 disabled:opacity-60"
               >
-                <span className="material-symbols-outlined text-[15px]">
+                <span
+                  className={`material-symbols-outlined text-[15px] ${
+                    clearingAll ? "animate-spin" : ""
+                  }`}
+                >
                   {clearingAll ? "progress_activity" : "clear_all"}
                 </span>
                 Clear all
@@ -206,7 +210,11 @@ export function BusinessNotificationBell() {
                       aria-label="Clear notification"
                       className="my-2 mr-2 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-rose-600 disabled:opacity-60"
                     >
-                      <span className="material-symbols-outlined text-[16px]">
+                      <span
+                        className={`material-symbols-outlined text-[16px] ${
+                          busyId === note.id ? "animate-spin" : ""
+                        }`}
+                      >
                         {busyId === note.id ? "progress_activity" : "close"}
                       </span>
                     </button>
