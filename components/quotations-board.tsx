@@ -176,7 +176,7 @@ function QuotationCardMenu({
               </span>
             ) : (
               <Link
-                href="/dashboard/bookings"
+                href="/dashboard/jobs"
                 role="menuitem"
                 className={menuItemClass}
                 onClick={() => setOpen(false)}
@@ -193,7 +193,7 @@ function QuotationCardMenu({
               role="menuitem"
               disabled
               className={menuItemClass}
-              title="Complete the inspection visit before scheduling"
+              title="Complete the request before scheduling"
             >
               <span className="material-symbols-outlined text-[18px] text-outline">
                 event
@@ -243,7 +243,7 @@ function QuotationCard({
   onBook: () => void;
 }) {
   const showFollowUpActions = canConvertQuotationToBooking(quotation);
-  const waitHref = `/dashboard/inspection-visits?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
+  const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
 
   return (
     <div
@@ -607,7 +607,7 @@ function QuotationPreviewContent({
             Linked visit
           </p>
           <Link
-            href={`/dashboard/inspection-visits?request=${quotation.inspectionRequestId}`}
+            href={`/dashboard/requests?request=${quotation.inspectionRequestId}`}
             onClick={onClose}
             className="mt-2 flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2.5 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-surface-container"
           >
@@ -638,7 +638,7 @@ function QuotationPreviewContent({
                     </span>
                   ) : (
                     <Link
-                      href="/dashboard/bookings"
+                      href="/dashboard/jobs"
                       onClick={onClose}
                       className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
                     >
@@ -896,7 +896,7 @@ export function QuotationsBoard() {
           </p>
           <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
             Create a quotation directly here, or send one from a completed
-            inspection visit.
+            request.
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <Link
@@ -907,13 +907,13 @@ export function QuotationsBoard() {
               New quotation
             </Link>
             <Link
-              href="/dashboard/inspection-visits"
+              href="/dashboard/requests"
               className="inline-flex items-center gap-2 rounded-xl border border-outline-variant px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
             >
               <span className="material-symbols-outlined text-[20px]">
                 event_available
               </span>
-              Inspection visits
+              Requests
             </Link>
           </div>
         </div>

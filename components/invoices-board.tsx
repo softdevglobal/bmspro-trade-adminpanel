@@ -530,13 +530,13 @@ export function InvoicesBoard() {
             View quotations
           </Link>
           <Link
-            href="/dashboard/inspection-visits"
+            href="/dashboard/requests"
             className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
           >
             <span className="material-symbols-outlined text-[20px]">
               event_available
             </span>
-            Inspection visits
+            Requests
           </Link>
         </div>
       </div>

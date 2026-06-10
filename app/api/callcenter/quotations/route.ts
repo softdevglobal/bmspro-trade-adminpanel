@@ -85,7 +85,7 @@
  *         },
  *         "lineItems": [
  *           {
- *             "description": "Inspection visit",
+ *             "description": "Request",
  *             "quantity":    1,
  *             "unitPriceAud": 250,
  *             "totalAud":    250

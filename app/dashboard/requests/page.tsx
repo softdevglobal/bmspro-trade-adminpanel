@@ -1,15 +1,15 @@
 import { BusinessOwnerGuard } from "@/components/business-owner-guard";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { InspectionVisitsBoard } from "@/components/inspection-visits-board";
+import { RequestsBoard } from "@/components/requests-board";
 
-export default function InspectionVisitsPage() {
+export default function RequestsPage() {
   return (
     <DashboardShell
-      title="Inspection visits"
+      title="Requests"
       subtitle="Review customer requests, schedule visits and assign an inspector."
     >
       <BusinessOwnerGuard>
-        <InspectionVisitsBoard />
+        <RequestsBoard />
       </BusinessOwnerGuard>
     </DashboardShell>
   );

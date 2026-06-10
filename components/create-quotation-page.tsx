@@ -365,7 +365,7 @@ export function CreateQuotationPage() {
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
 
-  // When opened from an inspection visit (e.g. a visit run by staff who can't
+  // When opened from an request (e.g. a visit run by staff who can't
   // create quotations), bind the quotation to that existing visit and prefill
   // the customer/service instead of creating a brand-new standalone visit.
   const [inspectionRequestId, setInspectionRequestId] = useState<string | null>(
@@ -975,7 +975,7 @@ export function CreateQuotationPage() {
           : null,
       };
 
-      // Bound to an existing inspection visit → attach the quotation to it.
+      // Bound to an existing request → attach the quotation to it.
       // Otherwise create a standalone quotation (with its own visit record).
       const quotationBody = inspectionRequestId
         ? { inspectionRequestId, ...sharedBody }
@@ -1166,7 +1166,7 @@ export function CreateQuotationPage() {
             assignment_turned_in
           </span>
           <span>
-            This quotation will be attached to inspection visit{" "}
+            This quotation will be attached to request{" "}
             <span className="font-semibold">
               {boundInspection.requestCode ?? boundInspection.id}
             </span>
@@ -1362,7 +1362,7 @@ export function CreateQuotationPage() {
                 </h2>
                 <p className="mt-1 font-body text-[12px] text-on-surface-variant">
                   Choose an existing service or describe a custom job — same as
-                  an inspection request.
+                  an request.
                 </p>
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <RequestTypeCard

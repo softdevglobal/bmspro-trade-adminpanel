@@ -19,6 +19,6 @@ export async function GET(request: Request) {
     );
   }
 
-  const bookings = await listBusinessBookings(auth.businessId);
-  return NextResponse.json({ ok: true, bookings });
+  const jobs = await listBusinessBookings(auth.businessId);
+  return NextResponse.json({ ok: true, jobs });
 }

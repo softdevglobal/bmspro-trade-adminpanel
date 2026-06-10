@@ -18,7 +18,7 @@ import {
   type InspectionRequestStatus,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
-import type { CustomerBooking } from "@/app/api/customer/bookings/route";
+import type { CustomerBooking } from "@/app/api/customer/jobs/route";
 import type { InspectionSlot, InspectionAssignment } from "@/lib/inspection/types";
 import {
   CustomerBookingShell,
@@ -262,14 +262,14 @@ function AuthedAccount({
 }) {
   const searchParams = useSearchParams();
   const focusRequestId =
-    tab === "requests" || tab === "bookings"
+    tab === "requests" || tab === "jobs"
       ? searchParams.get("request")?.trim() || null
       : null;
 
   const titles: Record<CustomerAccountTab, string> = {
     profile: "My profile",
     requests: "My requests",
-    bookings: "Booking history",
+    jobs: "Job history",
     notifications: "Notifications",
     activity: "My activity",
   };
@@ -296,7 +296,7 @@ function AuthedAccount({
             focusRequestId={focusRequestId}
           />
         ) : null}
-        {tab === "bookings" ? (
+        {tab === "jobs" ? (
           <BookingsList
             scope="history"
             emptyHint="No past bookings yet."
@@ -318,7 +318,7 @@ function ActivitySection({ slug }: { slug: string }) {
   return (
     <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm sm:p-5">
       <p className="font-body text-[13px] text-on-surface-variant">
-        Sign-ins, inspection requests, and account updates for your profile with
+        Sign-ins, requests, and account updates for your profile with
         this business.
       </p>
       <div className="mt-4">
@@ -635,7 +635,7 @@ function useBookings(): {
     try {
       const idToken = await getIdToken();
       if (!idToken) throw new Error("Not signed in");
-      const response = await fetch("/api/customer/bookings", {
+      const response = await fetch("/api/customer/jobs", {
         headers: { authorization: `Bearer ${idToken}` },
       });
       const payload = (await response.json()) as {
@@ -644,9 +644,9 @@ function useBookings(): {
         error?: string;
       };
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Could not load bookings.");
+        throw new Error(payload.error ?? "Could not load jobs.");
       }
-      setBookings(payload.bookings ?? []);
+      setBookings(payload.jobs ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load bookings.");
     } finally {
@@ -1033,7 +1033,7 @@ function BookingCard({
     setAcceptError(null);
     try {
       const idToken = await getIdToken();
-      const response = await fetch(`/api/customer/bookings/${booking.id}`, {
+      const response = await fetch(`/api/customer/jobs/${booking.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

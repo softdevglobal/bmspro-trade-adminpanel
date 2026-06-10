@@ -124,7 +124,7 @@ function requestHeadline(request: InspectionRequestDetail): string {
     request.customRequest?.title ??
     (request.requestType === "custom_quote"
       ? "Custom quotation request"
-      : "Inspection request")
+      : "Request")
   );
 }
 
@@ -132,7 +132,7 @@ function slotLabel(slot: InspectionSlot): string {
   return `${formatSlotDate(slot.date)} · ${TIME_RANGE_SHORT_LABELS[slot.timeRange]}`;
 }
 
-/** Confirm to the customer that their inspection request was received. */
+/** Confirm to the customer that their request was received. */
 export async function notifyCustomerOfNewRequest(
   request: InspectionRequestDetail,
   context: CustomerNotifyContext = {},
@@ -177,7 +177,7 @@ export async function notifyCustomerOfNewRequest(
       status: "pending",
       type: "request_created",
       title: `We received your request — ${business}`,
-      body: `Thanks for submitting your inspection request with ${business}. Your request is pending review.\n\nWe'll email you when they confirm a visit time or suggest other options. You can also check status anytime from your account.`,
+      body: `Thanks for submitting your request with ${business}. Your request is pending review.\n\nWe'll email you when they confirm a visit time or suggest other options. You can also check status anytime from your account.`,
       emailDetails,
       emailHighlight: preferredSummary,
       emailHighlightLabel: preferredSummary ? "Your preferred times" : null,
@@ -194,7 +194,7 @@ export async function notifyBusinessOfNewRequest(
 ): Promise<void> {
   const headline = requestHeadline(request);
   const who = request.customer.fullName?.trim() || "A customer";
-  const title = "New inspection request";
+  const title = "New request";
   const body = `${who} requested ${headline}.`;
   try {
     await createNotification({
@@ -437,7 +437,7 @@ export async function notifyCustomerOfBookingOnTheWay(
     { label: "Technician", value: technician },
   ];
   if (booking.bookingCode) {
-    emailDetails.push({ label: "Booking", value: booking.bookingCode });
+    emailDetails.push({ label: "Job", value: booking.bookingCode });
   }
   if (address) {
     emailDetails.push({ label: "Address", value: address });

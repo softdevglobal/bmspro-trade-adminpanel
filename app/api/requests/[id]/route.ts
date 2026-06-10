@@ -190,7 +190,7 @@ async function requireAssignedInspector(request: Request, requestId: string) {
     }
 
     const snap = await adminDb
-      .collection("inspection_requests")
+      .collection("requests")
       .doc(requestId)
       .get();
     if (!snap.exists) {

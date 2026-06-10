@@ -71,7 +71,7 @@ export async function GET(
   const booking = await getBusinessBooking(auth.businessId, id);
   if (!booking) {
     return NextResponse.json(
-      { ok: false, error: "Booking not found." },
+      { ok: false, error: "Job not found." },
       { status: 404 },
     );
   }
@@ -109,12 +109,12 @@ async function requireAssignedBookingOperator(
       };
     }
 
-    const snap = await adminDb.collection("bookings").doc(bookingId).get();
+    const snap = await adminDb.collection("jobs").doc(bookingId).get();
     if (!snap.exists) {
       return {
         ok: false as const,
         status: 404,
-        error: "Booking not found.",
+        error: "Job not found.",
       };
     }
 
@@ -320,7 +320,7 @@ export async function PATCH(
         email: ownerEmail ?? null,
       },
       source: "admin_panel",
-      summary: `Booking assigned to ${assignment.name}`,
+      summary: `Job assigned to ${assignment.name}`,
       targetId: id,
       targetLabel: assignment.name,
       metadata: { assignedToUid: assignment.uid, assignedToType: assignment.type },

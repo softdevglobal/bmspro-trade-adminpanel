@@ -58,9 +58,9 @@ export type QuotationDetail = {
   createdBy: string;
   createdAt: number | null;
   updatedAt: number | null;
-  /** From the linked inspection visit (`createdSource`). */
+  /** From the linked request (`createdSource`). */
   createdSource?: InspectionRequestCreatedSource | null;
-  /** Linked inspection visit status (for follow-up actions). */
+  /** Linked request status (for follow-up actions). */
   inspectionRequestStatus?: InspectionRequestStatus | null;
 };
 

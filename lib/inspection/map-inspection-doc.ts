@@ -72,7 +72,7 @@ function parseStatus(raw: unknown): InspectionRequestStatus {
     : "pending";
 }
 
-/** Maps a Firestore inspection_requests document for API and client listeners. */
+/** Maps a Firestore requests document for API and client listeners. */
 export function mapInspectionDoc(
   id: string,
   data: Record<string, unknown>,

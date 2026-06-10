@@ -64,7 +64,7 @@ const STEPS = [
   {
     title: "Review & create",
     subtitle:
-      "Check everything below, then create the inspection request.",
+      "Check everything below, then create the request.",
   },
 ] as const;
 
@@ -606,7 +606,7 @@ function InspectionPreview({
       <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
         A customer account will be created if this email is new. The customer
         receives a welcome email (with login details when applicable) and an
-        inspection request confirmation.
+        request confirmation.
       </p>
     </div>
   );
@@ -907,7 +907,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
 
     try {
       const token = await user.getIdToken();
-      const response = await fetch("/api/inspection-requests", {
+      const response = await fetch("/api/requests", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -945,7 +945,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
       };
 
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Could not create inspection request.");
+        throw new Error(payload.error ?? "Could not create request.");
       }
 
       setSuccess(true);
@@ -954,7 +954,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Could not create inspection request.",
+          : "Could not create request.",
       );
     } finally {
       setSubmitting(false);
@@ -1023,7 +1023,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                 </span>
               </span>
               <h3 className="mt-4 font-display text-headline-sm font-semibold text-on-surface">
-                Inspection request created
+                Request created
               </h3>
               <p className="mt-2 max-w-sm font-body text-body-md text-on-surface-variant">
                 The request is now on your board. You can review it, assign an

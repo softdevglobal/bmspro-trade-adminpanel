@@ -1,12 +1,12 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
-import { INSPECTION_COLLECTION } from "@/lib/inspection/types";
+import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import {
   buildBookingCode,
   buildInspectionRequestCode,
 } from "@/lib/reference-codes";
-import { BOOKING_COLLECTION } from "@/lib/bookings/types";
+import { JOBS_COLLECTION } from "@/lib/bookings/types";
 
 const QUOTATION_COLLECTION = "quotations";
 
@@ -29,19 +29,19 @@ export async function allocateInspectionRequestCode(): Promise<string> {
   for (let attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt += 1) {
     const code = buildInspectionRequestCode();
     const taken = await codeExists(
-      INSPECTION_COLLECTION,
+      REQUESTS_COLLECTION,
       "requestCode",
       code,
     );
     if (!taken) return code;
   }
-  throw new Error("Could not allocate a unique inspection request code.");
+  throw new Error("Could not allocate a unique request code.");
 }
 
 export async function allocateBookingCode(): Promise<string> {
   for (let attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt += 1) {
     const code = buildBookingCode();
-    const taken = await codeExists(BOOKING_COLLECTION, "bookingCode", code);
+    const taken = await codeExists(JOBS_COLLECTION, "bookingCode", code);
     if (!taken) return code;
   }
   throw new Error("Could not allocate a unique booking code.");

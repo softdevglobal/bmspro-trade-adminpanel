@@ -99,7 +99,7 @@ export function BusinessNotificationBell() {
   function openNotification(note: NotificationRecord) {
     setPanelOpen(false);
     if (!note.requestId) return;
-    router.push(`/dashboard/inspection-visits?request=${note.requestId}`);
+    router.push(`/dashboard/requests?request=${note.requestId}`);
     window.dispatchEvent(
       new CustomEvent("bmspt:open-inspection-request", {
         detail: note.requestId,
@@ -165,7 +165,7 @@ export function BusinessNotificationBell() {
                   No notifications
                 </p>
                 <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                  New inspection requests will appear here.
+                  New requests will appear here.
                 </p>
               </div>
             ) : (

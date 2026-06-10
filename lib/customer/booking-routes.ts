@@ -9,14 +9,14 @@ export const ACCOUNT_TAB_SEGMENT: Record<
 > = {
   profile: null,
   requests: "requests",
-  bookings: "history",
+  jobs: "history",
   notifications: "notifications",
   activity: "activity",
 };
 
 const SEGMENT_TO_TAB: Record<string, CustomerAccountTab> = {
   requests: "requests",
-  history: "bookings",
+  history: "jobs",
   notifications: "notifications",
   activity: "activity",
   profile: "profile",
@@ -48,7 +48,7 @@ export function accountBookingFocusPath(
   requestId: string | null | undefined,
   scope: "active" | "history",
 ): string {
-  const tab = scope === "history" ? "bookings" : "requests";
+  const tab = scope === "history" ? "jobs" : "requests";
   const base = accountPath(slug, tab);
   if (!requestId?.trim()) return base;
   return `${base}?request=${encodeURIComponent(requestId.trim())}`;
@@ -86,7 +86,7 @@ export function parseLegacyAccountTabQuery(
   value: string | null,
 ): CustomerAccountTab | null {
   if (value === "requests" || value === "notifications") return value;
-  if (value === "bookings" || value === "history") return "bookings";
+  if (value === "jobs" || value === "history") return "jobs";
   if (value === "profile") return "profile";
   return null;
 }

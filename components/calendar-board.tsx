@@ -184,7 +184,7 @@ function CalendarDayEventCards({
         const assignee = card.assignedTo;
         const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
         const sourceTone =
-          event.source === "bookings"
+          event.source === "jobs"
             ? "bg-primary/10 text-primary border border-primary/25"
             : "bg-green-50 text-green-700 border border-green-200";
 
@@ -512,17 +512,17 @@ export function CalendarBoard() {
       {!requestsLoading && !requestsError && requests.length === 0 ? (
         <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest p-6 text-center">
           <p className="font-body text-[14px] font-semibold text-on-surface">
-            No inspection requests yet
+            No requests yet
           </p>
           <p className="mt-1 font-body text-[13px] text-on-surface-variant">
             Requests from your booking page and owner-created visits will appear
             on the calendar.
           </p>
           <Link
-            href="/dashboard/inspection-visits"
+            href="/dashboard/requests"
             className="mt-3 inline-flex items-center gap-1 font-body text-[13px] font-semibold text-primary hover:underline"
           >
-            Go to Inspection visits
+            Go to Requests
             <span className="material-symbols-outlined text-[16px]">
               arrow_forward
             </span>
@@ -643,8 +643,8 @@ export function CalendarBoard() {
           </div>
           <div className="flex flex-wrap items-center gap-4">
             {[
-              { color: "bg-primary", label: "Bookings" },
-              { color: "bg-green-500", label: "Inspection visits" },
+              { color: "bg-primary", label: "Jobs" },
+              { color: "bg-green-500", label: "Requests" },
             ].map((item) => (
               <div
                 key={item.label}
@@ -783,7 +783,7 @@ export function CalendarBoard() {
                             type="button"
                             onClick={() => openDayByIso(isoDate)}
                             className={`w-full rounded-xl border px-3 py-2.5 text-left font-body text-[13px] font-semibold leading-snug transition-opacity active:opacity-90 ${
-                              event.source === "bookings"
+                              event.source === "jobs"
                                 ? "border-primary/25 bg-primary/10 text-primary"
                                 : "border-green-200 bg-green-50 text-green-800"
                             }`}
@@ -856,7 +856,7 @@ export function CalendarBoard() {
                               type="button"
                               onClick={() => openDayByIso(isoDate)}
                               className={`w-full truncate rounded-lg border px-2 py-1.5 text-left font-body text-[11px] font-semibold transition-opacity hover:opacity-90 ${
-                                event.source === "bookings"
+                                event.source === "jobs"
                                   ? "border-primary/25 bg-primary/10 text-primary"
                                   : "border-green-200 bg-green-50 text-green-800"
                               }`}
@@ -880,7 +880,7 @@ export function CalendarBoard() {
               <p className="font-body text-[13px] font-semibold text-on-surface-variant">
                 {focusDayEvents.length > 0
                   ? `${focusDayEvents.length} ${focusDayEvents.length === 1 ? "item" : "items"} scheduled`
-                  : "No visits or bookings on this day"}
+                  : "No visits or jobs on this day"}
               </p>
               {isSameDay(focusDate, today) ? (
                 <span className="rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
@@ -895,7 +895,7 @@ export function CalendarBoard() {
         ) : null}
       </section>
 
-      {/* Booking drawer */}
+      {/* Job drawer */}
       <div
         className={`fixed inset-0 z-[100] ${
           bookingDrawerOpen ? "pointer-events-auto" : "pointer-events-none"
@@ -986,7 +986,7 @@ export function CalendarBoard() {
           <div className="flex-1 space-y-6 overflow-y-auto p-5">
             <div className="space-y-3">
               <p className="font-body text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                Booking status
+                Job status
               </p>
               <div className="flex flex-wrap gap-2">
                 {(

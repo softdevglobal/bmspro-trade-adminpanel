@@ -55,7 +55,7 @@ export type AuTimezone = (typeof AU_TIMEZONES)[number]["id"];
 export const SUBSCRIPTION_PLANS = [
   {
     id: "booking_management",
-    name: "Booking Management",
+    name: "Job Management",
     price: 299,
     period: "7-day",
     billingNote: "Weekly • 7-day renewal",
@@ -63,7 +63,7 @@ export const SUBSCRIPTION_PLANS = [
     staff: 5,
     trialDays: null as number | null,
     description:
-      "Bookings, calendar, customers, staff assignment and job tracking for your trade business.",
+      "Jobs, calendar, customers, staff assignment and job tracking for your trade business.",
   },
   {
     id: "trade_pro",
@@ -75,7 +75,7 @@ export const SUBSCRIPTION_PLANS = [
     staff: 5,
     trialDays: 7,
     description:
-      "Everything in Booking Management plus quotes, invoices, contractor connections and partner jobs.",
+      "Everything in Job Management plus quotes, invoices, contractor connections and partner jobs.",
   },
   {
     id: "trade_pro_front_desk",

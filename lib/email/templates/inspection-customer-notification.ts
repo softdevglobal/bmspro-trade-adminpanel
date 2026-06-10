@@ -19,7 +19,7 @@ const EMAIL_PRESENTATION: Record<
   NotificationType,
   { eyebrow: string; tone: EmailTone }
 > = {
-  request_created: { eyebrow: "Inspection request", tone: "brand" },
+  request_created: { eyebrow: "Request", tone: "brand" },
   request_scheduled: { eyebrow: "Visit confirmed", tone: "success" },
   request_proposed: { eyebrow: "New times proposed", tone: "warning" },
   request_assigned: { eyebrow: "Inspector assigned", tone: "success" },
@@ -83,7 +83,7 @@ export async function sendInspectionCustomerNotificationEmail(
     if (input.emailDetails?.length) details.push(...input.emailDetails);
 
     const html = renderEmail({
-      eyebrow: presentation?.eyebrow ?? "Inspection request",
+      eyebrow: presentation?.eyebrow ?? "Request",
       tone: presentation?.tone ?? "brand",
       headerAlign: "center",
       headerHeadline: "BMS Pro Trade",

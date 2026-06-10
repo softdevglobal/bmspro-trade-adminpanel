@@ -17,7 +17,7 @@ export type {
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
-  INSPECTION_COLLECTION,
+  REQUESTS_COLLECTION,
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
@@ -448,7 +448,7 @@ export async function createQuotationForInspection(
 > {
   const inspectionId = input.inspectionRequestId.trim();
   if (!inspectionId) {
-    return { ok: false, status: 400, error: "Missing inspection request." };
+    return { ok: false, status: 400, error: "Missing request." };
   }
 
   const lineItems = parseLineItems(input.lineItems);
@@ -461,16 +461,16 @@ export async function createQuotationForInspection(
   }
 
   const requestSnap = await adminDb
-    .collection("inspection_requests")
+    .collection("requests")
     .doc(inspectionId)
     .get();
   if (!requestSnap.exists) {
-    return { ok: false, status: 404, error: "Inspection request not found." };
+    return { ok: false, status: 404, error: "Request not found." };
   }
 
   const requestData = requestSnap.data() ?? {};
   if (requestData.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Inspection request not found." };
+    return { ok: false, status: 404, error: "Request not found." };
   }
 
   const assigned = requestData.assignedTo as { uid?: string } | null;
@@ -624,7 +624,7 @@ export async function createQuotationForInspection(
     console.error("quotation PDF generation failed:", error);
   }
 
-  // Mirror quotation onto the inspection request and mark the visit complete.
+  // Mirror quotation onto the request and mark the visit complete.
   try {
     const currentStatus =
       typeof requestData.status === "string" ? requestData.status : "";
@@ -685,7 +685,7 @@ export async function createQuotationForInspection(
       });
     }
   } catch (error) {
-    console.error("quotation mirror to inspection request failed:", error);
+    console.error("quotation mirror to request failed:", error);
   }
 
   // Auto-save line items to the business item catalog for future reuse.
@@ -829,10 +829,10 @@ async function resolveOwnerAssignment(
 }
 
 /**
- * Creates a quotation directly (without an existing inspection visit). This
- * also creates a matching `inspection_requests` document that is already
+ * Creates a quotation directly (without an existing request). This
+ * also creates a matching `requests` document that is already
  * marked complete, tagged with the `quotation_direct` source, so the quote
- * shows up in both the Quotations and Inspection visits boards.
+ * shows up in both the Quotations and Requests boards.
  */
 export async function createStandaloneQuotation(
   businessId: string,
@@ -990,8 +990,8 @@ export async function createStandaloneQuotation(
   const now = FieldValue.serverTimestamp();
   const ownerAssignment = await resolveOwnerAssignment(createdBy);
 
-  // 1. Create the completed inspection visit record (source: quotation_direct).
-  const inspectionRef = adminDb.collection(INSPECTION_COLLECTION).doc();
+  // 1. Create the completed request record (source: quotation_direct).
+  const inspectionRef = adminDb.collection(REQUESTS_COLLECTION).doc();
   const requestCode = await allocateInspectionRequestCode();
   await inspectionRef.set({
     id: inspectionRef.id,
@@ -1025,7 +1025,7 @@ export async function createStandaloneQuotation(
     visitEndedAt: now,
   });
 
-  // 2. Create the quotation document linked to that inspection visit.
+  // 2. Create the quotation document linked to that request.
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
   const quotationCode = buildQuotationCodeForInspection({
     id: inspectionRef.id,
@@ -1101,7 +1101,7 @@ export async function createStandaloneQuotation(
     console.error("standalone quotation PDF generation failed:", error);
   }
 
-  // 4. Mirror the quotation summary onto the inspection visit and mark sent.
+  // 4. Mirror the quotation summary onto the request and mark sent.
   try {
     await inspectionRef.set(
       {
@@ -1156,7 +1156,7 @@ export async function createStandaloneQuotation(
   return { ok: true, quotation };
 }
 
-/** Lists quotations for an inspection request (admin viewing). */
+/** Lists quotations for an request (admin viewing). */
 export async function listQuotationsForInspection(
   businessId: string,
   inspectionRequestId: string,
@@ -1170,7 +1170,7 @@ export async function listQuotationsForInspection(
       .where("businessId", "==", businessId)
       .where("inspectionRequestId", "==", id)
       .get(),
-    adminDb.collection("inspection_requests").doc(id).get(),
+    adminDb.collection("requests").doc(id).get(),
   ]);
 
   const inspectionData = inspectionSnap.data() ?? {};
@@ -1252,7 +1252,7 @@ async function enrichQuotationsFromInspections(
   for (let i = 0; i < ids.length; i += 10) {
     const chunk = ids.slice(i, i + 10);
     const refs = chunk.map((id) =>
-      adminDb.collection(INSPECTION_COLLECTION).doc(id),
+      adminDb.collection(REQUESTS_COLLECTION).doc(id),
     );
     const snaps = await adminDb.getAll(...refs);
     for (const snap of snaps) {

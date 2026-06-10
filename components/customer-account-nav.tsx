@@ -23,7 +23,7 @@ import { Suspense, useMemo, useState } from "react";
 export type CustomerAccountTab =
   | "profile"
   | "requests"
-  | "bookings"
+  | "jobs"
   | "notifications"
   | "activity";
 
@@ -118,11 +118,11 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
         isActive: onAccount && activeTab === "requests",
       },
       {
-        id: "bookings",
+        id: "jobs",
         label: "History",
         icon: "receipt_long",
-        href: accountPath(slug, "bookings"),
-        isActive: onAccount && activeTab === "bookings",
+        href: accountPath(slug, "jobs"),
+        isActive: onAccount && activeTab === "jobs",
       },
       {
         id: "profile",

@@ -99,7 +99,7 @@ export function BookingStaffAssignSection({
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
         Choose who will run the booked work, or skip and assign later from the
-        Bookings page.
+        Jobs page.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -174,7 +174,7 @@ export function BookingStaffAssignSection({
           {staff.length === 0 ? (
             <p className="mt-2 rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
               No active staff members yet. Add team members from the Team page,
-              or skip and assign later from Bookings.
+              or skip and assign later from Jobs.
             </p>
           ) : (
             <div className="mt-2">
@@ -207,7 +207,7 @@ export function BookingStaffAssignSection({
             Skip for now
           </span>
           <span className="block font-body text-[11px] text-on-surface-variant">
-            Assign later from the Bookings page.
+            Assign later from the Jobs page.
           </span>
         </span>
         <span

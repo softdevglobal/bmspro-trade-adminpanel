@@ -127,8 +127,8 @@ export async function POST(request: Request) {
 
   const payload = body as Record<string, unknown>;
 
-  // Standalone quotation: no existing inspection visit. Creates both a
-  // completed inspection_requests record and the quotation document.
+  // Standalone quotation: no existing request. Creates both a
+  // completed requests record and the quotation document.
   if (payload.standalone === true || payload.source === "standalone") {
     const customer = (payload.customer ?? {}) as {
       fullName?: string;
@@ -324,7 +324,7 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, quotation: result.quotation });
 }
 
-/** Lists quotations for an inspection request (admin viewing). */
+/** Lists quotations for a request (admin viewing). */
 export async function GET(request: Request) {
   const auth = await requireQuotationAuthor(request);
   if (!auth.ok) {

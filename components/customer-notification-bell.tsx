@@ -63,7 +63,7 @@ export function CustomerNotificationBell() {
     router.push(
       note.requestId
         ? accountBookingFocusPath(target, note.requestId, scope)
-        : accountPath(target, scope === "history" ? "bookings" : "requests"),
+        : accountPath(target, scope === "history" ? "jobs" : "requests"),
     );
   }
 

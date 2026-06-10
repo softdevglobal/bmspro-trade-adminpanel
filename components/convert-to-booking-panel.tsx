@@ -235,7 +235,7 @@ export function ConvertToBookingPanel({
     try {
       const token = await user.getIdToken();
       const response = await fetch(
-        `/api/inspection-requests/${inspectionRequestId}`,
+        `/api/requests/${inspectionRequestId}`,
         {
           method: "PATCH",
           headers: {
@@ -267,11 +267,11 @@ export function ConvertToBookingPanel({
         request?: InspectionRequestDetail;
       };
       if (!response.ok || !data.ok || !data.request) {
-        throw new Error(data.error ?? "Could not create booking.");
+        throw new Error(data.error ?? "Could not create job.");
       }
       onSuccess(data.request);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create booking.");
+      setError(err instanceof Error ? err.message : "Could not create job.");
     } finally {
       setSubmitting(false);
     }
@@ -280,7 +280,7 @@ export function ConvertToBookingPanel({
   return (
     <section className="rounded-xl border border-primary/25 bg-primary/5 p-4">
       <h4 className="font-display text-[15px] font-semibold text-on-surface">
-        Create booking
+        Create job
       </h4>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
         Schedule the job after the customer accepted your quotation (or when they

@@ -1029,7 +1029,7 @@ function ServiceBookingFlow({
             <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
               event_available
             </span>
-            Inspection visit request
+            Request
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold leading-snug text-on-surface sm:mt-3 sm:text-headline-md">
             Request a visit with {businessName}
@@ -1407,7 +1407,7 @@ function ServiceBookingFlow({
               {submitting
                 ? "Sending request…"
                 : isAuthenticated
-                  ? "Submit inspection request"
+                  ? "Submit request"
                   : "Sign in & submit request"}
             </motion.button>
             {!isAuthenticated && canSubmit ? (

@@ -35,21 +35,21 @@ const NAV_ITEMS: NavItem[] = [
     businessOwner: true,
   },
   {
-    href: "/dashboard/inspection-visits",
-    label: "Inspection visits",
+    href: "/dashboard/requests",
+    label: "Requests",
     icon: "event_available",
-    businessOwner: true,
-  },
-  {
-    href: "/dashboard/bookings",
-    label: "Bookings",
-    icon: "assignment",
     businessOwner: true,
   },
   {
     href: "/dashboard/quotations",
     label: "Quotations",
     icon: "request_quote",
+    businessOwner: true,
+  },
+  {
+    href: "/dashboard/jobs",
+    label: "Jobs",
+    icon: "assignment",
     businessOwner: true,
   },
   {

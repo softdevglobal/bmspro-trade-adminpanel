@@ -1,15 +1,15 @@
 /**
- * Shared types and helpers for inspection visit requests.
+ * Shared types and helpers for service requests.
  *
  * Customers submit requests from /booknow/[slug] and business owners
- * triage them in /dashboard/inspection-visits.
+ * triage them in /dashboard/requests.
  */
 
 import type { BookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import { legacyInspectionReferenceFromId } from "@/lib/reference-codes";
 
-export const INSPECTION_COLLECTION = "inspection_requests";
+export const REQUESTS_COLLECTION = "requests";
 
 export const REQUEST_TYPES = ["existing_service", "custom_quote"] as const;
 export type InspectionRequestType = (typeof REQUEST_TYPES)[number];
@@ -53,7 +53,7 @@ export function timeRangeFromStartTime(startTime: string): InspectionTimeRange {
   return hour < 12 ? "morning" : "afternoon";
 }
 
-/** Where a new inspection_requests document was created. */
+/** Where a new requests document was created. */
 export const INSPECTION_CREATED_SOURCES = [
   "booking_engine",
   "owner_dashboard",
@@ -175,7 +175,7 @@ export type InspectionRequestDetail = {
   bookingConfirmedAt: number | null;
 };
 
-/** Quotation summary stored on inspection_requests after a quote is created. */
+/** Quotation summary stored on requests after a quote is created. */
 export type InspectionQuotationSummary = {
   id: string;
   quotationCode: string | null;

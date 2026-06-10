@@ -6,7 +6,7 @@ export default function CalendarPage() {
   return (
     <DashboardShell
       title="Calendar"
-      subtitle="View inspection visits and bookings by day, week or month."
+      subtitle="View requests and bookings by day, week or month."
       icon="calendar_month"
     >
       <BusinessOwnerGuard>

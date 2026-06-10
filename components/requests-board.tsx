@@ -143,7 +143,7 @@ function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
   );
 }
 
-export function InspectionVisitsBoard() {
+export function RequestsBoard() {
   const { user, status: authStatus } = useAuth();
   const {
     requests,
@@ -247,7 +247,7 @@ export function InspectionVisitsBoard() {
         <div
           className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-1 sm:flex-wrap sm:gap-2"
           role="tablist"
-          aria-label="Filter inspection requests"
+          aria-label="Filter requests"
         >
           {FILTER_TABS.map((tab) => (
             <button
@@ -376,7 +376,7 @@ function EmptyState({ filter }: { filter: StatusFilter }) {
       </span>
       <p className="mt-3 font-display text-[18px] font-semibold text-on-surface">
         {filter === "all"
-          ? "No inspection requests yet"
+          ? "No requests yet"
           : "Nothing in this view"}
       </p>
       <p className="mt-1 font-body text-body-md text-on-surface-variant">
@@ -762,7 +762,7 @@ function DrawerReviewFooter({
           <>
             <DrawerFooterAction
               icon="assignment"
-              label="Create booking"
+              label="Create job"
               variant="primary"
               onClick={onCreateBooking}
               disabled={submitting}
@@ -1048,7 +1048,7 @@ function DetailDrawerContent({
     try {
       const token = await user.getIdToken();
       const response = await fetch(
-        `/api/inspection-requests/${request.id}`,
+        `/api/requests/${request.id}`,
         {
           method: "PATCH",
           headers: {
@@ -1127,7 +1127,7 @@ function DetailDrawerContent({
       <header className="flex shrink-0 items-start justify-between gap-2 border-b border-outline-variant/40 px-4 py-2.5 sm:px-5 sm:py-3">
         <div className="min-w-0">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {inBookingMode ? "Create booking" : "Inspection request"}
+            {inBookingMode ? "Create job" : "Request"}
           </p>
           <p className="mt-0.5">
             <InspectionRequestCode
@@ -1433,7 +1433,7 @@ function formatAud(value: number): string {
   return `Aus $${value.toFixed(2)}`;
 }
 
-/** Loads and displays quotations created for this inspection request. */
+/** Loads and displays quotations created for this request. */
 function QuotationSection({ requestId }: { requestId: string }) {
   const { user } = useAuth();
   const [quotations, setQuotations] = useState<QuotationView[]>([]);
@@ -1681,7 +1681,7 @@ function BookingDetailsSection({
       setError(null);
       try {
         const token = await authedUser.getIdToken();
-        const response = await fetch(`/api/bookings/${bookingId}`, {
+        const response = await fetch(`/api/jobs/${bookingId}`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         });
@@ -1718,7 +1718,7 @@ function BookingDetailsSection({
     return (
       <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          Booking
+          Job
         </p>
         <p className="mt-1.5 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
           <span className="material-symbols-outlined animate-spin text-[16px]">
@@ -1734,7 +1734,7 @@ function BookingDetailsSection({
     return (
       <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          Booking
+          Job
         </p>
         {bookingCode ? (
           <p className="mt-1 font-mono text-[12px] font-semibold text-primary">
@@ -1762,7 +1762,7 @@ function BookingDetailsSection({
   return (
     <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-        Booking
+        Job
       </p>
       <div className="mt-2 rounded-xl border border-primary/20 bg-surface-container-lowest p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -2407,7 +2407,7 @@ function SetTimeForm({
   );
 }
 
-/** Earliest selectable job day: inspection visit date (inclusive), then later days only. */
+/** Earliest selectable job day: request date (inclusive), then later days only. */
 function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
   const scheduled = request.scheduledSlot?.date?.trim();
   if (scheduled) return scheduled;

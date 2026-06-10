@@ -10,7 +10,7 @@ import {
   type InspectionRequestStatus,
 } from "@/lib/inspection/types";
 
-export type CalendarSource = "inspection_visits" | "bookings";
+export type CalendarSource = "requests" | "jobs";
 
 export type DotColor = "primary" | "error" | "amber-500" | "green-500";
 
@@ -18,7 +18,7 @@ export type CalendarEvent = {
   key: string;
   requestId: string;
   date: string;
-  /** Bookings = blue; inspection visits = green. */
+  /** Jobs = blue; requests = green. */
   source: CalendarSource;
   dotColor: DotColor;
   request?: InspectionRequestDetail;
@@ -26,15 +26,15 @@ export type CalendarEvent = {
 };
 
 export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
-  bookings: "Booking",
-  inspection_visits: "Inspection visit",
+  jobs: "Job",
+  requests: "Request",
 };
 
 /** Day-drawer card chrome (light blue vs light green). */
 export const CALENDAR_SOURCE_CARD_CLASS: Record<CalendarSource, string> = {
-  bookings:
+  jobs:
     "rounded-xl border border-primary/25 bg-primary/5 p-card-padding transition-all hover:border-primary/45 hover:shadow-md",
-  inspection_visits:
+  requests:
     "rounded-xl border border-green-200 bg-green-50 p-card-padding transition-all hover:border-green-400 hover:shadow-md",
 };
 
@@ -74,17 +74,17 @@ export function requestTitle(request: InspectionRequestDetail): string {
 
 /** Calendar dot colour by entry type (not request status). */
 export function dotColorForCalendarSource(source: CalendarSource): DotColor {
-  return source === "bookings" ? "primary" : "green-500";
+  return source === "jobs" ? "primary" : "green-500";
 }
 
-/** Inspection visits only (job bookings use the `bookings` collection). */
+/** Requests only (jobs use the `jobs` collection). */
 export function calendarSourceForRequest(
   _request: InspectionRequestDetail,
 ): CalendarSource {
-  return "inspection_visits";
+  return "requests";
 }
 
-/** Only scheduled inspection visits appear on the calendar (not completed/pending). */
+/** Only scheduled requests appear on the calendar (not completed/pending). */
 export function datesForRequestOnCalendar(
   request: InspectionRequestDetail,
 ): string[] {
@@ -148,7 +148,7 @@ export function calendarCardView(event: CalendarEvent): CalendarCardView | null 
       scheduledSlot: booking.scheduledSlot,
       ownerProposedSlots: [],
       preferredSlots: [],
-      openHref: `/dashboard/inspection-visits?request=${encodeURIComponent(booking.inspectionRequestId)}`,
+      openHref: `/dashboard/requests?request=${encodeURIComponent(booking.inspectionRequestId)}`,
     };
   }
 
@@ -167,7 +167,7 @@ export function calendarCardView(event: CalendarEvent): CalendarCardView | null 
     scheduledSlot: request.scheduledSlot,
     ownerProposedSlots: request.ownerProposedSlots,
     preferredSlots: request.preferredSlots,
-    openHref: `/dashboard/inspection-visits?request=${encodeURIComponent(request.id)}`,
+    openHref: `/dashboard/requests?request=${encodeURIComponent(request.id)}`,
   };
 }
 
@@ -348,7 +348,7 @@ export function buildBookingCalendarEvents(
   filters: CalendarFilters,
   sourceFilter?: CalendarSource,
 ): CalendarEvent[] {
-  const source: CalendarSource = "bookings";
+  const source: CalendarSource = "jobs";
   if (sourceFilter && sourceFilter !== source) return [];
 
   const events: CalendarEvent[] = [];
@@ -384,7 +384,7 @@ export function buildCalendarEvents(
   return buildInspectionCalendarEvents(requests, filters, sourceFilter);
 }
 
-/** Month grid: inspection visits + job bookings. */
+/** Month grid: requests + jobs. */
 export function buildMonthGridCalendarEvents(
   requests: InspectionRequestDetail[],
   filters: CalendarFilters,
@@ -407,7 +407,7 @@ export function groupEventsByDate(
   return grouped;
 }
 
-/** Summary stats across bookings and inspection visits together. */
+/** Summary stats across jobs and requests together. */
 export function computeCombinedCalendarStats(
   requests: InspectionRequestDetail[],
   todayIso: string,

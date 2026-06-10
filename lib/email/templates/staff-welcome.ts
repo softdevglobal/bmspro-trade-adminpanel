@@ -51,7 +51,7 @@ export async function sendStaffWelcomeEmail(
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
     title: `You've joined ${input.businessName}`,
     greetingName: firstName(input.fullName),
-    body: `${input.businessName} added you to their team on BMS Pro Trade. Use the login credentials below to access your dashboard, view assigned inspection visits, and manage your availability.\n\nPlease change your password after your first sign-in.`,
+    body: `${input.businessName} added you to their team on BMS Pro Trade. Use the login credentials below to access your dashboard, view assigned requests, and manage your availability.\n\nPlease change your password after your first sign-in.`,
     details,
     loginCredentials: {
       email: input.email,

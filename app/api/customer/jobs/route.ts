@@ -2,7 +2,7 @@ import { parseBookingStatus } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { authenticateCustomerRequest } from "@/lib/customer/server";
 import {
-  INSPECTION_COLLECTION,
+  REQUESTS_COLLECTION,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   REQUEST_STATUSES,
@@ -225,13 +225,13 @@ export async function GET(request: Request) {
   }
 
   const byCustomerId = await adminDb
-    .collection(INSPECTION_COLLECTION)
+    .collection(REQUESTS_COLLECTION)
     .where("customerId", "==", auth.customer.uid)
     .limit(100)
     .get();
 
   const byEmail = await adminDb
-    .collection(INSPECTION_COLLECTION)
+    .collection(REQUESTS_COLLECTION)
     .where("customer.email", "==", auth.customer.email)
     .limit(100)
     .get();
@@ -263,5 +263,5 @@ export async function GET(request: Request) {
     })
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
-  return NextResponse.json({ ok: true, bookings: enriched });
+  return NextResponse.json({ ok: true, jobs: enriched });
 }
