@@ -78,9 +78,73 @@ service cloud.firestore {
         && resource.data.assignedTo.uid == request.auth.uid;
     }
 
+    function userFcmFieldKeys() {
+      return ['fcmToken', 'fcmTokenUpdatedAt', 'platform', 'deviceInfo'];
+    }
+
+    function userSelfFcmWrite(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(userFcmFieldKeys());
+    }
+
+    function userSelfFcmCreate(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(userFcmFieldKeys());
+    }
+
+    function salonStaffSelfFcmWrite(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fcmToken', 'fcmTokenUpdatedAt', 'platform']);
+    }
+
+    function ownsLegacyNotification() {
+      return isSignedIn()
+        && (
+          resource.data.staffUid == request.auth.uid
+          || resource.data.ownerUid == request.auth.uid
+          || resource.data.branchAdminUid == request.auth.uid
+          || resource.data.customerUid == request.auth.uid
+          || resource.data.targetAdminUid == request.auth.uid
+        );
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
-      allow create, update, delete: if false;
+      allow create: if userSelfFcmCreate(uid);
+      allow update: if userSelfFcmWrite(uid);
+      allow delete: if false;
+    }
+
+    // Legacy salon staff profiles (FCM token + self read).
+    match /salon_staff/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow update: if salonStaffSelfFcmWrite(uid);
+      allow create, delete: if false;
+    }
+
+    // Legacy in-app notifications (salon + trade mobile).
+    match /notifications/{notificationId} {
+      allow read: if isSuperAdmin() || ownsLegacyNotification();
+      allow update: if isSuperAdmin()
+        || (ownsLegacyNotification() && notificationReadOnlyUpdate());
+      allow create, delete: if false;
+    }
+
+    // Staff attendance / GPS check-ins (mobile background location).
+    match /staff_check_ins/{checkInId} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && resource.data.staffId == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.staffId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.staffId == request.auth.uid
+        && request.resource.data.staffId == request.auth.uid;
+      allow delete: if false;
     }
 
     // Booking intake attempts: write-only audit log from server; admins/owners read.
