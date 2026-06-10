@@ -13,6 +13,10 @@ import {
   type TenantStatus,
 } from "@/lib/onboarding/types";
 import { sendOwnerWelcomeEmail } from "@/lib/email/templates";
+import {
+  findStaffOwnerPhoneConflict,
+  PHONE_TAKEN_ERROR,
+} from "@/lib/users/phone-uniqueness";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 /**
@@ -124,6 +128,15 @@ async function createTenantWithOwnerAccount(
     const code = (error as { code?: string }).code;
     if (code !== "auth/user-not-found") {
       return { ok: false, error: "Could not verify email availability." };
+    }
+  }
+
+  if (value.businessPhone) {
+    const phoneConflict = await findStaffOwnerPhoneConflict(
+      value.businessPhone,
+    );
+    if (phoneConflict) {
+      return { ok: false, error: PHONE_TAKEN_ERROR };
     }
   }
 
