@@ -1,10 +1,22 @@
 "use client";
 
+import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const GST_INPUT_CLASS =
-  "w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  "h-11 w-full rounded-xl border border-outline-variant bg-surface-container-low px-3 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+const EXAMPLE_SUBTOTAL = 1000;
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
 
 export function BusinessGstSettings() {
   const { user } = useAuth();
@@ -13,6 +25,20 @@ export function BusinessGstSettings() {
   const [gstPercentage, setGstPercentage] = useState("10");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const preview = useMemo(() => {
+    const rate = Number.parseFloat(gstPercentage);
+    if (!Number.isFinite(rate) || rate < 0) {
+      return null;
+    }
+    const gstAmount = (EXAMPLE_SUBTOTAL * rate) / 100;
+    return {
+      subtotal: EXAMPLE_SUBTOTAL,
+      gstAmount,
+      total: EXAMPLE_SUBTOTAL + gstAmount,
+      rate,
+    };
+  }, [gstPercentage]);
 
   useEffect(() => {
     let active = true;
@@ -113,32 +139,22 @@ export function BusinessGstSettings() {
   }
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <span className="material-symbols-outlined">percent</span>
-        </div>
-        <div>
-          <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
-            GST settings
-          </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            GST rate used on quotations and invoices.
-          </p>
-        </div>
-      </div>
-
+    <SettingsSection
+      icon="percent"
+      title="GST settings"
+      description="GST rate used on quotations and invoices."
+    >
       {loading ? (
-        <p className="mt-5 font-body text-[13px] text-on-surface-variant">
+        <p className="font-body text-[13px] text-on-surface-variant">
           Loading GST settings…
         </p>
       ) : (
-        <div className="mt-5 space-y-4">
-          <label className="block">
+        <div className="space-y-4">
+          <label className="block max-w-xs">
             <span className="font-body text-[13px] font-semibold text-on-surface">
               GST percentage
             </span>
-            <div className="mt-2 flex max-w-xs items-center gap-2">
+            <div className="mt-2 flex items-center gap-2">
               <input
                 type="number"
                 inputMode="decimal"
@@ -150,7 +166,7 @@ export function BusinessGstSettings() {
                 onChange={(event) => setGstPercentage(event.target.value)}
                 className={GST_INPUT_CLASS}
               />
-              <span className="font-body text-[14px] font-semibold text-on-surface-variant">
+              <span className="shrink-0 font-body text-[14px] font-semibold text-on-surface-variant">
                 %
               </span>
             </div>
@@ -159,12 +175,64 @@ export function BusinessGstSettings() {
             </p>
           </label>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/80 px-3 py-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-primary">
+                  request_quote
+                </span>
+                <p className="font-body text-[12px] font-semibold text-on-surface">
+                  Quotations
+                </p>
+              </div>
+              <p className="mt-1.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+                Applied automatically to new quote line items.
+              </p>
+            </div>
+            <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/80 px-3 py-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-primary">
+                  receipt_long
+                </span>
+                <p className="font-body text-[12px] font-semibold text-on-surface">
+                  Invoices
+                </p>
+              </div>
+              <p className="mt-1.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+                Same rate is used when invoices are generated.
+              </p>
+            </div>
+            <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/80 px-3 py-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-primary">
+                  calculate
+                </span>
+                <p className="font-body text-[12px] font-semibold text-on-surface">
+                  Example
+                </p>
+              </div>
+              {preview ? (
+                <p className="mt-1.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+                  {formatCurrency(preview.subtotal)} ex GST +{" "}
+                  <span className="font-semibold text-on-surface">
+                    {formatCurrency(preview.gstAmount)} GST ({preview.rate}%)
+                  </span>{" "}
+                  = {formatCurrency(preview.total)} inc GST
+                </p>
+              ) : (
+                <p className="mt-1.5 font-body text-[12px] text-on-surface-variant">
+                  Enter a valid percentage to preview totals.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-outline-variant/50 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
               disabled={saving}
               onClick={() => void handleSave()}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {saving ? "Saving…" : "Save GST settings"}
             </button>
@@ -182,6 +250,6 @@ export function BusinessGstSettings() {
           ) : null}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }

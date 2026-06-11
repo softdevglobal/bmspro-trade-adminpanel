@@ -54,7 +54,7 @@ export default function LoginPage() {
             command center.
           </h1>
           <p className="mt-4 max-w-sm font-body text-body-md leading-relaxed text-outline-variant">
-            Bookings, calendar, partners and service areas — all in one
+            Jobs, calendar, partners and service areas — all in one
             workspace built for receptions and operators.
           </p>
         </div>
@@ -67,7 +67,7 @@ export default function LoginPage() {
           />
           <FeatureCard
             icon="assignment"
-            label="Bookings"
+            label="Jobs"
             description="Intake to invoice"
           />
           <FeatureCard

@@ -17,7 +17,7 @@ export type {
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
-  INSPECTION_COLLECTION,
+  REQUESTS_COLLECTION,
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
@@ -265,6 +265,12 @@ function mapQuotationDoc(
         ? data.pdfUrl.trim()
         : null,
     status: data.status === "sent" ? "sent" : "draft",
+    customerDecision:
+      data.customerDecision === "accepted" ||
+      data.customerDecision === "rejected"
+        ? data.customerDecision
+        : null,
+    customerDecisionAt: toMillis(data.customerDecisionAt),
     bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
     bookingCode:
       typeof data.bookingCode === "string" && data.bookingCode.trim()
@@ -448,7 +454,7 @@ export async function createQuotationForInspection(
 > {
   const inspectionId = input.inspectionRequestId.trim();
   if (!inspectionId) {
-    return { ok: false, status: 400, error: "Missing inspection request." };
+    return { ok: false, status: 400, error: "Missing request." };
   }
 
   const lineItems = parseLineItems(input.lineItems);
@@ -461,16 +467,16 @@ export async function createQuotationForInspection(
   }
 
   const requestSnap = await adminDb
-    .collection("inspection_requests")
+    .collection("requests")
     .doc(inspectionId)
     .get();
   if (!requestSnap.exists) {
-    return { ok: false, status: 404, error: "Inspection request not found." };
+    return { ok: false, status: 404, error: "Request not found." };
   }
 
   const requestData = requestSnap.data() ?? {};
   if (requestData.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Inspection request not found." };
+    return { ok: false, status: 404, error: "Request not found." };
   }
 
   const assigned = requestData.assignedTo as { uid?: string } | null;
@@ -624,12 +630,15 @@ export async function createQuotationForInspection(
     console.error("quotation PDF generation failed:", error);
   }
 
-  // Mirror quotation onto the inspection request and mark the visit complete.
+  const shouldSend = input.send === true;
+
+  // Mirror quotation summary onto the linked request.
   try {
     const currentStatus =
       typeof requestData.status === "string" ? requestData.status : "";
     const shouldComplete =
-      currentStatus === "scheduled" || currentStatus === "owner_proposed";
+      shouldSend &&
+      (currentStatus === "scheduled" || currentStatus === "owner_proposed");
 
     await requestSnap.ref.set(
       {
@@ -640,52 +649,56 @@ export async function createQuotationForInspection(
           subtotalAud,
           balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
-          status: "sent",
+          status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...awaitingBookingFields(),
+        ...(shouldSend ? awaitingBookingFields() : {}),
         ...(shouldComplete ? { status: "completed" as const } : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
 
-    await ref.set(
-      {
-        status: "sent",
-        ...awaitingBookingFields(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
-
-    if (shouldComplete) {
-      const after = await requestSnap.ref.get();
-      const updatedRequest = mapInspectionDoc(
-        inspectionId,
-        after.data() ?? {},
+    if (shouldSend) {
+      await ref.set(
+        {
+          status: "sent",
+          ...awaitingBookingFields(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
       );
-      const businessSnap = await adminDb
-        .collection("businesses")
-        .doc(businessId)
-        .get();
-      const businessData = businessSnap.data() ?? {};
-      await notifyCustomerOfStatusChange(updatedRequest, "completed", {
-        businessName:
-          typeof businessData.businessName === "string"
-            ? businessData.businessName
-            : null,
-        bookingSlug:
-          typeof businessData.bookingSlug === "string"
-            ? businessData.bookingSlug
-            : null,
-        logoUrl:
-          typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
-      });
+      quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+
+      if (shouldComplete) {
+        const after = await requestSnap.ref.get();
+        const updatedRequest = mapInspectionDoc(
+          inspectionId,
+          after.data() ?? {},
+        );
+        const businessSnap = await adminDb
+          .collection("businesses")
+          .doc(businessId)
+          .get();
+        const businessData = businessSnap.data() ?? {};
+        await notifyCustomerOfStatusChange(updatedRequest, "completed", {
+          businessName:
+            typeof businessData.businessName === "string"
+              ? businessData.businessName
+              : null,
+          bookingSlug:
+            typeof businessData.bookingSlug === "string"
+              ? businessData.bookingSlug
+              : null,
+          logoUrl:
+            typeof businessData.logoUrl === "string"
+              ? businessData.logoUrl
+              : null,
+        });
+      }
     }
   } catch (error) {
-    console.error("quotation mirror to inspection request failed:", error);
+    console.error("quotation mirror to request failed:", error);
   }
 
   // Auto-save line items to the business item catalog for future reuse.
@@ -701,7 +714,9 @@ export async function createQuotationForInspection(
     /* catalog auto-save is best-effort */
   }
 
-  await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+  if (shouldSend) {
+    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+  }
 
   return { ok: true, quotation };
 }
@@ -725,6 +740,10 @@ export type StandaloneQuotationInput = {
   validUntil?: string | null;
   imageUrls?: string[];
   depositRequest?: unknown;
+  /** When true, emails/SMS the customer and marks the quotation as sent. */
+  send?: boolean;
+  /** How the backing request is tagged. Defaults to `quotation_direct`. */
+  createdSource?: "quotation_direct" | "invoice_direct";
 };
 
 type ServiceLookup = { name: string; businessType: string };
@@ -829,10 +848,10 @@ async function resolveOwnerAssignment(
 }
 
 /**
- * Creates a quotation directly (without an existing inspection visit). This
- * also creates a matching `inspection_requests` document that is already
+ * Creates a quotation directly (without an existing request). This
+ * also creates a matching `requests` document that is already
  * marked complete, tagged with the `quotation_direct` source, so the quote
- * shows up in both the Quotations and Inspection visits boards.
+ * shows up in both the Quotations and Requests boards.
  */
 export async function createStandaloneQuotation(
   businessId: string,
@@ -990,8 +1009,8 @@ export async function createStandaloneQuotation(
   const now = FieldValue.serverTimestamp();
   const ownerAssignment = await resolveOwnerAssignment(createdBy);
 
-  // 1. Create the completed inspection visit record (source: quotation_direct).
-  const inspectionRef = adminDb.collection(INSPECTION_COLLECTION).doc();
+  // 1. Create the completed request record (source: quotation_direct).
+  const inspectionRef = adminDb.collection(REQUESTS_COLLECTION).doc();
   const requestCode = await allocateInspectionRequestCode();
   await inspectionRef.set({
     id: inspectionRef.id,
@@ -1005,7 +1024,7 @@ export async function createStandaloneQuotation(
     customRequest,
     customer,
     customerId,
-    createdSource: "quotation_direct",
+    createdSource: input.createdSource ?? "quotation_direct",
     address,
     preferredSlots: [],
     ownerProposedSlots: [],
@@ -1025,7 +1044,7 @@ export async function createStandaloneQuotation(
     visitEndedAt: now,
   });
 
-  // 2. Create the quotation document linked to that inspection visit.
+  // 2. Create the quotation document linked to that request.
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
   const quotationCode = buildQuotationCodeForInspection({
     id: inspectionRef.id,
@@ -1101,7 +1120,9 @@ export async function createStandaloneQuotation(
     console.error("standalone quotation PDF generation failed:", error);
   }
 
-  // 4. Mirror the quotation summary onto the inspection visit and mark sent.
+  const shouldSend = input.send === true;
+
+  // 4. Mirror the quotation summary onto the request.
   try {
     await inspectionRef.set(
       {
@@ -1112,23 +1133,25 @@ export async function createStandaloneQuotation(
           subtotalAud,
           balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
-          status: "sent",
+          status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...awaitingBookingFields(),
+        ...(shouldSend ? awaitingBookingFields() : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
-    await ref.set(
-      {
-        status: "sent",
-        ...awaitingBookingFields(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    if (shouldSend) {
+      await ref.set(
+        {
+          status: "sent",
+          ...awaitingBookingFields(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    }
   } catch (error) {
     console.error("standalone quotation mirror to inspection failed:", error);
   }
@@ -1146,17 +1169,19 @@ export async function createStandaloneQuotation(
     /* catalog auto-save is best-effort */
   }
 
-  // 6. Email the customer their quotation PDF.
-  try {
-    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
-  } catch (error) {
-    console.error("standalone quotation email failed:", error);
+  // 6. Email the customer their quotation PDF when explicitly sending.
+  if (shouldSend) {
+    try {
+      await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    } catch (error) {
+      console.error("standalone quotation email failed:", error);
+    }
   }
 
   return { ok: true, quotation };
 }
 
-/** Lists quotations for an inspection request (admin viewing). */
+/** Lists quotations for an request (admin viewing). */
 export async function listQuotationsForInspection(
   businessId: string,
   inspectionRequestId: string,
@@ -1170,7 +1195,7 @@ export async function listQuotationsForInspection(
       .where("businessId", "==", businessId)
       .where("inspectionRequestId", "==", id)
       .get(),
-    adminDb.collection("inspection_requests").doc(id).get(),
+    adminDb.collection("requests").doc(id).get(),
   ]);
 
   const inspectionData = inspectionSnap.data() ?? {};
@@ -1252,7 +1277,7 @@ async function enrichQuotationsFromInspections(
   for (let i = 0; i < ids.length; i += 10) {
     const chunk = ids.slice(i, i + 10);
     const refs = chunk.map((id) =>
-      adminDb.collection(INSPECTION_COLLECTION).doc(id),
+      adminDb.collection(REQUESTS_COLLECTION).doc(id),
     );
     const snaps = await adminDb.getAll(...refs);
     for (const snap of snaps) {
@@ -1359,6 +1384,210 @@ export async function listBusinessQuotations(
     "@/lib/invoices/enrich-quotations"
   );
   return enrichQuotationsWithInvoices(enriched);
+}
+
+async function applyQuotationCustomerDecision(
+  requestSnap: FirebaseFirestore.DocumentSnapshot,
+  quotationId: string,
+  decision: "accepted" | "rejected",
+  options: { notifyBusiness?: boolean } = {},
+): Promise<
+  | { ok: true; request: ReturnType<typeof mapInspectionDoc> }
+  | { ok: false; status: number; error: string }
+> {
+  const data = requestSnap.data() ?? {};
+  const request = mapInspectionDoc(requestSnap.id, data);
+  const summary = request.quotation;
+
+  if (!summary || summary.id !== quotationId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  // Legacy mirrors may lack `status`; they were always sent on creation.
+  if (summary.status === "draft") {
+    return {
+      ok: false,
+      status: 400,
+      error: "There is no sent quotation awaiting a decision.",
+    };
+  }
+  if (request.bookingId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This quotation has already been converted into a job.",
+    };
+  }
+  if (summary.customerDecision === decision) {
+    return { ok: true, request };
+  }
+
+  const decidedAt = FieldValue.serverTimestamp();
+  await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .doc(quotationId)
+    .set(
+      {
+        customerDecision: decision,
+        customerDecisionAt: decidedAt,
+        updatedAt: decidedAt,
+      },
+      { merge: true },
+    );
+  await requestSnap.ref.set(
+    {
+      quotation: {
+        ...(typeof data.quotation === "object" && data.quotation
+          ? data.quotation
+          : {}),
+        customerDecision: decision,
+        customerDecisionAt: decidedAt,
+      },
+      updatedAt: decidedAt,
+    },
+    { merge: true },
+  );
+
+  const updatedRequest = {
+    ...request,
+    quotation: summary
+      ? {
+          ...summary,
+          customerDecision: decision,
+          customerDecisionAt: Date.now(),
+        }
+      : null,
+  };
+
+  if (options.notifyBusiness) {
+    try {
+      const { notifyBusinessOfQuotationDecision } = await import(
+        "@/lib/notifications/server"
+      );
+      const businessSnap = await adminDb
+        .collection("businesses")
+        .doc(request.businessId)
+        .get();
+      const businessData = businessSnap.data() ?? {};
+      await notifyBusinessOfQuotationDecision(updatedRequest, decision, {
+        businessName:
+          typeof businessData.businessName === "string"
+            ? businessData.businessName
+            : null,
+        bookingSlug:
+          typeof businessData.bookingSlug === "string"
+            ? businessData.bookingSlug
+            : null,
+      });
+    } catch (error) {
+      console.error("quotation decision notification failed:", error);
+    }
+  }
+
+  return { ok: true, request: updatedRequest };
+}
+
+/**
+ * Records the customer's accept/reject decision on a sent quotation. The
+ * business cannot schedule a job or issue an invoice until it is accepted.
+ */
+export async function customerDecideQuotation(
+  requestId: string,
+  identity: { customerId: string; customerEmail: string },
+  decision: "accepted" | "rejected",
+): Promise<
+  | { ok: true }
+  | { ok: false; status: number; error: string }
+> {
+  const { getRequestDocument } = await import(
+    "@/lib/inspection/request-document"
+  );
+  const snap = await getRequestDocument(requestId);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+  const data = snap.data() ?? {};
+  const request = mapInspectionDoc(snap.id, data);
+
+  const ownsById =
+    !!request.customerId && request.customerId === identity.customerId;
+  const ownsByEmail =
+    !!identity.customerEmail &&
+    request.customer.email.toLowerCase() ===
+      identity.customerEmail.toLowerCase();
+  if (!ownsById && !ownsByEmail) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const summary = request.quotation;
+  if (!summary) {
+    return {
+      ok: false,
+      status: 400,
+      error: "There is no quotation awaiting your decision.",
+    };
+  }
+
+  const result = await applyQuotationCustomerDecision(
+    snap,
+    summary.id,
+    decision,
+    { notifyBusiness: true },
+  );
+  if (!result.ok) return result;
+  return { ok: true };
+}
+
+/**
+ * Lets the business owner record the customer's accept/reject decision when
+ * the customer confirms verbally or outside the booking engine.
+ */
+export async function businessRecordQuotationCustomerDecision(
+  quotationId: string,
+  businessId: string,
+  decision: "accepted" | "rejected",
+): Promise<
+  | { ok: true; request: ReturnType<typeof mapInspectionDoc> }
+  | { ok: false; status: number; error: string }
+> {
+  const quotationSnap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .doc(quotationId.trim())
+    .get();
+  if (!quotationSnap.exists) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  const quotationData = quotationSnap.data() ?? {};
+  if (quotationData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const inspectionRequestId =
+    typeof quotationData.inspectionRequestId === "string"
+      ? quotationData.inspectionRequestId.trim()
+      : "";
+  if (!inspectionRequestId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This quotation is not linked to a visit.",
+    };
+  }
+
+  const { getRequestDocument } = await import(
+    "@/lib/inspection/request-document"
+  );
+  const requestSnap = await getRequestDocument(inspectionRequestId);
+  if (!requestSnap) {
+    return { ok: false, status: 404, error: "Linked request not found." };
+  }
+
+  return applyQuotationCustomerDecision(
+    requestSnap,
+    quotationSnap.id,
+    decision,
+    { notifyBusiness: false },
+  );
 }
 
 async function sendQuotationCreatedEmail(

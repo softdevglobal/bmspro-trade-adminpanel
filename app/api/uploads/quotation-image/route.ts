@@ -66,7 +66,8 @@ export async function POST(request: Request) {
     }
 
     const file = formData.get("file");
-    const inspectionRequestId = formData.get("inspectionRequestId");
+    const inspectionRequestId =
+      formData.get("requestId") ?? formData.get("inspectionRequestId");
 
     if (!(file instanceof File)) {
       return NextResponse.json(

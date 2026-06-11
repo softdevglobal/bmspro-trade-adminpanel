@@ -33,11 +33,11 @@ export function FollowUpActionButtons({
       onKeyDown={(event) => event.stopPropagation()}
     >
       {bookHref ? (
-        <Link href={bookHref} className={bookClassName} title="Create booking">
+        <Link href={bookHref} className={bookClassName} title="Create job">
           Book
         </Link>
       ) : (
-        <button type="button" onClick={onBook} className={bookClassName} title="Create booking">
+        <button type="button" onClick={onBook} className={bookClassName} title="Create job">
           Book
         </button>
       )}

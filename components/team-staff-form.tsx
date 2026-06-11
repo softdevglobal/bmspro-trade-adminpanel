@@ -1,6 +1,11 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import {
+  formatAuPhoneDisplay,
+  toAuLocalPhoneDigits,
+} from "@/lib/phone/au-phone";
 import { useAuth } from "@/lib/auth/auth-context";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -115,7 +120,7 @@ export function TeamStaffForm() {
     field: "fullName" | "phone" | "email",
     value: string,
   ) {
-    const nextValue = field === "phone" ? value.replace(/\D/g, "") : value;
+    const nextValue = field === "phone" ? toAuLocalPhoneDigits(value) : value;
     setForm((current) => ({ ...current, [field]: nextValue }));
     setError(null);
     setShowDetailsErrors(false);
@@ -183,7 +188,7 @@ export function TeamStaffForm() {
   function openEditStaff(member: StaffMember) {
     setForm({
       fullName: member.fullName,
-      phone: (member.phone ?? "").replace(/\D/g, ""),
+      phone: toAuLocalPhoneDigits(member.phone ?? ""),
       email: member.email,
       staffType: member.staffType,
       availability: normalizeAvailability(member.availability, serviceAreas),
@@ -604,15 +609,22 @@ function StaffSetupStepContent({
               error={showDetailsErrors ? fieldErrors.fullName : undefined}
               required
             />
-            <TextField
-              label="Mobile Number"
-              placeholder="0400000000"
-              inputMode="numeric"
-              value={form.phone}
-              onChange={(value) => onUpdateField("phone", value)}
-              error={showDetailsErrors ? fieldErrors.phone : undefined}
-              required
-            />
+            <label className="flex flex-col gap-2">
+              <span className="font-body text-label-bold text-label-bold text-on-surface-variant">
+                Mobile Number
+                <RequiredMark />
+              </span>
+              <AuPhoneInput
+                value={form.phone}
+                onChange={(value) => onUpdateField("phone", value)}
+                required
+              />
+              {showDetailsErrors && fieldErrors.phone ? (
+                <span className="font-body text-[12px] font-medium text-error">
+                  {fieldErrors.phone}
+                </span>
+              ) : null}
+            </label>
             <div className="md:col-span-2">
               <TextField
                 label="Email Address"
@@ -1126,7 +1138,7 @@ function StaffReviewPanel({
               <span className="material-symbols-outlined text-[16px] text-primary">
                 call
               </span>
-              {form.phone.trim() || "No mobile"}
+              {formatAuPhoneDisplay(form.phone) || "No mobile"}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full bg-primary-fixed px-3 py-1 font-body text-[12px] font-semibold text-on-primary-fixed-variant">
               <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
@@ -1453,7 +1465,7 @@ function StaffMemberCard({
             <span className="material-symbols-outlined text-[13px] text-primary">
               call
             </span>
-            {member.phone || "No phone"}
+            {formatAuPhoneDisplay(member.phone) || "No phone"}
           </span>
           <span aria-hidden className="text-outline-variant">
             ·
@@ -1605,7 +1617,10 @@ function StaffDetailDrawer({
           <DetailSection title="Contact">
             <DetailRow label="Name" value={member.fullName || "—"} />
             <DetailRow label="Email" value={member.email || "—"} />
-            <DetailRow label="Mobile" value={member.phone || "—"} />
+            <DetailRow
+              label="Mobile"
+              value={formatAuPhoneDisplay(member.phone) || "—"}
+            />
           </DetailSection>
 
           <DetailSection title="Work profile">

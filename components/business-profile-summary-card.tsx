@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessLogoUploader } from "@/components/business-logo-settings";
 import type { BusinessProfilePlan } from "@/lib/onboarding/server";
 import type { ReactNode } from "react";
 import { timezoneLabel } from "@/lib/onboarding/tenant-display";
@@ -19,7 +20,8 @@ type SummaryData = {
 
 function formatPlanLabel(plan: BusinessProfilePlan): string {
   const period = plan.period ? `/${plan.period}` : "";
-  return `${plan.name} (AU$${plan.price}${period})`;
+  const name = plan.name.replace(/^Booking Management$/i, "Job Management");
+  return `${name} (AU$${plan.price}${period})`;
 }
 
 function SummaryRow({
@@ -61,9 +63,12 @@ function SummaryRow({
 export function BusinessProfileSummaryCard({
   data,
   loading,
+  showLogoUpload,
 }: {
   data: SummaryData;
   loading?: boolean;
+  /** When true, shows logo upload controls (settings page). */
+  showLogoUpload?: boolean;
 }) {
   if (loading) {
     return (
@@ -79,29 +84,48 @@ export function BusinessProfileSummaryCard({
 
   return (
     <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 shadow-sm">
-      <div className="flex items-start gap-3 border-b border-outline-variant/60 pb-4">
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-outline-variant/60 bg-white">
-          {data.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={data.logoUrl}
-              alt={displayName}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="material-symbols-outlined text-[28px] text-primary">
-              store
-            </span>
-          )}
-        </div>
-        <div className="min-w-0">
-          <h4 className="truncate font-display text-[15px] font-bold uppercase tracking-wide text-on-surface">
-            {displayName}
-          </h4>
-          <p className="mt-0.5 truncate font-body text-[12px] text-on-surface-variant">
-            {data.businessEmail || "—"}
-          </p>
-        </div>
+      <div
+        className={`${showLogoUpload ? "border-b border-outline-variant/60 pb-5" : "border-b border-outline-variant/60 pb-4"}`}
+      >
+        {showLogoUpload ? (
+          <BusinessLogoUploader compact />
+        ) : (
+          <div className="flex items-start gap-3">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-low">
+              {data.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={data.logoUrl}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="material-symbols-outlined text-[28px] text-primary">
+                  store
+                </span>
+              )}
+            </div>
+            <div className="min-w-0 pt-0.5">
+              <h4 className="truncate font-display text-[15px] font-bold uppercase tracking-wide text-on-surface">
+                {displayName}
+              </h4>
+              <p className="mt-0.5 truncate font-body text-[12px] text-on-surface-variant">
+                {data.businessEmail || "—"}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {showLogoUpload ? (
+          <div className="mt-4 text-center">
+            <h4 className="font-display text-[15px] font-bold uppercase tracking-wide text-on-surface">
+              {displayName}
+            </h4>
+            <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+              {data.businessEmail || "—"}
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div className="pt-1">
@@ -133,7 +157,7 @@ export function BusinessProfileSummaryCard({
 
         <SummaryRow icon="workspace_premium" label="Plan">
           {data.plan ? (
-            <span className="inline-flex rounded-full bg-tertiary-container/50 px-2.5 py-0.5 font-body text-[11px] font-semibold text-tertiary">
+            <span className="inline-flex max-w-[11rem] rounded-full bg-tertiary-container/50 px-2.5 py-0.5 text-center font-body text-[11px] font-semibold leading-snug text-tertiary">
               {formatPlanLabel(data.plan)}
             </span>
           ) : (

@@ -57,6 +57,8 @@ type CreateNotificationInput = {
   emailHighlight?: string | null;
   /** Optional small label above the highlight callout. */
   emailHighlightLabel?: string | null;
+  /** When true, only writes the in-portal notification (no email or SMS). */
+  portalOnly?: boolean;
 };
 
 /** Drops null/undefined/empty values so stored docs have no blank fields. */
@@ -71,7 +73,9 @@ function withoutEmpty(
   return result;
 }
 
-async function createNotification(input: CreateNotificationInput): Promise<void> {
+async function createNotification(
+  input: CreateNotificationInput,
+): Promise<string> {
   const collection = notificationCollectionFor(input.audience);
   const ref = adminDb.collection(collection).doc();
   await ref.set(
@@ -93,7 +97,11 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
     }),
   );
 
-  if (input.audience === "customer" && input.customerEmail) {
+  if (
+    input.audience === "customer" &&
+    input.customerEmail &&
+    !input.portalOnly
+  ) {
     await sendInspectionCustomerNotificationEmail({
       customerEmail: input.customerEmail,
       customerPhone: input.customerPhone,
@@ -116,6 +124,8 @@ async function createNotification(input: CreateNotificationInput): Promise<void>
   } else if (input.audience === "customer" && input.customerId) {
     notifyCustomerNotificationsChanged(input.customerId);
   }
+
+  return ref.id;
 }
 
 function requestHeadline(request: InspectionRequestDetail): string {
@@ -124,7 +134,7 @@ function requestHeadline(request: InspectionRequestDetail): string {
     request.customRequest?.title ??
     (request.requestType === "custom_quote"
       ? "Custom quotation request"
-      : "Inspection request")
+      : "Request")
   );
 }
 
@@ -132,7 +142,7 @@ function slotLabel(slot: InspectionSlot): string {
   return `${formatSlotDate(slot.date)} · ${TIME_RANGE_SHORT_LABELS[slot.timeRange]}`;
 }
 
-/** Confirm to the customer that their inspection request was received. */
+/** Confirm to the customer that their request was received. */
 export async function notifyCustomerOfNewRequest(
   request: InspectionRequestDetail,
   context: CustomerNotifyContext = {},
@@ -177,7 +187,7 @@ export async function notifyCustomerOfNewRequest(
       status: "pending",
       type: "request_created",
       title: `We received your request — ${business}`,
-      body: `Thanks for submitting your inspection request with ${business}. Your request is pending review.\n\nWe'll email you when they confirm a visit time or suggest other options. You can also check status anytime from your account.`,
+      body: `Thanks for submitting your request with ${business}. Your request is pending review.\n\nWe'll email you when they confirm a visit time or suggest other options. You can also check status anytime from your account.`,
       emailDetails,
       emailHighlight: preferredSummary,
       emailHighlightLabel: preferredSummary ? "Your preferred times" : null,
@@ -194,7 +204,7 @@ export async function notifyBusinessOfNewRequest(
 ): Promise<void> {
   const headline = requestHeadline(request);
   const who = request.customer.fullName?.trim() || "A customer";
-  const title = "New inspection request";
+  const title = "New request";
   const body = `${who} requested ${headline}.`;
   try {
     await createNotification({
@@ -437,7 +447,7 @@ export async function notifyCustomerOfBookingOnTheWay(
     { label: "Technician", value: technician },
   ];
   if (booking.bookingCode) {
-    emailDetails.push({ label: "Booking", value: booking.bookingCode });
+    emailDetails.push({ label: "Job", value: booking.bookingCode });
   }
   if (address) {
     emailDetails.push({ label: "Address", value: address });
@@ -472,6 +482,147 @@ export async function notifyCustomerOfBookingOnTheWay(
       emailDetails,
       emailHighlight: visitWindow,
       emailHighlightLabel: visitWindow ? "Expected arrival" : null,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+function formatNotificationAud(value: number): string {
+  return `Aus $${value.toLocaleString("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/** Notify the customer when their booked job is marked complete (mobile/admin flow). */
+export async function notifyCustomerOfJobCompleted(
+  booking: BookingDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const email = booking.customer.email?.trim();
+  if (!email && !booking.customerId) return;
+
+  const business = context.businessName ?? "The business";
+  const headline = bookingHeadline(booking);
+  const technician = booking.assignedTo?.name;
+  const emailDetails: EmailDetailRow[] = [
+    { label: "Job", value: headline },
+  ];
+  if (booking.bookingCode) {
+    emailDetails.push({ label: "Reference", value: booking.bookingCode });
+  }
+  if (technician) {
+    emailDetails.push({ label: "Completed by", value: technician });
+  }
+
+  const body = technician
+    ? `${technician} from ${business} has completed your job (${headline}). View your account for details and your invoice when it is ready.`
+    : `${business} has completed your job (${headline}). View your account for details and your invoice when it is ready.`;
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: booking.businessId,
+      customerId: booking.customerId,
+      customerEmail: email || null,
+      customerPhone: booking.customer.phone || null,
+      customerName: booking.customer.fullName || null,
+      requestId: booking.inspectionRequestId || booking.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "completed",
+      type: "job_completed",
+      title: `${business} completed your job`,
+      body,
+      emailDetails,
+      emailHighlight: technician ?? null,
+      emailHighlightLabel: technician ? "Completed by" : null,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+type InvoiceNotificationInput = {
+  id: string;
+  invoiceCode: string;
+  inspectionRequestId: string;
+  serviceTitle: string;
+  customer: BookingDetail["customer"];
+  finalPriceAud: number;
+  balanceDueAud: number;
+  dueDate?: string | null;
+};
+
+/** In-portal notification when an invoice is sent (email/SMS handled separately). */
+export async function notifyCustomerOfInvoiceSent(
+  businessId: string,
+  invoice: InvoiceNotificationInput,
+  context: CustomerNotifyContext & { customerId?: string | null } = {},
+): Promise<void> {
+  const requestId = invoice.inspectionRequestId?.trim();
+  if (!requestId) return;
+
+  let customerId = context.customerId ?? null;
+  if (!customerId) {
+    try {
+      const snap = await adminDb
+        .collection("requests")
+        .doc(requestId)
+        .get();
+      const raw = snap.data()?.customerId;
+      customerId = typeof raw === "string" ? raw : null;
+    } catch {
+      customerId = null;
+    }
+  }
+
+  const email = invoice.customer.email?.trim();
+  if (!email && !customerId) return;
+
+  const business = context.businessName ?? "The business";
+  const serviceTitle = invoice.serviceTitle.trim() || "your job";
+  const emailDetails: EmailDetailRow[] = [
+    { label: "Invoice", value: invoice.invoiceCode.trim() || "—" },
+    { label: "Service", value: serviceTitle },
+    {
+      label: "Total",
+      value: formatNotificationAud(invoice.finalPriceAud),
+    },
+    {
+      label: "Amount due",
+      value: formatNotificationAud(invoice.balanceDueAud),
+    },
+  ];
+  if (invoice.dueDate?.trim()) {
+    emailDetails.push({
+      label: "Due date",
+      value: formatSlotDate(invoice.dueDate.trim()),
+    });
+  }
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId,
+      customerId,
+      customerEmail: email || null,
+      customerPhone: invoice.customer.phone || null,
+      customerName: invoice.customer.fullName || null,
+      requestId,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "completed",
+      type: "invoice_sent",
+      title: `${business} sent your invoice`,
+      body: `Your invoice for ${serviceTitle} is ready. We've emailed you the PDF — you can also view or download it from your account.`,
+      emailDetails,
+      emailHighlight: formatNotificationAud(invoice.balanceDueAud),
+      emailHighlightLabel: "Amount due",
+      portalOnly: true,
     });
   } catch {
     /* best-effort */
@@ -532,6 +683,61 @@ export async function notifyCustomerOfVisitOnTheWay(
       emailHighlight: visitWindow,
       emailHighlightLabel: visitWindow ? "Expected arrival" : null,
     });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Notify the business owner that the customer accepted or rejected a quotation. */
+export async function notifyBusinessOfQuotationDecision(
+  request: InspectionRequestDetail,
+  decision: "accepted" | "rejected",
+  context: { bookingSlug?: string | null; businessName?: string | null } = {},
+): Promise<void> {
+  const who = request.customer.fullName?.trim() || "The customer";
+  const headline = requestHeadline(request);
+  const quoteCode = request.quotation?.quotationCode?.trim();
+  const quoteLabel = quoteCode ? `quotation ${quoteCode}` : "the quotation";
+  const title =
+    decision === "accepted"
+      ? "Quotation accepted"
+      : "Quotation rejected";
+  const body =
+    decision === "accepted"
+      ? `${who} accepted ${quoteLabel} for ${headline}. You can now schedule the job or issue an invoice.`
+      : `${who} rejected ${quoteLabel} for ${headline}.`;
+  try {
+    const notificationType =
+      decision === "accepted" ? "quotation_accepted" : "quotation_rejected";
+    const notificationId = await createNotification({
+      audience: "business",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      requestId: request.id,
+      status: request.status,
+      type: notificationType,
+      title,
+      body,
+    });
+
+    const ownerUid = await resolveBusinessOwnerUid(request.businessId);
+    if (ownerUid) {
+      await sendOwnerMobilePush({
+        ownerUid,
+        title,
+        body,
+        data: {
+          type: notificationType,
+          requestId: request.id,
+          notificationId,
+        },
+      });
+    }
   } catch {
     /* best-effort */
   }

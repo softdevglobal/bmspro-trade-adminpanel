@@ -3,6 +3,10 @@ import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { sendStaffWelcomeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
+import {
+  findStaffOwnerPhoneConflict,
+  PHONE_TAKEN_ERROR,
+} from "@/lib/users/phone-uniqueness";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
@@ -392,6 +396,14 @@ export async function POST(request: Request) {
     }
   }
 
+  const phoneConflict = await findStaffOwnerPhoneConflict(parsed.value.phone);
+  if (phoneConflict) {
+    return NextResponse.json(
+      { ok: false, error: PHONE_TAKEN_ERROR },
+      { status: 400 }
+    );
+  }
+
   let authUid: string | null = null;
   const now = FieldValue.serverTimestamp();
 
@@ -655,6 +667,16 @@ export async function PATCH(request: Request) {
   if (duplicate) {
     return NextResponse.json(
       { ok: false, error: "A user with this email already exists." },
+      { status: 400 }
+    );
+  }
+
+  const phoneConflict = await findStaffOwnerPhoneConflict(parsed.value.phone, {
+    excludeUserUid: parsed.value.id,
+  });
+  if (phoneConflict) {
+    return NextResponse.json(
+      { ok: false, error: PHONE_TAKEN_ERROR },
       { status: 400 }
     );
   }

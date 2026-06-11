@@ -14,7 +14,7 @@ import {
 } from "react";
 
 const INSPECTION_ROUTES = [
-  "/dashboard/inspection-visits",
+  "/dashboard/requests",
   "/dashboard/quotations",
   "/dashboard/customers",
   "/dashboard/calendar",
@@ -37,7 +37,7 @@ type InspectionRequestsValue = {
 const InspectionRequestsContext =
   createContext<InspectionRequestsValue | null>(null);
 
-/** Polls inspection_requests via API (no Firestore snapshot listener). */
+/** Polls requests via API (no Firestore snapshot listener). */
 export function InspectionRequestsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { role, businessId, user } = useAuth();

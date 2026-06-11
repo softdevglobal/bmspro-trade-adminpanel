@@ -21,7 +21,6 @@ const OWNER_ROLES = new Set([
   "owner",
   "admin",
   "business_owner",
-  "salon_owner",
 ]);
 
 async function resolveOwnerBusinessId(

@@ -41,7 +41,7 @@
       ]
     },
     {
-      "collectionGroup": "inspection_requests",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "businessId", "order": "ASCENDING" },
@@ -49,7 +49,7 @@
       ]
     },
     {
-      "collectionGroup": "bookings",
+      "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "businessId", "order": "ASCENDING" },
@@ -78,6 +78,57 @@
       "fields": [
         { "fieldPath": "businessId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "agentId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cc_direct_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tenantUserUid", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cc_direct_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "agentUid", "order": "ASCENDING" },
+        { "fieldPath": "sessionStatus", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cc_direct_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "queueStatus", "order": "ASCENDING" },
+        { "fieldPath": "sessionStatus", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
       ]
     }
   ],

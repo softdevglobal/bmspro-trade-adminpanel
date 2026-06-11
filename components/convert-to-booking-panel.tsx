@@ -169,7 +169,7 @@ export function ConvertToBookingPanel({
 }) {
   const { user } = useAuth();
   const { staff } = useBusinessStaffSummary();
-  const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("skip");
+  const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("owner");
   const [staffId, setStaffId] = useState("");
   const [slot, setSlot] = useState<InspectionSlot>({
     date: minBookingDate,
@@ -194,7 +194,7 @@ export function ConvertToBookingPanel({
       estimateMinutesFromTimeRange(initialStartTime, initialEndTime),
     );
     setNote("");
-    setAssignChoice("skip");
+    setAssignChoice("owner");
     setStaffId("");
     setError(null);
   }, [
@@ -225,8 +225,12 @@ export function ConvertToBookingPanel({
       setError("The end time must be after the start time.");
       return;
     }
+    if (assignChoice !== "owner" && assignChoice !== "staff") {
+      setError("Choose who will run this job.");
+      return;
+    }
     if (assignChoice === "staff" && !staffId) {
-      setError("Choose a team member to assign, or skip for now.");
+      setError("Choose a team member to assign.");
       return;
     }
 
@@ -235,7 +239,7 @@ export function ConvertToBookingPanel({
     try {
       const token = await user.getIdToken();
       const response = await fetch(
-        `/api/inspection-requests/${inspectionRequestId}`,
+        `/api/requests/${inspectionRequestId}`,
         {
           method: "PATCH",
           headers: {
@@ -252,12 +256,8 @@ export function ConvertToBookingPanel({
             endTime,
             estimatedDurationMinutes: estimatedMinutes,
             note: note.trim() || undefined,
-            ...(assignChoice !== "skip"
-              ? {
-                  assignTo: assignChoice,
-                  ...(assignChoice === "staff" ? { staffId } : {}),
-                }
-              : {}),
+            assignTo: assignChoice,
+            ...(assignChoice === "staff" ? { staffId } : {}),
           }),
         },
       );
@@ -267,11 +267,11 @@ export function ConvertToBookingPanel({
         request?: InspectionRequestDetail;
       };
       if (!response.ok || !data.ok || !data.request) {
-        throw new Error(data.error ?? "Could not create booking.");
+        throw new Error(data.error ?? "Could not create job.");
       }
       onSuccess(data.request);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create booking.");
+      setError(err instanceof Error ? err.message : "Could not create job.");
     } finally {
       setSubmitting(false);
     }
@@ -280,7 +280,7 @@ export function ConvertToBookingPanel({
   return (
     <section className="rounded-xl border border-primary/25 bg-primary/5 p-4">
       <h4 className="font-display text-[15px] font-semibold text-on-surface">
-        Create booking
+        Create job
       </h4>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
         Schedule the job after the customer accepted your quotation (or when they
@@ -370,10 +370,14 @@ export function ConvertToBookingPanel({
           disabled={submitting}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <span className="material-symbols-outlined text-[18px]">
+          <span
+            className={`material-symbols-outlined text-[18px] ${
+              submitting ? "animate-spin" : ""
+            }`}
+          >
             {submitting ? "progress_activity" : "assignment"}
           </span>
-          {submitting ? "Saving…" : "Save booking"}
+          {submitting ? "Creating…" : "Create job"}
         </button>
         <button
           type="button"

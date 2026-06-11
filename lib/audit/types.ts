@@ -52,7 +52,7 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   auth: "Auth",
   inspection: "Inspection",
   quotation: "Quotation",
-  booking: "Booking",
+  booking: "Job",
   staff: "Staff",
   customer: "Customer",
   service: "Service",

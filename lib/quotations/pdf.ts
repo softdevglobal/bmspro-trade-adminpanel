@@ -814,9 +814,14 @@ export async function generateDocumentPdf(
     ty -= 30;
 
     if (data.deposit) {
-      drawText("Deposit due", panelX + 12, ty, { size: 9.5, color: MUTED });
+      drawText(data.deposit.paid ? "Deposit paid" : "Deposit due", panelX + 12, ty, {
+        size: 9.5,
+        color: MUTED,
+      });
       drawNumberRight(
-        formatQuoteMoney(data.deposit.amountAud),
+        data.deposit.paid
+          ? `-${formatQuoteMoney(data.deposit.amountAud)}`
+          : formatQuoteMoney(data.deposit.amountAud),
         panelX + panelW - 12,
         ty,
         { size: 9.5, bold: true },

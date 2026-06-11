@@ -1,6 +1,8 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { AuditLogView } from "@/components/audit-log-view";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
@@ -10,15 +12,20 @@ import {
   NOTIFICATION_STATUS_TONE,
 } from "@/lib/notifications/types";
 import {
+  BOOKING_STATUS_LABELS,
+  type BookingStatus,
+} from "@/lib/bookings/types";
+import {
   STATUS_LABELS,
   TIME_RANGE_LABELS,
   formatBudgetAud,
   formatSlotDate,
   formatVisitWindow,
+  type InspectionInvoiceSummary,
   type InspectionRequestStatus,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
-import type { CustomerBooking } from "@/app/api/customer/bookings/route";
+import type { CustomerBooking } from "@/app/api/customer/jobs/route";
 import type { InspectionSlot, InspectionAssignment } from "@/lib/inspection/types";
 import {
   CustomerBookingShell,
@@ -96,12 +103,65 @@ function requestTypeLabel(booking: CustomerBooking): string {
   return "Existing service";
 }
 
-function quotationPdfFilename(title: string): string {
+function documentPdfFilename(
+  kind: "quotation" | "invoice",
+  title: string,
+): string {
   const safe = title
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase();
-  return `quotation-${safe || "bmspro"}.pdf`;
+  return `${kind}-${safe || "bmspro"}.pdf`;
+}
+
+function customerInvoiceReady(
+  invoice: InspectionInvoiceSummary | null | undefined,
+): invoice is InspectionInvoiceSummary {
+  return Boolean(invoice?.pdfUrl?.trim() && invoice.status === "sent");
+}
+
+const JOB_STATUS_TONE: Record<BookingStatus, string> = {
+  awaiting: "border-orange-200 bg-orange-50 text-orange-800",
+  scheduled: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  ongoing: "border-amber-200 bg-amber-50 text-amber-800",
+  cancelled: "border-stone-200 bg-stone-100 text-stone-600",
+  completed: "border-sky-200 bg-sky-50 text-sky-800",
+};
+
+function DocumentPdfActions({
+  pdfUrl,
+  title,
+  kind,
+  viewerTitle,
+}: {
+  pdfUrl: string;
+  title: string;
+  kind: "quotation" | "invoice";
+  viewerTitle?: string;
+}) {
+  const [viewerOpen, setViewerOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setViewerOpen(true)}
+        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-colors hover:bg-primary/90"
+      >
+        <span className="material-symbols-outlined text-[18px]">
+          picture_as_pdf
+        </span>
+        View PDF
+      </button>
+      <QuotationPdfViewerModal
+        open={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        pdfUrl={pdfUrl}
+        title={viewerTitle ?? title}
+        downloadFilename={documentPdfFilename(kind, title)}
+      />
+    </>
+  );
 }
 
 function QuotationPdfActions({
@@ -111,64 +171,8 @@ function QuotationPdfActions({
   pdfUrl: string;
   title: string;
 }) {
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-
-  async function downloadPdf() {
-    setDownloading(true);
-    try {
-      const response = await fetch(pdfUrl);
-      if (!response.ok) throw new Error("Could not download PDF.");
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = quotationPdfFilename(title);
-      anchor.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
-    } finally {
-      setDownloading(false);
-    }
-  }
-
-  const actionClass =
-    "inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 font-body text-[13px] font-bold transition-colors";
-
   return (
-    <>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => setViewerOpen(true)}
-          className={`${actionClass} bg-primary text-white shadow-sm hover:bg-primary/90`}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            picture_as_pdf
-          </span>
-          View PDF
-        </button>
-        <button
-          type="button"
-          disabled={downloading}
-          onClick={() => void downloadPdf()}
-          className={`${actionClass} border border-primary/25 bg-white text-primary shadow-sm hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60`}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            {downloading ? "progress_activity" : "download"}
-          </span>
-          {downloading ? "Downloading…" : "Download PDF"}
-        </button>
-      </div>
-      <QuotationPdfViewerModal
-        open={viewerOpen}
-        onClose={() => setViewerOpen(false)}
-        pdfUrl={pdfUrl}
-        title={title}
-        downloadFilename={quotationPdfFilename(title)}
-      />
-    </>
+    <DocumentPdfActions pdfUrl={pdfUrl} title={title} kind="quotation" />
   );
 }
 
@@ -262,14 +266,14 @@ function AuthedAccount({
 }) {
   const searchParams = useSearchParams();
   const focusRequestId =
-    tab === "requests" || tab === "bookings"
+    tab === "requests" || tab === "jobs"
       ? searchParams.get("request")?.trim() || null
       : null;
 
   const titles: Record<CustomerAccountTab, string> = {
     profile: "My profile",
     requests: "My requests",
-    bookings: "Booking history",
+    jobs: "Job history",
     notifications: "Notifications",
     activity: "My activity",
   };
@@ -296,7 +300,7 @@ function AuthedAccount({
             focusRequestId={focusRequestId}
           />
         ) : null}
-        {tab === "bookings" ? (
+        {tab === "jobs" ? (
           <BookingsList
             scope="history"
             emptyHint="No past bookings yet."
@@ -318,7 +322,7 @@ function ActivitySection({ slug }: { slug: string }) {
   return (
     <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm sm:p-5">
       <p className="font-body text-[13px] text-on-surface-variant">
-        Sign-ins, inspection requests, and account updates for your profile with
+        Sign-ins, requests, and account updates for your profile with
         this business.
       </p>
       <div className="mt-4">
@@ -552,14 +556,13 @@ function ProfileSection({ slug }: { slug: string }) {
           </ProfileField>
 
           <ProfileField label="Mobile number" icon="call">
-            <input
-              type="tel"
-              inputMode="tel"
+            <AuPhoneInput
               value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="07XXXXXXXX"
+              onChange={setPhone}
               autoComplete="tel"
-              className={PROFILE_INPUT_CLASS}
+              size="lg"
+              leadingIconPadding="pl-10"
+              className="rounded-xl border-stone-200 bg-white shadow-sm focus-within:border-primary/40 focus-within:ring-primary/10"
             />
           </ProfileField>
 
@@ -635,18 +638,18 @@ function useBookings(): {
     try {
       const idToken = await getIdToken();
       if (!idToken) throw new Error("Not signed in");
-      const response = await fetch("/api/customer/bookings", {
+      const response = await fetch("/api/customer/jobs", {
         headers: { authorization: `Bearer ${idToken}` },
       });
       const payload = (await response.json()) as {
         ok?: boolean;
-        bookings?: CustomerBooking[];
+        jobs?: CustomerBooking[];
         error?: string;
       };
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Could not load bookings.");
+        throw new Error(payload.error ?? "Could not load jobs.");
       }
-      setBookings(payload.bookings ?? []);
+      setBookings(payload.jobs ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load bookings.");
     } finally {
@@ -673,8 +676,18 @@ function BookingsList({
   const { bookings, loading, error, reload } = useBookings();
 
   const filtered = useMemo(() => {
-    const allowed = scope === "active" ? ACTIVE_STATUSES : HISTORY_STATUSES;
-    return bookings.filter((booking) => allowed.includes(booking.status));
+    if (scope === "active") {
+      return bookings.filter(
+        (booking) =>
+          ACTIVE_STATUSES.includes(booking.status) &&
+          booking.bookingStatus !== "completed",
+      );
+    }
+    return bookings.filter(
+      (booking) =>
+        HISTORY_STATUSES.includes(booking.status) ||
+        booking.bookingStatus === "completed",
+    );
   }, [bookings, scope]);
 
   if (loading) {
@@ -899,6 +912,60 @@ function inspectorAvatarUrl(assigned: InspectionAssignment): string {
   return `https://api.dicebear.com/9.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
 }
 
+function assigneeRoleLabel(assigned: InspectionAssignment): string {
+  return assigned.type === "owner" ? "Business owner" : "Team member";
+}
+
+function AssigneeHighlight({
+  assignedTo,
+  label,
+  tone = "emerald",
+}: {
+  assignedTo: InspectionAssignment;
+  label: string;
+  tone?: "emerald" | "sky";
+}) {
+  const styles =
+    tone === "sky"
+      ? {
+          wrap: "border-sky-200/80 bg-white/90",
+          label: "text-sky-700/90",
+          ring: "ring-sky-100",
+        }
+      : {
+          wrap: "border-emerald-200/80 bg-white/90",
+          label: "text-emerald-700/90",
+          ring: "ring-emerald-100",
+        };
+
+  return (
+    <div
+      className={`mt-3 flex items-center gap-3 rounded-xl border px-3 py-3 shadow-sm ${styles.wrap}`}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={inspectorAvatarUrl(assignedTo)}
+        alt=""
+        className={`h-12 w-12 shrink-0 rounded-full border-2 border-white object-cover shadow-sm ring-2 ${styles.ring}`}
+      />
+      <div className="min-w-0 flex-1">
+        <p
+          className={`font-body text-[10px] font-bold uppercase tracking-wider ${styles.label}`}
+        >
+          {label}
+        </p>
+        <p className="mt-0.5 font-body text-[15px] font-bold text-on-surface">
+          {assignedTo.name}
+        </p>
+        <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+          {assigneeRoleLabel(assignedTo)}
+          {assignedTo.email ? ` · ${assignedTo.email}` : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmedVisitHighlight({
   slot,
   assignedTo,
@@ -1014,6 +1081,10 @@ function BookingCard({
   );
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<"accepted" | "rejected" | null>(
+    null,
+  );
+  const [decisionError, setDecisionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -1033,7 +1104,7 @@ function BookingCard({
     setAcceptError(null);
     try {
       const idToken = await getIdToken();
-      const response = await fetch(`/api/customer/bookings/${booking.id}`, {
+      const response = await fetch(`/api/customer/jobs/${booking.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1062,6 +1133,36 @@ function BookingCard({
     }
   }
 
+  async function decideQuotation(decision: "accepted" | "rejected") {
+    setDeciding(decision);
+    setDecisionError(null);
+    try {
+      const idToken = await getIdToken();
+      const response = await fetch(`/api/customer/jobs/${booking.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ action: "quotation_decision", decision }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not save your decision.");
+      }
+      onChanged();
+    } catch (err) {
+      setDecisionError(
+        err instanceof Error ? err.message : "Could not save your decision.",
+      );
+    } finally {
+      setDeciding(null);
+    }
+  }
+
   const headline =
     booking.serviceName ??
     booking.customRequest?.title ??
@@ -1074,6 +1175,9 @@ function BookingCard({
   const locationShort = [booking.address.suburb, booking.address.state]
     .filter(Boolean)
     .join(", ");
+  const invoiceReady = customerInvoiceReady(booking.invoice);
+  const jobStatus = booking.bookingStatus;
+  const jobAssignee = booking.jobAssignedTo ?? booking.assignedTo;
 
   return (
     <article
@@ -1143,6 +1247,28 @@ function BookingCard({
           </div>
         ) : null}
 
+        {invoiceReady && !expanded ? (
+          <div className="mt-3 rounded-xl border border-sky-200/80 bg-sky-50/70 px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-sky-800">
+              <span className="material-symbols-outlined text-[16px]">
+                receipt_long
+              </span>
+              Invoice ready — expand to view or download
+            </p>
+          </div>
+        ) : null}
+
+        {jobStatus === "completed" && !invoiceReady && !expanded ? (
+          <div className="mt-3 rounded-xl border border-sky-200/80 bg-sky-50/60 px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-sky-800">
+              <span className="material-symbols-outlined text-[16px]">
+                check_circle
+              </span>
+              Job completed
+            </p>
+          </div>
+        ) : null}
+
         {booking.quotation?.pdfUrl && !expanded ? (
           <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2.5">
             <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-primary">
@@ -1183,6 +1309,110 @@ function BookingCard({
 
       {expanded ? (
         <div className="space-y-3 border-t border-stone-200/80 bg-[#faf8f5] px-4 py-4 sm:px-5">
+          {invoiceReady ? (
+            <section className="rounded-xl border border-sky-200/80 bg-white p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <span className="material-symbols-outlined text-[22px]">
+                    receipt_long
+                  </span>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wider text-sky-800">
+                    Your invoice
+                  </p>
+                  {booking.invoice?.invoiceCode ? (
+                    <p className="mt-0.5 font-mono text-[12px] font-semibold text-sky-800">
+                      {booking.invoice.invoiceCode}
+                    </p>
+                  ) : null}
+                  {formatBudgetAud(booking.invoice?.finalPriceAud) ? (
+                    <p className="mt-1 font-display text-[20px] font-semibold text-on-surface">
+                      {formatBudgetAud(booking.invoice?.finalPriceAud)}
+                    </p>
+                  ) : null}
+                  {formatBudgetAud(booking.invoice?.balanceDueAud) &&
+                  booking.invoice?.balanceDueAud !==
+                    booking.invoice?.finalPriceAud ? (
+                    <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                      Balance due {formatBudgetAud(booking.invoice?.balanceDueAud)}
+                    </p>
+                  ) : null}
+                  {booking.invoice?.dueDate ? (
+                    <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                      Due {formatSlotDate(booking.invoice.dueDate)}
+                    </p>
+                  ) : null}
+                  <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                    View or download the invoice PDF for this job.
+                  </p>
+                  <DocumentPdfActions
+                    pdfUrl={booking.invoice!.pdfUrl!}
+                    title={headline}
+                    kind="invoice"
+                    viewerTitle={
+                      booking.invoice?.invoiceCode
+                        ? `Invoice ${booking.invoice.invoiceCode}`
+                        : "Invoice PDF"
+                    }
+                  />
+                  <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 font-body text-[12px] font-bold text-sky-800">
+                    <span className="material-symbols-outlined text-[16px]">
+                      mark_email_read
+                    </span>
+                    Invoice sent to your email
+                  </p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {booking.bookingId && jobStatus ? (
+            <section className="rounded-xl border border-sky-200/80 bg-sky-50/50 p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <span className="material-symbols-outlined text-[22px]">
+                    handyman
+                  </span>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wider text-sky-800">
+                    Your job
+                  </p>
+                  <p className="mt-1 font-display text-[18px] font-semibold text-on-surface">
+                    {BOOKING_STATUS_LABELS[jobStatus]}
+                  </p>
+                  {booking.bookingCode ? (
+                    <p className="mt-0.5 font-mono text-[12px] font-semibold text-sky-800">
+                      {booking.bookingCode}
+                    </p>
+                  ) : null}
+                  {jobStatus === "completed" ? (
+                    <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                      The work for this visit has been marked complete.
+                    </p>
+                  ) : null}
+                  {jobAssignee ? (
+                    <AssigneeHighlight
+                      assignedTo={jobAssignee}
+                      label={
+                        jobStatus === "completed"
+                          ? "Who completed the job"
+                          : "Assigned to"
+                      }
+                      tone="sky"
+                    />
+                  ) : null}
+                </div>
+                <span
+                  className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wider ${JOB_STATUS_TONE[jobStatus]}`}
+                >
+                  {BOOKING_STATUS_LABELS[jobStatus]}
+                </span>
+              </div>
+            </section>
+          ) : null}
+
           {booking.scheduledSlot ? (
             <ConfirmedVisitHighlight
               slot={booking.scheduledSlot}
@@ -1216,6 +1446,77 @@ function BookingCard({
                     pdfUrl={booking.quotation.pdfUrl}
                     title={headline}
                   />
+
+                  {booking.quotation.customerDecision === "accepted" ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-body text-[12px] font-bold text-emerald-700">
+                      <span className="material-symbols-outlined text-[16px]">
+                        check_circle
+                      </span>
+                      You accepted this quotation
+                    </p>
+                  ) : booking.quotation.customerDecision === "rejected" ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 font-body text-[12px] font-bold text-rose-700">
+                      <span className="material-symbols-outlined text-[16px]">
+                        cancel
+                      </span>
+                      You rejected this quotation
+                    </p>
+                  ) : !booking.bookingId &&
+                    booking.quotation.status !== "draft" ? (
+                    <div className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3">
+                      <p className="font-body text-[12px] font-bold text-amber-900">
+                        Do you accept this quotation?
+                      </p>
+                      <p className="mt-0.5 font-body text-[11px] text-amber-800/90">
+                        The business can only schedule the job once you accept.
+                      </p>
+                      {decisionError ? (
+                        <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
+                          {decisionError}
+                        </p>
+                      ) : null}
+                      <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          disabled={deciding !== null}
+                          onClick={() => void decideQuotation("accepted")}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span
+                            className={`material-symbols-outlined text-[18px] ${
+                              deciding === "accepted" ? "animate-spin" : ""
+                            }`}
+                          >
+                            {deciding === "accepted"
+                              ? "progress_activity"
+                              : "check_circle"}
+                          </span>
+                          {deciding === "accepted"
+                            ? "Accepting…"
+                            : "Accept quotation"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deciding !== null}
+                          onClick={() => void decideQuotation("rejected")}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white py-2.5 font-body text-[13px] font-bold text-rose-600 shadow-sm transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span
+                            className={`material-symbols-outlined text-[18px] ${
+                              deciding === "rejected" ? "animate-spin" : ""
+                            }`}
+                          >
+                            {deciding === "rejected"
+                              ? "progress_activity"
+                              : "cancel"}
+                          </span>
+                          {deciding === "rejected"
+                            ? "Rejecting…"
+                            : "Reject quotation"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -1346,6 +1647,8 @@ function NotificationsSection({ slug }: { slug: string }) {
   const router = useRouter();
   const { notifications, loading, error, unread, reload, markAllRead, clearOne, clearAll } =
     useCustomerNotifications();
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
 
   function openRequest(note: NotificationRecord) {
     if (!note.requestId) return;
@@ -1407,8 +1710,31 @@ function NotificationsSection({ slug }: { slug: string }) {
     );
   }
 
+  async function handleClearAll() {
+    setClearingAll(true);
+    try {
+      await clearAll();
+      setShowClearConfirm(false);
+    } finally {
+      setClearingAll(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
+      <DeleteConfirmModal
+        open={showClearConfirm}
+        title="Clear all notifications?"
+        description="This will permanently remove all updates from your notification list. You can still view your requests from the Requests and History tabs."
+        confirmLabel="Yes, clear all"
+        cancelLabel="Cancel"
+        isLoading={clearingAll}
+        onCancel={() => {
+          if (!clearingAll) setShowClearConfirm(false);
+        }}
+        onConfirm={() => void handleClearAll()}
+      />
+
       <div className="flex items-center justify-between gap-2">
         <p className="font-body text-[12px] text-on-surface-variant">
           {unread > 0
@@ -1417,7 +1743,7 @@ function NotificationsSection({ slug }: { slug: string }) {
         </p>
         <button
           type="button"
-          onClick={() => void clearAll()}
+          onClick={() => setShowClearConfirm(true)}
           className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:border-rose-200 hover:text-rose-600"
         >
           <span className="material-symbols-outlined text-[15px]">clear_all</span>

@@ -16,7 +16,7 @@ export async function loadBusinessName(slug: string): Promise<string | null> {
 const TAB_TITLES: Record<CustomerAccountTab, string> = {
   profile: "My profile",
   requests: "My requests",
-  bookings: "Booking history",
+  jobs: "Job history",
   notifications: "Notifications",
   activity: "My activity",
 };
@@ -33,7 +33,7 @@ export function accountPageDescription(
   tab: CustomerAccountTab,
 ): string {
   if (!ACCOUNT_TAB_SEGMENT[tab]) {
-    return `Manage your profile and bookings with ${businessName}.`;
+    return `Manage your profile and jobs with ${businessName}.`;
   }
   return `${TAB_TITLES[tab]} for ${businessName} on BMS Pro Trade.`;
 }

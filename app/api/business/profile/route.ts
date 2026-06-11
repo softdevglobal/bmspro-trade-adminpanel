@@ -10,6 +10,10 @@ import {
   getBusinessProfile,
   updateBusinessProfile,
 } from "@/lib/onboarding/server";
+import {
+  findStaffOwnerPhoneConflict,
+  PHONE_TAKEN_ERROR,
+} from "@/lib/users/phone-uniqueness";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -144,6 +148,19 @@ export async function PATCH(request: Request) {
         );
       }
       updates.businessPhone = trimmed || null;
+    }
+  }
+
+  if (updates.businessPhone) {
+    const phoneConflict = await findStaffOwnerPhoneConflict(
+      updates.businessPhone,
+      { excludeBusinessId: auth.businessId },
+    );
+    if (phoneConflict) {
+      return NextResponse.json(
+        { ok: false, error: PHONE_TAKEN_ERROR },
+        { status: 400 },
+      );
     }
   }
 

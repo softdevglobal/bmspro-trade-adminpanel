@@ -2,11 +2,11 @@ import "server-only";
 
 import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
 import {
-  BOOKING_COLLECTION,
+  JOBS_COLLECTION,
   type BookingDetail,
 } from "@/lib/bookings/types";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
-import { INSPECTION_COLLECTION } from "@/lib/inspection/types";
+import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import type {
   InspectionAddress,
   InspectionAssignment,
@@ -17,7 +17,10 @@ import type {
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
-import { notifyCustomerOfBookingOnTheWay } from "@/lib/notifications/server";
+import {
+  notifyCustomerOfBookingOnTheWay,
+  notifyCustomerOfJobCompleted,
+} from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
@@ -40,7 +43,7 @@ export async function getBusinessBooking(
   businessId: string,
   bookingId: string,
 ): Promise<BookingDetail | null> {
-  const snap = await adminDb.collection(BOOKING_COLLECTION).doc(bookingId).get();
+  const snap = await adminDb.collection(JOBS_COLLECTION).doc(bookingId).get();
   if (!snap.exists) return null;
   const booking = mapBookingDoc(snap.id, snap.data() ?? {});
   if (booking.businessId !== businessId) return null;
@@ -51,7 +54,7 @@ export async function listBusinessBookings(
   businessId: string,
 ): Promise<BookingDetail[]> {
   const snapshot = await adminDb
-    .collection(BOOKING_COLLECTION)
+    .collection(JOBS_COLLECTION)
     .where("businessId", "==", businessId)
     .limit(BOOKING_LIST_LIMIT)
     .get();
@@ -69,11 +72,11 @@ export async function createBookingFromInspection(
   | { ok: false; status: number; error: string }
 > {
   const inspectionRef = adminDb
-    .collection(INSPECTION_COLLECTION)
+    .collection(REQUESTS_COLLECTION)
     .doc(input.inspectionRequestId);
   const inspectionSnap = await inspectionRef.get();
   if (!inspectionSnap.exists) {
-    return { ok: false, status: 404, error: "Inspection request not found." };
+    return { ok: false, status: 404, error: "Request not found." };
   }
 
   const current = mapInspectionDoc(
@@ -105,16 +108,27 @@ export async function createBookingFromInspection(
     };
   }
 
+  if (current.quotation.customerDecision !== "accepted") {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        current.quotation.customerDecision === "rejected"
+          ? "The customer rejected this quotation, so it cannot become a job."
+          : "Wait for the customer to accept the quotation before creating a job.",
+    };
+  }
+
   if (current.bookingId) {
     return {
       ok: false,
       status: 400,
-      error: "A booking already exists for this inspection visit.",
+      error: "A booking already exists for this request.",
     };
   }
 
   const bookingCode = await allocateBookingCode();
-  const bookingRef = adminDb.collection(BOOKING_COLLECTION).doc();
+  const bookingRef = adminDb.collection(JOBS_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
   const ownerUid = await resolveBusinessOwnerUid(current.businessId);
 
@@ -186,7 +200,7 @@ export async function createBookingFromInspection(
   };
 }
 
-/** Mirrors booking fields onto all quotations for an inspection visit. */
+/** Mirrors booking fields onto all quotations for an request. */
 export async function mirrorBookingToQuotations(
   inspectionRequestId: string,
   fields: {
@@ -228,7 +242,7 @@ async function mirrorBookingStatusToInspection(
     bookingCode?: string | null;
   } = {},
 ): Promise<void> {
-  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(inspectionRequestId);
+  const ref = adminDb.collection(REQUESTS_COLLECTION).doc(inspectionRequestId);
   const snap = await ref.get();
   if (!snap.exists) return;
 
@@ -250,15 +264,15 @@ export async function assignBusinessBooking(
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
   const snap = await ref.get();
   if (!snap.exists) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   const current = mapBookingDoc(snap.id, snap.data() ?? {});
   if (current.businessId !== businessId) {
-    return { ok: false, status: 403, error: "Booking not found." };
+    return { ok: false, status: 403, error: "Job not found." };
   }
 
   if (current.status !== "scheduled") {
@@ -309,15 +323,15 @@ export async function startBusinessBookingVisit(
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
   const snap = await ref.get();
   if (!snap.exists) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   const current = mapBookingDoc(snap.id, snap.data() ?? {});
   if (current.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   if (current.status !== "scheduled") {
@@ -362,15 +376,15 @@ export async function startBusinessBookingJob(
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
   const snap = await ref.get();
   if (!snap.exists) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   const current = mapBookingDoc(snap.id, snap.data() ?? {});
   if (current.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   if (current.status === "ongoing") {
@@ -403,6 +417,8 @@ export async function startBusinessBookingJob(
   }
 
   await ref.update({
+    visitEndedAt:
+      current.visitEndedAt ?? FieldValue.serverTimestamp(),
     bookingStartedAt:
       current.bookingStartedAt ?? FieldValue.serverTimestamp(),
     status: "ongoing",
@@ -431,10 +447,10 @@ export async function startBusinessBookingJob(
 }
 
 /**
- * Marks the booking for an inspection visit as completed when an invoice is
+ * Marks the booking for an request as completed when an invoice is
  * issued. If no booking exists yet, a completed booking is created so the job
  * still shows in the bookings table. Mirrors the status to the quotation and
- * inspection visit.
+ * request.
  */
 export async function completeBookingForInvoicedQuotation(input: {
   businessId: string;
@@ -458,10 +474,10 @@ export async function completeBookingForInvoicedQuotation(input: {
   const { businessId, inspectionRequestId, quotation } = input;
   const now = FieldValue.serverTimestamp();
 
-  // 1) Existing booking linked to this inspection visit → mark completed.
+  // 1) Existing booking linked to this request → mark completed.
   if (inspectionRequestId) {
     const existing = await adminDb
-      .collection(BOOKING_COLLECTION)
+      .collection(JOBS_COLLECTION)
       .where("businessId", "==", businessId)
       .where("inspectionRequestId", "==", inspectionRequestId)
       .limit(1)
@@ -503,7 +519,7 @@ export async function completeBookingForInvoicedQuotation(input: {
 
   if (inspectionRequestId) {
     const inspectionSnap = await adminDb
-      .collection(INSPECTION_COLLECTION)
+      .collection(REQUESTS_COLLECTION)
       .doc(inspectionRequestId)
       .get();
     if (inspectionSnap.exists) {
@@ -522,7 +538,7 @@ export async function completeBookingForInvoicedQuotation(input: {
   }
 
   const bookingCode = await allocateBookingCode();
-  const bookingRef = adminDb.collection(BOOKING_COLLECTION).doc();
+  const bookingRef = adminDb.collection(JOBS_COLLECTION).doc();
   const ownerUid = await resolveBusinessOwnerUid(businessId);
 
   const bookingPayload: Record<string, unknown> = {
@@ -593,15 +609,15 @@ export async function completeBusinessBooking(
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(BOOKING_COLLECTION).doc(bookingId);
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
   const snap = await ref.get();
   if (!snap.exists) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   const current = mapBookingDoc(snap.id, snap.data() ?? {});
   if (current.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Booking not found." };
+    return { ok: false, status: 404, error: "Job not found." };
   }
 
   if (current.status === "completed") {
@@ -652,8 +668,12 @@ export async function completeBusinessBooking(
   }
 
   const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfJobCompleted(booking, summary);
+
   return {
     ok: true,
-    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+    booking,
   };
 }

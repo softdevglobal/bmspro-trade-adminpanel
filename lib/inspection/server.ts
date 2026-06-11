@@ -6,7 +6,8 @@ import {
   mapInspectionDoc,
   sortInspectionRequestsNewestFirst,
 } from "@/lib/inspection/map-inspection-doc";
-import { INSPECTION_COLLECTION } from "@/lib/inspection/types";
+import { getRequestDocument } from "@/lib/inspection/request-document";
+import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import type {
   InspectionAssignment,
   InspectionRequestCreatedSource,
@@ -44,13 +45,13 @@ const SYSTEM_ACTOR: InspectionActionActor = {
 };
 
 const OWNER_ACTION_SUMMARY: Record<string, string> = {
-  accept: "confirmed an inspection visit date",
+  accept: "confirmed an request date",
   set_time: "set the inspection time window",
   propose: "proposed alternative inspection times",
   assign: "assigned the inspection to an inspector",
   cancel: "cancelled the inspection",
   complete: "marked the inspection completed",
-  convert_to_booking: "converted the inspection into a booking",
+  convert_to_booking: "converted the request into a job",
   mark_awaiting_decision: "sent the inspection quotation for decision",
 };
 
@@ -103,7 +104,7 @@ async function lookupService(
   return { name, businessType };
 }
 
-/** Creates a new inspection request from a public booking submission. */
+/** Creates a new request from a public booking submission. */
 export async function createInspectionRequest(
   businessId: string,
   input: InspectionRequestInput,
@@ -127,7 +128,7 @@ export async function createInspectionRequest(
     serviceBusinessType = service.businessType;
   }
 
-  const ref = adminDb.collection(INSPECTION_COLLECTION).doc();
+  const ref = adminDb.collection(REQUESTS_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
   const requestCode = await allocateInspectionRequestCode();
 
@@ -166,12 +167,12 @@ export async function createInspectionRequest(
   return { ok: true, request };
 }
 
-/** Lists inspection requests for a business, newest first. */
+/** Lists requests for a business, newest first. */
 export async function listInspectionRequests(
   businessId: string,
 ): Promise<InspectionRequestDetail[]> {
   const snapshot = await adminDb
-    .collection(INSPECTION_COLLECTION)
+    .collection(REQUESTS_COLLECTION)
     .where("businessId", "==", businessId)
     .limit(80)
     .get();
@@ -185,8 +186,8 @@ export async function getInspectionRequest(
   id: string,
   businessId: string,
 ): Promise<InspectionRequestDetail | null> {
-  const snap = await adminDb.collection(INSPECTION_COLLECTION).doc(id).get();
-  if (!snap.exists) return null;
+  const snap = await getRequestDocument(id);
+  if (!snap) return null;
   const data = snap.data();
   if (!data || data.businessId !== businessId) return null;
   return mapInspectionDoc(snap.id, data);
@@ -225,11 +226,11 @@ export async function applyOwnerAction(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
+  const ref = snap.ref;
   const current = snap.data();
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
@@ -317,7 +318,7 @@ export async function applyOwnerAction(
       action: "booking.created",
       actor: audit.actor,
       source: audit.source,
-      summary: `Booking created from inspection ${created.request.requestCode ?? id}`,
+      summary: `Job created from request ${created.request.requestCode ?? id}`,
       targetId: created.request.id,
       targetLabel:
         created.request.serviceName ||
@@ -334,7 +335,7 @@ export async function applyOwnerAction(
       action: "inspection.convert_to_booking",
       actor: audit.actor,
       source: audit.source,
-      summary: `${audit.actor.name ?? audit.actor.email ?? "Someone"} converted the inspection into a booking`,
+      summary: `${audit.actor.name ?? audit.actor.email ?? "Someone"} converted the request into a job`,
       targetId: id,
       targetLabel:
         created.request.serviceName ||
@@ -419,12 +420,11 @@ export async function applyStaffStart(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
-
+  const ref = snap.ref;
   const current = snap.data();
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
@@ -476,12 +476,11 @@ export async function applyAssignedEndVisit(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
-
+  const ref = snap.ref;
   const current = snap.data();
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
@@ -541,11 +540,11 @@ export async function customerAcceptProposedSlot(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(INSPECTION_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
+  const ref = snap.ref;
   const current = mapInspectionDoc(snap.id, snap.data() ?? {});
 
   const ownsById =

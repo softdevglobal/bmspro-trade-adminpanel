@@ -14,7 +14,7 @@ import {
 } from "react";
 
 const BOOKING_ROUTES = [
-  "/dashboard/bookings",
+  "/dashboard/jobs",
   "/dashboard/calendar",
 ] as const;
 

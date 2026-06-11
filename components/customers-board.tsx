@@ -182,7 +182,7 @@ export function CustomersBoard() {
               No customers yet
             </p>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
-              Customers appear here when they submit an inspection request.
+              Customers appear here when they submit an request.
             </p>
           </div>
         ) : (
@@ -373,7 +373,7 @@ function CustomerPreviewContent({
             {sortedRequests.map((request) => (
               <li key={request.id}>
                 <Link
-                  href={`/dashboard/inspection-visits?request=${request.id}`}
+                  href={`/dashboard/requests?request=${request.id}`}
                   onClick={onClose}
                   className="block rounded-xl border border-outline-variant/60 bg-white p-3 transition-colors hover:border-primary/30 hover:bg-primary/[0.02]"
                 >

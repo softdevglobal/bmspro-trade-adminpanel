@@ -2,57 +2,35 @@
  * Call-center agent login endpoint.
  *
  * Accepts an email + password, authenticates them against Firebase Auth via
- * the Identity Toolkit REST API, verifies the returned token carries the
- * `call_center` role claim, then returns the idToken and basic profile.
+ * the Identity Toolkit REST API, then returns the idToken and basic profile.
  *
- * Call-center agents use this token as `Authorization: Bearer <idToken>` in
- * all subsequent call-center API requests.
+ * Allowed accounts:
+ *   - call-center agents  (JWT claim, users/, or call_center_agents/)
+ *   - super admins        (`role: "super_admin"` claim or super_admins/{uid})
  *
  * ──────────────────────────────────────────────────────────────────────────
- * POSTMAN — Agent Login
+ * POST http://localhost:3000/api/callcenter/auth/login
  * ──────────────────────────────────────────────────────────────────────────
- * URL:    http://localhost:3000/api/callcenter/auth/login
- * Method: POST
- * Headers:
- *   Content-Type: application/json
- *
- * Request body:
+ * Body example (agent):
  *   {
- *     "email":    "sarah.johnson@callcenter.com",
- *     "password": "Agent@1234"
+ *     "email":    "sri123@emai.com",
+ *     "password": "111111"
  *   }
  *
- * Success response — 200:
- *   {
- *     "ok":       true,
- *     "idToken":  "<Firebase ID token — valid for 1 hour>",
- *     "uid":      "abc123xyz789",
- *     "email":    "sarah.johnson@callcenter.com",
- *     "fullName": "Sarah Johnson"
- *   }
- *
- * Use idToken in all call-center API requests:
- *   Authorization: Bearer <idToken>
- *
- * Error responses:
- *   { "ok": false, "error": "Email and password are required." }            400
- *   { "ok": false, "error": "Invalid email or password." }                  401
- *   { "ok": false, "error": "This account does not have call-center access." } 403
- *   { "ok": false, "error": "Login failed. Please try again." }             500
- *
- * ──────────────────────────────────────────────────────────────────────────
- * Token Refresh
- * ──────────────────────────────────────────────────────────────────────────
- * Firebase ID tokens expire after 1 hour. Call this endpoint again with the
- * same credentials to obtain a fresh token.
+ * Success — 200:
+ *   { "ok": true, "idToken": "...", "uid": "...", "isSuperAdmin": false, ... }
  */
 
-import { adminAuth } from "@/lib/firebase/admin";
+import {
+  ensureCallCenterAgentClaims,
+  resolveCallCenterAgentProfile,
+  syncCallCenterUserDoc,
+} from "@/lib/callcenter/agent-access";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-/** Errors returned by the Firebase Identity Toolkit REST API. */
 const FIREBASE_AUTH_ERRORS: Record<string, string> = {
   EMAIL_NOT_FOUND: "Invalid email or password.",
   INVALID_PASSWORD: "Invalid email or password.",
@@ -70,13 +48,6 @@ interface FirebaseSignInResponse {
   error?: { message: string };
 }
 
-/**
- * Calls the Firebase Identity Toolkit signInWithPassword endpoint.
- *
- * Returns { ok: true, data } on success, or { ok: false, error, status } on
- * failure. Never throws — all errors are caught and mapped to a friendly
- * message.
- */
 async function signInWithFirebase(
   email: string,
   password: string,
@@ -117,17 +88,19 @@ async function signInWithFirebase(
   return { ok: true, data: json };
 }
 
+async function isSuperAdminAccount(
+  decoded: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>,
+): Promise<boolean> {
+  if (decoded.superAdmin === true || decoded.role === "super_admin") {
+    return true;
+  }
+  const snap = await adminDb.collection("super_admins").doc(decoded.uid).get();
+  return snap.exists && snap.data()?.isActive !== false;
+}
+
 /**
  * POST /api/callcenter/auth/login
- *
- * Authenticates a call-center agent and returns a Firebase ID token.
- *
- * Steps:
- *  1. Validate request body (email + password required).
- *  2. Call Firebase REST API to sign in and get an ID token.
- *  3. Decode the token server-side to read custom claims.
- *  4. Reject if the user's role claim is not "call_center".
- *  5. Return idToken, uid, email, and fullName.
+ * Authenticates a call-center agent or super admin and returns a Firebase ID token.
  */
 export async function POST(request: Request) {
   let body: unknown;
@@ -152,7 +125,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Authenticate with Firebase.
   const signIn = await signInWithFirebase(email, password);
   if (!signIn.ok) {
     return NextResponse.json(
@@ -161,10 +133,10 @@ export async function POST(request: Request) {
     );
   }
 
-  // Verify the token server-side and check the call_center role claim.
-  let decoded: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>;
+  let activeSignIn = signIn.data;
+  let activeDecoded: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>;
   try {
-    decoded = await adminAuth.verifyIdToken(signIn.data.idToken);
+    activeDecoded = await adminAuth.verifyIdToken(activeSignIn.idToken);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Login failed. Please try again." },
@@ -172,7 +144,48 @@ export async function POST(request: Request) {
     );
   }
 
-  if (decoded.role !== "call_center") {
+  let isSuperAdmin = await isSuperAdminAccount(activeDecoded);
+  let agentProfile = await resolveCallCenterAgentProfile(
+    activeDecoded.uid,
+    email,
+  );
+
+  if (
+    activeDecoded.role !== "call_center" &&
+    !isSuperAdmin &&
+    agentProfile?.isActive
+  ) {
+    await ensureCallCenterAgentClaims(activeDecoded.uid, agentProfile);
+    await syncCallCenterUserDoc(activeDecoded.uid, email, agentProfile);
+
+    const refreshed = await signInWithFirebase(email, password);
+    if (!refreshed.ok) {
+      return NextResponse.json(
+        { ok: false, error: refreshed.error },
+        { status: refreshed.status },
+      );
+    }
+
+    activeSignIn = refreshed.data;
+    activeDecoded = await adminAuth.verifyIdToken(activeSignIn.idToken);
+    isSuperAdmin = await isSuperAdminAccount(activeDecoded);
+    agentProfile = await resolveCallCenterAgentProfile(
+      activeDecoded.uid,
+      email,
+    );
+  }
+
+  const isCallCenterAgent =
+    activeDecoded.role === "call_center" ||
+    (agentProfile?.isActive ?? false);
+
+  if (!isCallCenterAgent && !isSuperAdmin) {
+    if (agentProfile && !agentProfile.isActive) {
+      return NextResponse.json(
+        { ok: false, error: "This call-center account is inactive." },
+        { status: 403 },
+      );
+    }
     return NextResponse.json(
       {
         ok: false,
@@ -182,11 +195,26 @@ export async function POST(request: Request) {
     );
   }
 
+  const superAdminSnap = isSuperAdmin
+    ? await adminDb.collection("super_admins").doc(activeDecoded.uid).get()
+    : null;
+  const superAdminData = superAdminSnap?.data() ?? {};
+
   return NextResponse.json({
     ok: true,
-    idToken: signIn.data.idToken,
-    uid: decoded.uid,
-    email: decoded.email ?? email,
-    fullName: signIn.data.displayName ?? decoded.name ?? null,
+    idToken: activeSignIn.idToken,
+    uid: activeDecoded.uid,
+    email: activeDecoded.email ?? email,
+    isSuperAdmin,
+    fullName:
+      agentProfile?.fullName ??
+      (typeof superAdminData.displayName === "string"
+        ? superAdminData.displayName
+        : null) ??
+      activeSignIn.displayName ??
+      activeDecoded.name ??
+      null,
+    extension: agentProfile?.extension ?? null,
+    agentType: agentProfile?.agentType ?? null,
   });
 }

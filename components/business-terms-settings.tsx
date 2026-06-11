@@ -1,10 +1,11 @@
 "use client";
 
+import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useEffect, useState } from "react";
 
 const TEXTAREA_CLASS =
-  "mt-2 w-full resize-y rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] leading-relaxed text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+  "mt-2 w-full resize-y rounded-xl border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] leading-relaxed text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
 export function BusinessTermsSettings() {
   const { user } = useAuth();
@@ -100,28 +101,17 @@ export function BusinessTermsSettings() {
   }
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <span className="material-symbols-outlined">gavel</span>
-        </div>
-        <div>
-          <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
-            Terms and conditions
-          </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Default text included on new quotations. You can still edit it on
-            each quote before sending.
-          </p>
-        </div>
-      </div>
-
+    <SettingsSection
+      icon="gavel"
+      title="Terms and conditions"
+      description="Default text included on new quotations. You can still edit it on each quote before sending."
+    >
       {loading ? (
-        <p className="mt-5 font-body text-[13px] text-on-surface-variant">
+        <p className="font-body text-[13px] text-on-surface-variant">
           Loading terms and conditions…
         </p>
       ) : (
-        <div className="mt-5 space-y-4">
+        <div className="space-y-4">
           <label className="block">
             <span className="font-body text-[13px] font-semibold text-on-surface">
               Quotation terms
@@ -140,12 +130,12 @@ export function BusinessTermsSettings() {
             </p>
           </label>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 border-t border-outline-variant/50 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
               disabled={saving}
               onClick={() => void handleSave()}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {saving ? "Saving…" : "Save terms and conditions"}
             </button>
@@ -163,6 +153,6 @@ export function BusinessTermsSettings() {
           ) : null}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }

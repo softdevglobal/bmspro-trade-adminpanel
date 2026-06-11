@@ -43,7 +43,7 @@ export async function sendOwnerWelcomeEmail(
   if (input.bookingSlug) {
     const base = appBaseUrl();
     details.push({
-      label: "Booking page",
+      label: "Job page",
       value: base
         ? `${base}/booknow/${input.bookingSlug}`
         : `/booknow/${input.bookingSlug}`,
@@ -63,8 +63,8 @@ export async function sendOwnerWelcomeEmail(
     title: `Your ${input.businessName} workspace is ready`,
     greetingName: firstName(input.ownerName),
     body: input.temporaryPassword
-      ? `Your BMS Pro Trade account has been created. Sign in with your email and the temporary password below, then change it from your profile.\n\nFrom your dashboard you can manage bookings, inspection visits, your team, and your public booking page.`
-      : `Thanks for setting up ${input.businessName} on BMS Pro Trade. Your account is ready.\n\nFrom your dashboard you can manage bookings, inspection visits, your team, and your public booking page.`,
+      ? `Your BMS Pro Trade account has been created. Sign in with your email and the temporary password below, then change it from your profile.\n\nFrom your dashboard you can manage jobs, requests, your team, and your public booking page.`
+      : `Thanks for setting up ${input.businessName} on BMS Pro Trade. Your account is ready.\n\nFrom your dashboard you can manage jobs, requests, your team, and your public booking page.`,
     details,
     ctaUrl: loginUrl(),
     ctaLabel: "Go to my dashboard",

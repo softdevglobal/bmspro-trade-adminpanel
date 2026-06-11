@@ -127,8 +127,8 @@ export async function POST(request: Request) {
 
   const payload = body as Record<string, unknown>;
 
-  // Standalone quotation: no existing inspection visit. Creates both a
-  // completed inspection_requests record and the quotation document.
+  // Standalone quotation: no existing request. Creates both a
+  // completed requests record and the quotation document.
   if (payload.standalone === true || payload.source === "standalone") {
     const customer = (payload.customer ?? {}) as {
       fullName?: string;
@@ -141,6 +141,7 @@ export async function POST(request: Request) {
       state?: string;
       postcode?: string;
     };
+    const send = payload.send === true;
     const result = await createStandaloneQuotation(auth.businessId, auth.uid, {
       customer: {
         fullName: typeof customer.fullName === "string" ? customer.fullName : "",
@@ -201,6 +202,7 @@ export async function POST(request: Request) {
         typeof payload.validUntil === "string" ? payload.validUntil : null,
       imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],
       depositRequest: payload.depositRequest ?? null,
+      send,
     });
 
     if (!result.ok) {
@@ -217,9 +219,10 @@ export async function POST(request: Request) {
   }
 
   const inspectionRequestId =
-    typeof payload.inspectionRequestId === "string"
+    (typeof payload.requestId === "string" ? payload.requestId : "") ||
+    (typeof payload.inspectionRequestId === "string"
       ? payload.inspectionRequestId
-      : "";
+      : "");
   const lineItems = payload.lineItems;
   const finalPriceAud =
     typeof payload.finalPriceAud === "number" &&
@@ -243,6 +246,7 @@ export async function POST(request: Request) {
 
   const customerPayload = payload.customer;
   const addressPayload = payload.address;
+  const send = payload.send === true;
 
   const result = await createQuotationForInspection(
     auth.businessId,
@@ -308,6 +312,7 @@ export async function POST(request: Request) {
             },
           }
         : {}),
+      send,
     },
     auth.role,
   );
@@ -324,7 +329,7 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, quotation: result.quotation });
 }
 
-/** Lists quotations for an inspection request (admin viewing). */
+/** Lists quotations for a request (admin viewing). */
 export async function GET(request: Request) {
   const auth = await requireQuotationAuthor(request);
   if (!auth.ok) {
@@ -351,7 +356,9 @@ export async function GET(request: Request) {
   }
 
   const inspectionRequestId =
-    url.searchParams.get("inspectionRequestId")?.trim() ?? "";
+    url.searchParams.get("requestId")?.trim() ||
+    url.searchParams.get("inspectionRequestId")?.trim() ||
+    "";
 
   if (!inspectionRequestId) {
     const quotations = await listBusinessQuotations(auth.businessId);

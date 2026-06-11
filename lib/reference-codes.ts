@@ -76,7 +76,7 @@ export function legacySegmentFromInspectionId(
   return (clean + "23456789ABC").slice(0, REFERENCE_CODE_SEGMENT_LENGTH);
 }
 
-/** Quotation uses the same 9 characters as its inspection visit. */
+/** Quotation uses the same 9 characters as its request. */
 export function buildQuotationCodeForInspection(request: {
   id: string;
   requestCode?: string | null;

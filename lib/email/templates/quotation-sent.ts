@@ -102,9 +102,10 @@ export async function sendQuotationSentEmail(
   const email = input.customerEmail.trim();
   if (!email || !input.pdfBytes?.length) return;
 
+  const businessLabel = input.businessName?.trim() || "your trade provider";
+  const serviceTitle = input.serviceTitle.trim() || "your job";
+
   try {
-    const businessLabel = input.businessName?.trim() || "your trade provider";
-    const serviceTitle = input.serviceTitle.trim() || "your job";
     const bookingEngineUrl = input.bookingSlug
       ? buildBookingUrl(input.bookingSlug)
       : null;
@@ -156,15 +157,16 @@ export async function sendQuotationSentEmail(
         },
       ],
     });
-
-    if (input.customerPhone) {
-      const total = formatEmailAud(input.totalAud);
-      await sendSms({
-        to: input.customerPhone,
-        message: `${businessLabel}: Your quotation ${input.quoteNo.trim() || ""} for ${serviceTitle} is ready (${total}). We've emailed you the PDF.`,
-      });
-    }
   } catch {
-    /* email/SMS is best-effort */
+    /* email is best-effort */
+  }
+
+  // SMS is sent independently so an email failure never skips the SMS.
+  if (input.customerPhone) {
+    const total = formatEmailAud(input.totalAud);
+    await sendSms({
+      to: input.customerPhone,
+      message: `${businessLabel}: Your quotation ${input.quoteNo.trim() || ""} for ${serviceTitle} is ready (${total}). We've emailed you the PDF.`,
+    });
   }
 }
