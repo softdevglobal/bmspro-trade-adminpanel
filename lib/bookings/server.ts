@@ -17,7 +17,10 @@ import type {
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
-import { notifyCustomerOfBookingOnTheWay } from "@/lib/notifications/server";
+import {
+  notifyCustomerOfBookingOnTheWay,
+  notifyCustomerOfJobCompleted,
+} from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
@@ -665,8 +668,12 @@ export async function completeBusinessBooking(
   }
 
   const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfJobCompleted(booking, summary);
+
   return {
     ok: true,
-    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+    booking,
   };
 }

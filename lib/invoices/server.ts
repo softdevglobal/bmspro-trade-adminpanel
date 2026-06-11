@@ -11,6 +11,7 @@ import type {
 import { formatDepositPaymentNote } from "@/lib/quotations/document";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { buildInvoiceCodeForQuotation } from "@/lib/reference-codes";
+import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import { FieldValue } from "firebase-admin/firestore";
 import type {
   CreateDirectInvoiceInput,
@@ -254,6 +255,34 @@ async function generateInvoicePdfBytes(
   }
 }
 
+async function mirrorInvoiceToInspectionRequest(
+  invoice: InvoiceDetail,
+): Promise<void> {
+  const requestId = invoice.inspectionRequestId?.trim();
+  if (!requestId) return;
+
+  try {
+    await adminDb.collection(REQUESTS_COLLECTION).doc(requestId).set(
+      {
+        invoice: {
+          id: invoice.id,
+          invoiceCode: invoice.invoiceCode?.trim() || null,
+          pdfUrl: invoice.pdfUrl?.trim() || null,
+          finalPriceAud: invoice.finalPriceAud,
+          balanceDueAud: invoice.balanceDueAud,
+          status: invoice.status,
+          invoiceDate: invoice.invoiceDate,
+          dueDate: invoice.dueDate,
+        },
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.error("[invoice] request mirror failed:", error);
+  }
+}
+
 /** Generates an invoice PDF, uploads it, and persists the public URL on the doc. */
 async function persistInvoicePdf(
   invoice: InvoiceDetail,
@@ -395,6 +424,7 @@ export async function createInvoiceFromQuotation(
       businessId,
       persisted.pdfBytes,
     );
+    await mirrorInvoiceToInspectionRequest(invoice);
     return { ok: true, invoice };
   }
 
@@ -515,6 +545,8 @@ export async function createInvoiceFromQuotation(
       persisted.pdfBytes,
     );
   }
+
+  await mirrorInvoiceToInspectionRequest(invoice);
 
   return {
     ok: true,
@@ -653,5 +685,23 @@ async function sendInvoiceEmailForDetail(
     logoUrl: profile?.logoUrl ?? null,
     pdfBytes: bytes,
     pdfFileName: `${invoiceCode}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
+  });
+
+  const { notifyCustomerOfInvoiceSent } = await import(
+    "@/lib/notifications/server"
+  );
+  await notifyCustomerOfInvoiceSent(businessId, {
+    id: invoice.id,
+    invoiceCode: invoice.invoiceCode,
+    inspectionRequestId: invoice.inspectionRequestId,
+    serviceTitle: invoice.serviceTitle,
+    customer: invoice.customer,
+    finalPriceAud: invoice.finalPriceAud,
+    balanceDueAud: invoice.balanceDueAud,
+    dueDate: invoice.dueDate,
+  }, {
+    businessName: profile?.businessName ?? null,
+    bookingSlug: profile?.bookingSlug ?? null,
+    logoUrl: profile?.logoUrl ?? null,
   });
 }

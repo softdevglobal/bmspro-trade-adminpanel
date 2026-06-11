@@ -12,11 +12,16 @@ import {
   NOTIFICATION_STATUS_TONE,
 } from "@/lib/notifications/types";
 import {
+  BOOKING_STATUS_LABELS,
+  type BookingStatus,
+} from "@/lib/bookings/types";
+import {
   STATUS_LABELS,
   TIME_RANGE_LABELS,
   formatBudgetAud,
   formatSlotDate,
   formatVisitWindow,
+  type InspectionInvoiceSummary,
   type InspectionRequestStatus,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
@@ -98,12 +103,65 @@ function requestTypeLabel(booking: CustomerBooking): string {
   return "Existing service";
 }
 
-function quotationPdfFilename(title: string): string {
+function documentPdfFilename(
+  kind: "quotation" | "invoice",
+  title: string,
+): string {
   const safe = title
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase();
-  return `quotation-${safe || "bmspro"}.pdf`;
+  return `${kind}-${safe || "bmspro"}.pdf`;
+}
+
+function customerInvoiceReady(
+  invoice: InspectionInvoiceSummary | null | undefined,
+): invoice is InspectionInvoiceSummary {
+  return Boolean(invoice?.pdfUrl?.trim() && invoice.status === "sent");
+}
+
+const JOB_STATUS_TONE: Record<BookingStatus, string> = {
+  awaiting: "border-orange-200 bg-orange-50 text-orange-800",
+  scheduled: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  ongoing: "border-amber-200 bg-amber-50 text-amber-800",
+  cancelled: "border-stone-200 bg-stone-100 text-stone-600",
+  completed: "border-sky-200 bg-sky-50 text-sky-800",
+};
+
+function DocumentPdfActions({
+  pdfUrl,
+  title,
+  kind,
+  viewerTitle,
+}: {
+  pdfUrl: string;
+  title: string;
+  kind: "quotation" | "invoice";
+  viewerTitle?: string;
+}) {
+  const [viewerOpen, setViewerOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setViewerOpen(true)}
+        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-colors hover:bg-primary/90"
+      >
+        <span className="material-symbols-outlined text-[18px]">
+          picture_as_pdf
+        </span>
+        View PDF
+      </button>
+      <QuotationPdfViewerModal
+        open={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        pdfUrl={pdfUrl}
+        title={viewerTitle ?? title}
+        downloadFilename={documentPdfFilename(kind, title)}
+      />
+    </>
+  );
 }
 
 function QuotationPdfActions({
@@ -113,64 +171,8 @@ function QuotationPdfActions({
   pdfUrl: string;
   title: string;
 }) {
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-
-  async function downloadPdf() {
-    setDownloading(true);
-    try {
-      const response = await fetch(pdfUrl);
-      if (!response.ok) throw new Error("Could not download PDF.");
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = quotationPdfFilename(title);
-      anchor.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
-    } finally {
-      setDownloading(false);
-    }
-  }
-
-  const actionClass =
-    "inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 font-body text-[13px] font-bold transition-colors";
-
   return (
-    <>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-        <button
-          type="button"
-          onClick={() => setViewerOpen(true)}
-          className={`${actionClass} bg-primary text-white shadow-sm hover:bg-primary/90`}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            picture_as_pdf
-          </span>
-          View PDF
-        </button>
-        <button
-          type="button"
-          disabled={downloading}
-          onClick={() => void downloadPdf()}
-          className={`${actionClass} border border-primary/25 bg-white text-primary shadow-sm hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60`}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            {downloading ? "progress_activity" : "download"}
-          </span>
-          {downloading ? "Downloading…" : "Download PDF"}
-        </button>
-      </div>
-      <QuotationPdfViewerModal
-        open={viewerOpen}
-        onClose={() => setViewerOpen(false)}
-        pdfUrl={pdfUrl}
-        title={title}
-        downloadFilename={quotationPdfFilename(title)}
-      />
-    </>
+    <DocumentPdfActions pdfUrl={pdfUrl} title={title} kind="quotation" />
   );
 }
 
@@ -674,8 +676,18 @@ function BookingsList({
   const { bookings, loading, error, reload } = useBookings();
 
   const filtered = useMemo(() => {
-    const allowed = scope === "active" ? ACTIVE_STATUSES : HISTORY_STATUSES;
-    return bookings.filter((booking) => allowed.includes(booking.status));
+    if (scope === "active") {
+      return bookings.filter(
+        (booking) =>
+          ACTIVE_STATUSES.includes(booking.status) &&
+          booking.bookingStatus !== "completed",
+      );
+    }
+    return bookings.filter(
+      (booking) =>
+        HISTORY_STATUSES.includes(booking.status) ||
+        booking.bookingStatus === "completed",
+    );
   }, [bookings, scope]);
 
   if (loading) {
@@ -900,6 +912,60 @@ function inspectorAvatarUrl(assigned: InspectionAssignment): string {
   return `https://api.dicebear.com/9.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
 }
 
+function assigneeRoleLabel(assigned: InspectionAssignment): string {
+  return assigned.type === "owner" ? "Business owner" : "Team member";
+}
+
+function AssigneeHighlight({
+  assignedTo,
+  label,
+  tone = "emerald",
+}: {
+  assignedTo: InspectionAssignment;
+  label: string;
+  tone?: "emerald" | "sky";
+}) {
+  const styles =
+    tone === "sky"
+      ? {
+          wrap: "border-sky-200/80 bg-white/90",
+          label: "text-sky-700/90",
+          ring: "ring-sky-100",
+        }
+      : {
+          wrap: "border-emerald-200/80 bg-white/90",
+          label: "text-emerald-700/90",
+          ring: "ring-emerald-100",
+        };
+
+  return (
+    <div
+      className={`mt-3 flex items-center gap-3 rounded-xl border px-3 py-3 shadow-sm ${styles.wrap}`}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={inspectorAvatarUrl(assignedTo)}
+        alt=""
+        className={`h-12 w-12 shrink-0 rounded-full border-2 border-white object-cover shadow-sm ring-2 ${styles.ring}`}
+      />
+      <div className="min-w-0 flex-1">
+        <p
+          className={`font-body text-[10px] font-bold uppercase tracking-wider ${styles.label}`}
+        >
+          {label}
+        </p>
+        <p className="mt-0.5 font-body text-[15px] font-bold text-on-surface">
+          {assignedTo.name}
+        </p>
+        <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+          {assigneeRoleLabel(assignedTo)}
+          {assignedTo.email ? ` · ${assignedTo.email}` : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmedVisitHighlight({
   slot,
   assignedTo,
@@ -1109,6 +1175,9 @@ function BookingCard({
   const locationShort = [booking.address.suburb, booking.address.state]
     .filter(Boolean)
     .join(", ");
+  const invoiceReady = customerInvoiceReady(booking.invoice);
+  const jobStatus = booking.bookingStatus;
+  const jobAssignee = booking.jobAssignedTo ?? booking.assignedTo;
 
   return (
     <article
@@ -1178,6 +1247,28 @@ function BookingCard({
           </div>
         ) : null}
 
+        {invoiceReady && !expanded ? (
+          <div className="mt-3 rounded-xl border border-sky-200/80 bg-sky-50/70 px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-sky-800">
+              <span className="material-symbols-outlined text-[16px]">
+                receipt_long
+              </span>
+              Invoice ready — expand to view or download
+            </p>
+          </div>
+        ) : null}
+
+        {jobStatus === "completed" && !invoiceReady && !expanded ? (
+          <div className="mt-3 rounded-xl border border-sky-200/80 bg-sky-50/60 px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-sky-800">
+              <span className="material-symbols-outlined text-[16px]">
+                check_circle
+              </span>
+              Job completed
+            </p>
+          </div>
+        ) : null}
+
         {booking.quotation?.pdfUrl && !expanded ? (
           <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2.5">
             <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-primary">
@@ -1218,6 +1309,110 @@ function BookingCard({
 
       {expanded ? (
         <div className="space-y-3 border-t border-stone-200/80 bg-[#faf8f5] px-4 py-4 sm:px-5">
+          {invoiceReady ? (
+            <section className="rounded-xl border border-sky-200/80 bg-white p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <span className="material-symbols-outlined text-[22px]">
+                    receipt_long
+                  </span>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wider text-sky-800">
+                    Your invoice
+                  </p>
+                  {booking.invoice?.invoiceCode ? (
+                    <p className="mt-0.5 font-mono text-[12px] font-semibold text-sky-800">
+                      {booking.invoice.invoiceCode}
+                    </p>
+                  ) : null}
+                  {formatBudgetAud(booking.invoice?.finalPriceAud) ? (
+                    <p className="mt-1 font-display text-[20px] font-semibold text-on-surface">
+                      {formatBudgetAud(booking.invoice?.finalPriceAud)}
+                    </p>
+                  ) : null}
+                  {formatBudgetAud(booking.invoice?.balanceDueAud) &&
+                  booking.invoice?.balanceDueAud !==
+                    booking.invoice?.finalPriceAud ? (
+                    <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                      Balance due {formatBudgetAud(booking.invoice?.balanceDueAud)}
+                    </p>
+                  ) : null}
+                  {booking.invoice?.dueDate ? (
+                    <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                      Due {formatSlotDate(booking.invoice.dueDate)}
+                    </p>
+                  ) : null}
+                  <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                    View or download the invoice PDF for this job.
+                  </p>
+                  <DocumentPdfActions
+                    pdfUrl={booking.invoice!.pdfUrl!}
+                    title={headline}
+                    kind="invoice"
+                    viewerTitle={
+                      booking.invoice?.invoiceCode
+                        ? `Invoice ${booking.invoice.invoiceCode}`
+                        : "Invoice PDF"
+                    }
+                  />
+                  <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 font-body text-[12px] font-bold text-sky-800">
+                    <span className="material-symbols-outlined text-[16px]">
+                      mark_email_read
+                    </span>
+                    Invoice sent to your email
+                  </p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {booking.bookingId && jobStatus ? (
+            <section className="rounded-xl border border-sky-200/80 bg-sky-50/50 p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <span className="material-symbols-outlined text-[22px]">
+                    handyman
+                  </span>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[10px] font-bold uppercase tracking-wider text-sky-800">
+                    Your job
+                  </p>
+                  <p className="mt-1 font-display text-[18px] font-semibold text-on-surface">
+                    {BOOKING_STATUS_LABELS[jobStatus]}
+                  </p>
+                  {booking.bookingCode ? (
+                    <p className="mt-0.5 font-mono text-[12px] font-semibold text-sky-800">
+                      {booking.bookingCode}
+                    </p>
+                  ) : null}
+                  {jobStatus === "completed" ? (
+                    <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                      The work for this visit has been marked complete.
+                    </p>
+                  ) : null}
+                  {jobAssignee ? (
+                    <AssigneeHighlight
+                      assignedTo={jobAssignee}
+                      label={
+                        jobStatus === "completed"
+                          ? "Who completed the job"
+                          : "Assigned to"
+                      }
+                      tone="sky"
+                    />
+                  ) : null}
+                </div>
+                <span
+                  className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wider ${JOB_STATUS_TONE[jobStatus]}`}
+                >
+                  {BOOKING_STATUS_LABELS[jobStatus]}
+                </span>
+              </div>
+            </section>
+          ) : null}
+
           {booking.scheduledSlot ? (
             <ConfirmedVisitHighlight
               slot={booking.scheduledSlot}

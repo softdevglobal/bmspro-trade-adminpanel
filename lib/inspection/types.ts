@@ -163,6 +163,8 @@ export type InspectionRequestDetail = {
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */
   quotation: InspectionQuotationSummary | null;
+  /** Summary mirrored from invoices when an invoice is issued (id = quotation id). */
+  invoice: InspectionInvoiceSummary | null;
   /** Linked job booking document id (`bookings` collection). */
   bookingId: string | null;
   /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
@@ -200,6 +202,54 @@ export type InspectionQuotationSummary = {
   customerDecision: QuotationCustomerDecision | null;
   customerDecisionAt: number | null;
 };
+
+/** Invoice summary stored on requests after an invoice is issued. */
+export type InspectionInvoiceSummary = {
+  id: string;
+  invoiceCode: string | null;
+  pdfUrl: string | null;
+  finalPriceAud: number | null;
+  balanceDueAud: number | null;
+  status: "draft" | "sent" | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+};
+
+export function parseInspectionInvoice(
+  raw: unknown,
+): InspectionInvoiceSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const id = typeof item.id === "string" ? item.id.trim() : "";
+  if (!id) return null;
+
+  const readPrice = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+  const pdfUrlRaw = typeof item.pdfUrl === "string" ? item.pdfUrl.trim() : "";
+  const statusRaw = item.status;
+
+  return {
+    id,
+    invoiceCode:
+      typeof item.invoiceCode === "string" && item.invoiceCode.trim()
+        ? item.invoiceCode.trim()
+        : null,
+    pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
+    finalPriceAud: readPrice(item.finalPriceAud),
+    balanceDueAud: readPrice(item.balanceDueAud),
+    status:
+      statusRaw === "sent" ? "sent" : statusRaw === "draft" ? "draft" : null,
+    invoiceDate:
+      typeof item.invoiceDate === "string" && item.invoiceDate.trim()
+        ? item.invoiceDate.trim()
+        : null,
+    dueDate:
+      typeof item.dueDate === "string" && item.dueDate.trim()
+        ? item.dueDate.trim()
+        : null,
+  };
+}
 
 export function parseInspectionQuotation(
   raw: unknown,
