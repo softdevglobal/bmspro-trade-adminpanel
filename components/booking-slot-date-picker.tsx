@@ -176,15 +176,23 @@ function daysInMonth(year: number, month: number): number {
 }
 
 export function BookingMonthCalendar({
-  selectedIso,
+  selectedIso = "",
+  selectedIsos,
+  mode = "single",
+  maxSelections = 3,
   minDate,
   onSelect,
+  onToggle,
   blockedCombos,
   className = "",
 }: {
-  selectedIso: string;
+  selectedIso?: string;
+  selectedIsos?: string[];
+  mode?: "single" | "multiple";
+  maxSelections?: number;
   minDate: string;
-  onSelect: (iso: string) => void;
+  onSelect?: (iso: string) => void;
+  onToggle?: (iso: string) => void;
   /** Date+time combos that cannot be chosen (e.g. customer's original picks). */
   blockedCombos?: Set<string>;
   className?: string;
@@ -288,15 +296,28 @@ export function BookingMonthCalendar({
           const comboBlocked =
             blockedCombos && isDayFullyBlocked(cell.iso, blockedCombos);
           const disabled = past || comboBlocked;
-          const selected = selectedIso === cell.iso;
+          const selected =
+            mode === "multiple"
+              ? (selectedIsos ?? []).includes(cell.iso)
+              : selectedIso === cell.iso;
+          const atMax =
+            mode === "multiple" &&
+            !selected &&
+            (selectedIsos?.length ?? 0) >= maxSelections;
           const isToday = cell.iso === today;
 
           return (
             <button
               key={cell.iso}
               type="button"
-              disabled={disabled}
-              onClick={() => onSelect(cell.iso)}
+              disabled={disabled || atMax}
+              onClick={() => {
+                if (mode === "multiple") {
+                  onToggle?.(cell.iso);
+                  return;
+                }
+                onSelect?.(cell.iso);
+              }}
               className={`flex h-8 w-full items-center justify-center rounded-md font-body text-[12px] font-semibold leading-none transition-colors ${
                 disabled
                   ? "cursor-not-allowed text-stone-300"
@@ -318,22 +339,30 @@ export function BookingMonthCalendar({
 
 /** Horizontal day strip + optional month calendar (same UX as customer booking). */
 export function SlotDayPicker({
-  selectedIso,
+  selectedIso = "",
+  selectedIsos,
+  mode = "single",
+  maxSelections = 3,
   minDate,
   dayPage,
   onDayPageChange,
   onSelect,
+  onToggle,
   disabled = false,
   label = "Pick a day",
   blockedCombos,
   /** Customer booking: horizontal scroll strip. Admin propose dates: fit row, no scroll. */
   dayStripLayout = "scroll",
 }: {
-  selectedIso: string;
+  selectedIso?: string;
+  selectedIsos?: string[];
+  mode?: "single" | "multiple";
+  maxSelections?: number;
   minDate: string;
   dayPage: number;
   onDayPageChange: (page: number) => void;
-  onSelect: (iso: string) => void;
+  onSelect?: (iso: string) => void;
+  onToggle?: (iso: string) => void;
   disabled?: boolean;
   label?: string;
   blockedCombos?: Set<string>;
@@ -349,24 +378,43 @@ export function SlotDayPicker({
     [dayPage, daysPerPage, minDate],
   );
 
-  const offPageSelection = useMemo(() => {
-    if (!selectedIso || pageDays.some((day) => day.iso === selectedIso)) {
-      return null;
+  const offPageSelections = useMemo(() => {
+    if (mode === "multiple") {
+      const onPage = new Set(pageDays.map((day) => day.iso));
+      return (selectedIsos ?? [])
+        .filter((iso) => !onPage.has(iso))
+        .map((iso) => dayOptionFromIso(iso))
+        .filter((day): day is SlotDayOption => day !== null);
     }
-    return dayOptionFromIso(selectedIso);
-  }, [selectedIso, pageDays]);
+    if (!selectedIso || pageDays.some((day) => day.iso === selectedIso)) {
+      return [];
+    }
+    const option = dayOptionFromIso(selectedIso);
+    return option ? [option] : [];
+  }, [mode, selectedIso, selectedIsos, pageDays]);
 
   const displayDays = useMemo(() => {
-    if (!offPageSelection) return pageDays;
+    if (offPageSelections.length === 0) return pageDays;
+    const offPageIsos = new Set(offPageSelections.map((day) => day.iso));
     return [
-      offPageSelection,
-      ...pageDays.filter((day) => day.iso !== offPageSelection.iso),
+      ...offPageSelections,
+      ...pageDays.filter((day) => !offPageIsos.has(day.iso)),
     ].slice(0, daysPerPage);
-  }, [offPageSelection, pageDays, daysPerPage]);
+  }, [offPageSelections, pageDays, daysPerPage]);
 
   // Only jump the strip when the user picks a new date — not when they page with arrows.
   const prevSelectedIsoRef = useRef<string | null>(null);
+  const prevSelectedIsosRef = useRef<string[]>([]);
   useEffect(() => {
+    if (mode === "multiple") {
+      const prev = new Set(prevSelectedIsosRef.current);
+      const added = (selectedIsos ?? []).find((iso) => !prev.has(iso));
+      prevSelectedIsosRef.current = selectedIsos ?? [];
+      if (added) {
+        onDayPageChange(dayPageIndexForIso(added, daysPerPage, minDate));
+      }
+      return;
+    }
     if (!selectedIso) {
       prevSelectedIsoRef.current = null;
       return;
@@ -374,10 +422,17 @@ export function SlotDayPicker({
     if (prevSelectedIsoRef.current === selectedIso) return;
     prevSelectedIsoRef.current = selectedIso;
     onDayPageChange(dayPageIndexForIso(selectedIso, daysPerPage, minDate));
-  }, [selectedIso, daysPerPage, minDate, onDayPageChange]);
+  }, [mode, selectedIso, selectedIsos, daysPerPage, minDate, onDayPageChange]);
 
   const dayButtons = displayDays.map((day) => {
-    const selected = selectedIso === day.iso;
+    const selected =
+      mode === "multiple"
+        ? (selectedIsos ?? []).includes(day.iso)
+        : selectedIso === day.iso;
+    const atMax =
+      mode === "multiple" &&
+      !selected &&
+      (selectedIsos?.length ?? 0) >= maxSelections;
     const dayBlocked =
       blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
     const tooEarly = isBeforeMinDate(day.iso, minDate);
@@ -390,15 +445,23 @@ export function SlotDayPicker({
       <button
         key={day.iso}
         type="button"
-        disabled={disabled || dayBlocked || tooEarly}
+        disabled={disabled || dayBlocked || tooEarly || atMax}
         title={
-          dayBlocked
-            ? "Customer already offered both morning and afternoon on this day"
-            : tooEarly
-              ? "Choose the inspection day or later"
-              : undefined
+          atMax
+            ? "You can pick up to 3 days — tap a selected day to remove it"
+            : dayBlocked
+              ? "Customer already offered both morning and afternoon on this day"
+              : tooEarly
+                ? "Choose the inspection day or later"
+                : undefined
         }
-        onClick={() => onSelect(day.iso)}
+        onClick={() => {
+          if (mode === "multiple") {
+            onToggle?.(day.iso);
+            return;
+          }
+          onSelect?.(day.iso);
+        }}
         className={`flex min-h-[5.5rem] flex-col items-center justify-between rounded-2xl border py-2 text-center transition-all disabled:cursor-not-allowed ${
           fitStrip
             ? "min-w-0 flex-1 px-1.5 sm:px-2"
@@ -522,11 +585,17 @@ export function SlotDayPicker({
       {showMonthCalendar ? (
         <BookingMonthCalendar
           selectedIso={selectedIso}
+          selectedIsos={selectedIsos}
+          mode={mode}
+          maxSelections={maxSelections}
           minDate={minDate}
           blockedCombos={blockedCombos}
           onSelect={(iso) => {
-            onSelect(iso);
+            onSelect?.(iso);
             setShowMonthCalendar(false);
+          }}
+          onToggle={(iso) => {
+            onToggle?.(iso);
           }}
         />
       ) : null}

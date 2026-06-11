@@ -676,150 +676,63 @@ function formatPrettyDate(iso: string): string {
   });
 }
 
-function PreferredSlotPicker({
-  slot,
-  slotIndex,
-  minDate,
-  allSlots,
-  dayPage,
-  onDayPageChange,
-  onDateChange,
+function sortPreferredSlots(slots: PreferredSlot[]): PreferredSlot[] {
+  return [...slots].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function DayTimePicker({
+  timeRange,
   onTimeChange,
 }: {
-  slot: PreferredSlot;
-  slotIndex: number;
-  minDate: string;
-  allSlots: PreferredSlot[];
-  dayPage: number;
-  onDayPageChange: (page: number) => void;
-  onDateChange: (iso: string) => void;
+  timeRange: SlotTimeRange;
   onTimeChange: (timeRange: SlotTimeRange) => void;
 }) {
-  const takenCombos = useMemo(() => {
-    const combos = new Set<string>();
-    allSlots.forEach((entry, index) => {
-      if (index !== slotIndex && entry.date) {
-        combos.add(`${entry.date}-${entry.timeRange}`);
-      }
-    });
-    return combos;
-  }, [allSlots, slotIndex]);
-
-  const morningTaken =
-    slot.date.length > 0 && takenCombos.has(`${slot.date}-morning`);
-  const afternoonTaken =
-    slot.date.length > 0 && takenCombos.has(`${slot.date}-afternoon`);
-
-  const selectedTimeLabel =
-    TIME_RANGE_OPTIONS.find((option) => option.id === slot.timeRange)?.label ??
-    "";
-
   return (
-    <div className="mt-3 flex flex-col gap-4">
-      <SlotDayPicker
-        selectedIso={slot.date}
-        minDate={minDate}
-        dayPage={dayPage}
-        onDayPageChange={onDayPageChange}
-        onSelect={onDateChange}
-        dayStripLayout="fit"
-      />
-
-      <div>
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Pick a time window
-        </span>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {TIME_RANGE_OPTIONS.map((option) => {
-            const checked = slot.timeRange === option.id;
-            const disabled =
-              !slot.date ||
-              takenCombos.has(`${slot.date}-${option.id}`);
-            return (
-              <button
-                type="button"
-                key={option.id}
-                disabled={disabled}
-                onClick={() => onTimeChange(option.id)}
-                className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
-                  disabled
-                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
-                    : checked
-                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                      : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      {TIME_RANGE_OPTIONS.map((option) => {
+        const checked = timeRange === option.id;
+        return (
+          <button
+            type="button"
+            key={option.id}
+            onClick={() => onTimeChange(option.id)}
+            className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
+              checked
+                ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+            }`}
+          >
+            <span
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
+                checked
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "bg-stone-100 text-stone-600"
+              }`}
+            >
+              <span className="material-symbols-outlined material-symbols-filled text-[20px]">
+                {option.icon}
+              </span>
+            </span>
+            <span>
+              <span
+                className={`block font-body text-[14px] font-bold ${
+                  checked ? "text-primary" : "text-on-surface"
                 }`}
               >
-                <span
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
-                    checked
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "bg-stone-100 text-stone-600"
-                  }`}
-                >
-                  <span className="material-symbols-outlined material-symbols-filled text-[20px]">
-                    {option.icon}
-                  </span>
-                </span>
-                <span>
-                  <span
-                    className={`block font-body text-[14px] font-bold ${
-                      checked ? "text-primary" : "text-on-surface"
-                    }`}
-                  >
-                    {option.label}
-                  </span>
-                  <span className="font-body text-[11px] text-on-surface-variant">
-                    {option.hint}
-                  </span>
-                </span>
-                {checked ? (
-                  <span className="absolute right-2 top-[9px] material-symbols-outlined material-symbols-filled text-[18px] leading-none text-primary">
-                    check_circle
-                  </span>
-                ) : null}
-                {disabled && slot.date ? (
-                  <span className="absolute bottom-2 right-2 font-body text-[9px] font-bold uppercase tracking-wide text-outline">
-                    Used
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {slot.date ? (
-        <div
-          className={`rounded-xl border px-3 py-2.5 ${
-            morningTaken && afternoonTaken
-              ? "border-amber-200 bg-amber-50/80"
-              : "border-primary/25 bg-primary/5"
-          }`}
-        >
-          <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface">
-            <span className="material-symbols-outlined text-[16px] text-primary">
-              event_available
+                {option.label}
+              </span>
+              <span className="font-body text-[11px] text-on-surface-variant">
+                {option.hint}
+              </span>
             </span>
-            {formatPrettyDate(slot.date)}
-            {selectedTimeLabel ? (
-              <>
-                <span className="text-on-surface-variant">·</span>
-                <span className="text-primary">{selectedTimeLabel}</span>
-              </>
+            {checked ? (
+              <span className="absolute right-2 top-[9px] material-symbols-outlined material-symbols-filled text-[18px] leading-none text-primary">
+                check_circle
+              </span>
             ) : null}
-          </p>
-          {morningTaken && afternoonTaken ? (
-            <p className="mt-1 font-body text-[11px] text-amber-800">
-              Both time windows are already used in another option — pick a
-              different day.
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <p className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
-          Choose a day above, then pick morning or afternoon.
-        </p>
-      )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -850,9 +763,7 @@ function ServiceBookingFlow({
   const [customerNotes, setCustomerNotes] = useState("");
   const [budgetAud, setBudgetAud] = useState("");
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
-  const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([
-    { date: "", timeRange: "morning" },
-  ]);
+  const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([]);
   const [customer, setCustomer] = useState({
     fullName: "",
     email: "",
@@ -966,36 +877,22 @@ function ServiceBookingFlow({
     setSubmitError(null);
   }
 
-  function addSlot() {
+  const selectedPreferredDates = useMemo(
+    () => preferredSlots.map((slot) => slot.date).filter(Boolean),
+    [preferredSlots],
+  );
+
+  function togglePreferredDay(iso: string) {
     setPreferredSlots((prev) => {
+      const exists = prev.some((slot) => slot.date === iso);
+      if (exists) {
+        return prev.filter((slot) => slot.date !== iso);
+      }
       if (prev.length >= 3) return prev;
-      return [...prev, { date: "", timeRange: "morning" }];
-    });
-  }
-
-  function removeSlot(index: number) {
-    setPreferredSlots((prev) =>
-      prev.length === 1 ? prev : prev.filter((_, idx) => idx !== index),
-    );
-  }
-
-  function handleSlotDateChange(index: number, iso: string) {
-    setPreferredSlots((prev) => {
-      const taken = new Set(
-        prev
-          .filter((_, idx) => idx !== index && _.date)
-          .map((entry) => `${entry.date}-${entry.timeRange}`),
-      );
-      return prev.map((slot, idx) => {
-        if (idx !== index) return slot;
-        let timeRange = slot.timeRange;
-        if (iso && taken.has(`${iso}-${timeRange}`)) {
-          const alt: SlotTimeRange =
-            timeRange === "morning" ? "afternoon" : "morning";
-          if (!taken.has(`${iso}-${alt}`)) timeRange = alt;
-        }
-        return { date: iso, timeRange };
-      });
+      return sortPreferredSlots([
+        ...prev,
+        { date: iso, timeRange: "morning" },
+      ]);
     });
     setSubmitError(null);
   }
@@ -1314,68 +1211,90 @@ function ServiceBookingFlow({
           <BookingStepHeader
             step={3}
             title="Preferred dates & times"
-            hint={`${preferredSlots.length} of 3`}
+            hint={`${selectedPreferredDates.length} of 3 days`}
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Tap a day and morning or afternoon window — up to 3 options. The
-            owner will confirm one (or propose alternatives).
+            First pick up to 3 days that work for you, then choose morning or
+            afternoon for each. The owner will confirm one (or propose
+            alternatives).
           </p>
 
-          <ul className="mt-4 space-y-3">
-            {preferredSlots.map((slot, index) => (
-              <li
-                key={index}
-                className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <span className="material-symbols-outlined text-[14px]">
-                        event
-                      </span>
-                    </span>
-                    Option {index + 1}
-                  </span>
-                  {preferredSlots.length > 1 ? (
-                    <button
-                      type="button"
-                      onClick={() => removeSlot(index)}
-                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-stone-100"
+          <div className="mt-4 rounded-xl border border-stone-200 bg-white p-3 sm:p-4">
+            <SlotDayPicker
+              mode="multiple"
+              selectedIsos={selectedPreferredDates}
+              maxSelections={3}
+              minDate={minDate}
+              dayPage={workingDayPage}
+              onDayPageChange={setWorkingDayPage}
+              onToggle={togglePreferredDay}
+              label="Pick up to 3 days"
+              dayStripLayout="fit"
+            />
+            {selectedPreferredDates.length > 0 ? (
+              <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                Tap a selected day again to remove it.
+              </p>
+            ) : (
+              <p className="mt-3 rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                Choose at least one day to continue.
+              </p>
+            )}
+          </div>
+
+          {selectedPreferredDates.length > 0 ? (
+            <div className="mt-4">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Pick a time for each day
+              </span>
+              <ul className="mt-2 space-y-3">
+                {sortPreferredSlots(preferredSlots).map((slot) => {
+                  const slotIndex = preferredSlots.findIndex(
+                    (entry) => entry.date === slot.date,
+                  );
+                  const selectedTimeLabel =
+                    TIME_RANGE_OPTIONS.find(
+                      (option) => option.id === slot.timeRange,
+                    )?.label ?? "";
+                  return (
+                    <li
+                      key={slot.date}
+                      className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
                     >
-                      <span className="material-symbols-outlined text-[14px]">
-                        close
-                      </span>
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
-
-                <PreferredSlotPicker
-                  slot={slot}
-                  slotIndex={index}
-                  minDate={minDate}
-                  allSlots={preferredSlots}
-                  dayPage={workingDayPage}
-                  onDayPageChange={setWorkingDayPage}
-                  onDateChange={(iso) => handleSlotDateChange(index, iso)}
-                  onTimeChange={(timeRange) =>
-                    updateSlot(index, "timeRange", timeRange)
-                  }
-                />
-              </li>
-            ))}
-          </ul>
-
-          {preferredSlots.length < 3 ? (
-            <button
-              type="button"
-              onClick={addSlot}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Add another date
-            </button>
+                      <p className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                          <span className="material-symbols-outlined text-[14px]">
+                            schedule
+                          </span>
+                        </span>
+                        {formatPrettyDate(slot.date)}
+                      </p>
+                      <DayTimePicker
+                        timeRange={slot.timeRange}
+                        onTimeChange={(timeRange) =>
+                          updateSlot(slotIndex, "timeRange", timeRange)
+                        }
+                      />
+                      <p className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 font-body text-[12px] font-semibold text-on-surface">
+                        <span className="material-symbols-outlined text-[16px] text-primary">
+                          event_available
+                        </span>
+                        {formatPrettyDate(slot.date)}
+                        {selectedTimeLabel ? (
+                          <>
+                            <span className="text-on-surface-variant">·</span>
+                            <span className="text-primary">
+                              {selectedTimeLabel}
+                            </span>
+                          </>
+                        ) : null}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ) : null}
         </div>
 
