@@ -286,7 +286,17 @@ export async function applyOwnerAction(
     updates.scheduledEndTime = null;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "complete") {
+    if (current.status !== "scheduled") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Only scheduled visits can be marked done.",
+      };
+    }
     updates.status = "completed" satisfies InspectionRequestStatus;
+    if (!current.visitEndedAt) {
+      updates.visitEndedAt = FieldValue.serverTimestamp();
+    }
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "convert_to_booking") {
     const created = await createBookingFromInspection({
