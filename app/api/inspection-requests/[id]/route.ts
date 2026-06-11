@@ -1,1 +1,3 @@
-export { PATCH, runtime } from "../../requests/[id]/route";
+export { PATCH } from "../../requests/[id]/route";
+
+export const runtime = "nodejs";

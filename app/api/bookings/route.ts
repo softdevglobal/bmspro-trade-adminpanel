@@ -1,1 +1,3 @@
-export { GET, runtime } from "../jobs/route";
+export { GET } from "../jobs/route";
+
+export const runtime = "nodejs";

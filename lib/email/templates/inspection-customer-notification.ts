@@ -77,7 +77,12 @@ export async function sendInspectionCustomerNotificationEmail(
 ): Promise<void> {
   if (!input.customerEmail) return;
   try {
-    const ctaUrl = customerRequestUrl(input.bookingSlug);
+    const ctaUrl = customerAccountUrl(
+      input.bookingSlug,
+      input.type === "job_completed" || input.type === "invoice_sent"
+        ? "history"
+        : "requests",
+    );
     const presentation = EMAIL_PRESENTATION[input.type];
     const details: EmailDetailRow[] = [];
     const inspectionId = input.inspectionRequestId?.trim();

@@ -1,1 +1,3 @@
-export { GET, POST, runtime } from "../requests/route";
+export { GET, POST } from "../requests/route";
+
+export const runtime = "nodejs";
