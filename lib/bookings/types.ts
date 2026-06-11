@@ -71,6 +71,7 @@ export type BookingDetail = {
   ownerNote: string | null;
   quotation: InspectionQuotationSummary | null;
   visitStartedAt: number | null;
+  visitEndedAt: number | null;
   bookingStartedAt: number | null;
   /** Auto-completed booking created when a quotation is invoiced without a job visit. */
   completedFromInvoice: boolean;

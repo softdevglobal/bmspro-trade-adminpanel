@@ -414,6 +414,8 @@ export async function startBusinessBookingJob(
   }
 
   await ref.update({
+    visitEndedAt:
+      current.visitEndedAt ?? FieldValue.serverTimestamp(),
     bookingStartedAt:
       current.bookingStartedAt ?? FieldValue.serverTimestamp(),
     status: "ongoing",
