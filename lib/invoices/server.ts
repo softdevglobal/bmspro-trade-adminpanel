@@ -12,7 +12,11 @@ import { formatDepositPaymentNote } from "@/lib/quotations/document";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { buildInvoiceCodeForQuotation } from "@/lib/reference-codes";
 import { FieldValue } from "firebase-admin/firestore";
-import type { CreateInvoiceInput, InvoiceDetail } from "@/lib/invoices/types";
+import type {
+  CreateDirectInvoiceInput,
+  CreateInvoiceInput,
+  InvoiceDetail,
+} from "@/lib/invoices/types";
 
 export const INVOICE_COLLECTION = "invoices";
 export const INVOICE_LIST_LIMIT = 80;
@@ -516,6 +520,99 @@ export async function createInvoiceFromQuotation(
     ok: true,
     invoice,
   };
+}
+
+/**
+ * Creates an invoice directly (no existing quotation). The full record
+ * chain is created so the work reads like any other completed job:
+ * a completed request (`invoice_direct` source), an accepted quotation,
+ * a completed job, and finally the invoice itself.
+ */
+export async function createDirectInvoice(
+  businessId: string,
+  uid: string,
+  input: CreateDirectInvoiceInput,
+): Promise<
+  | { ok: true; invoice: InvoiceDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const serviceTitle = (input.serviceTitle ?? "").trim();
+  const description =
+    input.description?.trim() ||
+    `Direct invoice issued for completed work: ${serviceTitle || "job"}.`;
+
+  const { createStandaloneQuotation } = await import(
+    "@/lib/quotations/server"
+  );
+  const created = await createStandaloneQuotation(businessId, uid, {
+    customer: input.customer,
+    address: {
+      street: input.address.street ?? "",
+      suburb: input.address.suburb ?? "",
+      state: input.address.state ?? "",
+      postcode: input.address.postcode ?? "",
+    },
+    title: serviceTitle,
+    description,
+    requestType: input.requestType,
+    serviceId: input.serviceId,
+    customRequest: input.customRequest,
+    lineItems: input.lineItems,
+    finalPriceAud: input.finalPriceAud,
+    discountAud: input.discountAud,
+    depositRequest: input.depositRequest,
+    notes: input.notes,
+    termsAndConditions: input.termsAndConditions,
+    send: false,
+    createdSource: "invoice_direct",
+  });
+  if (!created.ok) return created;
+
+  const quotation = created.quotation;
+
+  // The work is already agreed and done, so record the quotation as sent
+  // and accepted — the same end state as a normal quote-to-invoice flow.
+  const now = FieldValue.serverTimestamp();
+  await adminDb
+    .collection("quotations")
+    .doc(quotation.id)
+    .set(
+      {
+        status: "sent",
+        customerDecision: "accepted",
+        customerDecisionAt: now,
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+  await adminDb
+    .collection("requests")
+    .doc(quotation.inspectionRequestId)
+    .set(
+      {
+        quotation: {
+          status: "sent",
+          customerDecision: "accepted",
+          customerDecisionAt: now,
+        },
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+
+  return createInvoiceFromQuotation(businessId, uid, {
+    quotationId: quotation.id,
+    lineItems: input.lineItems,
+    finalPriceAud: input.finalPriceAud,
+    discountAud: input.discountAud,
+    gstAud: input.gstAud,
+    depositRequest: input.depositRequest,
+    notes: input.notes,
+    termsAndConditions: input.termsAndConditions,
+    invoiceDate: input.invoiceDate,
+    dueDate: input.dueDate,
+    send: input.send,
+  });
 }
 
 async function sendInvoiceEmailForDetail(

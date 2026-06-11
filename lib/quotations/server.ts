@@ -742,6 +742,8 @@ export type StandaloneQuotationInput = {
   depositRequest?: unknown;
   /** When true, emails/SMS the customer and marks the quotation as sent. */
   send?: boolean;
+  /** How the backing request is tagged. Defaults to `quotation_direct`. */
+  createdSource?: "quotation_direct" | "invoice_direct";
 };
 
 type ServiceLookup = { name: string; businessType: string };
@@ -1022,7 +1024,7 @@ export async function createStandaloneQuotation(
     customRequest,
     customer,
     customerId,
-    createdSource: "quotation_direct",
+    createdSource: input.createdSource ?? "quotation_direct",
     address,
     preferredSlots: [],
     ownerProposedSlots: [],

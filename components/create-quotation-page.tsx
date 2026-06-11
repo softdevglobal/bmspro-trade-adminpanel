@@ -1136,7 +1136,7 @@ export function CreateQuotationPage() {
               disabled={submitting}
               className="inline-flex min-w-[5.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
-              {submitting ? <SaveSpinner label="Saving…" /> : "Save"}
+              {submitting ? <SaveSpinner label="Saving…" /> : "Save draft"}
             </button>
           </div>
         </div>

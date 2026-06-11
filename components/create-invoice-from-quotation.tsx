@@ -14,7 +14,13 @@ import { MonthCalendarField } from "@/components/month-calendar-field";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
-import { formatAddress, type InspectionAddress } from "@/lib/inspection/types";
+import {
+  formatAddress,
+  type InspectionAddress,
+  type InspectionRequestType,
+} from "@/lib/inspection/types";
+import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import { iconForBusinessType } from "@/lib/onboarding/types";
 import {
   buildQuotationDocumentDeposit,
   computeDocumentTotals,
@@ -35,6 +41,58 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Tab = "create" | "preview" | "send";
+
+function RequestTypeCard({
+  icon,
+  label,
+  description,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: string;
+  label: string;
+  description: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onSelect}
+      disabled={disabled}
+      className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
+        selected
+          ? "border-primary bg-surface-container-lowest shadow-sm ring-1 ring-primary/20"
+          : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+          selected
+            ? "bg-primary text-on-primary"
+            : "bg-primary/10 text-primary"
+        }`}
+      >
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-body text-[14px] font-semibold text-on-surface">
+          {label}
+        </span>
+        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
+          {description}
+        </span>
+      </span>
+      {selected ? (
+        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
+          check_circle
+        </span>
+      ) : null}
+    </button>
+  );
+}
 
 function SaveSpinner({ label }: { label: string }) {
   return (
@@ -181,9 +239,12 @@ function toApiLineItems(
 }
 
 export function CreateInvoiceFromQuotation({
-  quotationId,
+  quotationId = "",
+  direct = false,
 }: {
-  quotationId: string;
+  quotationId?: string;
+  /** Create an invoice from scratch — no existing quotation. */
+  direct?: boolean;
 }) {
   const router = useRouter();
   const { user } = useAuth();
@@ -195,6 +256,15 @@ export function CreateInvoiceFromQuotation({
   const [error, setError] = useState<string | null>(null);
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
 
+  const [requestType, setRequestType] =
+    useState<InspectionRequestType>("custom_quote");
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+    null,
+  );
+  const [customServiceTitle, setCustomServiceTitle] = useState("");
+  const [customServiceDescription, setCustomServiceDescription] = useState("");
+  const [services, setServices] = useState<BusinessServiceDetail[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -236,70 +306,84 @@ export function CreateInvoiceFromQuotation({
     setError(null);
     try {
       const token = await user.getIdToken();
-      const [quotationRes, profileRes, itemsRes] = await Promise.all([
-        fetch(`/api/quotations?quotationId=${encodeURIComponent(quotationId)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        }),
-        fetch("/api/business/profile", {
-          headers: { authorization: `Bearer ${token}` },
-          cache: "no-store",
-        }),
-        fetch("/api/items", {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        }),
-      ]);
+      const [quotationRes, profileRes, itemsRes, servicesRes] =
+        await Promise.all([
+          direct
+            ? Promise.resolve(null)
+            : fetch(
+                `/api/quotations?quotationId=${encodeURIComponent(quotationId)}`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                  cache: "no-store",
+                },
+              ),
+          fetch("/api/business/profile", {
+            headers: { authorization: `Bearer ${token}` },
+            cache: "no-store",
+          }),
+          fetch("/api/items", {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+          }),
+          direct
+            ? fetch("/api/services", {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: "no-store",
+              })
+            : Promise.resolve(null),
+        ]);
 
-      const quotationBody = (await quotationRes.json()) as {
-        ok?: boolean;
-        error?: string;
-        quotation?: QuotationDetail;
-      };
-      if (!quotationRes.ok || !quotationBody.ok || !quotationBody.quotation) {
-        throw new Error(quotationBody.error ?? "Could not load quotation.");
-      }
+      if (quotationRes) {
+        const quotationBody = (await quotationRes.json()) as {
+          ok?: boolean;
+          error?: string;
+          quotation?: QuotationDetail;
+        };
+        if (!quotationRes.ok || !quotationBody.ok || !quotationBody.quotation) {
+          throw new Error(quotationBody.error ?? "Could not load quotation.");
+        }
 
-      const q = quotationBody.quotation;
-      setQuotation(q);
-      setCustomerName(q.customer.fullName);
-      setCustomerEmail(q.customer.email);
-      setCustomerPhone(q.customer.phone);
-      setAddress(q.address);
-      setLineItems(q.lineItems.map(quotationLineToSaved));
-      if (q.discountAud > 0) {
-        setDiscount({ mode: "fixed", percent: 0, amountAud: q.discountAud });
-      }
-      if (q.depositRequest) {
-        setDeposit({
-          mode: q.depositRequest.mode,
-          percent: q.depositRequest.percent,
-          amountAud: q.depositRequest.amountAud,
-          dueDate: q.depositRequest.dueDate,
-        });
-      }
-      const rawTerms =
-        q.termsAndConditions?.trim() || q.paymentInstructions?.trim() || "";
-      const loadedDeposit = q.depositRequest
-        ? {
+        const q = quotationBody.quotation;
+        setQuotation(q);
+        setCustomerName(q.customer.fullName);
+        setCustomerEmail(q.customer.email);
+        setCustomerPhone(q.customer.phone);
+        setAddress(q.address);
+        setLineItems(q.lineItems.map(quotationLineToSaved));
+        if (q.discountAud > 0) {
+          setDiscount({ mode: "fixed", percent: 0, amountAud: q.discountAud });
+        }
+        if (q.depositRequest) {
+          setDeposit({
             mode: q.depositRequest.mode,
             percent: q.depositRequest.percent,
             amountAud: q.depositRequest.amountAud,
             dueDate: q.depositRequest.dueDate,
-          }
-        : null;
-      if (loadedDeposit) {
-        const depositNote = formatDepositPaymentNote(loadedDeposit);
-        setTermsAndConditions(
-          rawTerms.replace(depositNote, "").replace(/\n{3,}/g, "\n\n").trim(),
-        );
-      } else {
-        setTermsAndConditions(rawTerms);
+          });
+        }
+        const rawTerms =
+          q.termsAndConditions?.trim() || q.paymentInstructions?.trim() || "";
+        const loadedDeposit = q.depositRequest
+          ? {
+              mode: q.depositRequest.mode,
+              percent: q.depositRequest.percent,
+              amountAud: q.depositRequest.amountAud,
+              dueDate: q.depositRequest.dueDate,
+            }
+          : null;
+        if (loadedDeposit) {
+          const depositNote = formatDepositPaymentNote(loadedDeposit);
+          setTermsAndConditions(
+            rawTerms.replace(depositNote, "").replace(/\n{3,}/g, "\n\n").trim(),
+          );
+        } else {
+          setTermsAndConditions(rawTerms);
+        }
+        setNotes(q.notes?.trim() ?? "");
+        const issued = todayIso();
+        setInvoiceDate(issued);
+        setDueDate(q.validUntil?.trim() || addDaysIso(issued, 14));
       }
-      setNotes(q.notes?.trim() ?? "");
-      const issued = todayIso();
-      setInvoiceDate(issued);
-      setDueDate(q.validUntil?.trim() || addDaysIso(issued, 14));
 
       const itemsBody = (await itemsRes.json()) as {
         ok?: boolean;
@@ -325,6 +409,7 @@ export function CreateInvoiceFromQuotation({
             businessEmail?: string | null;
             businessPhone?: string | null;
             abn?: string | null;
+            termsAndConditions?: string | null;
           };
         };
         const profile = profileBody.profile;
@@ -337,7 +422,29 @@ export function CreateInvoiceFromQuotation({
           setBusinessEmail(profile.businessEmail ?? null);
           setBusinessPhone(profile.businessPhone ?? null);
           setBusinessAbn(profile.abn ?? null);
+          if (direct && profile.termsAndConditions?.trim()) {
+            setTermsAndConditions(profile.termsAndConditions.trim());
+          }
         }
+      }
+
+      if (direct && servicesRes) {
+        setServicesLoading(true);
+        const servicesData = (await servicesRes.json()) as {
+          ok?: boolean;
+          services?: BusinessServiceDetail[];
+        };
+        if (servicesRes.ok && servicesData.ok && servicesData.services) {
+          setServices(servicesData.services);
+          const active = servicesData.services.filter(
+            (service) => service.isActive,
+          );
+          if (active.length > 0) {
+            setRequestType("existing_service");
+            setSelectedServiceId(active[0]?.id ?? null);
+          }
+        }
+        setServicesLoading(false);
       }
     } catch (loadError) {
       setError(
@@ -348,11 +455,31 @@ export function CreateInvoiceFromQuotation({
     } finally {
       setLoading(false);
     }
-  }, [quotationId, user]);
+  }, [quotationId, direct, user]);
 
   useEffect(() => {
     void loadQuotation();
   }, [loadQuotation]);
+
+  const activeServices = useMemo(
+    () => services.filter((service) => service.isActive),
+    [services],
+  );
+
+  const selectedService = useMemo(
+    () =>
+      activeServices.find((service) => service.id === selectedServiceId) ??
+      null,
+    [activeServices, selectedServiceId],
+  );
+
+  const directServiceTitle = useMemo(() => {
+    if (!direct) return "";
+    if (requestType === "existing_service") {
+      return selectedService?.name ?? "";
+    }
+    return customServiceTitle.trim();
+  }, [direct, requestType, selectedService, customServiceTitle]);
 
   const catalogSuggestions = useMemo(() => {
     if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
@@ -445,7 +572,8 @@ export function CreateInvoiceFromQuotation({
       quoteNo: invoiceCode,
       quoteDate: formatQuoteDate(invoiceDate),
       validUntil: dueDate,
-      serviceTitle: quotation?.serviceTitle ?? null,
+      serviceTitle:
+        quotation?.serviceTitle ?? (directServiceTitle || null),
       customer: {
         fullName: customerName.trim(),
         email: customerEmail.trim(),
@@ -483,6 +611,7 @@ export function CreateInvoiceFromQuotation({
     invoiceDate,
     dueDate,
     quotation?.serviceTitle,
+    directServiceTitle,
     customerName,
     customerEmail,
     customerPhone,
@@ -505,11 +634,49 @@ export function CreateInvoiceFromQuotation({
   ]);
 
   async function saveInvoice(andSend = false) {
-    if (!user || !quotation) return;
+    if (!user || (!direct && !quotation)) return;
     if (lineItems.length === 0) {
       setError("Add at least one line item.");
       setTab("create");
       return;
+    }
+    if (direct) {
+      if (requestType === "existing_service") {
+        if (!selectedServiceId) {
+          setError("Select a service from your catalog.");
+          setTab("create");
+          return;
+        }
+      } else if (customServiceTitle.trim().length < 3) {
+        setError("Add a job title (at least 3 characters).");
+        setTab("create");
+        return;
+      }
+      if (customerName.trim().length < 2) {
+        setError("Add the customer's name.");
+        setTab("create");
+        return;
+      }
+      if (!customerEmail.trim() || !customerEmail.includes("@")) {
+        setError("Enter a valid customer email address.");
+        setTab("create");
+        return;
+      }
+      if (customerPhone.replace(/\D/g, "").length < 6) {
+        setError("Enter a valid customer mobile number.");
+        setTab("create");
+        return;
+      }
+      if (
+        !address.street.trim() ||
+        !address.suburb.trim() ||
+        !address.state.trim() ||
+        !address.postcode.trim()
+      ) {
+        setError("Enter a complete service address.");
+        setTab("create");
+        return;
+      }
     }
     if (andSend && !customerEmail.trim()) {
       setError("Add a customer email before sending.");
@@ -528,7 +695,32 @@ export function CreateInvoiceFromQuotation({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          quotationId: quotation.id,
+          ...(direct
+            ? {
+                direct: true,
+                serviceTitle: directServiceTitle,
+                description:
+                  requestType === "custom_quote"
+                    ? customServiceDescription.trim() || null
+                    : null,
+                requestType,
+                serviceId:
+                  requestType === "existing_service" ? selectedServiceId : null,
+                customRequest:
+                  requestType === "custom_quote"
+                    ? {
+                        title: customServiceTitle.trim(),
+                        description: customServiceDescription.trim(),
+                      }
+                    : null,
+                customer: {
+                  fullName: customerName.trim(),
+                  email: customerEmail.trim(),
+                  phone: customerPhone.trim(),
+                },
+                address,
+              }
+            : { quotationId: quotation!.id }),
           lineItems: toApiLineItems(
             lineItems,
             gstEnabled,
@@ -770,7 +962,7 @@ export function CreateInvoiceFromQuotation({
     );
   }
 
-  if (!quotation) {
+  if (!direct && !quotation) {
     return (
       <div className="px-4 py-10 text-center sm:px-6">
         <p className="font-body text-[14px] text-on-surface-variant">
@@ -786,7 +978,7 @@ export function CreateInvoiceFromQuotation({
     );
   }
 
-  const quotationCode = displayQuotationCode(quotation);
+  const quotationCode = quotation ? displayQuotationCode(quotation) : null;
   const businessName = business?.businessName ?? "Your business";
   const sendMessage = documentDeposit
     ? documentDeposit.paid
@@ -800,18 +992,20 @@ export function CreateInvoiceFromQuotation({
         <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Link
-              href="/dashboard/quotations"
+              href={direct ? "/dashboard/invoices" : "/dashboard/quotations"}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-low"
-              aria-label="Back to quotations"
+              aria-label={direct ? "Back to invoices" : "Back to quotations"}
             >
               <span className="material-symbols-outlined">arrow_back</span>
             </Link>
             <div className="min-w-0">
               <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
-                Issue invoice
+                {direct ? "Create invoice" : "Issue invoice"}
               </h1>
               <p className="truncate font-body text-[12px] text-on-surface-variant">
-                From {quotationCode} · {quotation.serviceTitle}
+                {quotation
+                  ? `From ${quotationCode} · ${quotation.serviceTitle}`
+                  : "Direct invoice · saved as a completed job"}
               </p>
             </div>
           </div>
@@ -821,7 +1015,7 @@ export function CreateInvoiceFromQuotation({
             disabled={submitting}
             className="inline-flex min-w-[6.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
           >
-            {submitting ? "Saving…" : "Save invoice"}
+            {submitting ? "Saving…" : "Save draft"}
           </button>
         </div>
 
@@ -865,6 +1059,156 @@ export function CreateInvoiceFromQuotation({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
         {tab === "create" ? (
           <div className="mx-auto max-w-2xl space-y-4">
+              {direct ? (
+                <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                  <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                    Job
+                  </h2>
+                  <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                    Choose an existing service or describe a custom job for this
+                    invoice.
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <RequestTypeCard
+                      icon="format_list_bulleted"
+                      label="Our service"
+                      description="Pick from the services this business offers."
+                      selected={requestType === "existing_service"}
+                      disabled={servicesLoading || activeServices.length === 0}
+                      onSelect={() => {
+                        setRequestType("existing_service");
+                        setSelectedServiceId((current) => {
+                          if (current) return current;
+                          return activeServices[0]?.id ?? null;
+                        });
+                        setError(null);
+                      }}
+                    />
+                    <RequestTypeCard
+                      icon="request_quote"
+                      label="Custom service"
+                      description="Describe the work for this invoice."
+                      selected={requestType === "custom_quote"}
+                      onSelect={() => {
+                        setRequestType("custom_quote");
+                        setSelectedServiceId(null);
+                        setError(null);
+                      }}
+                    />
+                  </div>
+
+                  {requestType === "existing_service" ? (
+                    activeServices.length > 0 ? (
+                      <ul className="mt-3 overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
+                        {activeServices.map((service, index) => {
+                          const selected = selectedServiceId === service.id;
+                          return (
+                            <li
+                              key={service.id}
+                              className={
+                                index > 0
+                                  ? "border-t border-outline-variant/40"
+                                  : ""
+                              }
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedServiceId(
+                                    selectedServiceId === service.id
+                                      ? null
+                                      : service.id,
+                                  );
+                                  setError(null);
+                                }}
+                                className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
+                                  selected
+                                    ? "bg-primary/5"
+                                    : "hover:bg-surface-container"
+                                }`}
+                              >
+                                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
+                                  {service.imageUrl ? (
+                                    <img
+                                      src={service.imageUrl}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center">
+                                      <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
+                                        {iconForBusinessType(service.businessType)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block font-body text-[14px] font-semibold text-on-surface">
+                                    {service.name}
+                                  </span>
+                                  <span className="font-body text-[12px] text-on-surface-variant">
+                                    {service.businessType}
+                                  </span>
+                                </span>
+                                {selected ? (
+                                  <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
+                                    check_circle
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : servicesLoading ? (
+                      <p className="mt-3 font-body text-[13px] text-on-surface-variant">
+                        Loading services…
+                      </p>
+                    ) : (
+                      <p className="mt-3 font-body text-[13px] text-on-surface-variant">
+                        No active services yet — use a custom service instead.
+                      </p>
+                    )
+                  ) : (
+                    <div className="mt-3 grid gap-3">
+                      <label className="block">
+                        <span className={LABEL_CLASS}>Job title</span>
+                        <input
+                          type="text"
+                          value={customServiceTitle}
+                          onChange={(e) => {
+                            setCustomServiceTitle(e.target.value);
+                            setError(null);
+                          }}
+                          placeholder="e.g. Replace kitchen tap and check leak"
+                          className={INPUT_CLASS}
+                          maxLength={120}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={LABEL_CLASS}>Description</span>
+                        <textarea
+                          value={customServiceDescription}
+                          onChange={(e) => {
+                            setCustomServiceDescription(e.target.value);
+                            setError(null);
+                          }}
+                          rows={4}
+                          placeholder="Scope of work, access notes, materials…"
+                          className={`${INPUT_CLASS} resize-y`}
+                          maxLength={2000}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                    A completed request, quotation, and job are saved with this
+                    invoice so it appears alongside your other finished work.
+                  </p>
+                </section>
+              ) : null}
+
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
                   Customer
@@ -896,9 +1240,72 @@ export function CreateInvoiceFromQuotation({
                       className="mt-1"
                     />
                   </label>
-                  <p className="font-body text-[13px] text-on-surface-variant sm:col-span-2">
-                    {formatAddress(address) || "No address on quotation"}
-                  </p>
+                  {direct ? (
+                    <>
+                      <label className="block sm:col-span-2">
+                        <span className={LABEL_CLASS}>Street address</span>
+                        <input
+                          type="text"
+                          value={address.street}
+                          onChange={(e) =>
+                            setAddress((prev) => ({
+                              ...prev,
+                              street: e.target.value,
+                            }))
+                          }
+                          className={INPUT_CLASS}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className={LABEL_CLASS}>Suburb</span>
+                        <input
+                          type="text"
+                          value={address.suburb}
+                          onChange={(e) =>
+                            setAddress((prev) => ({
+                              ...prev,
+                              suburb: e.target.value,
+                            }))
+                          }
+                          className={INPUT_CLASS}
+                        />
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <label className="block">
+                          <span className={LABEL_CLASS}>State</span>
+                          <input
+                            type="text"
+                            value={address.state}
+                            onChange={(e) =>
+                              setAddress((prev) => ({
+                                ...prev,
+                                state: e.target.value,
+                              }))
+                            }
+                            className={INPUT_CLASS}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className={LABEL_CLASS}>Postcode</span>
+                          <input
+                            type="text"
+                            value={address.postcode}
+                            onChange={(e) =>
+                              setAddress((prev) => ({
+                                ...prev,
+                                postcode: e.target.value,
+                              }))
+                            }
+                            className={INPUT_CLASS}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="font-body text-[13px] text-on-surface-variant sm:col-span-2">
+                      {formatAddress(address) || "No address on quotation"}
+                    </p>
+                  )}
                 </div>
               </section>
 
@@ -1262,9 +1669,10 @@ export function CreateInvoiceFromQuotation({
               </label>
             </div>
             <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
-              The invoice summary is emailed to the client when you click{" "}
-              <strong>Save &amp; send invoice</strong>. Use the Preview tab to
-              check the document before sending. The linked booking is marked
+              Use <strong>Save draft</strong> to keep an unsent invoice. The
+              invoice PDF is emailed to the client only when you click{" "}
+              <strong>Save &amp; send invoice</strong> below. Use the Preview tab
+              to check the document before sending. The linked booking is marked
               completed when the invoice is saved.
             </p>
             <button
@@ -1415,7 +1823,7 @@ export function CreateInvoiceFromQuotation({
                     </span>
                   </div>
                 </>
-              ) : (
+              ) : direct ? null : (
                 <div className="border-t border-outline-variant/30 px-3 py-2.5 text-center">
                   <button
                     type="button"

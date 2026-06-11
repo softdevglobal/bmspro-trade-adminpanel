@@ -545,8 +545,15 @@ export function InvoicesBoard() {
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <Link
-            href="/dashboard/quotations"
+            href="/dashboard/invoices?new=1"
             className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[20px]">add</span>
+            Create invoice
+          </Link>
+          <Link
+            href="/dashboard/quotations"
+            className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
           >
             <span className="material-symbols-outlined text-[20px]">
               request_quote
@@ -575,15 +582,24 @@ export function InvoicesBoard() {
           {filtered.length} invoice{filtered.length === 1 ? "" : "s"} · tap a
           card to open the side preview
         </p>
-        <Link
-          href="/dashboard/quotations"
-          className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-4 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            request_quote
-          </span>
-          From quotation
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/dashboard/quotations"
+            className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-4 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              request_quote
+            </span>
+            From quotation
+          </Link>
+          <Link
+            href="/dashboard/invoices?new=1"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            Create invoice
+          </Link>
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
