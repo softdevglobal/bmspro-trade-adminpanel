@@ -398,6 +398,13 @@ export function CreateQuotationPage() {
       phone: boundInspection.customer.phone ?? "",
     });
     setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
+    const noteParts = [
+      boundInspection.customerNotes?.trim(),
+      boundInspection.ownerNote?.trim(),
+    ].filter(Boolean);
+    if (noteParts.length > 0) {
+      setComment(noteParts.join("\n\n"));
+    }
     if (
       boundInspection.requestType === "existing_service" &&
       boundInspection.serviceId
@@ -414,6 +421,25 @@ export function CreateQuotationPage() {
       setCustomServiceDescription(
         boundInspection.customRequest?.description ?? "",
       );
+    }
+    if (boundInspection.budgetAud != null && boundInspection.budgetAud > 0) {
+      const rate = boundInspection.budgetAud;
+      setLineItems([
+        {
+          id: crypto.randomUUID(),
+          code: "",
+          name:
+            boundInspection.serviceName ??
+            boundInspection.customRequest?.title ??
+            "Quoted work",
+          description: "",
+          quantity: 1,
+          rate,
+          discountPercent: 0,
+          applyGst: false,
+          amountAud: rate,
+        },
+      ]);
     }
   }, [boundInspection]);
 

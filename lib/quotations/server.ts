@@ -479,6 +479,14 @@ export async function createQuotationForInspection(
     return { ok: false, status: 404, error: "Request not found." };
   }
 
+  if (requestData.quotation && typeof requestData.quotation === "object") {
+    return {
+      ok: false,
+      status: 400,
+      error: "This visit already has a quotation.",
+    };
+  }
+
   const assigned = requestData.assignedTo as { uid?: string } | null;
   const isAssigned = assigned?.uid === createdBy;
   const isOwnerOrAdmin = authorRole === "owner" || authorRole === "admin";
@@ -632,13 +640,13 @@ export async function createQuotationForInspection(
 
   const shouldSend = input.send === true;
 
-  // Mirror quotation summary onto the linked request.
+  // Mirror quotation summary onto the linked request and mark the visit
+  // completed once a quotation exists (not when the owner opens the form).
   try {
     const currentStatus =
       typeof requestData.status === "string" ? requestData.status : "";
-    const shouldComplete =
-      shouldSend &&
-      (currentStatus === "scheduled" || currentStatus === "owner_proposed");
+    const shouldCompleteVisit =
+      currentStatus === "scheduled" || currentStatus === "owner_proposed";
 
     await requestSnap.ref.set(
       {
@@ -653,7 +661,14 @@ export async function createQuotationForInspection(
           createdAt: FieldValue.serverTimestamp(),
         },
         ...(shouldSend ? awaitingBookingFields() : {}),
-        ...(shouldComplete ? { status: "completed" as const } : {}),
+        ...(shouldCompleteVisit
+          ? {
+              status: "completed" satisfies InspectionRequestStatus,
+              ...(requestData.visitEndedAt
+                ? {}
+                : { visitEndedAt: FieldValue.serverTimestamp() }),
+            }
+          : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -669,33 +684,19 @@ export async function createQuotationForInspection(
         { merge: true },
       );
       quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    }
 
-      if (shouldComplete) {
-        const after = await requestSnap.ref.get();
-        const updatedRequest = mapInspectionDoc(
-          inspectionId,
-          after.data() ?? {},
-        );
-        const businessSnap = await adminDb
-          .collection("businesses")
-          .doc(businessId)
-          .get();
-        const businessData = businessSnap.data() ?? {};
-        await notifyCustomerOfStatusChange(updatedRequest, "completed", {
-          businessName:
-            typeof businessData.businessName === "string"
-              ? businessData.businessName
-              : null,
-          bookingSlug:
-            typeof businessData.bookingSlug === "string"
-              ? businessData.bookingSlug
-              : null,
-          logoUrl:
-            typeof businessData.logoUrl === "string"
-              ? businessData.logoUrl
-              : null,
-        });
-      }
+    if (shouldCompleteVisit) {
+      const after = await requestSnap.ref.get();
+      const updatedRequest = mapInspectionDoc(
+        inspectionId,
+        after.data() ?? {},
+      );
+      await notifyCustomerOfStatusChange(
+        updatedRequest,
+        "completed",
+        businessBranding,
+      );
     }
   } catch (error) {
     console.error("quotation mirror to request failed:", error);
