@@ -6,6 +6,7 @@ import {
   ConvertToBookingPanel,
 } from "@/components/convert-to-booking-panel";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
+import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -22,6 +23,7 @@ import {
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
 import {
+  quotationAwaitingCustomerAcceptance,
   quotationHasInvoice,
   quotationJobActionsLocked,
 } from "@/lib/quotations/actions";
@@ -90,6 +92,46 @@ function CreatedSourcePill({
   );
 }
 
+function CustomerDecisionPill({
+  quotation,
+}: {
+  quotation: Pick<
+    QuotationDetail,
+    "status" | "bookingId" | "customerDecision"
+  >;
+}) {
+  if (quotation.status !== "sent") return null;
+  if (quotation.customerDecision === "accepted") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+        <span className="material-symbols-outlined text-[13px] leading-none">
+          check_circle
+        </span>
+        Customer accepted
+      </span>
+    );
+  }
+  if (quotation.customerDecision === "rejected") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-rose-700">
+        <span className="material-symbols-outlined text-[13px] leading-none">
+          cancel
+        </span>
+        Customer rejected
+      </span>
+    );
+  }
+  if (quotation.bookingId) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-700">
+      <span className="material-symbols-outlined text-[13px] leading-none">
+        hourglass_top
+      </span>
+      Awaiting customer
+    </span>
+  );
+}
+
 function QuotationCardMenu({
   quotation,
   onScheduleBooking,
@@ -103,6 +145,11 @@ function QuotationCardMenu({
   const hasBooking = Boolean(quotation.bookingId);
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
+  const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const awaitingCustomerTitle =
+    quotation.customerDecision === "rejected"
+      ? "The customer rejected this quotation"
+      : "Waiting for the customer to accept this quotation";
   const invoiceHref = `/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`;
 
   useEffect(() => {
@@ -144,15 +191,17 @@ function QuotationCardMenu({
             <button
               type="button"
               role="menuitem"
-              disabled={jobLocked}
+              disabled={jobLocked || awaitingCustomer}
               className={menuItemClass}
               title={
                 jobLocked
                   ? "Job completed and invoice already issued"
-                  : undefined
+                  : awaitingCustomer
+                    ? awaitingCustomerTitle
+                    : undefined
               }
               onClick={() => {
-                if (jobLocked) return;
+                if (jobLocked || awaitingCustomer) return;
                 setOpen(false);
                 onScheduleBooking();
               }}
@@ -160,7 +209,7 @@ function QuotationCardMenu({
               <span className="material-symbols-outlined text-[18px] text-primary">
                 event
               </span>
-              Schedule booking
+              Schedule job
             </button>
           ) : hasBooking ? (
             jobLocked ? (
@@ -172,7 +221,7 @@ function QuotationCardMenu({
                 <span className="material-symbols-outlined text-[18px] text-outline">
                   assignment
                 </span>
-                Schedule booking
+                Schedule job
               </span>
             ) : (
               <Link
@@ -184,7 +233,7 @@ function QuotationCardMenu({
                 <span className="material-symbols-outlined text-[18px] text-primary">
                   assignment
                 </span>
-                Schedule booking
+                Schedule job
               </Link>
             )
           ) : (
@@ -198,14 +247,18 @@ function QuotationCardMenu({
               <span className="material-symbols-outlined text-[18px] text-outline">
                 event
               </span>
-              Schedule booking
+              Schedule job
             </button>
           )}
-          {hasInvoice ? (
+          {hasInvoice || awaitingCustomer ? (
             <span
               role="menuitem"
               className={disabledMenuItemClass}
-              title="Invoice already issued for this quotation"
+              title={
+                hasInvoice
+                  ? "Invoice already issued for this quotation"
+                  : awaitingCustomerTitle
+              }
             >
               <span className="material-symbols-outlined text-[18px] text-outline">
                 receipt_long
@@ -242,7 +295,9 @@ function QuotationCard({
   onOpen: () => void;
   onBook: () => void;
 }) {
-  const showFollowUpActions = canConvertQuotationToBooking(quotation);
+  const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const showFollowUpActions =
+    canConvertQuotationToBooking(quotation) && !awaitingCustomer;
   const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
 
   return (
@@ -273,6 +328,7 @@ function QuotationCard({
           {quotation.bookingStatus && !quotation.bookingId ? (
             <BookingStatusPill status={quotation.bookingStatus} />
           ) : null}
+          <CustomerDecisionPill quotation={quotation} />
           <CreatedSourcePill source={quotation.createdSource} />
         </div>
         <QuotationCardMenu
@@ -325,6 +381,7 @@ function QuotationPreviewDrawer({
   onClose,
   onPreviewModeChange,
   onBookingCreated,
+  onQuotationDecided,
 }: {
   quotation: QuotationDetail | null;
   previewMode: QuotationPreviewMode;
@@ -332,6 +389,7 @@ function QuotationPreviewDrawer({
   onClose: () => void;
   onPreviewModeChange: (mode: QuotationPreviewMode) => void;
   onBookingCreated: (request: InspectionRequestDetail) => void;
+  onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
   const open = quotation !== null;
 
@@ -365,6 +423,7 @@ function QuotationPreviewDrawer({
               onClose={onClose}
               onPreviewModeChange={onPreviewModeChange}
               onBookingCreated={onBookingCreated}
+              onQuotationDecided={onQuotationDecided}
             />
           </motion.aside>
         </motion.div>
@@ -380,6 +439,7 @@ function QuotationPreviewContent({
   onClose,
   onPreviewModeChange,
   onBookingCreated,
+  onQuotationDecided,
 }: {
   quotation: QuotationDetail;
   previewMode: QuotationPreviewMode;
@@ -387,6 +447,7 @@ function QuotationPreviewContent({
   onClose: () => void;
   onPreviewModeChange: (mode: QuotationPreviewMode) => void;
   onBookingCreated: (request: InspectionRequestDetail) => void;
+  onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
   const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -406,6 +467,11 @@ function QuotationPreviewContent({
   const canConvert = canConvertQuotationToBooking(quotation);
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
+  const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const awaitingCustomerTitle =
+    quotation.customerDecision === "rejected"
+      ? "The customer rejected this quotation"
+      : "Waiting for the customer to accept this quotation";
   const hasFooterActions =
     previewMode === "review" &&
     (quotation.status === "sent" ||
@@ -466,7 +532,7 @@ function QuotationPreviewContent({
         <div className="min-w-0 flex-1">
           <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
             {previewMode === "convert_booking"
-              ? "Create booking"
+              ? "Create job"
               : "Quotation preview"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -479,6 +545,7 @@ function QuotationPreviewContent({
             {quotation.bookingStatus && !quotation.bookingId ? (
               <BookingStatusPill status={quotation.bookingStatus} />
             ) : null}
+            <CustomerDecisionPill quotation={quotation} />
             <CreatedSourcePill source={quotation.createdSource} />
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
@@ -580,7 +647,7 @@ function QuotationPreviewContent({
         {quotation.bookingId ? (
           <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-              Linked booking
+              Linked job
             </p>
             <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
               {displayBookingCode({
@@ -623,6 +690,48 @@ function QuotationPreviewContent({
 
         {hasFooterActions ? (
           <footer className="space-y-2 border-t border-outline-variant/40 pt-3">
+            {awaitingCustomer && quotation.status === "sent" ? (
+              <div
+                className={`flex items-start gap-2 rounded-xl border p-3 ${
+                  quotation.customerDecision === "rejected"
+                    ? "border-rose-200 bg-rose-50/80"
+                    : "border-amber-200 bg-amber-50/80"
+                }`}
+              >
+                <span
+                  className={`material-symbols-outlined shrink-0 text-[18px] ${
+                    quotation.customerDecision === "rejected"
+                      ? "text-rose-600"
+                      : "text-amber-600"
+                  }`}
+                >
+                  {quotation.customerDecision === "rejected"
+                    ? "cancel"
+                    : "hourglass_top"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`font-body text-[12px] font-semibold ${
+                      quotation.customerDecision === "rejected"
+                        ? "text-rose-800"
+                        : "text-amber-800"
+                    }`}
+                  >
+                    {quotation.customerDecision === "rejected"
+                      ? "The customer rejected this quotation, so it cannot be converted into a job or an invoice."
+                      : "Waiting for the customer to accept this quotation. Scheduling a job and issuing an invoice unlock once they accept."}
+                  </p>
+                  <QuotationOwnerDecisionButtons
+                    className="mt-2.5"
+                    quotationId={quotation.id}
+                    status={quotation.status}
+                    bookingId={quotation.bookingId}
+                    customerDecision={quotation.customerDecision}
+                    onDecided={onQuotationDecided}
+                  />
+                </div>
+              </div>
+            ) : null}
             {quotation.status === "sent" ? (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {quotation.bookingId ? (
@@ -651,18 +760,20 @@ function QuotationPreviewContent({
                 ) : canConvert ? (
                   <button
                     type="button"
-                    disabled={jobLocked}
+                    disabled={jobLocked || awaitingCustomer}
                     title={
                       jobLocked
                         ? "Job completed and invoice already issued"
-                        : undefined
+                        : awaitingCustomer
+                          ? awaitingCustomerTitle
+                          : undefined
                     }
                     onClick={() => {
-                      if (jobLocked) return;
+                      if (jobLocked || awaitingCustomer) return;
                       onPreviewModeChange("convert_booking");
                     }}
                     className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-body text-[14px] font-semibold transition-colors ${
-                      jobLocked
+                      jobLocked || awaitingCustomer
                         ? "cursor-not-allowed bg-primary/40 text-on-primary/70"
                         : "bg-primary text-on-primary hover:bg-primary/90"
                     }`}
@@ -673,10 +784,14 @@ function QuotationPreviewContent({
                     Schedule job
                   </button>
                 ) : null}
-                {hasInvoice ? (
+                {hasInvoice || awaitingCustomer ? (
                   <span
                     className={disabledActionClass}
-                    title="Invoice already issued for this quotation"
+                    title={
+                      hasInvoice
+                        ? "Invoice already issued for this quotation"
+                        : awaitingCustomerTitle
+                    }
                   >
                     <span className="material-symbols-outlined text-[20px]">
                       receipt_long
@@ -725,7 +840,11 @@ function QuotationPreviewContent({
                     disabled={invoicePdfLoading}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <span className="material-symbols-outlined text-[20px]">
+                    <span
+                      className={`material-symbols-outlined text-[20px] ${
+                        invoicePdfLoading ? "animate-spin" : ""
+                      }`}
+                    >
                       {invoicePdfLoading ? "progress_activity" : "receipt_long"}
                     </span>
                     {invoicePdfLoading ? "Loading invoice…" : "View invoice PDF"}
@@ -855,6 +974,21 @@ export function QuotationsBoard() {
     setPreviewMode("review");
   }
 
+  function handleQuotationDecided(decision: "accepted" | "rejected") {
+    if (!selectedId) return;
+    setQuotations((prev) =>
+      prev.map((quotation) =>
+        quotation.id === selectedId
+          ? {
+              ...quotation,
+              customerDecision: decision,
+              customerDecisionAt: Date.now(),
+            }
+          : quotation,
+      ),
+    );
+  }
+
   function handleClosePreview() {
     setSelectedId(null);
     setPreviewMode("review");
@@ -956,6 +1090,7 @@ export function QuotationsBoard() {
         onClose={handleClosePreview}
         onPreviewModeChange={setPreviewMode}
         onBookingCreated={handleBookingCreated}
+        onQuotationDecided={handleQuotationDecided}
       />
     </>
   );

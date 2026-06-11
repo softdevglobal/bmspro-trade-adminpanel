@@ -20,7 +20,12 @@ import {
   SlotDayPicker,
   todayIso,
 } from "@/components/booking-slot-date-picker";
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { formatAddress } from "@/lib/inspection/types";
+import {
+  isValidAuLocalPhone,
+  toAuLocalPhoneDigits,
+} from "@/lib/phone/au-phone";
 
 type Props = {
   business: BookingBusiness;
@@ -587,6 +592,68 @@ type SlotTimeRange = "morning" | "afternoon";
 
 type PreferredSlot = { date: string; timeRange: SlotTimeRange };
 
+function collectBookingMissingRequirements(input: {
+  requestType: RequestType;
+  selectedServiceId: string | null;
+  customTitle: string;
+  customDescription: string;
+  address: ServiceAddress;
+  preferredSlots: PreferredSlot[];
+  customer: { fullName: string; email: string; phone: string };
+}): string[] {
+  const missing: string[] = [];
+
+  if (input.requestType === "existing_service") {
+    if (!input.selectedServiceId) {
+      missing.push("Select a service");
+    }
+  } else {
+    if (input.customTitle.trim().length < 3) {
+      missing.push("Job title (at least 3 characters)");
+    }
+    if (input.customDescription.trim().length < 10) {
+      missing.push("Job description (at least 10 characters)");
+    }
+  }
+
+  if (input.address.street.trim().length < 3) {
+    missing.push("Street address");
+  }
+  if (input.address.suburb.trim().length < 2) {
+    missing.push("Suburb");
+  }
+  if (input.address.state.trim().length < 2) {
+    missing.push("State");
+  }
+  if (input.address.postcode.trim().length < 4) {
+    missing.push("Postcode");
+  }
+
+  const datedSlots = input.preferredSlots.filter((slot) => slot.date.trim());
+  if (datedSlots.length === 0) {
+    missing.push("At least one preferred date");
+  } else {
+    const uniqueCombos = new Set(
+      datedSlots.map((slot) => `${slot.date}-${slot.timeRange}`),
+    );
+    if (uniqueCombos.size !== datedSlots.length) {
+      missing.push("Each preferred slot needs a unique date and time");
+    }
+  }
+
+  if (input.customer.fullName.trim().length < 2) {
+    missing.push("Full name");
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customer.email.trim())) {
+    missing.push("Valid email address");
+  }
+  if (!isValidAuLocalPhone(input.customer.phone)) {
+    missing.push("Mobile number");
+  }
+
+  return missing;
+}
+
 const TIME_RANGE_OPTIONS: {
   id: SlotTimeRange;
   label: string;
@@ -842,7 +909,29 @@ function ServiceBookingFlow({
   const customerValid =
     customer.fullName.trim().length >= 2 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim()) &&
-    customer.phone.replace(/\D/g, "").length > 0;
+    isValidAuLocalPhone(customer.phone);
+
+  const missingRequirements = useMemo(
+    () =>
+      collectBookingMissingRequirements({
+        requestType,
+        selectedServiceId,
+        customTitle,
+        customDescription,
+        address,
+        preferredSlots,
+        customer,
+      }),
+    [
+      requestType,
+      selectedServiceId,
+      customTitle,
+      customDescription,
+      address,
+      preferredSlots,
+      customer,
+    ],
+  );
 
   const canSubmit =
     requestStepValid &&
@@ -861,7 +950,7 @@ function ServiceBookingFlow({
     field: "fullName" | "email" | "phone",
     value: string,
   ) {
-    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    const next = field === "phone" ? toAuLocalPhoneDigits(value) : value;
     setCustomer((prev) => ({ ...prev, [field]: next }));
     setSubmitError(null);
   }
@@ -1326,15 +1415,13 @@ function ServiceBookingFlow({
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
                 Mobile number
               </span>
-              <input
-                type="tel"
-                inputMode="numeric"
+              <AuPhoneInput
                 value={customer.phone}
-                onChange={(e) => updateCustomer("phone", e.target.value)}
-                placeholder="0400000000"
+                onChange={(value) => updateCustomer("phone", value)}
                 autoComplete={BOOKING_AUTOCOMPLETE}
                 readOnly={profileLocked}
-                className={`${BOOKING_INPUT_CLASS} ${
+                size="lg"
+                className={`mt-1 rounded-xl border-stone-200 bg-white shadow-sm focus-within:border-primary/40 focus-within:ring-primary/10 ${
                   profileLocked
                     ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
                     : ""
@@ -1390,14 +1477,24 @@ function ServiceBookingFlow({
             <motion.button
               type="button"
               whileHover={
-                reducedMotion || !canSubmit ? undefined : { scale: 1.02 }
+                reducedMotion || !canSubmit || submitting
+                  ? undefined
+                  : { scale: 1.02 }
               }
-              whileTap={canSubmit ? { scale: 0.98 } : undefined}
-              disabled={!canSubmit}
+              whileTap={canSubmit && !submitting ? { scale: 0.98 } : undefined}
+              disabled={!canSubmit || submitting}
               onClick={handleSubmit}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-[15px] font-semibold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:text-label-bold"
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-[15px] font-semibold text-on-primary shadow-md transition-opacity sm:w-auto sm:text-label-bold ${
+                submitting
+                  ? "cursor-wait opacity-100"
+                  : "disabled:cursor-not-allowed disabled:opacity-45"
+              }`}
             >
-              <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+              <span
+                className={`material-symbols-outlined material-symbols-filled text-[18px] ${
+                  submitting ? "animate-spin" : ""
+                }`}
+              >
                 {submitting
                   ? "progress_activity"
                   : isAuthenticated
@@ -1410,6 +1507,24 @@ function ServiceBookingFlow({
                   ? "Submit request"
                   : "Sign in & submit request"}
             </motion.button>
+            {!submitting && missingRequirements.length > 0 ? (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 font-body text-[12px] text-amber-900"
+              >
+                <p className="inline-flex items-center gap-1 font-semibold">
+                  <span className="material-symbols-outlined text-[16px]">
+                    info
+                  </span>
+                  Complete these required fields to submit:
+                </p>
+                <ul className="mt-1.5 list-inside list-disc space-y-0.5 pl-0.5">
+                  {missingRequirements.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {!isAuthenticated && canSubmit ? (
               <span className="inline-flex items-center justify-center gap-1 font-body text-[11px] text-on-surface-variant sm:justify-start">
                 <span className="material-symbols-outlined text-[14px] text-primary">

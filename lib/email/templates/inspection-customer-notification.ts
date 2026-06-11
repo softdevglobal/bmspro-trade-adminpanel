@@ -27,6 +27,10 @@ const EMAIL_PRESENTATION: Record<
   booking_on_the_way: { eyebrow: "Job on the way", tone: "brand" },
   request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },
   request_completed: { eyebrow: "Visit completed", tone: "success" },
+  job_completed: { eyebrow: "Job completed", tone: "success" },
+  invoice_sent: { eyebrow: "Invoice", tone: "brand" },
+  quotation_accepted: { eyebrow: "Quotation accepted", tone: "success" },
+  quotation_rejected: { eyebrow: "Quotation rejected", tone: "danger" },
 };
 
 export type InspectionCustomerNotificationEmailInput = {
@@ -54,11 +58,14 @@ function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
   return null;
 }
 
-function customerRequestUrl(bookingSlug: string | null | undefined): string | null {
+function customerAccountUrl(
+  bookingSlug: string | null | undefined,
+  tab: "requests" | "history" = "requests",
+): string | null {
   if (!bookingSlug) return null;
   const base = buildBookingUrl(bookingSlug);
   if (!base) return null;
-  return `${base}/account/requests`;
+  return `${base}/account/${tab}`;
 }
 
 /**
@@ -99,7 +106,11 @@ export async function sendInspectionCustomerNotificationEmail(
       ctaLabel:
         input.type === "booking_on_the_way"
           ? "View my booking"
-          : "View my request",
+          : input.type === "job_completed"
+            ? "View job history"
+            : input.type === "invoice_sent"
+              ? "View your invoice"
+              : "View my request",
       footnote:
         input.type === "booking_on_the_way"
           ? "You're receiving this about your scheduled job with BMS Pro Trade."
@@ -114,15 +125,16 @@ export async function sendInspectionCustomerNotificationEmail(
       subject: input.title,
       htmlBody: html,
     });
-
-    if (input.customerPhone) {
-      const smsBody = input.body?.replace(/\s+/g, " ").trim();
-      await sendSms({
-        to: input.customerPhone,
-        message: smsBody ? `${input.title}. ${smsBody}` : input.title,
-      });
-    }
   } catch {
-    /* email/SMS is best-effort */
+    /* email is best-effort */
+  }
+
+  // SMS is sent independently so an email failure never skips the SMS.
+  if (input.customerPhone) {
+    const smsBody = input.body?.replace(/\s+/g, " ").trim();
+    await sendSms({
+      to: input.customerPhone,
+      message: smsBody ? `${input.title}. ${smsBody}` : input.title,
+    });
   }
 }

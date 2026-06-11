@@ -26,7 +26,11 @@ export type NotificationType =
   | "request_completed"
   | "request_assigned"
   | "visit_on_the_way"
-  | "booking_on_the_way";
+  | "booking_on_the_way"
+  | "job_completed"
+  | "invoice_sent"
+  | "quotation_accepted"
+  | "quotation_rejected";
 
 /** Client-facing notification (timestamps are epoch millis). */
 export type NotificationRecord = {
@@ -71,3 +75,25 @@ export const NOTIFICATION_STATUS_TONE: Record<
   cancelled: "text-rose-600",
   completed: "text-primary",
 };
+
+const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
+  job_completed: "handyman",
+  invoice_sent: "receipt_long",
+  quotation_accepted: "check_circle",
+  quotation_rejected: "cancel",
+};
+
+const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
+  job_completed: "text-sky-600",
+  invoice_sent: "text-primary",
+  quotation_accepted: "text-emerald-600",
+  quotation_rejected: "text-rose-600",
+};
+
+export function notificationCardIcon(note: Pick<NotificationRecord, "type" | "status">): string {
+  return NOTIFICATION_TYPE_ICON[note.type] ?? NOTIFICATION_STATUS_ICON[note.status];
+}
+
+export function notificationCardTone(note: Pick<NotificationRecord, "type" | "status">): string {
+  return NOTIFICATION_TYPE_TONE[note.type] ?? NOTIFICATION_STATUS_TONE[note.status];
+}

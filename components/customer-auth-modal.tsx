@@ -1,7 +1,9 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { CustomerForgotPasswordModal } from "@/components/customer-forgot-password-modal";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { isValidAuLocalPhone } from "@/lib/phone/au-phone";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -558,7 +560,7 @@ function SignUpForm({
       setError("Enter your full name.");
       return;
     }
-    if (phone.replace(/\D/g, "").length < 6) {
+    if (!isValidAuLocalPhone(phone)) {
       setError("Enter a valid mobile number.");
       return;
     }
@@ -603,16 +605,13 @@ function SignUpForm({
       {compact ? (
         <>
           <AuthField label="Mobile" icon="call" htmlFor="customer-signup-phone">
-            <input
+            <AuPhoneInput
               id="customer-signup-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              required
               value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="07XXXXXXXX"
-              className={`${inputClass} pl-12 pr-3`}
+              onChange={setPhone}
+              required
+              size="sm"
+              leadingIconPadding="pl-12"
             />
           </AuthField>
           <AuthField label="Email" icon="mail" htmlFor="customer-signup-email">
@@ -631,16 +630,12 @@ function SignUpForm({
       ) : (
         <div className={contactGrid}>
           <AuthField label="Mobile" icon="call" htmlFor="customer-signup-phone">
-            <input
+            <AuPhoneInput
               id="customer-signup-phone"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              required
               value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="07XXXXXXXX"
-              className={`${inputClass} pl-12 pr-3`}
+              onChange={setPhone}
+              required
+              leadingIconPadding="pl-12"
             />
           </AuthField>
           <AuthField label="Email" icon="mail" htmlFor="customer-signup-email">

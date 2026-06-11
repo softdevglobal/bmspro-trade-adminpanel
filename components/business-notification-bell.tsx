@@ -3,8 +3,8 @@
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessNotifications } from "@/lib/notifications/use-business-notifications";
 import {
-  NOTIFICATION_STATUS_ICON,
-  NOTIFICATION_STATUS_TONE,
+  notificationCardIcon,
+  notificationCardTone,
   type NotificationRecord,
 } from "@/lib/notifications/types";
 import { useRouter } from "next/navigation";
@@ -141,7 +141,11 @@ export function BusinessNotificationBell() {
                 disabled={clearingAll}
                 className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-rose-600 disabled:opacity-60"
               >
-                <span className="material-symbols-outlined text-[15px]">
+                <span
+                  className={`material-symbols-outlined text-[15px] ${
+                    clearingAll ? "animate-spin" : ""
+                  }`}
+                >
                   {clearingAll ? "progress_activity" : "clear_all"}
                 </span>
                 Clear all
@@ -183,9 +187,9 @@ export function BusinessNotificationBell() {
                       className="flex min-w-0 flex-1 gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-container-low"
                     >
                       <span
-                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[20px] ${notificationCardTone(note)}`}
                       >
-                        {NOTIFICATION_STATUS_ICON[note.status]}
+                        {notificationCardIcon(note)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block font-body text-[13px] font-bold text-on-surface">
@@ -206,7 +210,11 @@ export function BusinessNotificationBell() {
                       aria-label="Clear notification"
                       className="my-2 mr-2 flex h-7 w-7 shrink-0 items-center justify-center self-start rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-rose-600 disabled:opacity-60"
                     >
-                      <span className="material-symbols-outlined text-[16px]">
+                      <span
+                        className={`material-symbols-outlined text-[16px] ${
+                          busyId === note.id ? "animate-spin" : ""
+                        }`}
+                      >
                         {busyId === note.id ? "progress_activity" : "close"}
                       </span>
                     </button>

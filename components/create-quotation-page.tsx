@@ -1,5 +1,6 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import {
   DiscountEditModal,
@@ -373,7 +374,9 @@ export function CreateQuotationPage() {
   );
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("inspectionRequestId")?.trim();
+    const id =
+      params.get("requestId")?.trim() ||
+      params.get("inspectionRequestId")?.trim();
     if (id) setInspectionRequestId(id);
   }, []);
 
@@ -924,12 +927,17 @@ export function CreateQuotationPage() {
     inspectionRequestId,
   ]);
 
-  async function save() {
+  async function save(sendToCustomer = false) {
     if (!user) return;
     const validationError = validate();
     if (validationError) {
       setError(validationError);
       setTab("create");
+      return;
+    }
+    if (sendToCustomer && !customer.email.trim()) {
+      setError("Add a client email before sending.");
+      setTab("send");
       return;
     }
 
@@ -978,9 +986,10 @@ export function CreateQuotationPage() {
       // Bound to an existing request → attach the quotation to it.
       // Otherwise create a standalone quotation (with its own visit record).
       const quotationBody = inspectionRequestId
-        ? { inspectionRequestId, ...sharedBody }
+        ? { requestId: inspectionRequestId, send: sendToCustomer, ...sharedBody }
         : {
             standalone: true,
+            send: sendToCustomer,
             requestType,
             serviceId:
               requestType === "existing_service" ? selectedServiceId : null,
@@ -1123,11 +1132,11 @@ export function CreateQuotationPage() {
             </Link>
             <button
               type="button"
-              onClick={() => void save()}
+              onClick={() => void save(false)}
               disabled={submitting}
               className="inline-flex min-w-[5.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
-              {submitting ? <SaveSpinner label="Saving…" /> : "Save"}
+              {submitting ? <SaveSpinner label="Saving…" /> : "Save draft"}
             </button>
           </div>
         </div>
@@ -1260,16 +1269,15 @@ export function CreateQuotationPage() {
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="block">
                       <span className={LABEL_CLASS}>Mobile</span>
-                      <input
-                        type="tel"
+                      <AuPhoneInput
                         value={customer.phone}
-                        onChange={(e) =>
+                        onChange={(phone) =>
                           setCustomer((prev) => ({
                             ...prev,
-                            phone: e.target.value.replace(/\D/g, ""),
+                            phone,
                           }))
                         }
-                        className={INPUT_CLASS}
+                        className="mt-1"
                       />
                     </label>
                     <label className="block">
@@ -1972,13 +1980,13 @@ export function CreateQuotationPage() {
                 </label>
               </div>
               <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
-                The quotation PDF is emailed to the client when you click{" "}
-                <strong>Save</strong>. Use the Preview tab to check the document
-                before sending.
+                Use <strong>Save</strong> to keep a draft. The quotation PDF is
+                emailed to the client only when you click{" "}
+                <strong>Save &amp; send quotation</strong> below.
               </p>
               <button
                 type="button"
-                onClick={() => void save()}
+                onClick={() => void save(true)}
                 disabled={submitting || !customer.email.trim()}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
               >

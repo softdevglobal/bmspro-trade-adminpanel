@@ -1,5 +1,6 @@
 import { adminAuth } from "@/lib/firebase/admin";
 import {
+  createDirectInvoice,
   createInvoiceFromQuotation,
   listBusinessInvoices,
 } from "@/lib/invoices/server";
@@ -98,12 +99,13 @@ export async function POST(request: Request) {
   const payload = body as Record<string, unknown>;
   const quotationId =
     typeof payload.quotationId === "string" ? payload.quotationId.trim() : "";
+  const direct = payload.direct === true;
   const invoiceDate =
     typeof payload.invoiceDate === "string" ? payload.invoiceDate.trim() : "";
   const dueDate =
     typeof payload.dueDate === "string" ? payload.dueDate.trim() : "";
 
-  if (!quotationId) {
+  if (!quotationId && !direct) {
     return NextResponse.json(
       { ok: false, error: "Quotation is required." },
       { status: 400 },
@@ -116,8 +118,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await createInvoiceFromQuotation(auth.businessId, auth.uid, {
-    quotationId,
+  const sharedInput = {
     lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
     finalPriceAud:
       typeof payload.finalPriceAud === "number" &&
@@ -142,7 +143,60 @@ export async function POST(request: Request) {
     invoiceDate,
     dueDate,
     send: payload.send === true,
-  });
+  };
+
+  const result = direct
+    ? await (async () => {
+        const customer = (payload.customer ?? {}) as Record<string, unknown>;
+        const address = (payload.address ?? {}) as Record<string, unknown>;
+        return createDirectInvoice(auth.businessId, auth.uid, {
+          ...sharedInput,
+          customer: {
+            fullName:
+              typeof customer.fullName === "string" ? customer.fullName : "",
+            email: typeof customer.email === "string" ? customer.email : "",
+            phone: typeof customer.phone === "string" ? customer.phone : "",
+          },
+          address: {
+            street: typeof address.street === "string" ? address.street : "",
+            suburb: typeof address.suburb === "string" ? address.suburb : "",
+            state: typeof address.state === "string" ? address.state : "",
+            postcode:
+              typeof address.postcode === "string" ? address.postcode : "",
+          },
+          serviceTitle:
+            typeof payload.serviceTitle === "string"
+              ? payload.serviceTitle
+              : "",
+          description:
+            typeof payload.description === "string"
+              ? payload.description
+              : null,
+          requestType:
+            payload.requestType === "existing_service"
+              ? "existing_service"
+              : payload.requestType === "custom_quote"
+                ? "custom_quote"
+                : undefined,
+          serviceId:
+            typeof payload.serviceId === "string" ? payload.serviceId : null,
+          customRequest: (() => {
+            const raw = payload.customRequest;
+            if (!raw || typeof raw !== "object") return null;
+            const cr = raw as Record<string, unknown>;
+            const title =
+              typeof cr.title === "string" ? cr.title.trim() : "";
+            const desc =
+              typeof cr.description === "string" ? cr.description.trim() : "";
+            if (!title) return null;
+            return { title, description: desc };
+          })(),
+        });
+      })()
+    : await createInvoiceFromQuotation(auth.businessId, auth.uid, {
+        quotationId,
+        ...sharedInput,
+      });
 
   if (!result.ok) {
     return NextResponse.json(

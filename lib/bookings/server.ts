@@ -17,7 +17,10 @@ import type {
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
-import { notifyCustomerOfBookingOnTheWay } from "@/lib/notifications/server";
+import {
+  notifyCustomerOfBookingOnTheWay,
+  notifyCustomerOfJobCompleted,
+} from "@/lib/notifications/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
@@ -102,6 +105,17 @@ export async function createBookingFromInspection(
       ok: false,
       status: 400,
       error: "Send a quotation before creating a booking.",
+    };
+  }
+
+  if (current.quotation.customerDecision !== "accepted") {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        current.quotation.customerDecision === "rejected"
+          ? "The customer rejected this quotation, so it cannot become a job."
+          : "Wait for the customer to accept the quotation before creating a job.",
     };
   }
 
@@ -403,6 +417,8 @@ export async function startBusinessBookingJob(
   }
 
   await ref.update({
+    visitEndedAt:
+      current.visitEndedAt ?? FieldValue.serverTimestamp(),
     bookingStartedAt:
       current.bookingStartedAt ?? FieldValue.serverTimestamp(),
     status: "ongoing",
@@ -652,8 +668,12 @@ export async function completeBusinessBooking(
   }
 
   const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfJobCompleted(booking, summary);
+
   return {
     ok: true,
-    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+    booking,
   };
 }

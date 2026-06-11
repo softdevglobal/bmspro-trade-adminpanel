@@ -677,7 +677,11 @@ export const BusinessOnboardingForm = forwardRef<
                         logoUploading ? "pointer-events-none opacity-60" : ""
                       }`}
                     >
-                      <span className="material-symbols-outlined text-[16px]">
+                      <span
+                        className={`material-symbols-outlined text-[16px] ${
+                          logoUploading ? "animate-spin" : ""
+                        }`}
+                      >
                         {logoUploading ? "progress_activity" : "upload"}
                       </span>
                       {logoUploading

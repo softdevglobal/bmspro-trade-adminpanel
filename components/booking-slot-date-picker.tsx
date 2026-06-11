@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export const SLOT_DAYS_PER_PAGE_MOBILE = 3;
 /** @deprecated Use SLOT_DAYS_PER_PAGE_MOBILE — mobile always shows 3 days with arrows. */
@@ -239,7 +239,10 @@ export function BookingMonthCalendar({
         <button
           type="button"
           disabled={!canGoPrev}
-          onClick={() => shiftMonth(-1)}
+          onClick={(event) => {
+            event.stopPropagation();
+            shiftMonth(-1);
+          }}
           aria-label="Previous month"
           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
         >
@@ -252,7 +255,10 @@ export function BookingMonthCalendar({
         </p>
         <button
           type="button"
-          onClick={() => shiftMonth(1)}
+          onClick={(event) => {
+            event.stopPropagation();
+            shiftMonth(1);
+          }}
           aria-label="Next month"
           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary"
         >
@@ -358,11 +364,17 @@ export function SlotDayPicker({
     ].slice(0, daysPerPage);
   }, [offPageSelection, pageDays, daysPerPage]);
 
+  // Only jump the strip when the user picks a new date — not when they page with arrows.
+  const prevSelectedIsoRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedIso || pageDays.some((day) => day.iso === selectedIso)) return;
-    const targetPage = dayPageIndexForIso(selectedIso, daysPerPage, minDate);
-    if (targetPage !== dayPage) onDayPageChange(targetPage);
-  }, [selectedIso, pageDays, daysPerPage, minDate, dayPage, onDayPageChange]);
+    if (!selectedIso) {
+      prevSelectedIsoRef.current = null;
+      return;
+    }
+    if (prevSelectedIsoRef.current === selectedIso) return;
+    prevSelectedIsoRef.current = selectedIso;
+    onDayPageChange(dayPageIndexForIso(selectedIso, daysPerPage, minDate));
+  }, [selectedIso, daysPerPage, minDate, onDayPageChange]);
 
   const dayButtons = displayDays.map((day) => {
     const selected = selectedIso === day.iso;
@@ -455,7 +467,10 @@ export function SlotDayPicker({
         <button
           type="button"
           disabled={disabled || dayPage === 0}
-          onClick={() => onDayPageChange(Math.max(0, dayPage - 1))}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDayPageChange(Math.max(0, dayPage - 1));
+          }}
           aria-label="Show earlier dates"
           className={`inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
             fitStrip ? "self-stretch" : "self-center"
@@ -477,9 +492,10 @@ export function SlotDayPicker({
         <button
           type="button"
           disabled={disabled || dayPage >= SLOT_MAX_DAY_PAGES - 1}
-          onClick={() =>
-            onDayPageChange(Math.min(SLOT_MAX_DAY_PAGES - 1, dayPage + 1))
-          }
+          onClick={(event) => {
+            event.stopPropagation();
+            onDayPageChange(Math.min(SLOT_MAX_DAY_PAGES - 1, dayPage + 1));
+          }}
           aria-label="Show later dates"
           className={`inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
             fitStrip ? "self-stretch" : "self-center"

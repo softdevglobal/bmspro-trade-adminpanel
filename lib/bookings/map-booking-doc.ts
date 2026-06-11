@@ -137,6 +137,7 @@ export function mapBookingDoc(
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
     quotation: parseInspectionQuotation(data.quotation),
     visitStartedAt: toMillis(data.visitStartedAt),
+    visitEndedAt: toMillis(data.visitEndedAt),
     bookingStartedAt: toMillis(data.bookingStartedAt),
     completedFromInvoice: data.completedFromInvoice === true,
     createdAt: toMillis(data.createdAt),

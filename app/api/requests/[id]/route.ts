@@ -14,6 +14,7 @@ import {
   type InspectionAssignment,
   type InspectionSlot,
 } from "@/lib/inspection/types";
+import { getRequestDocument } from "@/lib/inspection/request-document";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -189,11 +190,8 @@ async function requireAssignedInspector(request: Request, requestId: string) {
       };
     }
 
-    const snap = await adminDb
-      .collection("requests")
-      .doc(requestId)
-      .get();
-    if (!snap.exists) {
+    const snap = await getRequestDocument(requestId);
+    if (!snap) {
       return {
         ok: false as const,
         status: 404,
@@ -531,9 +529,15 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    let assignedTo: InspectionAssignment | null = null;
     const assignTo =
       typeof payload.assignTo === "string" ? payload.assignTo.trim() : "";
+    if (assignTo !== "owner" && assignTo !== "staff") {
+      return NextResponse.json(
+        { ok: false, error: "Choose who will run this job." },
+        { status: 400 },
+      );
+    }
+    let assignedTo: InspectionAssignment | null = null;
     if (assignTo === "owner") {
       assignedTo = await resolveOwnerAssignment(
         auth.uid,

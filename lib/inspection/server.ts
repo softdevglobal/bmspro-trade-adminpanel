@@ -6,6 +6,7 @@ import {
   mapInspectionDoc,
   sortInspectionRequestsNewestFirst,
 } from "@/lib/inspection/map-inspection-doc";
+import { getRequestDocument } from "@/lib/inspection/request-document";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import type {
   InspectionAssignment,
@@ -185,8 +186,8 @@ export async function getInspectionRequest(
   id: string,
   businessId: string,
 ): Promise<InspectionRequestDetail | null> {
-  const snap = await adminDb.collection(REQUESTS_COLLECTION).doc(id).get();
-  if (!snap.exists) return null;
+  const snap = await getRequestDocument(id);
+  if (!snap) return null;
   const data = snap.data();
   if (!data || data.businessId !== businessId) return null;
   return mapInspectionDoc(snap.id, data);
@@ -225,11 +226,11 @@ export async function applyOwnerAction(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(REQUESTS_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
+  const ref = snap.ref;
   const current = snap.data();
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
@@ -419,12 +420,11 @@ export async function applyStaffStart(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(REQUESTS_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
-
+  const ref = snap.ref;
   const current = snap.data();
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
@@ -476,12 +476,11 @@ export async function applyAssignedEndVisit(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(REQUESTS_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
-
+  const ref = snap.ref;
   const current = snap.data();
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
@@ -541,11 +540,11 @@ export async function customerAcceptProposedSlot(
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  const ref = adminDb.collection(REQUESTS_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
   }
+  const ref = snap.ref;
   const current = mapInspectionDoc(snap.id, snap.data() ?? {});
 
   const ownsById =

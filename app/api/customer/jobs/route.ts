@@ -14,8 +14,13 @@ import {
   type InspectionCustomer,
   type InspectionSlot,
   parseCreatedSource,
+  parseInspectionInvoice,
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
+import {
+  enrichRequestsWithInvoices,
+  enrichRequestsWithJobAssignees,
+} from "@/lib/invoices/enrich-customer-requests";
 import { toMillis } from "@/lib/onboarding/services/display";
 import { NextResponse } from "next/server";
 
@@ -24,6 +29,7 @@ export const runtime = "nodejs";
 export type CustomerBooking = InspectionRequestDetail & {
   businessName: string | null;
   bookingSlug: string | null;
+  jobAssignedTo: InspectionAssignment | null;
 };
 
 function parseAddress(raw: unknown): InspectionAddress {
@@ -153,6 +159,7 @@ function mapBookingDoc(
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
     quotation: parseInspectionQuotation(data.quotation),
+    invoice: parseInspectionInvoice(data.invoice),
     bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
     bookingCode:
       typeof data.bookingCode === "string" && data.bookingCode.trim()
@@ -244,8 +251,10 @@ export async function GET(request: Request) {
     if (!docs.has(doc.id)) docs.set(doc.id, doc.data());
   }
 
-  const requests = Array.from(docs.entries()).map(([id, data]) =>
-    mapBookingDoc(id, data),
+  const requests = await enrichRequestsWithJobAssignees(
+    await enrichRequestsWithInvoices(
+      Array.from(docs.entries()).map(([id, data]) => mapBookingDoc(id, data)),
+    ),
   );
 
   const businessLookup = await loadBusinessSummaries(
@@ -259,9 +268,13 @@ export async function GET(request: Request) {
         ...req,
         businessName: summary?.businessName ?? null,
         bookingSlug: summary?.bookingSlug ?? null,
+        jobAssignedTo: req.jobAssignedTo ?? null,
       } satisfies CustomerBooking;
     })
-    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    .sort(
+      (a, b) =>
+        (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0),
+    );
 
   return NextResponse.json({ ok: true, jobs: enriched });
 }

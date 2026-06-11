@@ -22,6 +22,8 @@ export type QuotationDepositRequest = {
   percent: number;
   amountAud: number;
   dueDate: string;
+  /** Invoices only: true when the deposit has already been received. */
+  paid?: boolean;
 };
 
 export type QuotationDetail = {
@@ -46,6 +48,9 @@ export type QuotationDetail = {
   imageUrls: string[];
   pdfUrl: string | null;
   status: "draft" | "sent";
+  /** Customer accept/reject response (null until the customer decides). */
+  customerDecision: "accepted" | "rejected" | null;
+  customerDecisionAt: number | null;
   bookingId: string | null;
   bookingCode: string | null;
   bookingStatus: BookingStatus | null;
@@ -81,4 +86,6 @@ export type CreateQuotationInput = {
     state?: string;
     postcode?: string;
   };
+  /** When true, emails/SMS the customer and marks the quotation as sent. */
+  send?: boolean;
 };

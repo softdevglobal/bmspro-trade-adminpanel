@@ -12,6 +12,7 @@ import {
   type InspectionRequestStatus,
   type InspectionSlot,
   parseCreatedSource,
+  parseInspectionInvoice,
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
 
@@ -146,6 +147,7 @@ export function mapInspectionDoc(
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
     quotation: parseInspectionQuotation(data.quotation),
+    invoice: parseInspectionInvoice(data.invoice),
     bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
     bookingCode:
       typeof data.bookingCode === "string" && data.bookingCode.trim()

@@ -1,5 +1,6 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import {
   SlotDayPicker,
   buildBlockedComboSet,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { toAuLocalPhoneDigits } from "@/lib/phone/au-phone";
 import {
   useCallback,
   useEffect,
@@ -800,7 +802,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
     field: "fullName" | "email" | "phone",
     value: string,
   ) {
-    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    const next = field === "phone" ? toAuLocalPhoneDigits(value) : value;
     setForm((prev) => ({
       ...prev,
       customer: { ...prev.customer, [field]: next },
@@ -1481,21 +1483,11 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                     </label>
                     <label className="block">
                       <span className={LABEL_CLASS}>Mobile number</span>
-                      <input
-                        type="tel"
-                        inputMode="numeric"
+                      <AuPhoneInput
                         value={form.customer.phone}
-                        onChange={(event) =>
-                          updateCustomer("phone", event.target.value)
-                        }
-                        onBlur={() => touchField("phone")}
-                        placeholder="0400000000"
+                        onChange={(value) => updateCustomer("phone", value)}
                         autoComplete="off"
-                        className={inputClassName(showFieldError("phone"))}
-                        aria-invalid={showFieldError("phone")}
-                        aria-describedby={
-                          fieldErrorMessage("phone") ? "phone-error" : undefined
-                        }
+                        className="mt-1"
                       />
                       <FieldFeedback
                         error={fieldErrorMessage("phone")}
