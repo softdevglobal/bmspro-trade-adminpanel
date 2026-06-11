@@ -1116,10 +1116,17 @@ function DetailDrawerContent({
     });
   }
 
-  async function callAction(
-    body: Record<string, unknown>,
-    options?: { redirectToQuotation?: boolean },
-  ) {
+  function openCreateQuotation() {
+    if (request.quotation) {
+      router.push("/dashboard/quotations");
+      return;
+    }
+    router.push(
+      `/dashboard/quotations/new?requestId=${encodeURIComponent(request.id)}`,
+    );
+  }
+
+  async function callAction(body: Record<string, unknown>) {
     if (!user) return;
     setSubmitting(true);
     setActionError(null);
@@ -1146,13 +1153,6 @@ function DetailDrawerContent({
       }
       const next = data.request;
       onUpdated(next);
-
-      if (options?.redirectToQuotation && !next.quotation) {
-        router.push(
-          `/dashboard/quotations/new?requestId=${encodeURIComponent(request.id)}`,
-        );
-        return;
-      }
 
       if (
         next.status === "scheduled" &&
@@ -1486,12 +1486,7 @@ function DetailDrawerContent({
             onPropose={() => openAction("propose")}
             onSetTime={() => openAction("set_time")}
             onAssign={() => openAction("assign")}
-            onComplete={() =>
-              void callAction(
-                { action: "complete" },
-                { redirectToQuotation: true },
-              )
-            }
+            onComplete={openCreateQuotation}
             onCancel={() => openAction("cancel")}
             onCreateBooking={() => openAction("convert_booking")}
             onAwaitingDecision={() => openAction("awaiting_decision")}
