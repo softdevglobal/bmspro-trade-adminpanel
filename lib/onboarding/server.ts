@@ -310,6 +310,7 @@ export type BusinessProfile = {
   timezone: string | null;
   plan: BusinessProfilePlan | null;
   termsAndConditions: string | null;
+  serviceAreas: string[];
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -376,6 +377,12 @@ export async function getBusinessProfile(
       data.termsAndConditions.trim()
         ? data.termsAndConditions.trim()
         : null,
+    serviceAreas: Array.isArray(data.serviceAreas)
+      ? (data.serviceAreas as unknown[])
+          .filter((area): area is string => typeof area === "string")
+          .map((area) => area.trim())
+          .filter(Boolean)
+      : [],
   };
 }
 

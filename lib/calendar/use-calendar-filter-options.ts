@@ -1,9 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { auth, db } from "@/lib/firebase/client";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
-import { doc, getDoc } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 
 export type CalendarServiceOption = {
@@ -31,11 +29,14 @@ export function useCalendarFilterOptions(enabled: boolean) {
 
     try {
       const token = await user.getIdToken();
-      const [servicesResponse, businessSnap] = await Promise.all([
+      const [servicesResponse, profileResponse] = await Promise.all([
         fetch("/api/services", {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        getDoc(doc(db, "businesses", businessId)),
+        fetch("/api/business/profile", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        }),
       ]);
 
       const servicesPayload = (await servicesResponse.json()) as {
@@ -60,10 +61,21 @@ export function useCalendarFilterOptions(enabled: boolean) {
           .sort((a, b) => a.name.localeCompare(b.name)),
       );
 
-      const areasRaw = businessSnap.data()?.serviceAreas;
+      const profilePayload = (await profileResponse.json()) as {
+        ok?: boolean;
+        profile?: { serviceAreas?: string[] };
+        error?: string;
+      };
+
+      if (!profileResponse.ok || !profilePayload.ok) {
+        throw new Error(
+          profilePayload.error ?? "Could not load business profile.",
+        );
+      }
+
       setServiceAreas(
-        Array.isArray(areasRaw)
-          ? areasRaw
+        Array.isArray(profilePayload.profile?.serviceAreas)
+          ? profilePayload.profile!.serviceAreas!
               .filter((area): area is string => typeof area === "string")
               .map((area) => area.trim())
               .filter(Boolean)
