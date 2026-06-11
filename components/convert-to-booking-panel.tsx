@@ -169,7 +169,7 @@ export function ConvertToBookingPanel({
 }) {
   const { user } = useAuth();
   const { staff } = useBusinessStaffSummary();
-  const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("skip");
+  const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("owner");
   const [staffId, setStaffId] = useState("");
   const [slot, setSlot] = useState<InspectionSlot>({
     date: minBookingDate,
@@ -194,7 +194,7 @@ export function ConvertToBookingPanel({
       estimateMinutesFromTimeRange(initialStartTime, initialEndTime),
     );
     setNote("");
-    setAssignChoice("skip");
+    setAssignChoice("owner");
     setStaffId("");
     setError(null);
   }, [
@@ -225,8 +225,12 @@ export function ConvertToBookingPanel({
       setError("The end time must be after the start time.");
       return;
     }
+    if (assignChoice !== "owner" && assignChoice !== "staff") {
+      setError("Choose who will run this job.");
+      return;
+    }
     if (assignChoice === "staff" && !staffId) {
-      setError("Choose a team member to assign, or skip for now.");
+      setError("Choose a team member to assign.");
       return;
     }
 
@@ -252,12 +256,8 @@ export function ConvertToBookingPanel({
             endTime,
             estimatedDurationMinutes: estimatedMinutes,
             note: note.trim() || undefined,
-            ...(assignChoice !== "skip"
-              ? {
-                  assignTo: assignChoice,
-                  ...(assignChoice === "staff" ? { staffId } : {}),
-                }
-              : {}),
+            assignTo: assignChoice,
+            ...(assignChoice === "staff" ? { staffId } : {}),
           }),
         },
       );
@@ -377,7 +377,7 @@ export function ConvertToBookingPanel({
           >
             {submitting ? "progress_activity" : "assignment"}
           </span>
-          {submitting ? "Saving…" : "Save booking"}
+          {submitting ? "Creating…" : "Create job"}
         </button>
         <button
           type="button"

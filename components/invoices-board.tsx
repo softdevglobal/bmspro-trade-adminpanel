@@ -371,7 +371,7 @@ function InvoicePreviewDrawer({
               {invoice.bookingId ? (
                 <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
                   <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-                    Linked booking
+                    Linked job
                   </p>
                   <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
                     {displayBookingCode({

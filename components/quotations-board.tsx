@@ -209,7 +209,7 @@ function QuotationCardMenu({
               <span className="material-symbols-outlined text-[18px] text-primary">
                 event
               </span>
-              Schedule booking
+              Schedule job
             </button>
           ) : hasBooking ? (
             jobLocked ? (
@@ -221,7 +221,7 @@ function QuotationCardMenu({
                 <span className="material-symbols-outlined text-[18px] text-outline">
                   assignment
                 </span>
-                Schedule booking
+                Schedule job
               </span>
             ) : (
               <Link
@@ -233,7 +233,7 @@ function QuotationCardMenu({
                 <span className="material-symbols-outlined text-[18px] text-primary">
                   assignment
                 </span>
-                Schedule booking
+                Schedule job
               </Link>
             )
           ) : (
@@ -247,7 +247,7 @@ function QuotationCardMenu({
               <span className="material-symbols-outlined text-[18px] text-outline">
                 event
               </span>
-              Schedule booking
+              Schedule job
             </button>
           )}
           {hasInvoice || awaitingCustomer ? (
@@ -532,7 +532,7 @@ function QuotationPreviewContent({
         <div className="min-w-0 flex-1">
           <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
             {previewMode === "convert_booking"
-              ? "Create booking"
+              ? "Create job"
               : "Quotation preview"}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -647,7 +647,7 @@ function QuotationPreviewContent({
         {quotation.bookingId ? (
           <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-              Linked booking
+              Linked job
             </p>
             <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
               {displayBookingCode({

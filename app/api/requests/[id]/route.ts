@@ -529,9 +529,15 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    let assignedTo: InspectionAssignment | null = null;
     const assignTo =
       typeof payload.assignTo === "string" ? payload.assignTo.trim() : "";
+    if (assignTo !== "owner" && assignTo !== "staff") {
+      return NextResponse.json(
+        { ok: false, error: "Choose who will run this job." },
+        { status: 400 },
+      );
+    }
+    let assignedTo: InspectionAssignment | null = null;
     if (assignTo === "owner") {
       assignedTo = await resolveOwnerAssignment(
         auth.uid,

@@ -1672,7 +1672,7 @@ export function CreateInvoiceFromQuotation({
               Use <strong>Save draft</strong> to keep an unsent invoice. The
               invoice PDF is emailed to the client only when you click{" "}
               <strong>Save &amp; send invoice</strong> below. Use the Preview tab
-              to check the document before sending. The linked booking is marked
+              to check the document before sending. The linked job is marked
               completed when the invoice is saved.
             </p>
             <button
@@ -1838,7 +1838,7 @@ export function CreateInvoiceFromQuotation({
 
             <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
               <p className="font-body text-[11px] leading-relaxed text-on-surface-variant">
-                Issuing this invoice marks the linked booking as{" "}
+                Issuing this invoice marks the linked job as{" "}
                 <span className="font-semibold text-on-surface">completed</span>.
               </p>
             </div>
