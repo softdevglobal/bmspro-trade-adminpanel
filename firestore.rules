@@ -294,6 +294,49 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    function isCallCenterAgent() {
+      return isSignedIn() && request.auth.token.role == 'call_center';
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if isSuperAdmin()
+        || isCallCenterAgent()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSuperAdmin()
+          || isCallCenterAgent()
+          || (
+            isSignedIn()
+            && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId
+              == request.auth.uid
+          );
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /cc_direct_chats/{chatId} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && request.auth.uid in resource.data.participantIds);
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSuperAdmin()
+          || (
+            isSignedIn()
+            && request.auth.uid in get(/databases/$(database)/documents/cc_direct_chats/$(chatId)).data.participantIds
+          );
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /call_center_agents/{uid} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && request.auth.uid == uid);
+      allow create, update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();

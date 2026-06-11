@@ -30,12 +30,16 @@
  *
  * Request body:
  *   {
- *     "fullName": "Sarah Johnson",
- *     "email":    "sarah.johnson@callcenter.com",
- *     "phone":    "+61400123456",
- *     "password": "Agent@1234"
+ *     "name":       "Sri",
+ *     "email":      "sri123@email.com",
+ *     "phone":      "+61400123456",
+ *     "password":   "111111",
+ *     "extension":  "1009",
+ *     "agentType":  "command-centre",
+ *     "notes":      ""
  *   }
- *   NOTE: password must be at least 8 characters.
+ *   fullName is accepted as an alias for name.
+ *   NOTE: password must be at least 6 characters.
  *
  * Success response — 201:
  *   {
@@ -106,20 +110,26 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD_LENGTH = 8;
+/** Firebase Auth minimum; agents may use shorter test passwords. */
+const MIN_PASSWORD_LENGTH = 6;
+
+const AGENT_TYPES = new Set(["command-centre", "reception", "support"]);
 
 type CallCenterAgentInput = {
   fullName: string;
   email: string;
   phone: string;
   password: string;
+  extension: string;
+  agentType: string;
+  notes: string;
 };
 
 /**
  * Validates and normalises the raw POST body for creating a call-center agent.
  *
- * Required fields : fullName, email (valid format), password (≥ 8 chars)
- * Optional fields : phone (defaults to "")
+ * Required fields : fullName or name, email (valid format), password (≥ 6 chars)
+ * Optional fields : phone, extension, agentType, notes
  *
  * Returns { ok: true, value } on success or { ok: false, error } on failure.
  */
@@ -132,14 +142,25 @@ function parseAgentPayload(
   const data = raw as Record<string, unknown>;
 
   const fullName =
-    typeof data.fullName === "string" ? data.fullName.trim() : "";
+    (typeof data.fullName === "string" ? data.fullName.trim() : "") ||
+    (typeof data.name === "string" ? data.name.trim() : "");
   const email =
     typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
   const phone = typeof data.phone === "string" ? data.phone.trim() : "";
   const password = typeof data.password === "string" ? data.password : "";
+  const extension =
+    typeof data.extension === "string" ? data.extension.trim() : "";
+  const agentTypeRaw =
+    typeof data.agentType === "string" ? data.agentType.trim() : "";
+  const agentType = AGENT_TYPES.has(agentTypeRaw)
+    ? agentTypeRaw
+    : agentTypeRaw
+      ? agentTypeRaw
+      : "command-centre";
+  const notes = typeof data.notes === "string" ? data.notes.trim() : "";
 
   if (!fullName) {
-    return { ok: false, error: "Full name is required." };
+    return { ok: false, error: "Full name is required (use fullName or name)." };
   }
   if (!EMAIL_PATTERN.test(email)) {
     return { ok: false, error: "A valid email is required." };
@@ -151,7 +172,10 @@ function parseAgentPayload(
     };
   }
 
-  return { ok: true, value: { fullName, email, phone, password } };
+  return {
+    ok: true,
+    value: { fullName, email, phone, password, extension, agentType, notes },
+  };
 }
 
 /**
@@ -240,13 +264,17 @@ export async function POST(request: Request) {
 
     await adminAuth.setCustomUserClaims(authUid, {
       role: "call_center",
+      agentType: parsed.value.agentType,
     });
 
-    await adminDb.collection("users").doc(authUid).set({
+    const agentProfile = {
       uid: authUid,
       email: parsed.value.email,
       fullName: parsed.value.fullName,
       phone: parsed.value.phone,
+      extension: parsed.value.extension || null,
+      agentType: parsed.value.agentType,
+      notes: parsed.value.notes || null,
       role: "call_center",
       status: "active",
       isActive: true,
@@ -254,7 +282,24 @@ export async function POST(request: Request) {
       createdByEmail: auth.email ?? null,
       createdAt: now,
       updatedAt: now,
+    };
+
+    const batch = adminDb.batch();
+    batch.set(adminDb.collection("users").doc(authUid), agentProfile);
+    batch.set(adminDb.collection("call_center_agents").doc(authUid), {
+      uid: authUid,
+      email: parsed.value.email,
+      fullName: parsed.value.fullName,
+      phone: parsed.value.phone,
+      extension: parsed.value.extension || null,
+      agentType: parsed.value.agentType,
+      notes: parsed.value.notes || null,
+      isOnline: false,
+      activeChatCount: 0,
+      createdAt: now,
+      updatedAt: now,
     });
+    await batch.commit();
 
     return NextResponse.json({ ok: true, agentId: authUid }, { status: 201 });
   } catch (error) {
@@ -306,6 +351,9 @@ export async function GET(request: Request) {
       fullName: typeof data.fullName === "string" ? data.fullName : "",
       email: typeof data.email === "string" ? data.email : "",
       phone: typeof data.phone === "string" ? data.phone : "",
+      extension: typeof data.extension === "string" ? data.extension : "",
+      agentType: typeof data.agentType === "string" ? data.agentType : "",
+      notes: typeof data.notes === "string" ? data.notes : "",
       status: typeof data.status === "string" ? data.status : "active",
       isActive: data.isActive !== false,
     };

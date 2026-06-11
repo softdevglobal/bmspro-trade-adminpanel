@@ -1,5 +1,6 @@
 "use client";
 
+import { SupportChatWidget } from "@/components/support-chat-widget";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -33,5 +34,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <SupportChatWidget />
+    </>
+  );
 }
