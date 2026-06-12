@@ -399,6 +399,7 @@ export async function updateBusinessProfile(
     registeredForGst?: boolean;
     gstPercentage?: number | null;
     termsAndConditions?: string | null;
+    serviceAreas?: string[];
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -442,6 +443,10 @@ export async function updateBusinessProfile(
 
   if ("termsAndConditions" in updates) {
     payload.termsAndConditions = updates.termsAndConditions;
+  }
+
+  if ("serviceAreas" in updates) {
+    payload.serviceAreas = updates.serviceAreas;
   }
 
   await adminDb.collection("businesses").doc(businessId).update(payload);

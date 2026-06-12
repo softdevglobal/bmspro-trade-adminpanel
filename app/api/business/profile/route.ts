@@ -11,6 +11,10 @@ import {
   updateBusinessProfile,
 } from "@/lib/onboarding/server";
 import {
+  MIN_SERVICE_AREAS,
+  normaliseServiceAreas,
+} from "@/lib/onboarding/types";
+import {
   findStaffOwnerPhoneConflict,
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
@@ -81,6 +85,7 @@ export async function PATCH(request: Request) {
     registeredForGst?: boolean;
     gstPercentage?: number | null;
     termsAndConditions?: string | null;
+    serviceAreas?: string[];
   } = {};
 
   if ("businessName" in raw) {
@@ -218,6 +223,25 @@ export async function PATCH(request: Request) {
       }
       updates.termsAndConditions = trimmed || null;
     }
+  }
+
+  if ("serviceAreas" in raw) {
+    if (!Array.isArray(raw.serviceAreas)) {
+      return NextResponse.json(
+        { ok: false, error: "Service areas must be a list." },
+        { status: 400 },
+      );
+    }
+    const normalized = normaliseServiceAreas(
+      raw.serviceAreas.filter((item): item is string => typeof item === "string"),
+    );
+    if (normalized.length < MIN_SERVICE_AREAS) {
+      return NextResponse.json(
+        { ok: false, error: "Add at least one service area you cover." },
+        { status: 400 },
+      );
+    }
+    updates.serviceAreas = normalized;
   }
 
   const current = await getBusinessProfile(auth.businessId);
