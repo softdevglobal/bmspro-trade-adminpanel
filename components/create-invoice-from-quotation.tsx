@@ -22,6 +22,7 @@ import {
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { platformTodayIso } from "@/lib/platform/timezone";
 import {
   buildQuotationDocumentDeposit,
   computeDocumentTotals,
@@ -156,8 +157,7 @@ function formatAud(value: number): string {
 }
 
 function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return platformTodayIso();
 }
 
 function addDaysIso(iso: string, days: number): string {

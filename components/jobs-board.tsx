@@ -14,6 +14,7 @@ import {
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
 } from "@/lib/inspection/types";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import {
@@ -44,7 +45,7 @@ function formatEstimatedMinutes(minutes: number | null): string | null {
 
 function formatWhen(timestamp: number | null): string {
   if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     year: "numeric",

@@ -12,6 +12,7 @@ import {
 } from "@/lib/dashboard/stats";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useBusinessNotifications } from "@/lib/notifications/business-notifications-context";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -113,7 +114,7 @@ function greetingForHour(hour: number): string {
 
 function formatActivityTime(timestamp: number): string {
   if (!timestamp) return "";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -122,7 +123,7 @@ function formatActivityTime(timestamp: number): string {
 }
 
 function formatTodayLabel(): string {
-  return new Date().toLocaleDateString(undefined, {
+  return formatInPlatformTimeZone(new Date(), {
     weekday: "long",
     month: "long",
     day: "numeric",

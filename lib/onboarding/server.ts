@@ -17,6 +17,7 @@ import {
   findStaffOwnerPhoneConflict,
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 /**
@@ -370,7 +371,10 @@ export async function getBusinessProfile(
     businessType:
       typeof data.businessType === "string" ? data.businessType : null,
     state: typeof data.state === "string" ? data.state : null,
-    timezone: typeof data.timezone === "string" ? data.timezone : null,
+    timezone:
+      typeof data.timezone === "string" && data.timezone.trim()
+        ? data.timezone
+        : PLATFORM_TIME_ZONE,
     plan,
     termsAndConditions:
       typeof data.termsAndConditions === "string" &&

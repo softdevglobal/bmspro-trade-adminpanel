@@ -1,6 +1,7 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import type { TenantDetail } from "@/lib/onboarding/tenant-display";
 import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
 
@@ -46,7 +47,7 @@ function mapTenantDoc(doc: QueryDocumentSnapshot): TenantDetail {
     businessAddress: data.businessAddress ?? null,
     state: data.state ?? "",
     postcode: data.postcode ?? "",
-    timezone: data.timezone ?? null,
+    timezone: typeof data.timezone === "string" ? data.timezone : PLATFORM_TIME_ZONE,
     mainSuburb: data.mainSuburb ?? "",
     serviceAreas: Array.isArray(data.serviceAreas)
       ? (data.serviceAreas as unknown[])

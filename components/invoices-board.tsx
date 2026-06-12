@@ -4,6 +4,7 @@ import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal
 import { useAuth } from "@/lib/auth/auth-context";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import { formatAddress } from "@/lib/inspection/types";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
@@ -21,7 +22,7 @@ function formatAud(value: number | null): string {
 
 function formatWhen(timestamp: number | null): string {
   if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     year: "numeric",

@@ -34,6 +34,7 @@ import {
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { platformTodayIso } from "@/lib/platform/timezone";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -120,8 +121,7 @@ const EMPTY_ADDRESS: InspectionAddress = {
 };
 
 function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return platformTodayIso();
 }
 
 function addDaysIso(iso: string, days: number): string {

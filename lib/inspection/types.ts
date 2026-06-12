@@ -7,6 +7,10 @@
 
 import type { BookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
+import {
+  formatIsoDateInPlatformTimeZone,
+  platformTodayIso,
+} from "@/lib/platform/timezone";
 import { legacyInspectionReferenceFromId } from "@/lib/reference-codes";
 
 export const REQUESTS_COLLECTION = "requests";
@@ -308,9 +312,7 @@ export function isIsoDate(value: string): boolean {
 
 export function isFutureOrTodayDate(value: string): boolean {
   if (!isIsoDate(value)) return false;
-  const today = new Date();
-  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  return value >= todayIso;
+  return value >= platformTodayIso();
 }
 
 export function isTimeRange(value: unknown): value is InspectionTimeRange {
@@ -495,8 +497,7 @@ export function formatBudgetAud(amount: number | null | undefined): string | nul
 
 export function formatSlotDate(date: string): string {
   if (!isIsoDate(date)) return date;
-  const parsed = new Date(`${date}T12:00:00`);
-  return parsed.toLocaleDateString(undefined, {
+  return formatIsoDateInPlatformTimeZone(date, {
     weekday: "short",
     month: "short",
     day: "numeric",
