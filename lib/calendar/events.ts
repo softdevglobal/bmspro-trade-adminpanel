@@ -12,7 +12,12 @@ import {
 
 export type CalendarSource = "requests" | "jobs";
 
-export type DotColor = "primary" | "error" | "amber-500" | "green-500";
+export type DotColor =
+  | "primary"
+  | "error"
+  | "amber-500"
+  | "green-500"
+  | "sky-500";
 
 export type CalendarEvent = {
   key: string;
@@ -50,6 +55,7 @@ export const DOT_CLASS: Record<DotColor, string> = {
   error: "bg-error",
   "amber-500": "bg-amber-500",
   "green-500": "bg-green-500",
+  "sky-500": "bg-sky-500",
 };
 
 export function toIsoDateLocal(date: Date): string {
@@ -72,8 +78,14 @@ export function requestTitle(request: InspectionRequestDetail): string {
     : request.customRequest?.title ?? "Custom quotation request";
 }
 
-/** Calendar dot colour by entry type (not request status). */
-export function dotColorForCalendarSource(source: CalendarSource): DotColor {
+/** Jobs = blue; completed jobs = sky; requests = green. */
+export function dotColorForCalendarSource(
+  source: CalendarSource,
+  bookingStatus?: BookingDetail["status"],
+): DotColor {
+  if (source === "jobs" && bookingStatus === "completed") {
+    return "sky-500";
+  }
   return source === "jobs" ? "primary" : "green-500";
 }
 
@@ -93,7 +105,11 @@ export function datesForRequestOnCalendar(
 }
 
 export function datesForBookingOnCalendar(booking: BookingDetail): string[] {
-  if (booking.status !== "scheduled" && booking.status !== "ongoing") {
+  if (
+    booking.status !== "scheduled" &&
+    booking.status !== "ongoing" &&
+    booking.status !== "completed"
+  ) {
     return [];
   }
   return booking.scheduledSlot?.date ? [booking.scheduledSlot.date] : [];
@@ -359,7 +375,7 @@ export function buildBookingCalendarEvents(
     const dates = datesForBookingOnCalendar(booking);
     if (dates.length === 0) continue;
 
-    const dotColor = dotColorForCalendarSource(source);
+    const dotColor = dotColorForCalendarSource(source, booking.status);
 
     for (const date of dates) {
       events.push({
