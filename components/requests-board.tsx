@@ -141,6 +141,7 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
 function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
   return (
     !!request.quotation &&
+    request.quotation.status !== "cancelled" &&
     !request.bookingId &&
     (request.status === "scheduled" ||
       request.status === "completed" ||
@@ -435,7 +436,7 @@ function RequestCard({
   );
   const cardQuotationAwaitingCustomer = Boolean(
     request.quotation &&
-      request.quotation.status !== "draft" &&
+      request.quotation.status === "sent" &&
       !request.bookingId &&
       request.quotation.customerDecision !== "accepted",
   );
@@ -758,7 +759,7 @@ function DrawerReviewFooter({
   const followUp = canFollowUpAfterQuotation(request);
   const quotationAwaitingCustomer = Boolean(
     request.quotation &&
-      request.quotation.status !== "draft" &&
+      request.quotation.status === "sent" &&
       !request.bookingId &&
       request.quotation.customerDecision !== "accepted",
   );
@@ -834,9 +835,7 @@ function DrawerReviewFooter({
                   <QuotationOwnerDecisionButtons
                     className="mt-2.5"
                     quotationId={request.quotation.id}
-                    status={
-                      request.quotation.status === "draft" ? "draft" : "sent"
-                    }
+                    status="sent"
                     bookingId={request.bookingId}
                     customerDecision={request.quotation.customerDecision}
                     onDecided={onQuotationDecided}
@@ -1086,6 +1085,13 @@ function DetailDrawerContent({
 
   useEffect(() => {
     if (!initialMode || initialMode === "review") return;
+    if (
+      initialMode === "convert_booking" &&
+      !canFollowUpAfterQuotation(request)
+    ) {
+      onInitialModeConsumed();
+      return;
+    }
     setMode(initialMode);
     onInitialModeConsumed();
   }, [initialMode, onInitialModeConsumed]);
@@ -1223,6 +1229,14 @@ function DetailDrawerContent({
 
   function openAction(nextMode: Exclude<DrawerMode, "review">) {
     setActionError(null);
+    if (
+      nextMode === "convert_booking" &&
+      !canFollowUpAfterQuotation(request)
+    ) {
+      setActionError("Cancelled quotations cannot be converted into jobs.");
+      setMode("review");
+      return;
+    }
     if (nextMode === "set_time") {
       if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
       if (request.scheduledEndTime) setAcceptEndTime(request.scheduledEndTime);
@@ -1593,7 +1607,7 @@ function DetailDrawerContent({
 type QuotationView = {
   id: string;
   quotationCode: string | null;
-  status: "draft" | "sent";
+  status: "draft" | "sent" | "cancelled";
   customerDecision: "accepted" | "rejected" | null;
   bookingId: string | null;
   bookingCode: string | null;

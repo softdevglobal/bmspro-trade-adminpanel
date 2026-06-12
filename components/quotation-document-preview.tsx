@@ -27,6 +27,10 @@ export function QuotationDocumentPreview({
   const docLabel = isInvoice ? "Invoice" : "Quote";
   const numberLabel = isInvoice ? "Invoice No" : "Quote No";
   const dateLabel = isInvoice ? "Due date" : "Valid until";
+  const depositBalanceDueAud =
+    document.deposit && isInvoice && !document.deposit.paid
+      ? document.totalAud
+      : (document.deposit?.balanceDueAud ?? 0);
 
   return (
     <div
@@ -309,7 +313,11 @@ export function QuotationDocumentPreview({
               <div className="space-y-0.5 border-t border-[#c5d0e0] px-4 py-3 text-[12px]">
                 <div className="flex justify-between gap-4 text-[#6b7280]">
                   <span>
-                    {document.deposit.paid ? "Deposit paid" : "Deposit due"}
+                    {document.deposit.paid
+                      ? "Deposit paid"
+                      : isInvoice
+                        ? "Deposit not paid"
+                        : "Deposit due"}
                   </span>
                   <span
                     className={`font-numeric font-medium ${
@@ -330,7 +338,7 @@ export function QuotationDocumentPreview({
                   Balance due
                 </span>
                 <span className="font-numeric text-[15px] font-bold text-white">
-                  {formatQuoteMoney(document.deposit.balanceDueAud)}
+                  {formatQuoteMoney(depositBalanceDueAud)}
                 </span>
               </div>
             </>
