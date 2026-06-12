@@ -403,15 +403,17 @@ function RequestCard({
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
 }) {
-  const title =
+  const serviceTitle =
     request.requestType === "existing_service"
       ? request.serviceName ?? "Existing service"
       : request.customRequest?.title ?? "Custom quotation request";
 
-  const subtitle =
+  const serviceSubtitle =
     request.requestType === "existing_service"
       ? request.serviceBusinessType ?? "Service request"
       : "Custom quotation request";
+
+  const customerName = request.customer.fullName?.trim() || "Customer";
 
   const created = request.createdAt
     ? new Date(request.createdAt).toLocaleString(undefined, {
@@ -467,12 +469,12 @@ function RequestCard({
                   ? "format_list_bulleted"
                   : "request_quote"}
               </span>
-              {subtitle}
+              {serviceSubtitle}
             </span>
             <CreatedSourcePill source={request.createdSource} />
           </div>
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
-            {title}
+            {customerName}
           </h4>
           <p className="mt-1">
             <InspectionRequestCode
@@ -481,7 +483,10 @@ function RequestCard({
             />
           </p>
           <p className="mt-0.5 truncate font-body text-[13px] text-on-surface-variant">
-            {request.customer.fullName} · {request.customer.phone}
+            Service: {serviceTitle}
+          </p>
+          <p className="truncate font-body text-[13px] text-on-surface-variant">
+            {request.customer.phone}
           </p>
           <p className="truncate font-body text-[12px] text-on-surface-variant">
             {formatAddress(request.address)}
