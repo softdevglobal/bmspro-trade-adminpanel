@@ -14,6 +14,7 @@ import {
   CustomerAccountNav,
   CustomerGuestNav,
 } from "@/components/customer-account-nav";
+import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
 import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import {
@@ -82,6 +83,8 @@ export function BookingEngine({ business, services }: Props) {
         bookingSlug={business.slug}
         logoUrl={business.logoUrl}
       />
+
+      <CustomerNotificationBanner bookingSlug={business.slug} />
 
       {/* Hero split — same card footprint as account panel */}
       <motion.section

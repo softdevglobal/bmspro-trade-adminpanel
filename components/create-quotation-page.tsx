@@ -25,6 +25,7 @@ import {
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
 import {
+  formatAddress,
   type InspectionAddress,
   type InspectionRequestDetail,
   type InspectionRequestType,
@@ -312,6 +313,7 @@ export function CreateQuotationPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [clientOpen, setClientOpen] = useState(false);
+  const [serviceEditing, setServiceEditing] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customer, setCustomer] = useState({
@@ -398,13 +400,8 @@ export function CreateQuotationPage() {
       phone: boundInspection.customer.phone ?? "",
     });
     setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
-    const noteParts = [
-      boundInspection.customerNotes?.trim(),
-      boundInspection.ownerNote?.trim(),
-    ].filter(Boolean);
-    if (noteParts.length > 0) {
-      setComment(noteParts.join("\n\n"));
-    }
+    setClientOpen(false);
+    setServiceEditing(false);
     if (
       boundInspection.requestType === "existing_service" &&
       boundInspection.serviceId
@@ -421,25 +418,6 @@ export function CreateQuotationPage() {
       setCustomServiceDescription(
         boundInspection.customRequest?.description ?? "",
       );
-    }
-    if (boundInspection.budgetAud != null && boundInspection.budgetAud > 0) {
-      const rate = boundInspection.budgetAud;
-      setLineItems([
-        {
-          id: crypto.randomUUID(),
-          code: "",
-          name:
-            boundInspection.serviceName ??
-            boundInspection.customRequest?.title ??
-            "Quoted work",
-          description: "",
-          quantity: 1,
-          rate,
-          discountPercent: 0,
-          applyGst: false,
-          amountAud: rate,
-        },
-      ]);
     }
   }, [boundInspection]);
 
@@ -1225,7 +1203,44 @@ export function CreateQuotationPage() {
           {tab === "create" ? (
             <div className="mx-auto max-w-2xl space-y-3">
               {/* Client */}
-              {!clientOpen ? (
+              {boundInspection && !clientOpen ? (
+                <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                        Client
+                      </h2>
+                      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                        From the visit — saved with the quotation when you
+                        draft or send.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setClientOpen(true)}
+                      className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-1 font-body text-[14px] text-on-surface">
+                    <p className="font-semibold">
+                      {customer.fullName.trim() || "—"}
+                    </p>
+                    {customer.phone ? (
+                      <p className="text-on-surface-variant">{customer.phone}</p>
+                    ) : null}
+                    {customer.email ? (
+                      <p className="text-on-surface-variant">{customer.email}</p>
+                    ) : null}
+                    {formatAddress(address) ? (
+                      <p className="pt-1 text-[13px] text-on-surface-variant">
+                        {formatAddress(address)}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+              ) : !clientOpen ? (
                 <SectionLink
                   icon="person"
                   label="Add a client"
@@ -1390,6 +1405,64 @@ export function CreateQuotationPage() {
               )}
 
               {/* Service */}
+              {boundInspection &&
+              !serviceEditing &&
+              ((requestType === "existing_service" && selectedService) ||
+                (requestType === "custom_quote" &&
+                  customServiceTitle.trim().length > 0)) ? (
+                <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                      Service
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setServiceEditing(true)}
+                      className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
+                    >
+                      Change
+                    </button>
+                  </div>
+                  {requestType === "existing_service" && selectedService ? (
+                    <div className="mt-3 flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
+                        {selectedService.imageUrl ? (
+                          <img
+                            src={selectedService.imageUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
+                              {iconForBusinessType(selectedService.businessType)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-body text-[14px] font-semibold text-on-surface">
+                          {selectedService.name}
+                        </p>
+                        <p className="font-body text-[12px] text-on-surface-variant">
+                          {selectedService.businessType}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                      <p className="font-body text-[14px] font-semibold text-on-surface">
+                        {customServiceTitle.trim()}
+                      </p>
+                      {customServiceDescription.trim() ? (
+                        <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                          {customServiceDescription.trim()}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </section>
+              ) : (
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
                   Service
@@ -1531,6 +1604,7 @@ export function CreateQuotationPage() {
                   </div>
                 )}
               </section>
+              )}
 
               {/* Items */}
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">

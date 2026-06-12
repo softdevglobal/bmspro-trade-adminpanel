@@ -286,18 +286,12 @@ export async function applyOwnerAction(
     updates.scheduledEndTime = null;
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "complete") {
-    if (current.status !== "scheduled") {
-      return {
-        ok: false,
-        status: 400,
-        error: "Only scheduled visits can be marked done.",
-      };
-    }
-    updates.status = "completed" satisfies InspectionRequestStatus;
-    if (!current.visitEndedAt) {
-      updates.visitEndedAt = FieldValue.serverTimestamp();
-    }
-    if (typeof action.note === "string") updates.ownerNote = action.note;
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "Save a quotation to finish this visit. The request stays scheduled until the quotation is created.",
+    };
   } else if (action.type === "convert_to_booking") {
     const created = await createBookingFromInspection({
       inspectionRequestId: id,
@@ -355,12 +349,16 @@ export async function applyOwnerAction(
     });
     return { ok: true, request: created.request };
   } else if (action.type === "mark_awaiting_decision") {
-    if (current.status !== "completed") {
+    if (
+      current.status !== "completed" &&
+      current.status !== "scheduled" &&
+      current.status !== "awaiting_decision"
+    ) {
       return {
         ok: false,
         status: 400,
         error:
-          "Only completed visits with a quotation can be marked awaiting decision.",
+          "Only visits with a quotation can be marked awaiting decision.",
       };
     }
     if (!current.quotation) {

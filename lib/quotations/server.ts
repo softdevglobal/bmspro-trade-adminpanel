@@ -15,7 +15,6 @@ export type {
   QuotationLineItem,
 } from "@/lib/quotations/types";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
-import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import {
   REQUESTS_COLLECTION,
   type InspectionAddress,
@@ -640,14 +639,10 @@ export async function createQuotationForInspection(
 
   const shouldSend = input.send === true;
 
-  // Mirror quotation summary onto the linked request and mark the visit
-  // completed once a quotation exists (not when the owner opens the form).
+  // Mirror quotation onto the linked request. The visit request stays
+  // scheduled for drafts; sending moves it to awaiting_decision — never
+  // auto-completes the request when the owner only opens the quote form.
   try {
-    const currentStatus =
-      typeof requestData.status === "string" ? requestData.status : "";
-    const shouldCompleteVisit =
-      currentStatus === "scheduled" || currentStatus === "owner_proposed";
-
     await requestSnap.ref.set(
       {
         quotation: {
@@ -660,13 +655,10 @@ export async function createQuotationForInspection(
           status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...(shouldSend ? awaitingBookingFields() : {}),
-        ...(shouldCompleteVisit
+        ...(shouldSend
           ? {
-              status: "completed" satisfies InspectionRequestStatus,
-              ...(requestData.visitEndedAt
-                ? {}
-                : { visitEndedAt: FieldValue.serverTimestamp() }),
+              status: "awaiting_decision" satisfies InspectionRequestStatus,
+              ...awaitingBookingFields(),
             }
           : {}),
         updatedAt: FieldValue.serverTimestamp(),
@@ -684,19 +676,6 @@ export async function createQuotationForInspection(
         { merge: true },
       );
       quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
-    }
-
-    if (shouldCompleteVisit) {
-      const after = await requestSnap.ref.get();
-      const updatedRequest = mapInspectionDoc(
-        inspectionId,
-        after.data() ?? {},
-      );
-      await notifyCustomerOfStatusChange(
-        updatedRequest,
-        "completed",
-        businessBranding,
-      );
     }
   } catch (error) {
     console.error("quotation mirror to request failed:", error);
@@ -717,6 +696,23 @@ export async function createQuotationForInspection(
 
   if (shouldSend) {
     await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    try {
+      const updatedSnap = await requestSnap.ref.get();
+      const updatedRequest = mapInspectionDoc(
+        inspectionId,
+        updatedSnap.data() ?? {},
+      );
+      const { notifyCustomerOfQuotationSent } = await import(
+        "@/lib/notifications/server"
+      );
+      await notifyCustomerOfQuotationSent(updatedRequest, {
+        businessName: businessBranding.businessName,
+        bookingSlug: businessBranding.bookingSlug,
+        logoUrl: businessBranding.logoUrl,
+      });
+    } catch (error) {
+      console.error("quotation sent notification failed:", error);
+    }
   }
 
   return { ok: true, quotation };

@@ -1,3 +1,7 @@
+import {
+  logInvoiceCreated,
+  logInvoiceSent,
+} from "@/lib/audit/action-logs";
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   createDirectInvoice,
@@ -38,6 +42,9 @@ async function requireInvoiceAuthor(request: Request) {
     return {
       ok: true as const,
       uid: decoded.uid,
+      email: decoded.email ?? null,
+      name: typeof decoded.name === "string" ? decoded.name : null,
+      role: typeof role === "string" ? role : null,
       businessId,
     };
   } catch {
@@ -203,6 +210,20 @@ export async function POST(request: Request) {
       { ok: false, error: result.error },
       { status: result.status },
     );
+  }
+
+  const invoiceOrigin = direct ? "direct" : "from_quotation";
+  const invoiceSummary = {
+    id: result.invoice.id,
+    invoiceCode: result.invoice.invoiceCode,
+    finalPriceAud: result.invoice.finalPriceAud,
+    customer: result.invoice.customer,
+    quotationCode: result.invoice.quotationCode,
+  };
+
+  await logInvoiceCreated(auth, invoiceSummary, invoiceOrigin);
+  if (sharedInput.send) {
+    await logInvoiceSent(auth, invoiceSummary, invoiceOrigin);
   }
 
   return NextResponse.json({ ok: true, invoice: result.invoice }, { status: 201 });

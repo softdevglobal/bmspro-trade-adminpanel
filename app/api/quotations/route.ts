@@ -1,5 +1,7 @@
-import { logAuditEvent } from "@/lib/audit/server";
-import { actorRoleFromClaim } from "@/lib/audit/types";
+import {
+  logQuotationCreated,
+  logQuotationSent,
+} from "@/lib/audit/action-logs";
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
@@ -63,41 +65,6 @@ type QuotationAuthor = {
   role: string | null;
   businessId: string;
 };
-
-type QuotationSummary = {
-  id: string;
-  quotationCode: string | null;
-  finalPriceAud: number;
-  customer: { fullName: string };
-};
-
-/** Records a "quotation.created" audit event (best-effort). */
-async function logQuotationCreated(
-  auth: QuotationAuthor,
-  quotation: QuotationSummary,
-  origin: "standalone" | "from_inspection",
-) {
-  await logAuditEvent({
-    businessId: auth.businessId,
-    category: "quotation",
-    action: "quotation.created",
-    actor: {
-      uid: auth.uid,
-      role: actorRoleFromClaim(auth.role),
-      name: auth.name,
-      email: auth.email,
-    },
-    source: "admin_panel",
-    summary: `Quotation ${quotation.quotationCode ?? quotation.id} created for ${quotation.customer.fullName || "a customer"}`,
-    targetId: quotation.id,
-    targetLabel: quotation.customer.fullName || null,
-    metadata: {
-      quotationCode: quotation.quotationCode ?? null,
-      finalPriceAud: quotation.finalPriceAud,
-      origin,
-    },
-  });
-}
 
 export async function POST(request: Request) {
   const auth = await requireQuotationAuthor(request);
@@ -212,6 +179,9 @@ export async function POST(request: Request) {
       );
     }
     await logQuotationCreated(auth, result.quotation, "standalone");
+    if (send) {
+      await logQuotationSent(auth, result.quotation, "standalone");
+    }
     return NextResponse.json(
       { ok: true, quotation: result.quotation },
       { status: 201 },
@@ -325,6 +295,9 @@ export async function POST(request: Request) {
   }
 
   await logQuotationCreated(auth, result.quotation, "from_inspection");
+  if (send) {
+    await logQuotationSent(auth, result.quotation, "from_inspection");
+  }
 
   return NextResponse.json({ ok: true, quotation: result.quotation });
 }

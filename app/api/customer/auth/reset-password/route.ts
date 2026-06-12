@@ -1,3 +1,7 @@
+import {
+  logPasswordChanged,
+  resolveAuditIdentityForUid,
+} from "@/lib/audit/action-logs";
 import { CUSTOMER_COLLECTION } from "@/lib/customer/types";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
@@ -102,6 +106,21 @@ export async function POST(req: NextRequest) {
 
     await adminAuth.updateUser(uid, { password: newPassword });
     await docRef.update({ used: true });
+
+    const identity = await resolveAuditIdentityForUid(uid);
+    const customerData = customerSnap.data() ?? {};
+    await logPasswordChanged({
+      uid,
+      email: trimmedEmail,
+      name: identity.name,
+      role: "customer",
+      businessId:
+        typeof customerData.registeredBusinessId === "string"
+          ? customerData.registeredBusinessId
+          : identity.businessId,
+      source: "customer_portal",
+      method: "reset_code",
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

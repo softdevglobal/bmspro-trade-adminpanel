@@ -141,7 +141,9 @@ function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
   return (
     !!request.quotation &&
     !request.bookingId &&
-    (request.status === "completed" || request.status === "awaiting_decision")
+    (request.status === "scheduled" ||
+      request.status === "completed" ||
+      request.status === "awaiting_decision")
   );
 }
 
@@ -878,7 +880,7 @@ function DrawerReviewFooter({
           <span className="material-symbols-outlined text-[18px]">
             request_quote
           </span>
-          Create quotation
+          Visit complete and create quotation
         </Link>
       ) : null}
       {request.status === "scheduled" ? (
@@ -900,8 +902,8 @@ function DrawerReviewFooter({
                   disabled={submitting}
                 />
                 <DrawerFooterAction
-                  icon="request_quote"
-                  label="Mark done & quote"
+                  icon="task_alt"
+                  label="Visit complete and create quotation"
                   onClick={onComplete}
                   disabled={submitting}
                 />
