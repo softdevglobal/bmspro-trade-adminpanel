@@ -210,7 +210,7 @@ export type InspectionInvoiceSummary = {
   pdfUrl: string | null;
   finalPriceAud: number | null;
   balanceDueAud: number | null;
-  status: "draft" | "sent" | null;
+  status: "draft" | "sent" | "paid" | null;
   invoiceDate: string | null;
   dueDate: string | null;
 };
@@ -239,7 +239,13 @@ export function parseInspectionInvoice(
     finalPriceAud: readPrice(item.finalPriceAud),
     balanceDueAud: readPrice(item.balanceDueAud),
     status:
-      statusRaw === "sent" ? "sent" : statusRaw === "draft" ? "draft" : null,
+      statusRaw === "paid"
+        ? "paid"
+        : statusRaw === "sent"
+          ? "sent"
+          : statusRaw === "draft"
+            ? "draft"
+            : null,
     invoiceDate:
       typeof item.invoiceDate === "string" && item.invoiceDate.trim()
         ? item.invoiceDate.trim()

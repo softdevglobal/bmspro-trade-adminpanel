@@ -25,7 +25,11 @@ export async function enrichQuotationsWithInvoices(
     if (!invoice) return quotation;
 
     const invoiceStatus: InvoiceStatus =
-      invoice.status === "sent" ? "sent" : "draft";
+      invoice.status === "paid"
+        ? "paid"
+        : invoice.status === "sent"
+          ? "sent"
+          : "draft";
 
     return {
       ...quotation,
