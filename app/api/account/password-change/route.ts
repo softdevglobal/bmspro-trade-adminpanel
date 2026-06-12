@@ -1,3 +1,7 @@
+import {
+  logPasswordChanged,
+  resolveAuditIdentityForUid,
+} from "@/lib/audit/action-logs";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
@@ -91,6 +95,17 @@ export async function PATCH(request: Request) {
     mustChangePassword: false,
     passwordChangedAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const identity = await resolveAuditIdentityForUid(auth.uid);
+  await logPasswordChanged({
+    uid: auth.uid,
+    email: identity.email,
+    name: identity.name,
+    role: "staff",
+    businessId: auth.businessId,
+    source: "admin_panel",
+    method: "first_login",
   });
 
   return NextResponse.json({ ok: true, mustChangePassword: false });
