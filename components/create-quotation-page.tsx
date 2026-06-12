@@ -26,6 +26,7 @@ import {
 } from "@/lib/quotations/document";
 import {
   formatAddress,
+  STATUS_LABELS,
   type InspectionAddress,
   type InspectionRequestDetail,
   type InspectionRequestType,
@@ -239,6 +240,38 @@ function buildCustomerOptions(
   );
 }
 
+function requestServiceTitle(request: InspectionRequestDetail): string {
+  if (request.requestType === "existing_service") {
+    return request.serviceName ?? "Existing service";
+  }
+  return request.customRequest?.title ?? "Custom quotation request";
+}
+
+function requestHasActiveQuotation(request: InspectionRequestDetail): boolean {
+  if (!request.quotation) return false;
+  return request.quotation.status !== "cancelled";
+}
+
+function requestMatchesQuery(
+  request: InspectionRequestDetail,
+  query: string,
+): boolean {
+  if (!query) return true;
+  const haystack = [
+    request.requestCode,
+    request.id,
+    request.customer.fullName,
+    request.customer.email,
+    request.customer.phone,
+    requestServiceTitle(request),
+    formatAddress(request.address),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
 function savedLineItemFromQuotation(
   item: QuotationDetail["lineItems"][number],
   index: number,
@@ -349,6 +382,8 @@ export function CreateQuotationPage() {
   const [serviceEditing, setServiceEditing] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [requestPickerOpen, setRequestPickerOpen] = useState(false);
+  const [requestSearch, setRequestSearch] = useState("");
   const [customer, setCustomer] = useState({
     fullName: "",
     email: "",
@@ -417,6 +452,12 @@ export function CreateQuotationPage() {
     if (quotationId) {
       frames.push(requestAnimationFrame(() => setDraftQuotationId(quotationId)));
     }
+    if (
+      params.get("fromRequests") === "1" ||
+      params.get("selectRequest") === "1"
+    ) {
+      frames.push(requestAnimationFrame(() => setRequestPickerOpen(true)));
+    }
     const id =
       params.get("requestId")?.trim() ||
       params.get("inspectionRequestId")?.trim();
@@ -438,38 +479,67 @@ export function CreateQuotationPage() {
 
   const inspectionPrefilledRef = useRef(false);
   const draftPrefilledRef = useRef(false);
+
+  const availableRequests = useMemo(
+    () =>
+      requests
+        .filter((request) => {
+          if (request.status === "cancelled") return false;
+          if (request.bookingId) return false;
+          if (requestHasActiveQuotation(request)) return false;
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0),
+        ),
+    [requests],
+  );
+
+  const filteredRequests = useMemo(() => {
+    const query = requestSearch.trim().toLowerCase();
+    return availableRequests
+      .filter((request) => requestMatchesQuery(request, query))
+      .slice(0, 12);
+  }, [availableRequests, requestSearch]);
+
+  const applyInspectionRequest = useCallback((request: InspectionRequestDetail) => {
+    inspectionPrefilledRef.current = true;
+    setInspectionRequestId(request.id);
+    setCustomer({
+      fullName: request.customer.fullName ?? "",
+      email: request.customer.email ?? "",
+      phone: request.customer.phone ?? "",
+    });
+    setAddress({ ...EMPTY_ADDRESS, ...request.address });
+    setCustomerSearch(request.customer.fullName ?? "");
+    setClientOpen(false);
+    setServiceEditing(false);
+    if (request.requestType === "existing_service" && request.serviceId) {
+      setRequestType("existing_service");
+      setSelectedServiceId(request.serviceId);
+      setCustomServiceTitle("");
+      setCustomServiceDescription("");
+    } else {
+      setRequestType("custom_quote");
+      setSelectedServiceId(null);
+      setCustomServiceTitle(
+        request.customRequest?.title ?? request.serviceName ?? "",
+      );
+      setCustomServiceDescription(request.customRequest?.description ?? "");
+    }
+    setRequestPickerOpen(false);
+    setRequestSearch("");
+    setError(null);
+  }, []);
+
   useEffect(() => {
     if (inspectionPrefilledRef.current || !boundInspection) return;
-    inspectionPrefilledRef.current = true;
     const frame = requestAnimationFrame(() => {
-      setCustomer({
-        fullName: boundInspection.customer.fullName ?? "",
-        email: boundInspection.customer.email ?? "",
-        phone: boundInspection.customer.phone ?? "",
-      });
-      setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
-      setClientOpen(false);
-      setServiceEditing(false);
-      if (
-        boundInspection.requestType === "existing_service" &&
-        boundInspection.serviceId
-      ) {
-        setRequestType("existing_service");
-        setSelectedServiceId(boundInspection.serviceId);
-      } else {
-        setRequestType("custom_quote");
-        setCustomServiceTitle(
-          boundInspection.customRequest?.title ??
-            boundInspection.serviceName ??
-            "",
-        );
-        setCustomServiceDescription(
-          boundInspection.customRequest?.description ?? "",
-        );
-      }
+      applyInspectionRequest(boundInspection);
     });
     return () => cancelAnimationFrame(frame);
-  }, [boundInspection]);
+  }, [applyInspectionRequest, boundInspection]);
 
   useEffect(() => {
     if (!user || !draftQuotationId || draftPrefilledRef.current) return;
@@ -1341,17 +1411,26 @@ export function CreateQuotationPage() {
       </header>
 
       {boundInspection ? (
-        <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 font-body text-[13px] text-on-surface sm:mx-6">
-          <span className="material-symbols-outlined mt-0.5 text-[18px] text-primary">
-            assignment_turned_in
-          </span>
-          <span>
-            This quotation will be attached to request{" "}
-            <span className="font-semibold">
-              {boundInspection.requestCode ?? boundInspection.id}
+        <div className="mx-4 mt-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 font-body text-[13px] text-on-surface sm:mx-6">
+          <div className="flex min-w-0 items-start gap-2">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px] text-primary">
+              assignment_turned_in
             </span>
-            . The customer details are pre-filled from the visit.
-          </span>
+            <span>
+              This quotation will be attached to request{" "}
+              <span className="font-semibold">
+                {boundInspection.requestCode ?? boundInspection.id}
+              </span>
+              . The customer details are pre-filled from the visit.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRequestPickerOpen(true)}
+            className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
+          >
+            Change request
+          </button>
         </div>
       ) : null}
 
@@ -1369,6 +1448,100 @@ export function CreateQuotationPage() {
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
           {tab === "create" ? (
             <div className="mx-auto max-w-2xl space-y-3">
+              {requestPickerOpen ? (
+                <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                        Fetch from requests
+                      </h2>
+                      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                        Choose a request to fill the customer, address, and
+                        service details. Existing quotation items will stay as
+                        they are.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRequestPickerOpen(false)}
+                      className="shrink-0 font-body text-[12px] font-semibold text-on-surface-variant hover:text-on-surface"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <label className="mt-3 block">
+                    <span className={LABEL_CLASS}>Search requests</span>
+                    <input
+                      type="text"
+                      value={requestSearch}
+                      onChange={(event) => setRequestSearch(event.target.value)}
+                      placeholder="Search by request code, customer, phone, email, or service"
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                  {filteredRequests.length > 0 ? (
+                    <ul className="mt-3 max-h-80 overflow-y-auto rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
+                      {filteredRequests.map((request, index) => (
+                        <li
+                          key={request.id}
+                          className={
+                            index > 0 ? "border-t border-outline-variant/40" : ""
+                          }
+                        >
+                          <button
+                            type="button"
+                            onClick={() => applyInspectionRequest(request)}
+                            className="flex w-full items-start gap-3 p-3 text-left transition-colors hover:bg-surface-container-low"
+                          >
+                            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-primary">
+                              assignment
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono text-[12px] font-semibold text-primary">
+                                  {request.requestCode ?? request.id}
+                                </span>
+                                <span className="rounded-full bg-surface-container-low px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                                  {STATUS_LABELS[request.status]}
+                                </span>
+                              </span>
+                              <span className="mt-1 block font-body text-[14px] font-semibold text-on-surface">
+                                {request.customer.fullName || "Unknown customer"}
+                              </span>
+                              <span className="mt-0.5 block truncate font-body text-[12px] text-on-surface-variant">
+                                {requestServiceTitle(request)}
+                              </span>
+                              <span className="mt-0.5 block truncate font-body text-[12px] text-on-surface-variant">
+                                {request.customer.phone || request.customer.email
+                                  ? `${request.customer.phone || ""}${
+                                      request.customer.phone &&
+                                      request.customer.email
+                                        ? " · "
+                                        : ""
+                                    }${request.customer.email || ""}`
+                                  : formatAddress(request.address)}
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] text-on-surface-variant">
+                      No available requests found. Requests with active
+                      quotations, jobs, or cancellations are hidden to avoid
+                      duplicate quotes.
+                    </p>
+                  )}
+                </section>
+              ) : !boundInspection ? (
+                <SectionLink
+                  icon="assignment"
+                  label="Fetch from requests"
+                  onClick={() => setRequestPickerOpen(true)}
+                />
+              ) : null}
+
               {/* Client */}
               {boundInspection && !clientOpen ? (
                 <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">

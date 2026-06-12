@@ -1463,6 +1463,15 @@ export function QuotationsBoard() {
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <Link
+              href="/dashboard/quotations/new?fromRequests=1"
+              className="inline-flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-5 py-2.5 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                assignment
+              </span>
+              From request
+            </Link>
+            <Link
               href="/dashboard/quotations/new"
               className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
             >
@@ -1491,13 +1500,24 @@ export function QuotationsBoard() {
           {counts.pending} pending · {counts.completed} completed · tap a card
           to open the side preview
         </p>
-        <Link
-          href="/dashboard/quotations/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
-        >
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          New quotation
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/dashboard/quotations/new?fromRequests=1"
+            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-primary/10"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              assignment
+            </span>
+            From request
+          </Link>
+          <Link
+            href="/dashboard/quotations/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            New quotation
+          </Link>
+        </div>
       </div>
 
       <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/60 bg-surface-container-low p-1">
