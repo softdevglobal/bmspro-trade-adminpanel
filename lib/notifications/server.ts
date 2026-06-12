@@ -331,9 +331,9 @@ export async function notifyCustomerOfStatusChange(
       break;
     }
     case "awaiting_decision": {
-      type = "request_proposed";
-      title = `${business} is waiting to hear from you`;
-      body = `Your quotation for ${headline} is with you for review. Contact ${business} when you are ready to proceed.`;
+      type = "quotation_sent";
+      title = `${business} sent your quotation`;
+      body = `Review and accept or reject the quote for ${headline} in your requests.`;
       emailDetails = [{ label: "Service", value: headline }];
       break;
     }
@@ -360,6 +360,42 @@ export async function notifyCustomerOfStatusChange(
       emailDetails,
       emailHighlight,
       emailHighlightLabel,
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
+/** In-portal alert when a sent quotation needs accept/reject (email is sent separately). */
+export async function notifyCustomerOfQuotationSent(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const business = context.businessName?.trim() || "The business";
+  const headline = requestHeadline(request);
+  const priceAud = request.quotation?.finalPriceAud;
+  const priceLine =
+    typeof priceAud === "number" && Number.isFinite(priceAud)
+      ? ` Total: $${priceAud.toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}.`
+      : "";
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      requestId: request.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "awaiting_decision",
+      type: "quotation_sent",
+      title: `${business} sent your quotation`,
+      body: `Accept or reject the quote for ${headline}.${priceLine}`,
+      portalOnly: true,
     });
   } catch {
     /* notifications are best-effort */

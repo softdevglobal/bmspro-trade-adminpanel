@@ -696,6 +696,23 @@ export async function createQuotationForInspection(
 
   if (shouldSend) {
     await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    try {
+      const updatedSnap = await requestSnap.ref.get();
+      const updatedRequest = mapInspectionDoc(
+        inspectionId,
+        updatedSnap.data() ?? {},
+      );
+      const { notifyCustomerOfQuotationSent } = await import(
+        "@/lib/notifications/server"
+      );
+      await notifyCustomerOfQuotationSent(updatedRequest, {
+        businessName: businessBranding.businessName,
+        bookingSlug: businessBranding.bookingSlug,
+        logoUrl: businessBranding.logoUrl,
+      });
+    } catch (error) {
+      console.error("quotation sent notification failed:", error);
+    }
   }
 
   return { ok: true, quotation };

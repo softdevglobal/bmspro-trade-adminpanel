@@ -5,6 +5,7 @@ import { AuditLogView } from "@/components/audit-log-view";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
+import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
@@ -191,6 +192,7 @@ export function AccountClient({
       </Suspense>
       <CustomerAccountAccess slug={slug}>
         <CustomerTopNav />
+        <CustomerNotificationBanner bookingSlug={slug} />
         <CustomerShellPanel>
           <Suspense
             fallback={

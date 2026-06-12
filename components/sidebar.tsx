@@ -3,9 +3,11 @@
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
 import { useAuth, type AuthRole } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { countPendingInspectionRequests } from "@/lib/inspection/request-counts";
+import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /** Today is /dashboard only — not parent of other /dashboard/* routes. */
 function isNavItemActive(pathname: string, href: string): boolean {
@@ -108,6 +110,11 @@ export function Sidebar({
   const pathname = usePathname();
   const { user, logout, role } = useAuth();
   const business = useBusinessProfile();
+  const { requests } = useInspectionRequests();
+  const pendingRequestCount = useMemo(
+    () => countPendingInspectionRequests(requests),
+    [requests],
+  );
   const brandName = business?.businessName?.trim() || "BMS Pro Trade";
   const brandLogo =
     role === "business_owner" ? (business?.logoUrl ?? null) : null;
@@ -219,28 +226,45 @@ export function Sidebar({
             return true;
           }).map((item) => {
             const isActive = isNavItemActive(pathname, item.href);
+            const showPendingBadge =
+              item.href === "/dashboard/requests" && pendingRequestCount > 0;
 
             const inner = (
               <>
-                <span
-                  className={`material-symbols-outlined shrink-0 text-[22px] ${
-                    isActive ? "material-symbols-filled" : ""
-                  }`}
-                >
-                  {item.icon}
+                <span className="relative shrink-0">
+                  <span
+                    className={`material-symbols-outlined block text-[22px] ${
+                      isActive ? "material-symbols-filled" : ""
+                    }`}
+                  >
+                    {item.icon}
+                  </span>
+                  {showPendingBadge && !showLabels ? (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 font-body text-[9px] font-bold text-white ring-2 ring-on-background">
+                      {pendingRequestCount > 9 ? "9+" : pendingRequestCount}
+                    </span>
+                  ) : null}
                 </span>
                 {showLabels && (
-                  <span className="truncate font-body text-[14px] font-medium">
+                  <span className="min-w-0 flex-1 truncate font-body text-[14px] font-medium">
                     {item.href === "/dashboard" && role === "super_admin"
                       ? "Overview"
                       : item.label}
                   </span>
                 )}
+                {showPendingBadge && showLabels ? (
+                  <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white">
+                    {pendingRequestCount > 99 ? "99+" : pendingRequestCount}
+                  </span>
+                ) : null}
                 {!showLabels && (
                   <span className="sr-only">
                     {item.href === "/dashboard" && role === "super_admin"
                       ? "Overview"
                       : item.label}
+                    {showPendingBadge
+                      ? `, ${pendingRequestCount} new request${pendingRequestCount === 1 ? "" : "s"}`
+                      : ""}
                   </span>
                 )}
               </>

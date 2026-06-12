@@ -7,6 +7,8 @@ import {
 } from "@/components/customer-booking-shell";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
+import { customerAttentionCount } from "@/lib/notifications/customer-pending-actions";
+import type { CustomerBooking } from "@/app/api/customer/jobs/route";
 import {
   accountPath,
   booknowPath,
@@ -18,7 +20,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 export type CustomerAccountTab =
   | "profile"
@@ -99,13 +101,47 @@ function GuestAuthButton({
 
 function CustomerAccountNavInner({ className }: { className?: string }) {
   const pathname = usePathname();
-  const { status } = useCustomerAuth();
-  const { unread } = useCustomerNotifications();
+  const { status, getIdToken } = useCustomerAuth();
+  const { notifications, unread } = useCustomerNotifications();
+  const [bookings, setBookings] = useState<CustomerBooking[]>([]);
 
   const slug = parseBooknowSlug(pathname);
   const onAccount = isBooknowAccountPath(pathname);
   const onBookingPage = Boolean(slug) && !onAccount;
   const activeTab = onAccount ? parseAccountTabFromPathname(pathname) : null;
+
+  const loadBookings = useCallback(async () => {
+    if (status !== "authenticated" || !slug) return;
+    try {
+      const token = await getIdToken();
+      if (!token) return;
+      const response = await fetch("/api/customer/jobs", {
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        jobs?: CustomerBooking[];
+      };
+      if (response.ok && payload.ok) {
+        setBookings(payload.jobs ?? []);
+      }
+    } catch {
+      /* badge fallback is best-effort */
+    }
+  }, [getIdToken, slug, status]);
+
+  useEffect(() => {
+    void loadBookings();
+  }, [loadBookings]);
+
+  const attentionCount = useMemo(
+    () =>
+      slug
+        ? customerAttentionCount(notifications, bookings, slug)
+        : unread,
+    [bookings, notifications, slug, unread],
+  );
 
   const smallTabs = useMemo(() => {
     if (!slug) return [];
@@ -224,9 +260,9 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
               <span className="material-symbols-outlined text-[18px] sm:text-[20px]">
                 notifications
               </span>
-              {unread > 0 ? (
+              {attentionCount > 0 ? (
                 <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-rose-500 px-0.5 font-body text-[8px] font-bold text-white ring-2 ring-white">
-                  {unread > 9 ? "9+" : unread}
+                  {attentionCount > 9 ? "9+" : attentionCount}
                 </span>
               ) : null}
             </Link>
