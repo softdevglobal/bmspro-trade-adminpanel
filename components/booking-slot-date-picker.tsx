@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  formatInPlatformTimeZone,
+  formatIsoDateInPlatformTimeZone,
+  platformTodayIso,
+} from "@/lib/platform/timezone";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export const SLOT_DAYS_PER_PAGE_MOBILE = 3;
@@ -99,7 +104,14 @@ export function formatLocalDateInput(date: Date): string {
 }
 
 export function todayIso(): string {
-  return formatLocalDateInput(new Date());
+  return platformTodayIso();
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(year!, month! - 1, day!, 12, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  return formatLocalDateInput(date);
 }
 
 function atLocalNoon(date: Date): Date {
@@ -115,15 +127,13 @@ function firstBookableDay(from = new Date()): Date {
 export function buildSlotDayOption(date: Date): SlotDayOption {
   const iso = formatLocalDateInput(date);
   const today = todayIso();
-  const tomorrowDate = atLocalNoon(new Date());
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = formatLocalDateInput(tomorrowDate);
+  const tomorrow = addDaysIso(today, 1);
 
   return {
     iso,
-    weekdayShort: date.toLocaleDateString(undefined, { weekday: "short" }),
+    weekdayShort: formatIsoDateInPlatformTimeZone(iso, { weekday: "short" }),
     dayNum: date.getDate(),
-    monthShort: date.toLocaleDateString(undefined, { month: "short" }),
+    monthShort: formatIsoDateInPlatformTimeZone(iso, { month: "short" }),
     isToday: iso === today,
     isTomorrow: iso === tomorrow,
   };
@@ -137,7 +147,7 @@ export function getSlotDayPage(
 ): SlotDayOption[] {
   const anchor = anchorDate?.trim() || todayIso();
   const parsed = new Date(`${anchor}T12:00:00`);
-  let cursor = Number.isNaN(parsed.getTime())
+  const cursor = Number.isNaN(parsed.getTime())
     ? firstBookableDay()
     : atLocalNoon(parsed);
   const toSkip = pageIndex * pageSize;
@@ -204,8 +214,8 @@ export function BookingMonthCalendar({
   const [viewMonth, setViewMonth] = useState(initialView.getMonth());
 
   const today = todayIso();
-  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(
-    undefined,
+  const monthLabel = formatInPlatformTimeZone(
+    new Date(viewYear, viewMonth, 1, 12, 0, 0, 0),
     { month: "long", year: "numeric" },
   );
 

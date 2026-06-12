@@ -1,4 +1,8 @@
 import { AU_TIMEZONES } from "@/lib/onboarding/types";
+import {
+  formatInPlatformTimeZone,
+  PLATFORM_TIME_ZONE,
+} from "@/lib/platform/timezone";
 
 export type TenantPlan = {
   name: string;
@@ -42,14 +46,14 @@ export type TenantDetail = {
 };
 
 export function timezoneLabel(timezoneId: string | null): string {
-  if (!timezoneId) return "—";
-  const match = AU_TIMEZONES.find((tz) => tz.id === timezoneId);
-  return match?.label ?? timezoneId;
+  const effectiveTimezone = timezoneId || PLATFORM_TIME_ZONE;
+  const match = AU_TIMEZONES.find((tz) => tz.id === effectiveTimezone);
+  return match?.label ?? effectiveTimezone;
 }
 
 export function formatTenantDate(ms: number | null): string {
   if (!ms) return "—";
-  return new Date(ms).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(ms, {
     dateStyle: "medium",
     timeStyle: "short",
   });

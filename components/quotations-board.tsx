@@ -10,6 +10,7 @@ import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-deci
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   BOOKING_STATUS_LABELS,
   BOOKING_STATUS_TONE,
@@ -40,7 +41,7 @@ function formatAud(value: number | null): string {
 
 function formatWhen(timestamp: number | null): string {
   if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     year: "numeric",

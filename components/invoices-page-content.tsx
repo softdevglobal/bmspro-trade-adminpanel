@@ -9,14 +9,16 @@ import { Suspense } from "react";
 function InvoicesPageInner() {
   const searchParams = useSearchParams();
   const quotationId = searchParams.get("quotation")?.trim() ?? "";
+  const draftInvoiceId = searchParams.get("invoice")?.trim() ?? "";
   const isNew = searchParams.get("new") === "1";
 
-  if (quotationId || isNew) {
+  if (quotationId || draftInvoiceId || isNew) {
     return (
       <DashboardShell title="Invoices" hidePageHeader fullBleed>
         <CreateInvoiceFromQuotation
           quotationId={quotationId}
-          direct={!quotationId}
+          draftInvoiceId={draftInvoiceId}
+          direct={isNew && !quotationId && !draftInvoiceId}
         />
       </DashboardShell>
     );

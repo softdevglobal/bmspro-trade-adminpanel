@@ -39,6 +39,7 @@ import {
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   displayBookingCode,
   displayQuotationCode,
@@ -418,7 +419,7 @@ function RequestCard({
   const customerName = request.customer.fullName?.trim() || "Customer";
 
   const created = request.createdAt
-    ? new Date(request.createdAt).toLocaleString(undefined, {
+    ? formatInPlatformTimeZone(request.createdAt, {
         month: "short",
         day: "numeric",
         hour: "numeric",
@@ -1782,7 +1783,7 @@ function QuotationCard({
           </p>
           {quotation.createdAt ? (
             <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
-              {new Date(quotation.createdAt).toLocaleDateString(undefined, {
+              {formatInPlatformTimeZone(quotation.createdAt, {
                 day: "numeric",
                 month: "short",
                 year: "numeric",

@@ -8,7 +8,7 @@ import type {
   QuotationLineItem,
 } from "@/lib/quotations/types";
 
-export type InvoiceStatus = "draft" | "sent";
+export type InvoiceStatus = "draft" | "sent" | "paid";
 
 export type InvoiceDetail = {
   id: string;
@@ -46,6 +46,14 @@ export type CreateInvoiceInput = {
   quotationId: string;
   lineItems: QuotationLineItem[];
   finalPriceAud: number;
+  customer?: { fullName: string; email: string; phone: string };
+  address?: {
+    street?: string;
+    suburb?: string;
+    state?: string;
+    postcode?: string;
+  };
+  serviceTitle?: string;
   discountAud?: number | null;
   gstAud?: number | null;
   depositRequest?: unknown;

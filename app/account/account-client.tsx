@@ -119,7 +119,10 @@ function documentPdfFilename(
 function customerInvoiceReady(
   invoice: InspectionInvoiceSummary | null | undefined,
 ): invoice is InspectionInvoiceSummary {
-  return Boolean(invoice?.pdfUrl?.trim() && invoice.status === "sent");
+  return Boolean(
+    invoice?.pdfUrl?.trim() &&
+      (invoice.status === "sent" || invoice.status === "paid"),
+  );
 }
 
 const JOB_STATUS_TONE: Record<BookingStatus, string> = {

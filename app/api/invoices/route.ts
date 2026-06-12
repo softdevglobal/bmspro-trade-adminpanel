@@ -6,7 +6,9 @@ import { adminAuth } from "@/lib/firebase/admin";
 import {
   createDirectInvoice,
   createInvoiceFromQuotation,
+  getBusinessInvoiceByQuotationId,
   listBusinessInvoices,
+  markBusinessInvoicePaid,
 } from "@/lib/invoices/server";
 import { NextResponse } from "next/server";
 
@@ -66,6 +68,25 @@ export async function GET(request: Request) {
   }
 
   try {
+    const url = new URL(request.url);
+    const invoiceId =
+      url.searchParams.get("invoiceId")?.trim() ||
+      url.searchParams.get("quotationId")?.trim() ||
+      "";
+    if (invoiceId) {
+      const invoice = await getBusinessInvoiceByQuotationId(
+        auth.businessId,
+        invoiceId,
+      );
+      if (!invoice) {
+        return NextResponse.json(
+          { ok: false, error: "Invoice not found." },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ ok: true, invoice });
+    }
+
     const invoices = await listBusinessInvoices(auth.businessId);
     return NextResponse.json({ ok: true, invoices });
   } catch (error) {
@@ -111,6 +132,14 @@ export async function POST(request: Request) {
     typeof payload.invoiceDate === "string" ? payload.invoiceDate.trim() : "";
   const dueDate =
     typeof payload.dueDate === "string" ? payload.dueDate.trim() : "";
+  const customerPayload =
+    payload.customer && typeof payload.customer === "object"
+      ? (payload.customer as Record<string, unknown>)
+      : null;
+  const addressPayload =
+    payload.address && typeof payload.address === "object"
+      ? (payload.address as Record<string, unknown>)
+      : null;
 
   if (!quotationId && !direct) {
     return NextResponse.json(
@@ -141,6 +170,34 @@ export async function POST(request: Request) {
       typeof payload.gstAud === "number" && Number.isFinite(payload.gstAud)
         ? payload.gstAud
         : null,
+    customer: customerPayload
+      ? {
+          fullName:
+            typeof customerPayload.fullName === "string"
+              ? customerPayload.fullName
+              : "",
+          email:
+            typeof customerPayload.email === "string" ? customerPayload.email : "",
+          phone:
+            typeof customerPayload.phone === "string" ? customerPayload.phone : "",
+        }
+      : undefined,
+    address: addressPayload
+      ? {
+          street:
+            typeof addressPayload.street === "string" ? addressPayload.street : "",
+          suburb:
+            typeof addressPayload.suburb === "string" ? addressPayload.suburb : "",
+          state:
+            typeof addressPayload.state === "string" ? addressPayload.state : "",
+          postcode:
+            typeof addressPayload.postcode === "string"
+              ? addressPayload.postcode
+              : "",
+        }
+      : undefined,
+    serviceTitle:
+      typeof payload.serviceTitle === "string" ? payload.serviceTitle : undefined,
     depositRequest: payload.depositRequest ?? null,
     notes: typeof payload.notes === "string" ? payload.notes : null,
     termsAndConditions:
@@ -227,4 +284,57 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true, invoice: result.invoice }, { status: 201 });
+}
+
+export async function PATCH(request: Request) {
+  const auth = await requireInvoiceAuthor(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+
+  if (!body || typeof body !== "object") {
+    return NextResponse.json(
+      { ok: false, error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+
+  const payload = body as Record<string, unknown>;
+  const action = typeof payload.action === "string" ? payload.action : "";
+  const invoiceId =
+    typeof payload.invoiceId === "string"
+      ? payload.invoiceId.trim()
+      : typeof payload.quotationId === "string"
+        ? payload.quotationId.trim()
+        : "";
+
+  if (action !== "mark_paid") {
+    return NextResponse.json(
+      { ok: false, error: "Unsupported invoice action." },
+      { status: 400 },
+    );
+  }
+
+  const result = await markBusinessInvoicePaid(auth.businessId, invoiceId);
+  if (!result.ok) {
+    return NextResponse.json(
+      { ok: false, error: result.error },
+      { status: result.status },
+    );
+  }
+
+  return NextResponse.json({ ok: true, invoice: result.invoice });
 }

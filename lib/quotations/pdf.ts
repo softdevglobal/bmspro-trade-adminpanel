@@ -202,21 +202,47 @@ function wrapText(
   size: number,
   maxWidth: number,
 ): string[] {
-  const words = pdfSafeText(text).trim().split(/\s+/);
+  const words = pdfSafeText(text).trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (font.widthOfTextAtSize(candidate, size) > maxWidth) {
-      if (line) lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
+    const parts = splitWordToFit(word, font, size, maxWidth);
+    for (const part of parts) {
+      const candidate = line ? `${line} ${part}` : part;
+      if (font.widthOfTextAtSize(candidate, size) > maxWidth) {
+        if (line) lines.push(line);
+        line = part;
+      } else {
+        line = candidate;
+      }
     }
   }
   if (line) lines.push(line);
   return lines;
+}
+
+function splitWordToFit(
+  word: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number,
+): string[] {
+  if (font.widthOfTextAtSize(word, size) <= maxWidth) return [word];
+
+  const parts: string[] = [];
+  let part = "";
+  for (const char of word) {
+    const candidate = `${part}${char}`;
+    if (part && font.widthOfTextAtSize(candidate, size) > maxWidth) {
+      parts.push(part);
+      part = char;
+    } else {
+      part = candidate;
+    }
+  }
+  if (part) parts.push(part);
+  return parts;
 }
 
 function lineItemsFromQuotation(
@@ -318,6 +344,13 @@ export async function generateDocumentPdf(
   let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   drawPageDecorations(page, fontBold, watermark);
   let y = PAGE_HEIGHT;
+  const contentBottomY = MARGIN + 72;
+
+  const addDecoratedPage = () => {
+    page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    drawPageDecorations(page, fontBold, watermark);
+    y = PAGE_HEIGHT - MARGIN;
+  };
 
   const logoImage =
     data.business.logoUrl &&
@@ -424,11 +457,7 @@ export async function generateDocumentPdf(
   };
 
   const ensureSpace = (needed: number) => {
-    if (y - needed < MARGIN + 72) {
-      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      drawPageDecorations(page, fontBold, watermark);
-      y = PAGE_HEIGHT - MARGIN;
-    }
+    if (y - needed < contentBottomY) addDecoratedPage();
   };
 
   // ── Header: title left, logo right ──
@@ -866,44 +895,80 @@ export async function generateDocumentPdf(
 
   const termsText = data.termsAndConditions?.trim();
   if (termsText) {
-    const termsLines = wrapText(termsText, font, 10, CONTENT_WIDTH - 24);
-    const termsBoxH = 22 + termsLines.length * 13;
-    const sectionTopY = y;
     const termsW = CONTENT_WIDTH - panelW - sectionGap;
-    const sectionH = Math.max(termsBoxH, panelH);
+    const termsLines = wrapText(termsText, font, 10, termsW - 24);
+    const termsLineH = 13;
+    const termsHeaderH = 22;
+    let remainingTermsLines = termsLines;
+    let isFirstTermsPage = true;
 
-    ensureSpace(sectionH + 16);
+    const drawTermsBox = (
+      sectionTopY: number,
+      title: string,
+      lines: string[],
+    ) => {
+      const termsBoxH = termsHeaderH + lines.length * termsLineH;
+      page.drawRectangle({
+        x: MARGIN,
+        y: sectionTopY - termsBoxH,
+        width: termsW,
+        height: termsBoxH,
+        color: WHITE,
+        opacity: 0.88,
+        borderColor: rgb(0.78, 0.84, 0.92),
+        borderWidth: 0.75,
+      });
+      page.drawRectangle({
+        x: MARGIN,
+        y: sectionTopY - termsBoxH,
+        width: 4,
+        height: termsBoxH,
+        color: BRAND,
+      });
+      drawText(title, MARGIN + 12, sectionTopY - 16, {
+        size: 11,
+        bold: true,
+        color: BRAND,
+      });
+      let termsY = sectionTopY - 32;
+      for (const line of lines) {
+        drawText(line, MARGIN + 12, termsY, {
+          size: 10,
+          maxWidth: termsW - 24,
+        });
+        termsY -= termsLineH;
+      }
+      return termsBoxH;
+    };
 
-    page.drawRectangle({
-      x: MARGIN,
-      y: sectionTopY - termsBoxH,
-      width: termsW,
-      height: termsBoxH,
-      color: WHITE,
-      opacity: 0.88,
-      borderColor: rgb(0.78, 0.84, 0.92),
-      borderWidth: 0.75,
-    });
-    page.drawRectangle({
-      x: MARGIN,
-      y: sectionTopY - termsBoxH,
-      width: 4,
-      height: termsBoxH,
-      color: BRAND,
-    });
-    drawText("Terms and conditions", MARGIN + 12, sectionTopY - 16, {
-      size: 11,
-      bold: true,
-      color: BRAND,
-    });
-    let termsY = sectionTopY - 32;
-    for (const line of termsLines) {
-      drawText(line, MARGIN + 12, termsY, { size: 10, maxWidth: termsW - 24 });
-      termsY -= 13;
+    while (remainingTermsLines.length > 0) {
+      if (isFirstTermsPage) {
+        ensureSpace(panelH + 16);
+      } else {
+        addDecoratedPage();
+      }
+
+      const sectionTopY = y;
+      const availableTermsH = sectionTopY - contentBottomY - 16;
+      const maxTermsLines = Math.max(
+        1,
+        Math.floor((availableTermsH - termsHeaderH) / termsLineH),
+      );
+      const pageTermsLines = remainingTermsLines.slice(0, maxTermsLines);
+      const termsBoxH = drawTermsBox(
+        sectionTopY,
+        isFirstTermsPage
+          ? "Terms and conditions"
+          : "Terms and conditions (continued)",
+        pageTermsLines,
+      );
+      const sectionH = isFirstTermsPage ? Math.max(termsBoxH, panelH) : termsBoxH;
+
+      if (isFirstTermsPage) drawTotalsPanel(sectionTopY);
+      y = sectionTopY - sectionH - 20;
+      remainingTermsLines = remainingTermsLines.slice(pageTermsLines.length);
+      isFirstTermsPage = false;
     }
-
-    drawTotalsPanel(sectionTopY);
-    y = sectionTopY - sectionH - 20;
   } else {
     ensureSpace(panelH + 8);
     drawTotalsPanel(y);

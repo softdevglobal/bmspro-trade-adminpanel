@@ -14,6 +14,7 @@ import {
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
 } from "@/lib/inspection/types";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import {
@@ -23,9 +24,15 @@ import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 type PreviewMode = "review" | "assign";
+type JobsFilter = "active" | "completed";
+
+const JOB_TABS: { id: JobsFilter; label: string }[] = [
+  { id: "active", label: "Active" },
+  { id: "completed", label: "Completed" },
+];
 
 function formatEstimatedMinutes(minutes: number | null): string | null {
   if (minutes == null || minutes <= 0) return null;
@@ -38,7 +45,7 @@ function formatEstimatedMinutes(minutes: number | null): string | null {
 
 function formatWhen(timestamp: number | null): string {
   if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -199,6 +206,7 @@ function BookingPreviewDrawer({
             className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
             <BookingPreviewContent
+              key={booking.id}
               booking={booking}
               staff={staff}
               onClose={onClose}
@@ -436,13 +444,6 @@ function BookingPreviewContent({
   const [staffId, setStaffId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMode("review");
-    setAssignTo(null);
-    setStaffId("");
-    setActionError(null);
-  }, [booking.id]);
 
   const title = bookingTitle(booking);
   const visitWindow = formatVisitWindow(
@@ -797,26 +798,57 @@ export function JobsBoard() {
   const { bookings, loading, error } = useBookings();
   const { staff } = useBusinessStaffSummary();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [localBookings, setLocalBookings] = useState<BookingDetail[] | null>(
+  const [filter, setFilter] = useState<JobsFilter>("active");
+  const [localBookingState, setLocalBookingState] = useState<{
+    source: BookingDetail[];
+    bookings: BookingDetail[];
+  } | null>(
     null,
   );
 
-  useEffect(() => {
-    setLocalBookings(null);
-  }, [bookings]);
-
-  const displayBookings = localBookings ?? bookings;
+  const displayBookings =
+    localBookingState?.source === bookings
+      ? localBookingState.bookings
+      : bookings;
+  const groupedBookings = useMemo(() => {
+    return displayBookings.reduce(
+      (groups, booking) => {
+        if (booking.status === "completed") {
+          groups.completed.push(booking);
+        } else {
+          groups.active.push(booking);
+        }
+        return groups;
+      },
+      {
+        active: [] as BookingDetail[],
+        completed: [] as BookingDetail[],
+      },
+    );
+  }, [displayBookings]);
+  const visibleBookings = groupedBookings[filter];
 
   const selected = useMemo(
-    () => displayBookings.find((booking) => booking.id === selectedId) ?? null,
-    [displayBookings, selectedId],
+    () => visibleBookings.find((booking) => booking.id === selectedId) ?? null,
+    [visibleBookings, selectedId],
   );
 
   function handleBookingUpdated(next: BookingDetail) {
-    setLocalBookings((current) => {
-      const base = current ?? bookings;
-      return base.map((booking) => (booking.id === next.id ? next : booking));
+    setLocalBookingState((current) => {
+      const base =
+        current?.source === bookings ? current.bookings : bookings;
+      return {
+        source: bookings,
+        bookings: base.map((booking) =>
+          booking.id === next.id ? next : booking,
+        ),
+      };
     });
+  }
+
+  function handleFilterChange(nextFilter: JobsFilter) {
+    setFilter(nextFilter);
+    setSelectedId(null);
   }
 
   if (authStatus === "loading" || loading) {
@@ -872,21 +904,69 @@ export function JobsBoard() {
   return (
     <>
       <p className="mb-3 font-body text-[12px] text-on-surface-variant">
-        {displayBookings.length} job
-        {displayBookings.length === 1 ? "" : "s"} · tap a card to open the side
-        preview
+        {groupedBookings.active.length} active ·{" "}
+        {groupedBookings.completed.length} completed · tap a card to open the
+        side preview
       </p>
-      <ul className="space-y-3">
-        {displayBookings.map((booking) => (
-          <li key={booking.id}>
-            <BookingCard
-              booking={booking}
-              isPreviewOpen={selectedId === booking.id}
-              onOpen={() => setSelectedId(booking.id)}
-            />
-          </li>
-        ))}
-      </ul>
+
+      <div
+        role="tablist"
+        aria-label="Filter jobs"
+        className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/60 bg-surface-container-low p-1"
+      >
+        {JOB_TABS.map((tab) => {
+          const selectedTab = filter === tab.id;
+          const count = groupedBookings[tab.id].length;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selectedTab}
+              onClick={() => handleFilterChange(tab.id)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 font-body text-[12px] font-bold transition-colors ${
+                selectedTab
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface"
+              }`}
+            >
+              {tab.label}
+              <span
+                className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] ${
+                  selectedTab
+                    ? "bg-on-primary/15 text-on-primary"
+                    : "bg-surface-container-lowest text-on-surface-variant"
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {visibleBookings.length > 0 ? (
+        <ul className="space-y-3">
+          {visibleBookings.map((booking) => (
+            <li key={booking.id}>
+              <BookingCard
+                booking={booking}
+                isPreviewOpen={selectedId === booking.id}
+                onOpen={() => setSelectedId(booking.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <section className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-5 py-8 text-center">
+          <p className="font-display text-[17px] font-semibold text-on-surface">
+            No {filter} jobs
+          </p>
+          <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+            Jobs for this tab will appear here.
+          </p>
+        </section>
+      )}
 
       <BookingPreviewDrawer
         booking={selected}
