@@ -428,6 +428,14 @@ export async function createInvoiceFromQuotation(
     return { ok: true, invoice };
   }
 
+  if (quotation.status === "cancelled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Cancelled quotations cannot be invoiced.",
+    };
+  }
+
   if (
     quotation.status === "sent" &&
     quotation.customerDecision !== "accepted"

@@ -26,6 +26,8 @@ export type QuotationDepositRequest = {
   paid?: boolean;
 };
 
+export type QuotationStatus = "draft" | "sent" | "cancelled";
+
 export type QuotationDetail = {
   id: string;
   quotationCode: string | null;
@@ -47,7 +49,8 @@ export type QuotationDetail = {
   validUntil: string | null;
   imageUrls: string[];
   pdfUrl: string | null;
-  status: "draft" | "sent";
+  status: QuotationStatus;
+  cancelledFromStatus: Exclude<QuotationStatus, "cancelled"> | null;
   /** Customer accept/reject response (null until the customer decides). */
   customerDecision: "accepted" | "rejected" | null;
   customerDecisionAt: number | null;

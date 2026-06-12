@@ -1,6 +1,8 @@
 import { adminAuth } from "@/lib/firebase/admin";
 import {
   businessRecordQuotationCustomerDecision,
+  cancelQuotation,
+  undoCancelQuotation,
   updateDraftQuotation,
 } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
@@ -160,6 +162,30 @@ export async function PATCH(
       send: payload.send === true,
     });
 
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    return NextResponse.json({ ok: true, quotation: result.quotation });
+  }
+
+  if (action === "cancel") {
+    const result = await cancelQuotation(id, auth.businessId);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    return NextResponse.json({ ok: true, quotation: result.quotation });
+  }
+
+  if (action === "undo_cancel") {
+    const result = await undoCancelQuotation(id, auth.businessId);
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
