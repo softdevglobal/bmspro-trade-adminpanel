@@ -1,5 +1,6 @@
 "use client";
 
+import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import { auth } from "@/lib/firebase/client";
 import {
@@ -12,7 +13,7 @@ import { useState } from "react";
 const MIN_PASSWORD_LENGTH = 8;
 
 const INPUT_CLASS =
-  "h-11 w-full rounded-lg border border-outline-variant bg-surface-container-low pl-11 pr-11 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+  "h-11 w-full rounded-xl border border-outline-variant bg-surface-container-low pl-11 pr-11 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
 function firebasePasswordError(err: unknown): string {
   const code =
@@ -164,22 +165,12 @@ export function BusinessSecuritySettings() {
   }
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <span className="material-symbols-outlined">shield</span>
-        </div>
-        <div>
-          <h3 className="font-display text-headline-sm font-semibold text-on-surface">
-            Security
-          </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Update your account password for better security.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 space-y-4">
+    <SettingsSection
+      icon="shield"
+      title="Security"
+      description="Update your account password for better security."
+    >
+      <div className="space-y-4">
         <PasswordField
           id="current-password"
           label="Current password"
@@ -216,7 +207,7 @@ export function BusinessSecuritySettings() {
           onChange={setConfirmPassword}
         />
 
-        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+        <div className="flex flex-col gap-2 border-t border-outline-variant/50 pt-4 sm:flex-row sm:items-center sm:justify-end">
           <button
             type="button"
             disabled={
@@ -226,7 +217,7 @@ export function BusinessSecuritySettings() {
               !confirmPassword
             }
             onClick={() => void handleChangePassword()}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             <span className="material-symbols-outlined text-[18px]">key</span>
             {saving ? "Changing…" : "Change password"}
@@ -240,6 +231,6 @@ export function BusinessSecuritySettings() {
           <p className="font-body text-[12px] font-semibold text-primary">{notice}</p>
         ) : null}
       </div>
-    </section>
+    </SettingsSection>
   );
 }

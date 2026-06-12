@@ -1,15 +1,15 @@
 /**
- * Shared types and helpers for inspection visit requests.
+ * Shared types and helpers for service requests.
  *
  * Customers submit requests from /booknow/[slug] and business owners
- * triage them in /dashboard/inspection-visits.
+ * triage them in /dashboard/requests.
  */
 
 import type { BookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import { legacyInspectionReferenceFromId } from "@/lib/reference-codes";
 
-export const INSPECTION_COLLECTION = "inspection_requests";
+export const REQUESTS_COLLECTION = "requests";
 
 export const REQUEST_TYPES = ["existing_service", "custom_quote"] as const;
 export type InspectionRequestType = (typeof REQUEST_TYPES)[number];
@@ -53,12 +53,13 @@ export function timeRangeFromStartTime(startTime: string): InspectionTimeRange {
   return hour < 12 ? "morning" : "afternoon";
 }
 
-/** Where a new inspection_requests document was created. */
+/** Where a new requests document was created. */
 export const INSPECTION_CREATED_SOURCES = [
   "booking_engine",
   "owner_dashboard",
   "owner_mobile",
   "quotation_direct",
+  "invoice_direct",
 ] as const;
 export type InspectionRequestCreatedSource =
   (typeof INSPECTION_CREATED_SOURCES)[number];
@@ -71,6 +72,7 @@ export const CREATED_SOURCE_LABELS: Record<
   owner_dashboard: "Admin panel",
   owner_mobile: "Mobile app",
   quotation_direct: "Quotation",
+  invoice_direct: "Invoice",
 };
 
 export function isCreatedSource(
@@ -161,6 +163,8 @@ export type InspectionRequestDetail = {
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */
   quotation: InspectionQuotationSummary | null;
+  /** Summary mirrored from invoices when an invoice is issued (id = quotation id). */
+  invoice: InspectionInvoiceSummary | null;
   /** Linked job booking document id (`bookings` collection). */
   bookingId: string | null;
   /** Human-readable job code, e.g. `BK 4K7H2M9P`. */
@@ -175,7 +179,16 @@ export type InspectionRequestDetail = {
   bookingConfirmedAt: number | null;
 };
 
-/** Quotation summary stored on inspection_requests after a quote is created. */
+/** Customer's response to a sent quotation. */
+export type QuotationCustomerDecision = "accepted" | "rejected";
+
+export function parseQuotationCustomerDecision(
+  raw: unknown,
+): QuotationCustomerDecision | null {
+  return raw === "accepted" || raw === "rejected" ? raw : null;
+}
+
+/** Quotation summary stored on requests after a quote is created. */
 export type InspectionQuotationSummary = {
   id: string;
   quotationCode: string | null;
@@ -185,7 +198,58 @@ export type InspectionQuotationSummary = {
   balanceDueAud: number | null;
   status: string | null;
   createdAt: number | null;
+  /** Customer accept/reject response (null until the customer decides). */
+  customerDecision: QuotationCustomerDecision | null;
+  customerDecisionAt: number | null;
 };
+
+/** Invoice summary stored on requests after an invoice is issued. */
+export type InspectionInvoiceSummary = {
+  id: string;
+  invoiceCode: string | null;
+  pdfUrl: string | null;
+  finalPriceAud: number | null;
+  balanceDueAud: number | null;
+  status: "draft" | "sent" | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+};
+
+export function parseInspectionInvoice(
+  raw: unknown,
+): InspectionInvoiceSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const id = typeof item.id === "string" ? item.id.trim() : "";
+  if (!id) return null;
+
+  const readPrice = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+  const pdfUrlRaw = typeof item.pdfUrl === "string" ? item.pdfUrl.trim() : "";
+  const statusRaw = item.status;
+
+  return {
+    id,
+    invoiceCode:
+      typeof item.invoiceCode === "string" && item.invoiceCode.trim()
+        ? item.invoiceCode.trim()
+        : null,
+    pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
+    finalPriceAud: readPrice(item.finalPriceAud),
+    balanceDueAud: readPrice(item.balanceDueAud),
+    status:
+      statusRaw === "sent" ? "sent" : statusRaw === "draft" ? "draft" : null,
+    invoiceDate:
+      typeof item.invoiceDate === "string" && item.invoiceDate.trim()
+        ? item.invoiceDate.trim()
+        : null,
+    dueDate:
+      typeof item.dueDate === "string" && item.dueDate.trim()
+        ? item.dueDate.trim()
+        : null,
+  };
+}
 
 export function parseInspectionQuotation(
   raw: unknown,
@@ -214,6 +278,8 @@ export function parseInspectionQuotation(
     balanceDueAud: readPrice(item.balanceDueAud),
     status: typeof item.status === "string" ? item.status : null,
     createdAt: toMillis(item.createdAt),
+    customerDecision: parseQuotationCustomerDecision(item.customerDecision),
+    customerDecisionAt: toMillis(item.customerDecisionAt),
   };
 }
 

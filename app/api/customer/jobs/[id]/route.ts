@@ -4,6 +4,7 @@ import {
   isTimeRange,
   type InspectionSlot,
 } from "@/lib/inspection/types";
+import { customerDecideQuotation } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -43,6 +44,28 @@ export async function PATCH(
 
   const payload = (body ?? {}) as Record<string, unknown>;
   const action = typeof payload.action === "string" ? payload.action : "";
+
+  if (action === "quotation_decision") {
+    const decision = payload.decision;
+    if (decision !== "accepted" && decision !== "rejected") {
+      return NextResponse.json(
+        { ok: false, error: "Choose accept or reject." },
+        { status: 400 },
+      );
+    }
+    const result = await customerDecideQuotation(
+      id,
+      { customerId: auth.customer.uid, customerEmail: auth.customer.email },
+      decision,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, decision });
+  }
 
   if (action !== "accept_proposed") {
     return NextResponse.json(

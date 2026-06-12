@@ -57,13 +57,16 @@ export function CustomerNotificationBell() {
     const target = note.bookingSlug ?? fallbackSlug;
     if (!target) return;
     const scope =
-      note.status === "completed" || note.status === "cancelled"
+      note.status === "completed" ||
+      note.status === "cancelled" ||
+      note.type === "job_completed" ||
+      note.type === "invoice_sent"
         ? "history"
         : "active";
     router.push(
       note.requestId
         ? accountBookingFocusPath(target, note.requestId, scope)
-        : accountPath(target, scope === "history" ? "bookings" : "requests"),
+        : accountPath(target, scope === "history" ? "jobs" : "requests"),
     );
   }
 

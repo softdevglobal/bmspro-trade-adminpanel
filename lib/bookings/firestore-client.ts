@@ -5,7 +5,7 @@ import {
   mapBookingDoc,
   sortBookingsNewestFirst,
 } from "@/lib/bookings/map-booking-doc";
-import { BOOKING_COLLECTION } from "@/lib/bookings/types";
+import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import type { BookingDetail } from "@/lib/bookings/types";
 import {
   collection,
@@ -24,7 +24,7 @@ export function subscribeBusinessBookings(
   onError?: (error: Error) => void,
 ): Unsubscribe {
   const q = query(
-    collection(db, BOOKING_COLLECTION),
+    collection(db, JOBS_COLLECTION),
     where("businessId", "==", businessId),
     limit(BOOKING_LIST_LIMIT),
   );

@@ -25,6 +25,7 @@ export type InvoiceSentEmailInput = {
     dueDate: string;
     mode?: "percent" | "fixed";
     percent?: number;
+    paid?: boolean;
   } | null;
   businessName?: string | null;
   bookingSlug?: string | null;
@@ -67,11 +68,11 @@ function buildInvoiceEmailDetails(input: InvoiceSentEmailInput): EmailDetailRow[
   );
   if (deposit) {
     details.push({
-      label: "Deposit due",
+      label: deposit.paid ? "Deposit paid" : "Deposit due",
       value: `${formatEmailAud(deposit.amountAud)} (${formatDepositSummary(deposit)})`,
     });
     details.push({
-      label: "Balance due",
+      label: deposit.paid ? "Balance due" : "Total due",
       value: formatEmailAud(input.balanceDueAud),
     });
   }
@@ -89,17 +90,17 @@ export async function sendInvoiceSentEmail(
   const email = input.customerEmail.trim();
   if (!email || !input.pdfBytes?.length) return;
 
+  const businessLabel = input.businessName?.trim() || "your trade provider";
+  const serviceTitle = input.serviceTitle.trim() || "your job";
+  const deposit = buildQuotationDocumentDeposit(
+    input.totalAud,
+    input.depositRequest,
+  );
+
   try {
-    const businessLabel = input.businessName?.trim() || "your trade provider";
-    const serviceTitle = input.serviceTitle.trim() || "your job";
     const bookingEngineUrl = input.bookingSlug
       ? buildBookingUrl(input.bookingSlug)
       : null;
-
-    const deposit = buildQuotationDocumentDeposit(
-      input.totalAud,
-      input.depositRequest,
-    );
     const details = buildInvoiceEmailDetails(input);
 
     const html = renderEmail({
@@ -109,10 +110,8 @@ export async function sendInvoiceSentEmail(
       greetingName: firstName(input.customerFullName),
       body: `Please find your invoice from ${businessLabel} for ${serviceTitle} attached as a PDF.\n\nThe summary below matches the attached document. Open the PDF for the full line-item breakdown, terms, and payment details.`,
       details,
-      highlight: deposit
-        ? formatEmailAud(input.balanceDueAud)
-        : formatEmailAud(input.totalAud),
-      highlightLabel: deposit ? "Balance due" : "Total due",
+      highlight: formatEmailAud(input.balanceDueAud),
+      highlightLabel: deposit?.paid ? "Balance due" : "Total due",
       ctaUrl: bookingEngineUrl,
       ctaLabel: bookingEngineUrl ? "View your account" : undefined,
       footnote:
@@ -139,18 +138,17 @@ export async function sendInvoiceSentEmail(
         },
       ],
     });
-
-    if (input.customerPhone) {
-      const amount = formatEmailAud(
-        deposit ? input.balanceDueAud : input.totalAud,
-      );
-      const amountLabel = deposit ? "balance due" : "total due";
-      await sendSms({
-        to: input.customerPhone,
-        message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
-      });
-    }
   } catch {
-    /* email/SMS is best-effort */
+    /* email is best-effort */
+  }
+
+  // SMS is sent independently so an email failure never skips the SMS.
+  if (input.customerPhone) {
+    const amount = formatEmailAud(input.balanceDueAud);
+    const amountLabel = deposit?.paid ? "balance due" : "total due";
+    await sendSms({
+      to: input.customerPhone,
+      message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
+    });
   }
 }

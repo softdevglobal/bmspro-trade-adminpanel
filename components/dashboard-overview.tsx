@@ -19,10 +19,10 @@ import { useMemo } from "react";
 
 const QUICK_ACTIONS = [
   {
-    label: "Inspection visits",
+    label: "Requests",
     desc: "Review & schedule",
     icon: "fact_check",
-    href: "/dashboard/inspection-visits",
+    href: "/dashboard/requests",
     tone: "from-emerald-500/15 to-emerald-600/5 text-emerald-700",
   },
   {
@@ -33,10 +33,10 @@ const QUICK_ACTIONS = [
     tone: "from-primary/15 to-sky-500/5 text-primary",
   },
   {
-    label: "Bookings",
+    label: "Jobs",
     desc: "Jobs & assignments",
     icon: "assignment",
-    href: "/dashboard/bookings",
+    href: "/dashboard/jobs",
     tone: "from-violet-500/15 to-violet-600/5 text-violet-700",
   },
   {
@@ -99,6 +99,8 @@ const ACTIVITY_ICONS: Record<string, string> = {
   request_assigned: "person_check",
   request_cancelled: "event_busy",
   request_completed: "check_circle",
+  quotation_accepted: "check_circle",
+  quotation_rejected: "cancel",
   visit_on_the_way: "directions_car",
   booking_on_the_way: "engineering",
 };
@@ -204,13 +206,13 @@ function BusinessDashboardOverview() {
                 Open calendar
               </Link>
               <Link
-                href="/dashboard/inspection-visits"
+                href="/dashboard/requests"
                 className="inline-flex items-center gap-2 rounded-full bg-on-primary px-4 py-2.5 font-body text-[13px] font-bold text-primary shadow-lg shadow-black/15 transition hover:brightness-95"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   add_circle
                 </span>
-                New inspection visit
+                New request
               </Link>
             </div>
           </div>
@@ -396,7 +398,7 @@ function BusinessDashboardOverview() {
                     event_available
                   </span>
                   <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-                    No upcoming jobs yet. Scheduled bookings and visits will
+                    No upcoming jobs yet. Scheduled jobs and visits will
                     show here.
                   </p>
                 </div>

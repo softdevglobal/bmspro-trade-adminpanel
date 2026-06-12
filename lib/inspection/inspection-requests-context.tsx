@@ -13,19 +13,9 @@ import {
   type ReactNode,
 } from "react";
 
-const INSPECTION_ROUTES = [
-  "/dashboard/inspection-visits",
-  "/dashboard/quotations",
-  "/dashboard/customers",
-  "/dashboard/calendar",
-] as const;
-
 function needsInspectionFeed(pathname: string | null): boolean {
   if (!pathname) return false;
-  if (pathname === "/dashboard" || pathname === "/dashboard/") return true;
-  return INSPECTION_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
-  );
+  return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
 }
 
 type InspectionRequestsValue = {
@@ -37,7 +27,7 @@ type InspectionRequestsValue = {
 const InspectionRequestsContext =
   createContext<InspectionRequestsValue | null>(null);
 
-/** Polls inspection_requests via API (no Firestore snapshot listener). */
+/** Polls requests via API (no Firestore snapshot listener). */
 export function InspectionRequestsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { role, businessId, user } = useAuth();

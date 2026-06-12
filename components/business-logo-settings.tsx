@@ -4,12 +4,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useState } from "react";
 
-/**
- * Settings card that lets a business owner upload, replace, or remove their
- * logo. Reads the current logo live from the business doc and saves changes
- * through the business profile API.
- */
-export function BusinessLogoSettings() {
+export function useBusinessLogoActions() {
   const { user } = useAuth();
   const profile = useBusinessProfile();
   const [uploading, setUploading] = useState(false);
@@ -18,6 +13,7 @@ export function BusinessLogoSettings() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const logoUrl = profile?.logoUrl ?? null;
+  const busy = uploading || saving;
 
   async function authHeaders(): Promise<Record<string, string> | null> {
     if (!user) return null;
@@ -82,26 +78,47 @@ export function BusinessLogoSettings() {
     }
   }
 
-  const busy = uploading || saving;
+  return {
+    logoUrl,
+    busy,
+    uploading,
+    error,
+    notice,
+    handleFile,
+    removeLogo: () => void saveLogo(null),
+  };
+}
+
+type BusinessLogoUploaderProps = {
+  compact?: boolean;
+};
+
+export function BusinessLogoUploader({ compact }: BusinessLogoUploaderProps) {
+  const {
+    logoUrl,
+    busy,
+    uploading,
+    error,
+    notice,
+    handleFile,
+    removeLogo,
+  } = useBusinessLogoActions();
+
+  const inputId = "business-logo-file-input";
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <span className="material-symbols-outlined">image</span>
-        </div>
-        <div>
-          <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">
-            Business Logo
-          </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Appears on your booking page, dashboard, and customer emails.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-outline-variant bg-surface-container">
+    <div className={compact ? "" : "mt-4"}>
+      <label
+        htmlFor={inputId}
+        className={`group relative mx-auto block w-full cursor-pointer overflow-hidden rounded-2xl border shadow-sm transition-all hover:shadow-md ${
+          compact ? "max-w-[140px]" : "max-w-[200px]"
+        } ${
+          logoUrl
+            ? "border-outline-variant/50"
+            : "border-dashed border-outline-variant bg-surface-container-low"
+        } ${busy ? "pointer-events-none opacity-70" : ""}`}
+      >
+        <div className="aspect-square w-full">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -110,69 +127,100 @@ export function BusinessLogoSettings() {
               className="h-full w-full object-cover"
             />
           ) : (
-            <span className="material-symbols-outlined text-[34px] text-outline">
-              storefront
-            </span>
+            <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-surface-container-low px-3 text-center">
+              <span className="material-symbols-outlined text-[28px] text-outline">
+                add_photo_alternate
+              </span>
+              <span className="font-body text-[11px] font-semibold text-on-surface-variant">
+                Upload
+              </span>
+            </div>
           )}
         </div>
 
-        <div className="min-w-0 flex-1">
-          <p className="font-body text-[13px] text-on-surface-variant">
-            PNG, JPG, WebP or GIF up to 5 MB. A square image works best.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <label
-              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 ${
-                busy ? "pointer-events-none opacity-60" : ""
-              }`}
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                {uploading ? "progress_activity" : "upload"}
-              </span>
-              {uploading
-                ? "Uploading…"
-                : logoUrl
-                  ? "Replace logo"
-                  : "Upload logo"}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                className="sr-only"
-                disabled={busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (file) void handleFile(file);
-                }}
-              />
-            </label>
-            {logoUrl ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void saveLogo(null)}
-                className="inline-flex items-center gap-1 rounded-lg border border-outline-variant px-3 py-2 font-body text-[13px] font-semibold text-on-surface-variant transition-colors hover:text-error disabled:opacity-60"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  delete
-                </span>
-                Remove
-              </button>
-            ) : null}
-          </div>
+        {logoUrl ? (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/0 font-body text-[11px] font-semibold text-white opacity-0 transition-all group-hover:bg-black/45 group-hover:opacity-100">
+            {uploading ? "Uploading…" : "Change"}
+          </span>
+        ) : null}
 
-          {error ? (
-            <p className="mt-3 font-body text-[12px] font-semibold text-error">
-              {error}
-            </p>
-          ) : null}
-          {notice ? (
-            <p className="mt-3 font-body text-[12px] font-semibold text-primary">
-              {notice}
-            </p>
-          ) : null}
+        {busy ? (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
+            <span className="material-symbols-outlined animate-spin text-[24px]">
+              progress_activity
+            </span>
+          </span>
+        ) : null}
+
+        <input
+          id={inputId}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="sr-only"
+          disabled={busy}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void handleFile(file);
+          }}
+        />
+      </label>
+
+      {logoUrl ? (
+        <div className="mt-2 flex items-center justify-center gap-2">
+          <label
+            htmlFor={`${inputId}-replace`}
+            className={`cursor-pointer font-body text-[11px] font-semibold text-primary hover:underline ${
+              busy ? "pointer-events-none opacity-60" : ""
+            }`}
+          >
+            Replace
+            <input
+              id={`${inputId}-replace`}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="sr-only"
+              disabled={busy}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void handleFile(file);
+              }}
+            />
+          </label>
+          <span className="text-outline-variant">·</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={removeLogo}
+            className="font-body text-[11px] font-semibold text-on-surface-variant transition-colors hover:text-error disabled:opacity-60"
+          >
+            Remove
+          </button>
         </div>
-      </div>
-    </section>
+      ) : null}
+
+      {!compact ? (
+        <p className="mt-2 text-center font-body text-[11px] leading-snug text-on-surface-variant">
+          PNG, JPG, WebP or GIF · up to 5 MB
+        </p>
+      ) : null}
+
+      {error ? (
+        <p className="mt-2 text-center font-body text-[11px] font-semibold text-error">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="mt-2 text-center font-body text-[11px] font-semibold text-primary">
+          {notice}
+        </p>
+      ) : null}
+    </div>
   );
+}
+
+/** @deprecated Logo upload is on the settings identity hero. */
+export function BusinessLogoSettings() {
+  return null;
 }

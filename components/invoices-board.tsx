@@ -313,12 +313,32 @@ function InvoicePreviewDrawer({
                   <span className="font-numeric">{formatAud(invoice.finalPriceAud)}</span>
                 </div>
                 {invoice.depositRequest ? (
-                  <div className="mt-2 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
-                    <span>Balance due</span>
-                    <span className="font-numeric font-semibold text-on-surface">
-                      {formatAud(invoice.balanceDueAud)}
-                    </span>
-                  </div>
+                  <>
+                    <div className="mt-2 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                      <span>
+                        {invoice.depositRequest.paid
+                          ? "Deposit paid"
+                          : "Deposit requested"}
+                      </span>
+                      <span
+                        className={`font-numeric font-semibold ${
+                          invoice.depositRequest.paid
+                            ? "text-emerald-600"
+                            : "text-on-surface"
+                        }`}
+                      >
+                        {invoice.depositRequest.paid
+                          ? `−${formatAud(invoice.depositRequest.amountAud)}`
+                          : formatAud(invoice.depositRequest.amountAud)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between font-body text-[13px] text-on-surface-variant">
+                      <span>Balance due</span>
+                      <span className="font-numeric font-semibold text-on-surface">
+                        {formatAud(invoice.balanceDueAud)}
+                      </span>
+                    </div>
+                  </>
                 ) : null}
               </section>
 
@@ -351,7 +371,7 @@ function InvoicePreviewDrawer({
               {invoice.bookingId ? (
                 <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
                   <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-                    Linked booking
+                    Linked job
                   </p>
                   <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
                     {displayBookingCode({
@@ -370,7 +390,11 @@ function InvoicePreviewDrawer({
                 disabled={pdfLoading}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <span className="material-symbols-outlined text-[20px]">
+                <span
+                  className={`material-symbols-outlined text-[20px] ${
+                    pdfLoading ? "animate-spin" : ""
+                  }`}
+                >
                   {pdfLoading ? "progress_activity" : "picture_as_pdf"}
                 </span>
                 {pdfLoading ? "Loading PDF…" : "View invoice PDF"}
@@ -521,8 +545,15 @@ export function InvoicesBoard() {
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <Link
-            href="/dashboard/quotations"
+            href="/dashboard/invoices?new=1"
             className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[20px]">add</span>
+            Create invoice
+          </Link>
+          <Link
+            href="/dashboard/quotations"
+            className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
           >
             <span className="material-symbols-outlined text-[20px]">
               request_quote
@@ -530,13 +561,13 @@ export function InvoicesBoard() {
             View quotations
           </Link>
           <Link
-            href="/dashboard/inspection-visits"
+            href="/dashboard/requests"
             className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-5 py-2.5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
           >
             <span className="material-symbols-outlined text-[20px]">
               event_available
             </span>
-            Inspection visits
+            Requests
           </Link>
         </div>
       </div>
@@ -551,15 +582,24 @@ export function InvoicesBoard() {
           {filtered.length} invoice{filtered.length === 1 ? "" : "s"} · tap a
           card to open the side preview
         </p>
-        <Link
-          href="/dashboard/quotations"
-          className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-4 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            request_quote
-          </span>
-          From quotation
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/dashboard/quotations"
+            className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-4 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              request_quote
+            </span>
+            From quotation
+          </Link>
+          <Link
+            href="/dashboard/invoices?new=1"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            Create invoice
+          </Link>
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">

@@ -8,6 +8,30 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  async redirects() {
+    return [
+      {
+        source: "/dashboard/inspection-visits",
+        destination: "/dashboard/requests",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/inspection-visits/:path*",
+        destination: "/dashboard/requests/:path*",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/bookings",
+        destination: "/dashboard/jobs",
+        permanent: true,
+      },
+      {
+        source: "/dashboard/bookings/:path*",
+        destination: "/dashboard/jobs/:path*",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

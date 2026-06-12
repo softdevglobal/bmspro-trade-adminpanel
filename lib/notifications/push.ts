@@ -30,9 +30,9 @@ type OwnerPushInput = {
 /**
  * Best-effort FCM push to the owner's mobile device.
  *
- * Sends a data-only message so the mobile app does not show a system
- * notification while foreground (Firestore listener handles that). Background
- * delivery is handled by the app's FCM background handler.
+ * Includes a notification payload so Android/iOS show a system tray alert when
+ * the app is backgrounded or closed. Data fields are included for tap navigation.
+ * Foreground UI is handled separately by the mobile app's SSE/Firestore listeners.
  */
 export async function sendOwnerMobilePush(
   input: OwnerPushInput,
@@ -40,10 +40,17 @@ export async function sendOwnerMobilePush(
   try {
     const userSnap = await adminDb.collection("users").doc(input.ownerUid).get();
     const fcmToken = userSnap.data()?.fcmToken;
-    if (typeof fcmToken !== "string" || !fcmToken.trim()) return;
+    if (typeof fcmToken !== "string" || !fcmToken.trim()) {
+      console.warn("[push] No FCM token for owner", input.ownerUid);
+      return;
+    }
 
     await getMessaging(adminApp).send({
       token: fcmToken.trim(),
+      notification: {
+        title: input.title,
+        body: input.body,
+      },
       data: {
         ...input.data,
         title: input.title,
@@ -52,20 +59,30 @@ export async function sendOwnerMobilePush(
       },
       android: {
         priority: "high",
+        notification: {
+          channelId: "appointments",
+          priority: "high",
+          sound: "default",
+        },
       },
       apns: {
         headers: {
           "apns-priority": "10",
-          "apns-push-type": "background",
+          "apns-push-type": "alert",
         },
         payload: {
           aps: {
-            "content-available": 1,
+            alert: {
+              title: input.title,
+              body: input.body,
+            },
+            sound: "default",
+            badge: 1,
           },
         },
       },
     });
-  } catch {
-    /* push is best-effort */
+  } catch (error) {
+    console.error("[push] Owner mobile push failed:", error);
   }
 }

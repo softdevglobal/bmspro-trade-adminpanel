@@ -1,5 +1,6 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import {
   DiscountEditModal,
@@ -24,6 +25,7 @@ import {
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
 import {
+  formatAddress,
   type InspectionAddress,
   type InspectionRequestDetail,
   type InspectionRequestType,
@@ -311,6 +313,7 @@ export function CreateQuotationPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [clientOpen, setClientOpen] = useState(false);
+  const [serviceEditing, setServiceEditing] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [customer, setCustomer] = useState({
@@ -365,7 +368,7 @@ export function CreateQuotationPage() {
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
 
-  // When opened from an inspection visit (e.g. a visit run by staff who can't
+  // When opened from an request (e.g. a visit run by staff who can't
   // create quotations), bind the quotation to that existing visit and prefill
   // the customer/service instead of creating a brand-new standalone visit.
   const [inspectionRequestId, setInspectionRequestId] = useState<string | null>(
@@ -373,7 +376,9 @@ export function CreateQuotationPage() {
   );
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("inspectionRequestId")?.trim();
+    const id =
+      params.get("requestId")?.trim() ||
+      params.get("inspectionRequestId")?.trim();
     if (id) setInspectionRequestId(id);
   }, []);
 
@@ -395,6 +400,8 @@ export function CreateQuotationPage() {
       phone: boundInspection.customer.phone ?? "",
     });
     setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
+    setClientOpen(false);
+    setServiceEditing(false);
     if (
       boundInspection.requestType === "existing_service" &&
       boundInspection.serviceId
@@ -924,12 +931,17 @@ export function CreateQuotationPage() {
     inspectionRequestId,
   ]);
 
-  async function save() {
+  async function save(sendToCustomer = false) {
     if (!user) return;
     const validationError = validate();
     if (validationError) {
       setError(validationError);
       setTab("create");
+      return;
+    }
+    if (sendToCustomer && !customer.email.trim()) {
+      setError("Add a client email before sending.");
+      setTab("send");
       return;
     }
 
@@ -975,12 +987,13 @@ export function CreateQuotationPage() {
           : null,
       };
 
-      // Bound to an existing inspection visit → attach the quotation to it.
+      // Bound to an existing request → attach the quotation to it.
       // Otherwise create a standalone quotation (with its own visit record).
       const quotationBody = inspectionRequestId
-        ? { inspectionRequestId, ...sharedBody }
+        ? { requestId: inspectionRequestId, send: sendToCustomer, ...sharedBody }
         : {
             standalone: true,
+            send: sendToCustomer,
             requestType,
             serviceId:
               requestType === "existing_service" ? selectedServiceId : null,
@@ -1123,11 +1136,11 @@ export function CreateQuotationPage() {
             </Link>
             <button
               type="button"
-              onClick={() => void save()}
+              onClick={() => void save(false)}
               disabled={submitting}
               className="inline-flex min-w-[5.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
-              {submitting ? <SaveSpinner label="Saving…" /> : "Save"}
+              {submitting ? <SaveSpinner label="Saving…" /> : "Save draft"}
             </button>
           </div>
         </div>
@@ -1166,7 +1179,7 @@ export function CreateQuotationPage() {
             assignment_turned_in
           </span>
           <span>
-            This quotation will be attached to inspection visit{" "}
+            This quotation will be attached to request{" "}
             <span className="font-semibold">
               {boundInspection.requestCode ?? boundInspection.id}
             </span>
@@ -1190,7 +1203,44 @@ export function CreateQuotationPage() {
           {tab === "create" ? (
             <div className="mx-auto max-w-2xl space-y-3">
               {/* Client */}
-              {!clientOpen ? (
+              {boundInspection && !clientOpen ? (
+                <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                        Client
+                      </h2>
+                      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                        From the visit — saved with the quotation when you
+                        draft or send.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setClientOpen(true)}
+                      className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-1 font-body text-[14px] text-on-surface">
+                    <p className="font-semibold">
+                      {customer.fullName.trim() || "—"}
+                    </p>
+                    {customer.phone ? (
+                      <p className="text-on-surface-variant">{customer.phone}</p>
+                    ) : null}
+                    {customer.email ? (
+                      <p className="text-on-surface-variant">{customer.email}</p>
+                    ) : null}
+                    {formatAddress(address) ? (
+                      <p className="pt-1 text-[13px] text-on-surface-variant">
+                        {formatAddress(address)}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+              ) : !clientOpen ? (
                 <SectionLink
                   icon="person"
                   label="Add a client"
@@ -1260,16 +1310,15 @@ export function CreateQuotationPage() {
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="block">
                       <span className={LABEL_CLASS}>Mobile</span>
-                      <input
-                        type="tel"
+                      <AuPhoneInput
                         value={customer.phone}
-                        onChange={(e) =>
+                        onChange={(phone) =>
                           setCustomer((prev) => ({
                             ...prev,
-                            phone: e.target.value.replace(/\D/g, ""),
+                            phone,
                           }))
                         }
-                        className={INPUT_CLASS}
+                        className="mt-1"
                       />
                     </label>
                     <label className="block">
@@ -1356,13 +1405,71 @@ export function CreateQuotationPage() {
               )}
 
               {/* Service */}
+              {boundInspection &&
+              !serviceEditing &&
+              ((requestType === "existing_service" && selectedService) ||
+                (requestType === "custom_quote" &&
+                  customServiceTitle.trim().length > 0)) ? (
+                <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                      Service
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setServiceEditing(true)}
+                      className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
+                    >
+                      Change
+                    </button>
+                  </div>
+                  {requestType === "existing_service" && selectedService ? (
+                    <div className="mt-3 flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
+                        {selectedService.imageUrl ? (
+                          <img
+                            src={selectedService.imageUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
+                              {iconForBusinessType(selectedService.businessType)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-body text-[14px] font-semibold text-on-surface">
+                          {selectedService.name}
+                        </p>
+                        <p className="font-body text-[12px] text-on-surface-variant">
+                          {selectedService.businessType}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                      <p className="font-body text-[14px] font-semibold text-on-surface">
+                        {customServiceTitle.trim()}
+                      </p>
+                      {customServiceDescription.trim() ? (
+                        <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                          {customServiceDescription.trim()}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </section>
+              ) : (
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
                   Service
                 </h2>
                 <p className="mt-1 font-body text-[12px] text-on-surface-variant">
                   Choose an existing service or describe a custom job — same as
-                  an inspection request.
+                  an request.
                 </p>
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <RequestTypeCard
@@ -1497,6 +1604,7 @@ export function CreateQuotationPage() {
                   </div>
                 )}
               </section>
+              )}
 
               {/* Items */}
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
@@ -1972,13 +2080,13 @@ export function CreateQuotationPage() {
                 </label>
               </div>
               <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
-                The quotation PDF is emailed to the client when you click{" "}
-                <strong>Save</strong>. Use the Preview tab to check the document
-                before sending.
+                Use <strong>Save</strong> to keep a draft. The quotation PDF is
+                emailed to the client only when you click{" "}
+                <strong>Save &amp; send quotation</strong> below.
               </p>
               <button
                 type="button"
-                onClick={() => void save()}
+                onClick={() => void save(true)}
                 disabled={submitting || !customer.email.trim()}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
               >

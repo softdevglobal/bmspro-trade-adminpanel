@@ -66,7 +66,7 @@ function bookingTitle(booking: BookingDetail): string {
 
 function visitTitle(request: InspectionRequestDetail): string {
   return request.requestType === "existing_service"
-    ? (request.serviceName ?? "Inspection visit")
+    ? (request.serviceName ?? "Request")
     : (request.customRequest?.title ?? "Custom quote visit");
 }
 
@@ -142,7 +142,7 @@ export function computeDashboardOverview(input: {
         ongoingCount > 0
           ? `${ongoingCount} job${ongoingCount === 1 ? "" : "s"} in progress`
           : todayTotal > 0
-            ? `${todayBookings} booking${todayBookings === 1 ? "" : "s"} · ${todayVisits} visit${todayVisits === 1 ? "" : "s"}`
+            ? `${todayBookings} job${todayBookings === 1 ? "" : "s"} · ${todayVisits} visit${todayVisits === 1 ? "" : "s"}`
             : "Clear day ahead",
     },
     {
@@ -221,7 +221,7 @@ export function computeDashboardOverview(input: {
         dateLabel: formatShortDate(date),
         statusLabel:
           booking.status === "ongoing" ? "Ongoing" : "Scheduled",
-        href: "/dashboard/bookings",
+        href: "/dashboard/jobs",
       },
     });
   }
@@ -237,7 +237,7 @@ export function computeDashboardOverview(input: {
         title: visitTitle(request),
         dateLabel: formatShortDate(date),
         statusLabel: "Inspection",
-        href: `/dashboard/inspection-visits?request=${request.id}`,
+        href: `/dashboard/requests?request=${request.id}`,
       },
     });
   }
@@ -249,11 +249,11 @@ export function computeDashboardOverview(input: {
 
   let focusMessage: string | null = null;
   if (urgentPending > 0) {
-    focusMessage = `${urgentPending} new inspection request${urgentPending === 1 ? "" : "s"} need your review.`;
+    focusMessage = `${urgentPending} new request${urgentPending === 1 ? "" : "s"} need your review.`;
   } else if (unassignedTotal > 0) {
     focusMessage = `${unassignedTotal} job${unassignedTotal === 1 ? "" : "s"} still need someone assigned.`;
   } else if (ongoingCount > 0) {
-    focusMessage = `${ongoingCount} booking${ongoingCount === 1 ? " is" : "s are"} live on site right now.`;
+    focusMessage = `${ongoingCount} job${ongoingCount === 1 ? " is" : "s are"} live on site right now.`;
   } else if (todayTotal > 0) {
     focusMessage = `You have ${todayTotal} appointment${todayTotal === 1 ? "" : "s"} scheduled for today.`;
   }

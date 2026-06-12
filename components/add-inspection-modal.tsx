@@ -1,11 +1,7 @@
 "use client";
 
-import {
-  SlotDayPicker,
-  buildBlockedComboSet,
-  slotComboKey,
-  todayIso,
-} from "@/components/booking-slot-date-picker";
+import { AuPhoneInput } from "@/components/au-phone-input";
+import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import type {
   InspectionRequestType,
@@ -13,13 +9,13 @@ import type {
   InspectionTimeRange,
 } from "@/lib/inspection/types";
 import {
-  TIME_RANGES,
   TIME_RANGE_LABELS,
   formatAddress,
   formatSlotDate,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { toAuLocalPhoneDigits } from "@/lib/phone/au-phone";
 import {
   useCallback,
   useEffect,
@@ -54,7 +50,7 @@ const STEPS = [
   {
     title: "Preferred dates & times",
     subtitle:
-      "Pick up to 3 date and time options. You can confirm one later.",
+      "Pick up to 3 days first, then morning or afternoon for each.",
   },
   {
     title: "Contact details",
@@ -64,7 +60,7 @@ const STEPS = [
   {
     title: "Review & create",
     subtitle:
-      "Check everything below, then create the inspection request.",
+      "Check everything below, then create the request.",
   },
 ] as const;
 
@@ -362,102 +358,39 @@ function RequestTypeCard({
   );
 }
 
-function PreferredSlotRow({
+function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
+  return [...slots].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function PreferredDayTimeRow({
   slot,
-  index,
-  minDate,
-  allSlots,
-  onDateChange,
   onTimeChange,
-  onRemove,
-  canRemove,
 }: {
   slot: InspectionSlot;
-  index: number;
-  minDate: string;
-  allSlots: InspectionSlot[];
-  onDateChange: (iso: string) => void;
   onTimeChange: (range: InspectionTimeRange) => void;
-  onRemove: () => void;
-  canRemove: boolean;
 }) {
-  const [dayPage, setDayPage] = useState(0);
-
-  const blockedCombos = useMemo(() => {
-    const set = new Set<string>();
-    allSlots.forEach((entry, idx) => {
-      if (idx !== index && entry.date) {
-        set.add(slotComboKey(entry.date, entry.timeRange));
-      }
-    });
-    return set;
-  }, [allSlots, index]);
-
-  function selectDate(iso: string) {
-    onDateChange(iso);
-    if (blockedCombos.has(slotComboKey(iso, slot.timeRange))) {
-      for (const range of TIME_RANGES) {
-        if (!blockedCombos.has(slotComboKey(iso, range))) {
-          onTimeChange(range);
-          return;
-        }
-      }
-    }
-  }
-
   return (
     <li className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <span className="material-symbols-outlined text-[14px]">event</span>
-          </span>
-          Option {index + 1}
+      <p className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <span className="material-symbols-outlined text-[14px]">schedule</span>
         </span>
-        {canRemove ? (
-          <button
-            type="button"
-            onClick={onRemove}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container"
-          >
-            <span className="material-symbols-outlined text-[14px]">close</span>
-            Remove
-          </button>
-        ) : null}
-      </div>
-
+        {formatSlotDate(slot.date)}
+      </p>
       <div className="mt-3">
-        <SlotDayPicker
-          selectedIso={slot.date}
-          minDate={minDate}
-          dayPage={dayPage}
-          onDayPageChange={setDayPage}
-          onSelect={selectDate}
-          blockedCombos={blockedCombos}
-          dayStripLayout="fit"
-        />
-      </div>
-
-      <div className="mt-4">
         <span className={LABEL_CLASS}>Pick a time window</span>
         <div className="mt-2 grid grid-cols-2 gap-2">
           {TIME_OPTIONS.map((option) => {
             const checked = slot.timeRange === option.id;
-            const disabled =
-              !slot.date ||
-              blockedCombos.has(slotComboKey(slot.date, option.id));
             return (
               <button
                 type="button"
                 key={option.id}
-                disabled={disabled}
                 onClick={() => onTimeChange(option.id)}
                 className={`relative flex min-h-[4.5rem] flex-col justify-between rounded-2xl border px-3 py-2.5 text-left transition-all ${
-                  disabled
-                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
-                    : checked
-                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                      : "border-outline-variant/60 bg-white hover:border-primary/40"
+                  checked
+                    ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                    : "border-outline-variant/60 bg-white hover:border-primary/40"
                 }`}
               >
                 <span
@@ -492,11 +425,6 @@ function PreferredSlotRow({
             );
           })}
         </div>
-        {!slot.date ? (
-          <p className="mt-2 font-body text-[12px] text-on-surface-variant">
-            Choose a day above, then pick morning or afternoon.
-          </p>
-        ) : null}
       </div>
     </li>
   );
@@ -606,7 +534,7 @@ function InspectionPreview({
       <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
         A customer account will be created if this email is new. The customer
         receives a welcome email (with login details when applicable) and an
-        inspection request confirmation.
+        request confirmation.
       </p>
     </div>
   );
@@ -621,7 +549,7 @@ function createInitialForm() {
     customerNotes: "",
     budgetAud: "",
     address: { ...EMPTY_ADDRESS },
-    preferredSlots: [{ date: "", timeRange: "morning" as InspectionTimeRange }],
+    preferredSlots: [] as InspectionSlot[],
     customer: { fullName: "", email: "", phone: "" },
   };
 }
@@ -636,6 +564,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
+  const [workingDayPage, setWorkingDayPage] = useState(0);
 
   const activeServices = useMemo(
     () => services.filter((service) => service.isActive),
@@ -800,7 +729,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
     field: "fullName" | "email" | "phone",
     value: string,
   ) {
-    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    const next = field === "phone" ? toAuLocalPhoneDigits(value) : value;
     setForm((prev) => ({
       ...prev,
       customer: { ...prev.customer, [field]: next },
@@ -808,23 +737,27 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
     setError(null);
   }
 
-  function handleSlotDateChange(index: number, iso: string) {
+  const selectedPreferredDates = useMemo(
+    () => form.preferredSlots.map((slot) => slot.date).filter(Boolean),
+    [form.preferredSlots],
+  );
+
+  function togglePreferredDay(iso: string) {
     setForm((prev) => {
-      const taken = buildBlockedComboSet(
-        prev.preferredSlots.filter((_, idx) => idx !== index),
-      );
+      const exists = prev.preferredSlots.some((slot) => slot.date === iso);
+      if (exists) {
+        return {
+          ...prev,
+          preferredSlots: prev.preferredSlots.filter((slot) => slot.date !== iso),
+        };
+      }
+      if (prev.preferredSlots.length >= 3) return prev;
       return {
         ...prev,
-        preferredSlots: prev.preferredSlots.map((slot, idx) => {
-          if (idx !== index) return slot;
-          let timeRange = slot.timeRange;
-          if (iso && taken.has(slotComboKey(iso, timeRange))) {
-            const alt: InspectionTimeRange =
-              timeRange === "morning" ? "afternoon" : "morning";
-            if (!taken.has(slotComboKey(iso, alt))) timeRange = alt;
-          }
-          return { date: iso, timeRange };
-        }),
+        preferredSlots: sortPreferredSlots([
+          ...prev.preferredSlots,
+          { date: iso, timeRange: "morning" as InspectionTimeRange },
+        ]),
       };
     });
     setError(null);
@@ -838,29 +771,6 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
       ),
     }));
     setError(null);
-  }
-
-  function addSlot() {
-    setForm((prev) => {
-      if (prev.preferredSlots.length >= 3) return prev;
-      return {
-        ...prev,
-        preferredSlots: [
-          ...prev.preferredSlots,
-          { date: "", timeRange: "morning" as InspectionTimeRange },
-        ],
-      };
-    });
-  }
-
-  function removeSlot(index: number) {
-    setForm((prev) => ({
-      ...prev,
-      preferredSlots:
-        prev.preferredSlots.length === 1
-          ? prev.preferredSlots
-          : prev.preferredSlots.filter((_, idx) => idx !== index),
-    }));
   }
 
   function goNext() {
@@ -907,7 +817,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
 
     try {
       const token = await user.getIdToken();
-      const response = await fetch("/api/inspection-requests", {
+      const response = await fetch("/api/requests", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -945,7 +855,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
       };
 
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Could not create inspection request.");
+        throw new Error(payload.error ?? "Could not create request.");
       }
 
       setSuccess(true);
@@ -954,7 +864,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Could not create inspection request.",
+          : "Could not create request.",
       );
     } finally {
       setSubmitting(false);
@@ -1023,7 +933,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                 </span>
               </span>
               <h3 className="mt-4 font-display text-headline-sm font-semibold text-on-surface">
-                Inspection request created
+                Request created
               </h3>
               <p className="mt-2 max-w-sm font-body text-body-md text-on-surface-variant">
                 The request is now on your board. You can review it, assign an
@@ -1396,7 +1306,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                   <StepHeader
                     step={3}
                     title={current.title}
-                    hint={`${form.preferredSlots.length} of 3`}
+                    hint={`${selectedPreferredDates.length} of 3 days`}
                   />
                   {fieldErrorMessage("preferredSlots") ? (
                     <FieldFeedback
@@ -1404,38 +1314,56 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                       errorId="preferredSlots-error"
                     />
                   ) : null}
-                  <ul className="space-y-3">
-                    {form.preferredSlots.map((slot, index) => (
-                      <PreferredSlotRow
-                        key={index}
-                        slot={slot}
-                        index={index}
-                        minDate={minDate}
-                        allSlots={form.preferredSlots}
-                        onDateChange={(iso) => {
-                          touchField("preferredSlots");
-                          handleSlotDateChange(index, iso);
-                        }}
-                        onTimeChange={(range) => {
-                          touchField("preferredSlots");
-                          updateSlotTime(index, range);
-                        }}
-                        onRemove={() => removeSlot(index)}
-                        canRemove={form.preferredSlots.length > 1}
-                      />
-                    ))}
-                  </ul>
-                  {form.preferredSlots.length < 3 ? (
-                    <button
-                      type="button"
-                      onClick={addSlot}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-outline-variant px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        add
+
+                  <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                    <SlotDayPicker
+                      mode="multiple"
+                      selectedIsos={selectedPreferredDates}
+                      maxSelections={3}
+                      minDate={minDate}
+                      dayPage={workingDayPage}
+                      onDayPageChange={setWorkingDayPage}
+                      onToggle={(iso) => {
+                        touchField("preferredSlots");
+                        togglePreferredDay(iso);
+                      }}
+                      label="Pick up to 3 days"
+                      dayStripLayout="fit"
+                    />
+                    {selectedPreferredDates.length > 0 ? (
+                      <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                        Tap a selected day again to remove it.
+                      </p>
+                    ) : (
+                      <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                        Choose at least one day to continue.
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedPreferredDates.length > 0 ? (
+                    <div>
+                      <span className={LABEL_CLASS}>
+                        Pick a time for each day
                       </span>
-                      Add another date
-                    </button>
+                      <ul className="mt-2 space-y-3">
+                        {sortPreferredSlots(form.preferredSlots).map((slot) => {
+                          const slotIndex = form.preferredSlots.findIndex(
+                            (entry) => entry.date === slot.date,
+                          );
+                          return (
+                            <PreferredDayTimeRow
+                              key={slot.date}
+                              slot={slot}
+                              onTimeChange={(range) => {
+                                touchField("preferredSlots");
+                                updateSlotTime(slotIndex, range);
+                              }}
+                            />
+                          );
+                        })}
+                      </ul>
+                    </div>
                   ) : null}
                 </div>
               ) : null}
@@ -1481,21 +1409,11 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                     </label>
                     <label className="block">
                       <span className={LABEL_CLASS}>Mobile number</span>
-                      <input
-                        type="tel"
-                        inputMode="numeric"
+                      <AuPhoneInput
                         value={form.customer.phone}
-                        onChange={(event) =>
-                          updateCustomer("phone", event.target.value)
-                        }
-                        onBlur={() => touchField("phone")}
-                        placeholder="0400000000"
+                        onChange={(value) => updateCustomer("phone", value)}
                         autoComplete="off"
-                        className={inputClassName(showFieldError("phone"))}
-                        aria-invalid={showFieldError("phone")}
-                        aria-describedby={
-                          fieldErrorMessage("phone") ? "phone-error" : undefined
-                        }
+                        className="mt-1"
                       />
                       <FieldFeedback
                         error={fieldErrorMessage("phone")}

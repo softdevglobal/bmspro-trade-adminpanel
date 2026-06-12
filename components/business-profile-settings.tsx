@@ -1,15 +1,17 @@
 "use client";
 
+import { AuPhoneInput } from "@/components/au-phone-input";
 import type { ProfileFormState } from "@/components/business-settings-panel";
+import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useState } from "react";
 
 const INPUT_CLASS =
-  "mt-2 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+  "mt-2 w-full rounded-xl border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
 const READONLY_INPUT_CLASS =
-  "mt-2 w-full cursor-default rounded-lg border border-outline-variant/70 bg-surface-container/80 px-3 py-2.5 font-body text-[14px] text-on-surface-variant";
+  "mt-2 w-full cursor-default rounded-xl border border-outline-variant/70 bg-surface-container/80 px-3 py-2.5 font-body text-[14px] text-on-surface-variant";
 
 type Props = {
   form: ProfileFormState;
@@ -98,29 +100,20 @@ export function BusinessProfileSettings({
     user?.email?.trim() || form.businessEmail.trim() || "—";
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-card-padding">
-      <div className="flex items-start gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <span className="material-symbols-outlined">store</span>
-        </div>
-        <div>
-          <h3 className="font-display text-headline-sm font-semibold text-on-surface">
-            Business profile
-          </h3>
-          <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Company details shown on your booking page, quotations, and invoices.
-          </p>
-        </div>
-      </div>
-
+    <SettingsSection
+      icon="store"
+      title="Business profile"
+      description="Company details shown on your public page, quotations, and invoices."
+    >
       {loading ? (
-        <p className="mt-5 font-body text-[13px] text-on-surface-variant">
+        <p className="font-body text-[13px] text-on-surface-variant">
           Loading business profile…
         </p>
       ) : (
-        <div className="mt-5 space-y-4">
-          <p className="font-body text-[12px] text-on-surface-variant">
-            Editing profile for <span className="font-semibold">{displayName}</span>
+        <div className="space-y-5">
+          <p className="rounded-xl bg-surface-container-low px-3 py-2 font-body text-[12px] text-on-surface-variant">
+            Editing profile for{" "}
+            <span className="font-semibold text-on-surface">{displayName}</span>
           </p>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -174,14 +167,12 @@ export function BusinessProfileSettings({
               <span className="font-body text-[13px] font-semibold text-on-surface">
                 Business phone
               </span>
-              <input
-                type="tel"
+              <AuPhoneInput
                 value={form.businessPhone}
                 disabled={saving}
-                onChange={(e) => updateField("businessPhone", e.target.value)}
-                className={INPUT_CLASS}
-                maxLength={30}
-                placeholder="04xx xxx xxx"
+                onChange={(value) => updateField("businessPhone", value)}
+                size="md"
+                className="mt-1"
               />
             </label>
 
@@ -201,12 +192,12 @@ export function BusinessProfileSettings({
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 border-t border-outline-variant/50 pt-4 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
               disabled={saving}
               onClick={() => void handleSave()}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {saving ? "Saving…" : "Save business profile"}
             </button>
@@ -220,6 +211,6 @@ export function BusinessProfileSettings({
           ) : null}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }

@@ -6,7 +6,7 @@ export default function SettingsPage() {
   return (
     <DashboardShell
       title="Settings"
-      subtitle="Booking link, business profile, branding, tax, quotation defaults, and account security."
+      subtitle="Manage your business profile, public link, tax, quotation defaults, and account security."
     >
       <BusinessOwnerGuard>
         <BusinessSettingsPanel />

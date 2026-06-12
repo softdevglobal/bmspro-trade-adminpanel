@@ -190,7 +190,7 @@ function BookingPreviewDrawer({
             key="booking-drawer"
             role="dialog"
             aria-modal="true"
-            aria-label={`Booking preview: ${displayBookingCode(booking)}`}
+            aria-label={`Job preview: ${displayBookingCode(booking)}`}
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
@@ -473,7 +473,7 @@ function BookingPreviewContent({
     setActionError(null);
     try {
       const token = await user.getIdToken();
-      const response = await fetch(`/api/bookings/${booking.id}`, {
+      const response = await fetch(`/api/jobs/${booking.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -511,7 +511,7 @@ function BookingPreviewContent({
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant/60 px-4 py-4 sm:px-5">
         <div className="min-w-0 flex-1">
           <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
-            Booking preview
+            Job preview
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
@@ -760,7 +760,7 @@ function BookingPreviewContent({
             Linked visit
           </p>
           <Link
-            href={`/dashboard/inspection-visits?request=${booking.inspectionRequestId}`}
+            href={`/dashboard/requests?request=${booking.inspectionRequestId}`}
             onClick={onClose}
             className="mt-2 flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2.5 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-surface-container"
           >
@@ -792,7 +792,7 @@ function BookingPreviewContent({
   );
 }
 
-export function BookingsBoard() {
+export function JobsBoard() {
   const { status: authStatus } = useAuth();
   const { bookings, loading, error } = useBookings();
   const { staff } = useBusinessStaffSummary();
@@ -850,20 +850,20 @@ export function BookingsBoard() {
           assignment
         </span>
         <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
-          No job bookings yet
+          No jobs yet
         </p>
         <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
-          After an inspection visit is complete and you have sent a quotation,
-          use Create booking on the completed visit to schedule the job here.
+          After a request is complete and you have sent a quotation,
+          use Create job on the completed visit to schedule the job here.
         </p>
         <Link
-          href="/dashboard/inspection-visits"
+          href="/dashboard/requests"
           className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
         >
           <span className="material-symbols-outlined text-[20px]">
             event_available
           </span>
-          Inspection visits
+          Requests
         </Link>
       </div>
     );
@@ -872,7 +872,7 @@ export function BookingsBoard() {
   return (
     <>
       <p className="mb-3 font-body text-[12px] text-on-surface-variant">
-        {displayBookings.length} booking
+        {displayBookings.length} job
         {displayBookings.length === 1 ? "" : "s"} · tap a card to open the side
         preview
       </p>

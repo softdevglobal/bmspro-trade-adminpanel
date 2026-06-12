@@ -60,8 +60,8 @@ export async function sendCustomerWelcomeEmail(
     input.context === "quotation"
       ? "view quotations, request visits, and track your jobs"
       : input.context === "inspection"
-        ? "track your inspection visits and proposed times"
-        : "request inspection visits, track proposed times, and see confirmed visit details";
+        ? "track your requests and proposed times"
+        : "submit requests, track proposed times, and see confirmed visit details";
 
   const html = renderEmail({
     eyebrow: "Account created",

@@ -56,3 +56,23 @@ export type CreateInvoiceInput = {
   /** When true, marks the invoice as sent and emails the customer. */
   send?: boolean;
 };
+
+/**
+ * Direct invoice (no existing quotation). The server creates the full
+ * record chain — completed request, accepted quotation, completed job —
+ * so the invoice reads like any other finished job.
+ */
+export type CreateDirectInvoiceInput = Omit<CreateInvoiceInput, "quotationId"> & {
+  customer: { fullName: string; email: string; phone: string };
+  address: {
+    street?: string;
+    suburb?: string;
+    state?: string;
+    postcode?: string;
+  };
+  serviceTitle?: string;
+  description?: string | null;
+  requestType?: "existing_service" | "custom_quote";
+  serviceId?: string | null;
+  customRequest?: { title: string; description: string } | null;
+};

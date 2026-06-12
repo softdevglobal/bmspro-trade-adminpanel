@@ -153,20 +153,20 @@ export function BookingLinkCard({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
         <a
           href={path}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 font-mono text-[12px] text-primary transition-colors hover:bg-surface-container"
+          className="inline-flex min-w-0 items-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-mono text-[12px] text-primary transition-colors hover:bg-surface-container"
         >
-          <span className="material-symbols-outlined text-[16px]">link</span>
-          <span className="max-w-[260px] truncate">{display}</span>
+          <span className="material-symbols-outlined shrink-0 text-[16px]">link</span>
+          <span className="min-w-0 truncate">{display}</span>
         </a>
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-label-bold text-on-primary transition-colors hover:bg-primary/90"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-body text-label-bold text-on-primary transition-colors hover:bg-primary/90"
         >
           <span className="material-symbols-outlined text-[18px]">
             {copied ? "check" : "content_copy"}
@@ -179,7 +179,7 @@ export function BookingLinkCard({
 
   if (variant === "permanent") {
     return (
-      <section className="overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary-fixed via-primary-fixed-dim to-surface-container-lowest p-card-padding">
+      <section className="overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary-fixed via-primary-fixed-dim to-surface-container-lowest px-4 py-4 shadow-sm sm:px-6 sm:py-5">
         {cardContent}
       </section>
     );

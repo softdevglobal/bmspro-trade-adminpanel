@@ -13,3 +13,18 @@ export function quotationJobActionsLocked(quotation: QuotationDetail): boolean {
     quotation.bookingStatus === "completed" || Boolean(quotation.bookingId)
   );
 }
+
+/**
+ * A sent quotation cannot be converted into a job or an invoice until the
+ * customer has accepted it.
+ */
+export function quotationAwaitingCustomerAcceptance(
+  quotation: Pick<
+    QuotationDetail,
+    "status" | "bookingId" | "customerDecision"
+  >,
+): boolean {
+  if (quotation.status !== "sent") return false;
+  if (quotation.bookingId) return false;
+  return quotation.customerDecision !== "accepted";
+}

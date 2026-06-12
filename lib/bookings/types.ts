@@ -7,7 +7,7 @@ import type {
   InspectionSlot,
 } from "@/lib/inspection/types";
 
-export const BOOKING_COLLECTION = "bookings";
+export const JOBS_COLLECTION = "jobs";
 
 export const BOOKING_STATUSES = [
   "awaiting",
@@ -19,7 +19,7 @@ export const BOOKING_STATUSES = [
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
-  awaiting: "Awaiting booking",
+  awaiting: "Awaiting job",
   scheduled: "Scheduled",
   ongoing: "Ongoing",
   cancelled: "Cancelled",
@@ -71,6 +71,7 @@ export type BookingDetail = {
   ownerNote: string | null;
   quotation: InspectionQuotationSummary | null;
   visitStartedAt: number | null;
+  visitEndedAt: number | null;
   bookingStartedAt: number | null;
   /** Auto-completed booking created when a quotation is invoiced without a job visit. */
   completedFromInvoice: boolean;

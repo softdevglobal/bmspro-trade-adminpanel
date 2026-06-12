@@ -217,86 +217,91 @@ export function AuditLogView({
     [processedLogs, category, isTenantOwner],
   );
 
+  const categoryOptions = useMemo(() => {
+    const categories = AUDIT_CATEGORIES.filter((cat) => {
+      if (cat === "staff") return isTenantOwner;
+      if (isCustomer) {
+        return (
+          cat === "auth" ||
+          cat === "inspection" ||
+          cat === "customer" ||
+          cat === "booking" ||
+          cat === "quotation"
+        );
+      }
+      return true;
+    });
+
+    return [
+      { value: "all" as const, label: "All categories", count: stats.total },
+      ...categories.map((cat) => ({
+        value: cat,
+        label: CATEGORY_LABELS[cat],
+        count: stats.byCategory.get(cat) ?? 0,
+      })),
+    ];
+  }, [isTenantOwner, isCustomer, stats]);
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap gap-2">
-          <CategoryChip
-            label="All"
-            icon="apps"
-            active={category === "all"}
-            count={stats.total}
-            onClick={() => setCategory("all")}
-          />
-          {AUDIT_CATEGORIES.filter((cat) => {
-            // Staff chip: business owners only (hidden for super admin)
-            if (cat === "staff") return isTenantOwner;
-            if (isCustomer) {
-              return (
-                cat === "auth" ||
-                cat === "inspection" ||
-                cat === "customer" ||
-                cat === "booking" ||
-                cat === "quotation"
-              );
-            }
-            return true;
-          }).map((cat) => (
-            <CategoryChip
-              key={cat}
-              label={CATEGORY_LABELS[cat]}
-              icon={CATEGORY_ICONS[cat]}
-              active={category === cat}
-              count={stats.byCategory.get(cat) ?? 0}
-              onClick={() => setCategory(cat)}
-            />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <AuditFilterSelect
+          value={category}
+          onChange={(value) =>
+            setCategory(value as AuditCategory | "all")
+          }
+          ariaLabel="Filter by category"
+          className="sm:w-48"
+        >
+          {categoryOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label} ({option.count})
+            </option>
           ))}
-        </div>
+        </AuditFilterSelect>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-          {isPlatform ? (
-            <AuditFilterSelect
-              value={businessId}
-              onChange={(value) => setBusinessId(value)}
-              ariaLabel="Filter by tenant"
-              className="sm:w-52"
-            >
-              <option value="">All tenants</option>
-              {tenantOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.businessName}
-                </option>
-              ))}
-            </AuditFilterSelect>
-          ) : null}
-
+        {isPlatform ? (
           <AuditFilterSelect
-            value={source}
-            onChange={(value) => setSource(value as AuditSource | "all")}
-            ariaLabel="Filter by source"
-            className="sm:w-44"
+            value={businessId}
+            onChange={(value) => setBusinessId(value)}
+            ariaLabel="Filter by tenant"
+            className="sm:w-52"
           >
-            <option value="all">All sources</option>
-            <option value="customer_portal">Customer portal</option>
-            <option value="booking_engine">Booking engine</option>
-            {!isCustomer ? (
-              <>
-                <option value="admin_panel">Admin panel</option>
-                <option value="mobile_app">Mobile app</option>
-              </>
-            ) : null}
-            <option value="system">System</option>
+            <option value="">All tenants</option>
+            {tenantOptions.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.businessName}
+              </option>
+            ))}
           </AuditFilterSelect>
+        ) : null}
 
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
-          >
-            <span className="material-symbols-outlined text-[18px]">refresh</span>
-            Refresh
-          </button>
-        </div>
+        <AuditFilterSelect
+          value={source}
+          onChange={(value) => setSource(value as AuditSource | "all")}
+          ariaLabel="Filter by source"
+          className="sm:w-44"
+        >
+          <option value="all">All sources</option>
+          <option value="customer_portal">Customer portal</option>
+          <option value="booking_engine">Booking engine</option>
+          {!isCustomer ? (
+            <>
+              <option value="admin_panel">Admin panel</option>
+              <option value="mobile_app">Mobile app</option>
+            </>
+          ) : null}
+          <option value="system">System</option>
+        </AuditFilterSelect>
+
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-lowest px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+        >
+          <span className="material-symbols-outlined text-[18px]">refresh</span>
+          Refresh
+        </button>
       </div>
 
       {errorMessage && (
@@ -428,40 +433,3 @@ function AuditFilterSelect({
   );
 }
 
-function CategoryChip({
-  label,
-  icon,
-  active,
-  count,
-  onClick,
-}: {
-  label: string;
-  icon: string;
-  active: boolean;
-  count: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        active
-          ? "flex h-9 items-center gap-1.5 rounded-full bg-primary px-3 font-body text-[13px] font-semibold text-on-primary"
-          : "flex h-9 items-center gap-1.5 rounded-full border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-semibold text-on-surface hover:bg-surface-container-low"
-      }
-    >
-      <span className="material-symbols-outlined text-[16px]">{icon}</span>
-      {label}
-      <span
-        className={
-          active
-            ? "rounded-full bg-on-primary/20 px-1.5 py-0.5 text-[11px]"
-            : "rounded-full bg-surface-variant px-1.5 py-0.5 text-[11px] text-on-surface-variant"
-        }
-      >
-        {count}
-      </span>
-    </button>
-  );
-}

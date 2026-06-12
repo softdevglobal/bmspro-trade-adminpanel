@@ -9,6 +9,7 @@ import {
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
+import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
@@ -44,6 +45,7 @@ import {
 } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function CreatedSourcePill({
@@ -139,11 +141,13 @@ function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
   return (
     !!request.quotation &&
     !request.bookingId &&
-    (request.status === "completed" || request.status === "awaiting_decision")
+    (request.status === "scheduled" ||
+      request.status === "completed" ||
+      request.status === "awaiting_decision")
   );
 }
 
-export function InspectionVisitsBoard() {
+export function RequestsBoard() {
   const { user, status: authStatus } = useAuth();
   const {
     requests,
@@ -247,7 +251,7 @@ export function InspectionVisitsBoard() {
         <div
           className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-1 sm:flex-wrap sm:gap-2"
           role="tablist"
-          aria-label="Filter inspection requests"
+          aria-label="Filter requests"
         >
           {FILTER_TABS.map((tab) => (
             <button
@@ -376,7 +380,7 @@ function EmptyState({ filter }: { filter: StatusFilter }) {
       </span>
       <p className="mt-3 font-display text-[18px] font-semibold text-on-surface">
         {filter === "all"
-          ? "No inspection requests yet"
+          ? "No requests yet"
           : "Nothing in this view"}
       </p>
       <p className="mt-1 font-body text-body-md text-on-surface-variant">
@@ -426,7 +430,14 @@ function RequestCard({
     request.scheduledStartTime,
     request.scheduledEndTime,
   );
-  const showPostQuoteActions = canFollowUpAfterQuotation(request);
+  const cardQuotationAwaitingCustomer = Boolean(
+    request.quotation &&
+      request.quotation.status !== "draft" &&
+      !request.bookingId &&
+      request.quotation.customerDecision !== "accepted",
+  );
+  const showPostQuoteActions =
+    canFollowUpAfterQuotation(request) && !cardQuotationAwaitingCustomer;
   const hasLinkedBooking = Boolean(request.bookingId);
 
   return (
@@ -554,6 +565,19 @@ function RequestCard({
           ) : null}
           {request.bookingStatus ? (
             <BookingStatusPill status={request.bookingStatus} />
+          ) : null}
+          {cardQuotationAwaitingCustomer ? (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
+                request.quotation?.customerDecision === "rejected"
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
+            >
+              {request.quotation?.customerDecision === "rejected"
+                ? "Customer rejected"
+                : "Awaiting customer"}
+            </span>
           ) : null}
           {showPostQuoteActions ? (
             <div
@@ -708,6 +732,7 @@ function DrawerReviewFooter({
   onCancel,
   onCreateBooking,
   onAwaitingDecision,
+  onQuotationDecided,
 }: {
   request: InspectionRequestDetail;
   submitting: boolean;
@@ -719,9 +744,16 @@ function DrawerReviewFooter({
   onCancel: () => void;
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
+  onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
   const [pdfOpen, setPdfOpen] = useState(false);
   const followUp = canFollowUpAfterQuotation(request);
+  const quotationAwaitingCustomer = Boolean(
+    request.quotation &&
+      request.quotation.status !== "draft" &&
+      !request.bookingId &&
+      request.quotation.customerDecision !== "accepted",
+  );
 
   if (request.quotation) {
     const headline =
@@ -760,12 +792,56 @@ function DrawerReviewFooter({
         )}
         {followUp ? (
           <>
+            {quotationAwaitingCustomer ? (
+              <div
+                className={`flex items-start gap-2 rounded-xl border p-3 ${
+                  request.quotation.customerDecision === "rejected"
+                    ? "border-rose-200 bg-rose-50/80"
+                    : "border-amber-200 bg-amber-50/80"
+                }`}
+              >
+                <span
+                  className={`material-symbols-outlined shrink-0 text-[18px] ${
+                    request.quotation.customerDecision === "rejected"
+                      ? "text-rose-600"
+                      : "text-amber-600"
+                  }`}
+                >
+                  {request.quotation.customerDecision === "rejected"
+                    ? "cancel"
+                    : "hourglass_top"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`font-body text-[12px] font-semibold ${
+                      request.quotation.customerDecision === "rejected"
+                        ? "text-rose-800"
+                        : "text-amber-800"
+                    }`}
+                  >
+                    {request.quotation.customerDecision === "rejected"
+                      ? "The customer rejected this quotation, so a job cannot be created from it."
+                      : "Waiting for the customer to accept the quotation. Creating a job unlocks once they accept."}
+                  </p>
+                  <QuotationOwnerDecisionButtons
+                    className="mt-2.5"
+                    quotationId={request.quotation.id}
+                    status={
+                      request.quotation.status === "draft" ? "draft" : "sent"
+                    }
+                    bookingId={request.bookingId}
+                    customerDecision={request.quotation.customerDecision}
+                    onDecided={onQuotationDecided}
+                  />
+                </div>
+              </div>
+            ) : null}
             <DrawerFooterAction
               icon="assignment"
-              label="Create booking"
+              label="Create job"
               variant="primary"
               onClick={onCreateBooking}
-              disabled={submitting}
+              disabled={submitting || quotationAwaitingCustomer}
             />
             {request.status === "completed" ? (
               <DrawerFooterAction
@@ -798,13 +874,13 @@ function DrawerReviewFooter({
     <div className="border-t border-outline-variant/40 pt-4">
       {needsOwnerQuotation ? (
         <Link
-          href={`/dashboard/quotations/new?inspectionRequestId=${encodeURIComponent(request.id)}`}
+          href={`/dashboard/quotations/new?requestId=${encodeURIComponent(request.id)}`}
           className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
         >
           <span className="material-symbols-outlined text-[18px]">
             request_quote
           </span>
-          Create quotation
+          Visit complete and create quotation
         </Link>
       ) : null}
       {request.status === "scheduled" ? (
@@ -827,7 +903,7 @@ function DrawerReviewFooter({
                 />
                 <DrawerFooterAction
                   icon="task_alt"
-                  label="Mark done"
+                  label="Visit complete and create quotation"
                   onClick={onComplete}
                   disabled={submitting}
                 />
@@ -945,6 +1021,7 @@ function DetailDrawerContent({
   onUpdated: (next: InspectionRequestDetail) => void;
 }) {
   const { user } = useAuth();
+  const router = useRouter();
   const [mode, setMode] = useState<DrawerMode>(initialMode ?? "review");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1041,6 +1118,16 @@ function DetailDrawerContent({
     });
   }
 
+  function openCreateQuotation() {
+    if (request.quotation) {
+      router.push("/dashboard/quotations");
+      return;
+    }
+    router.push(
+      `/dashboard/quotations/new?requestId=${encodeURIComponent(request.id)}`,
+    );
+  }
+
   async function callAction(body: Record<string, unknown>) {
     if (!user) return;
     setSubmitting(true);
@@ -1048,7 +1135,7 @@ function DetailDrawerContent({
     try {
       const token = await user.getIdToken();
       const response = await fetch(
-        `/api/inspection-requests/${request.id}`,
+        `/api/requests/${request.id}`,
         {
           method: "PATCH",
           headers: {
@@ -1068,6 +1155,7 @@ function DetailDrawerContent({
       }
       const next = data.request;
       onUpdated(next);
+
       if (
         next.status === "scheduled" &&
         !next.assignedTo &&
@@ -1127,7 +1215,7 @@ function DetailDrawerContent({
       <header className="flex shrink-0 items-start justify-between gap-2 border-b border-outline-variant/40 px-4 py-2.5 sm:px-5 sm:py-3">
         <div className="min-w-0">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {inBookingMode ? "Create booking" : "Inspection request"}
+            {inBookingMode ? "Create job" : "Request"}
           </p>
           <p className="mt-0.5">
             <InspectionRequestCode
@@ -1216,7 +1304,10 @@ function DetailDrawerContent({
                 </p>
               </div>
             ) : null}
-            <QuotationSection requestId={request.id} />
+            <QuotationSection
+              requestId={request.id}
+              mirroredDecision={request.quotation?.customerDecision ?? null}
+            />
             <BookingDetailsSection
               bookingId={request.bookingId}
               bookingCode={request.bookingCode}
@@ -1397,10 +1488,21 @@ function DetailDrawerContent({
             onPropose={() => openAction("propose")}
             onSetTime={() => openAction("set_time")}
             onAssign={() => openAction("assign")}
-            onComplete={() => void callAction({ action: "complete" })}
+            onComplete={openCreateQuotation}
             onCancel={() => openAction("cancel")}
             onCreateBooking={() => openAction("convert_booking")}
             onAwaitingDecision={() => openAction("awaiting_decision")}
+            onQuotationDecided={(decision) => {
+              if (!request.quotation) return;
+              onUpdated({
+                ...request,
+                quotation: {
+                  ...request.quotation,
+                  customerDecision: decision,
+                  customerDecisionAt: Date.now(),
+                },
+              });
+            }}
           />
         ) : null}
       </div>
@@ -1415,6 +1517,8 @@ function DetailDrawerContent({
 type QuotationView = {
   id: string;
   quotationCode: string | null;
+  status: "draft" | "sent";
+  customerDecision: "accepted" | "rejected" | null;
   bookingId: string | null;
   bookingCode: string | null;
   bookingStatus: BookingStatus | null;
@@ -1433,8 +1537,14 @@ function formatAud(value: number): string {
   return `Aus $${value.toFixed(2)}`;
 }
 
-/** Loads and displays quotations created for this inspection request. */
-function QuotationSection({ requestId }: { requestId: string }) {
+/** Loads and displays quotations created for this request. */
+function QuotationSection({
+  requestId,
+  mirroredDecision,
+}: {
+  requestId: string;
+  mirroredDecision: "accepted" | "rejected" | null;
+}) {
   const { user } = useAuth();
   const [quotations, setQuotations] = useState<QuotationView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1449,7 +1559,7 @@ function QuotationSection({ requestId }: { requestId: string }) {
       try {
         const token = await user.getIdToken();
         const response = await fetch(
-          `/api/quotations?inspectionRequestId=${encodeURIComponent(requestId)}`,
+          `/api/quotations?requestId=${encodeURIComponent(requestId)}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         const data = (await response.json()) as {
@@ -1515,15 +1625,27 @@ function QuotationSection({ requestId }: { requestId: string }) {
       </p>
       <div className="mt-2 space-y-2">
         {quotations.map((quotation) => (
-          <QuotationCard key={quotation.id} quotation={quotation} />
+          <QuotationCard
+            key={quotation.id}
+            quotation={quotation}
+            mirroredDecision={mirroredDecision}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function QuotationCard({ quotation }: { quotation: QuotationView }) {
+function QuotationCard({
+  quotation,
+  mirroredDecision,
+}: {
+  quotation: QuotationView;
+  mirroredDecision: "accepted" | "rejected" | null;
+}) {
   const [pdfOpen, setPdfOpen] = useState(false);
+  const effectiveDecision =
+    quotation.customerDecision ?? mirroredDecision;
   const title = quotation.serviceTitle || "Quotation";
   const downloadFilename = `quotation-${title
     .replace(/[^a-z0-9]+/gi, "-")
@@ -1548,6 +1670,21 @@ function QuotationCard({ quotation }: { quotation: QuotationView }) {
             ) : null}
             {quotation.bookingStatus ? (
               <BookingStatusPill status={quotation.bookingStatus} />
+            ) : null}
+            {quotation.status === "sent" && !quotation.bookingId ? (
+              effectiveDecision === "accepted" ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                  Customer accepted
+                </span>
+              ) : effectiveDecision === "rejected" ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider text-rose-700">
+                  Customer rejected
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                  Awaiting customer
+                </span>
+              )
             ) : null}
           </div>
           <p className="mt-1 truncate font-display text-[14px] font-semibold text-on-surface">
@@ -1681,7 +1818,7 @@ function BookingDetailsSection({
       setError(null);
       try {
         const token = await authedUser.getIdToken();
-        const response = await fetch(`/api/bookings/${bookingId}`, {
+        const response = await fetch(`/api/jobs/${bookingId}`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         });
@@ -1718,7 +1855,7 @@ function BookingDetailsSection({
     return (
       <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          Booking
+          Job
         </p>
         <p className="mt-1.5 flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
           <span className="material-symbols-outlined animate-spin text-[16px]">
@@ -1734,7 +1871,7 @@ function BookingDetailsSection({
     return (
       <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
         <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-          Booking
+          Job
         </p>
         {bookingCode ? (
           <p className="mt-1 font-mono text-[12px] font-semibold text-primary">
@@ -1762,7 +1899,7 @@ function BookingDetailsSection({
   return (
     <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
-        Booking
+        Job
       </p>
       <div className="mt-2 rounded-xl border border-primary/20 bg-surface-container-lowest p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -2407,7 +2544,7 @@ function SetTimeForm({
   );
 }
 
-/** Earliest selectable job day: inspection visit date (inclusive), then later days only. */
+/** Earliest selectable job day: request date (inclusive), then later days only. */
 function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
   const scheduled = request.scheduledSlot?.date?.trim();
   if (scheduled) return scheduled;
@@ -3099,7 +3236,11 @@ function FormActions({
         disabled={disabled}
         className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        <span className="material-symbols-outlined text-[18px]">
+        <span
+          className={`material-symbols-outlined text-[18px] ${
+            disabled ? "animate-spin" : ""
+          }`}
+        >
           {disabled ? "progress_activity" : confirmIcon}
         </span>
         {disabled ? "Saving…" : confirmLabel}

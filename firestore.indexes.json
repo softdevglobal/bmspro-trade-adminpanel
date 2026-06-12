@@ -41,7 +41,7 @@
       ]
     },
     {
-      "collectionGroup": "inspection_requests",
+      "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "businessId", "order": "ASCENDING" },
@@ -49,7 +49,7 @@
       ]
     },
     {
-      "collectionGroup": "bookings",
+      "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "businessId", "order": "ASCENDING" },

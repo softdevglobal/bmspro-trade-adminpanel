@@ -62,6 +62,7 @@ service cloud.firestore {
     match /businesses/{businessId} {
       allow read: if isSuperAdmin()
         || ownsBusiness(businessId)
+        || userOwnsBusiness(businessId)
         || (signedInUserDocExists() && resource.data.ownerUid == request.auth.uid);
       allow create, update, delete: if false;
     }
@@ -79,9 +80,73 @@ service cloud.firestore {
         && resource.data.assignedTo.uid == request.auth.uid;
     }
 
+    function userFcmFieldKeys() {
+      return ['fcmToken', 'fcmTokenUpdatedAt', 'platform', 'deviceInfo'];
+    }
+
+    function userSelfFcmWrite(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(userFcmFieldKeys());
+    }
+
+    function userSelfFcmCreate(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(userFcmFieldKeys());
+    }
+
+    function salonStaffSelfFcmWrite(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fcmToken', 'fcmTokenUpdatedAt', 'platform']);
+    }
+
+    function ownsLegacyNotification() {
+      return isSignedIn()
+        && (
+          resource.data.staffUid == request.auth.uid
+          || resource.data.ownerUid == request.auth.uid
+          || resource.data.branchAdminUid == request.auth.uid
+          || resource.data.customerUid == request.auth.uid
+          || resource.data.targetAdminUid == request.auth.uid
+        );
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
-      allow create, update, delete: if false;
+      allow create: if userSelfFcmCreate(uid);
+      allow update: if userSelfFcmWrite(uid);
+      allow delete: if false;
+    }
+
+    // Legacy salon staff profiles (FCM token + self read).
+    match /salon_staff/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow update: if salonStaffSelfFcmWrite(uid);
+      allow create, delete: if false;
+    }
+
+    // Legacy in-app notifications (salon + trade mobile).
+    match /notifications/{notificationId} {
+      allow read: if isSuperAdmin() || ownsLegacyNotification();
+      allow update: if isSuperAdmin()
+        || (ownsLegacyNotification() && notificationReadOnlyUpdate());
+      allow create, delete: if false;
+    }
+
+    // Staff attendance / GPS check-ins (mobile background location).
+    match /staff_check_ins/{checkInId} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && resource.data.staffId == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.staffId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.staffId == request.auth.uid
+        && request.resource.data.staffId == request.auth.uid;
+      allow delete: if false;
     }
 
     // Booking intake attempts: write-only audit log from server; admins/owners read.
@@ -150,7 +215,7 @@ service cloud.firestore {
         );
     }
 
-    match /inspection_requests/{requestId} {
+    match /requests/{requestId} {
       allow read: if isSuperAdmin()
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
@@ -185,29 +250,41 @@ service cloud.firestore {
         );
     }
 
-    function ownsSalonBooking() {
+    function ownsOwnerUidJob() {
       return isSignedIn() && resource.data.ownerUid == request.auth.uid;
     }
 
-    function canReadTradeBooking() {
+    function ownsOwnerUidBookingRequest() {
+      return isSignedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    function canReadBusinessJob() {
       return resource.data.businessId is string
         && (
           (isBusinessOwner()
               && resource.data.businessId == request.auth.token.businessId)
           || userOwnsBusiness(resource.data.businessId)
+          || (isBusinessStaff()
+              && resource.data.businessId == request.auth.token.businessId)
           || ownsStaffBooking()
           || ownsAssignedTradeBooking()
           || ownsCustomerBooking()
-          || (isSignedIn()
-              && resource.data.ownerUid == request.auth.uid)
         );
     }
 
-    // Trade job bookings (from inspection visits) + legacy salon bookings (ownerUid).
-    match /bookings/{bookingId} {
+    // Trade jobs (businessId) + owner-scoped jobs (ownerUid).
+    match /jobs/{jobId} {
       allow read: if isSuperAdmin()
-        || ownsSalonBooking()
-        || canReadTradeBooking();
+        || ownsOwnerUidJob()
+        || canReadBusinessJob();
+      allow create, update, delete: if false;
+    }
+
+    // Legacy booking-engine intake (salon / ownerUid-scoped).
+    match /bookingRequests/{requestId} {
+      allow read: if isSuperAdmin()
+        || ownsOwnerUidBookingRequest()
+        || canReadBusinessJob();
       allow create, update, delete: if false;
     }
 
@@ -216,6 +293,38 @@ service cloud.firestore {
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
         || userOwnsBusiness(resource.data.businessId);
+      allow create, update, delete: if false;
+    }
+
+    function canReadBusinessInvoice() {
+      return resource.data.businessId is string
+        && (
+          (isBusinessOwner()
+              && resource.data.businessId == request.auth.token.businessId)
+          || userOwnsBusiness(resource.data.businessId)
+          || (isBusinessStaff()
+              && resource.data.businessId == request.auth.token.businessId)
+        );
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isSuperAdmin() || canReadBusinessInvoice();
+      allow create, update, delete: if false;
+    }
+
+    function canReadBusinessItem() {
+      return resource.data.businessId is string
+        && (
+          (isBusinessOwner()
+              && resource.data.businessId == request.auth.token.businessId)
+          || userOwnsBusiness(resource.data.businessId)
+          || (isBusinessStaff()
+              && resource.data.businessId == request.auth.token.businessId)
+        );
+    }
+
+    match /items/{itemId} {
+      allow read: if isSuperAdmin() || canReadBusinessItem();
       allow create, update, delete: if false;
     }
 
@@ -241,16 +350,27 @@ service cloud.firestore {
       }
     }
 
+    function ownsCcDirectChat() {
+      return isSignedIn()
+        && (
+          request.auth.uid in resource.data.participantIds
+          || resource.data.tenantUserUid == request.auth.uid
+        );
+    }
+
     match /cc_direct_chats/{chatId} {
-      allow read: if isSuperAdmin()
-        || (isSignedIn() && request.auth.uid in resource.data.participantIds);
+      allow read: if isSuperAdmin() || ownsCcDirectChat();
       allow create, update, delete: if false;
 
       match /messages/{messageId} {
         allow read: if isSuperAdmin()
           || (
             isSignedIn()
-            && request.auth.uid in get(/databases/$(database)/documents/cc_direct_chats/$(chatId)).data.participantIds
+            && (
+              request.auth.uid in get(/databases/$(database)/documents/cc_direct_chats/$(chatId)).data.participantIds
+              || get(/databases/$(database)/documents/cc_direct_chats/$(chatId)).data.tenantUserUid
+                  == request.auth.uid
+            )
           );
         allow create, update, delete: if false;
       }

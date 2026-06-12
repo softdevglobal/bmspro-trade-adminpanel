@@ -6,7 +6,7 @@ export type EmailDetailRow = { label: string; value: string };
 export type EmailTone = "brand" | "success" | "warning" | "danger" | "neutral";
 
 export type EmailTemplateContent = {
-  /** Small eyebrow label above the title (e.g. "Inspection request"). */
+  /** Small eyebrow label above the title (e.g. "Request"). */
   eyebrow?: string | null;
   title: string;
   /** Lead paragraph. Plain text — line breaks become paragraphs. */

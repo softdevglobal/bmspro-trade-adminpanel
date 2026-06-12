@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 
-export type BookingAssignChoice = "skip" | "owner" | "staff";
+export type BookingAssignChoice = "owner" | "staff";
 
 function StaffMemberPicker({
   staff,
@@ -98,8 +98,7 @@ export function BookingStaffAssignSection({
         Assign this job
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Choose who will run the booked work, or skip and assign later from the
-        Bookings page.
+        Choose who will run the job.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -174,7 +173,7 @@ export function BookingStaffAssignSection({
           {staff.length === 0 ? (
             <p className="mt-2 rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
               No active staff members yet. Add team members from the Team page,
-              or skip and assign later from Bookings.
+              or assign the job to yourself.
             </p>
           ) : (
             <div className="mt-2">
@@ -188,41 +187,6 @@ export function BookingStaffAssignSection({
           )}
         </div>
       ) : null}
-
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onChoiceChange("skip")}
-        className={`mt-3 flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-          choice === "skip"
-            ? "border-primary bg-white ring-1 ring-primary/30"
-            : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
-        }`}
-      >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-high text-on-surface-variant">
-          <span className="material-symbols-outlined text-[20px]">schedule</span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-body text-[13px] font-semibold text-on-surface">
-            Skip for now
-          </span>
-          <span className="block font-body text-[11px] text-on-surface-variant">
-            Assign later from the Bookings page.
-          </span>
-        </span>
-        <span
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 ${
-            choice === "skip"
-              ? "border-primary bg-primary text-on-primary"
-              : "border-stone-300 bg-transparent"
-          }`}
-          aria-hidden
-        >
-          {choice === "skip" ? (
-            <span className="material-symbols-outlined text-[14px]">check</span>
-          ) : null}
-        </span>
-      </button>
     </section>
   );
 }

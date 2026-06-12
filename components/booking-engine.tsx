@@ -14,13 +14,19 @@ import {
   CustomerAccountNav,
   CustomerGuestNav,
 } from "@/components/customer-account-nav";
+import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
 import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import {
   SlotDayPicker,
   todayIso,
 } from "@/components/booking-slot-date-picker";
+import { AuPhoneInput } from "@/components/au-phone-input";
 import { formatAddress } from "@/lib/inspection/types";
+import {
+  isValidAuLocalPhone,
+  toAuLocalPhoneDigits,
+} from "@/lib/phone/au-phone";
 
 type Props = {
   business: BookingBusiness;
@@ -77,6 +83,8 @@ export function BookingEngine({ business, services }: Props) {
         bookingSlug={business.slug}
         logoUrl={business.logoUrl}
       />
+
+      <CustomerNotificationBanner bookingSlug={business.slug} />
 
       {/* Hero split — same card footprint as account panel */}
       <motion.section
@@ -587,6 +595,68 @@ type SlotTimeRange = "morning" | "afternoon";
 
 type PreferredSlot = { date: string; timeRange: SlotTimeRange };
 
+function collectBookingMissingRequirements(input: {
+  requestType: RequestType;
+  selectedServiceId: string | null;
+  customTitle: string;
+  customDescription: string;
+  address: ServiceAddress;
+  preferredSlots: PreferredSlot[];
+  customer: { fullName: string; email: string; phone: string };
+}): string[] {
+  const missing: string[] = [];
+
+  if (input.requestType === "existing_service") {
+    if (!input.selectedServiceId) {
+      missing.push("Select a service");
+    }
+  } else {
+    if (input.customTitle.trim().length < 3) {
+      missing.push("Job title (at least 3 characters)");
+    }
+    if (input.customDescription.trim().length < 10) {
+      missing.push("Job description (at least 10 characters)");
+    }
+  }
+
+  if (input.address.street.trim().length < 3) {
+    missing.push("Street address");
+  }
+  if (input.address.suburb.trim().length < 2) {
+    missing.push("Suburb");
+  }
+  if (input.address.state.trim().length < 2) {
+    missing.push("State");
+  }
+  if (input.address.postcode.trim().length < 4) {
+    missing.push("Postcode");
+  }
+
+  const datedSlots = input.preferredSlots.filter((slot) => slot.date.trim());
+  if (datedSlots.length === 0) {
+    missing.push("At least one preferred date");
+  } else {
+    const uniqueCombos = new Set(
+      datedSlots.map((slot) => `${slot.date}-${slot.timeRange}`),
+    );
+    if (uniqueCombos.size !== datedSlots.length) {
+      missing.push("Each preferred slot needs a unique date and time");
+    }
+  }
+
+  if (input.customer.fullName.trim().length < 2) {
+    missing.push("Full name");
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customer.email.trim())) {
+    missing.push("Valid email address");
+  }
+  if (!isValidAuLocalPhone(input.customer.phone)) {
+    missing.push("Mobile number");
+  }
+
+  return missing;
+}
+
 const TIME_RANGE_OPTIONS: {
   id: SlotTimeRange;
   label: string;
@@ -609,150 +679,63 @@ function formatPrettyDate(iso: string): string {
   });
 }
 
-function PreferredSlotPicker({
-  slot,
-  slotIndex,
-  minDate,
-  allSlots,
-  dayPage,
-  onDayPageChange,
-  onDateChange,
+function sortPreferredSlots(slots: PreferredSlot[]): PreferredSlot[] {
+  return [...slots].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function DayTimePicker({
+  timeRange,
   onTimeChange,
 }: {
-  slot: PreferredSlot;
-  slotIndex: number;
-  minDate: string;
-  allSlots: PreferredSlot[];
-  dayPage: number;
-  onDayPageChange: (page: number) => void;
-  onDateChange: (iso: string) => void;
+  timeRange: SlotTimeRange;
   onTimeChange: (timeRange: SlotTimeRange) => void;
 }) {
-  const takenCombos = useMemo(() => {
-    const combos = new Set<string>();
-    allSlots.forEach((entry, index) => {
-      if (index !== slotIndex && entry.date) {
-        combos.add(`${entry.date}-${entry.timeRange}`);
-      }
-    });
-    return combos;
-  }, [allSlots, slotIndex]);
-
-  const morningTaken =
-    slot.date.length > 0 && takenCombos.has(`${slot.date}-morning`);
-  const afternoonTaken =
-    slot.date.length > 0 && takenCombos.has(`${slot.date}-afternoon`);
-
-  const selectedTimeLabel =
-    TIME_RANGE_OPTIONS.find((option) => option.id === slot.timeRange)?.label ??
-    "";
-
   return (
-    <div className="mt-3 flex flex-col gap-4">
-      <SlotDayPicker
-        selectedIso={slot.date}
-        minDate={minDate}
-        dayPage={dayPage}
-        onDayPageChange={onDayPageChange}
-        onSelect={onDateChange}
-        dayStripLayout="fit"
-      />
-
-      <div>
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Pick a time window
-        </span>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {TIME_RANGE_OPTIONS.map((option) => {
-            const checked = slot.timeRange === option.id;
-            const disabled =
-              !slot.date ||
-              takenCombos.has(`${slot.date}-${option.id}`);
-            return (
-              <button
-                type="button"
-                key={option.id}
-                disabled={disabled}
-                onClick={() => onTimeChange(option.id)}
-                className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
-                  disabled
-                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
-                    : checked
-                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                      : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      {TIME_RANGE_OPTIONS.map((option) => {
+        const checked = timeRange === option.id;
+        return (
+          <button
+            type="button"
+            key={option.id}
+            onClick={() => onTimeChange(option.id)}
+            className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
+              checked
+                ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+            }`}
+          >
+            <span
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
+                checked
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "bg-stone-100 text-stone-600"
+              }`}
+            >
+              <span className="material-symbols-outlined material-symbols-filled text-[20px]">
+                {option.icon}
+              </span>
+            </span>
+            <span>
+              <span
+                className={`block font-body text-[14px] font-bold ${
+                  checked ? "text-primary" : "text-on-surface"
                 }`}
               >
-                <span
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
-                    checked
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "bg-stone-100 text-stone-600"
-                  }`}
-                >
-                  <span className="material-symbols-outlined material-symbols-filled text-[20px]">
-                    {option.icon}
-                  </span>
-                </span>
-                <span>
-                  <span
-                    className={`block font-body text-[14px] font-bold ${
-                      checked ? "text-primary" : "text-on-surface"
-                    }`}
-                  >
-                    {option.label}
-                  </span>
-                  <span className="font-body text-[11px] text-on-surface-variant">
-                    {option.hint}
-                  </span>
-                </span>
-                {checked ? (
-                  <span className="absolute right-2 top-[9px] material-symbols-outlined material-symbols-filled text-[18px] leading-none text-primary">
-                    check_circle
-                  </span>
-                ) : null}
-                {disabled && slot.date ? (
-                  <span className="absolute bottom-2 right-2 font-body text-[9px] font-bold uppercase tracking-wide text-outline">
-                    Used
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {slot.date ? (
-        <div
-          className={`rounded-xl border px-3 py-2.5 ${
-            morningTaken && afternoonTaken
-              ? "border-amber-200 bg-amber-50/80"
-              : "border-primary/25 bg-primary/5"
-          }`}
-        >
-          <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface">
-            <span className="material-symbols-outlined text-[16px] text-primary">
-              event_available
+                {option.label}
+              </span>
+              <span className="font-body text-[11px] text-on-surface-variant">
+                {option.hint}
+              </span>
             </span>
-            {formatPrettyDate(slot.date)}
-            {selectedTimeLabel ? (
-              <>
-                <span className="text-on-surface-variant">·</span>
-                <span className="text-primary">{selectedTimeLabel}</span>
-              </>
+            {checked ? (
+              <span className="absolute right-2 top-[9px] material-symbols-outlined material-symbols-filled text-[18px] leading-none text-primary">
+                check_circle
+              </span>
             ) : null}
-          </p>
-          {morningTaken && afternoonTaken ? (
-            <p className="mt-1 font-body text-[11px] text-amber-800">
-              Both time windows are already used in another option — pick a
-              different day.
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <p className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
-          Choose a day above, then pick morning or afternoon.
-        </p>
-      )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -783,9 +766,7 @@ function ServiceBookingFlow({
   const [customerNotes, setCustomerNotes] = useState("");
   const [budgetAud, setBudgetAud] = useState("");
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
-  const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([
-    { date: "", timeRange: "morning" },
-  ]);
+  const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([]);
   const [customer, setCustomer] = useState({
     fullName: "",
     email: "",
@@ -842,7 +823,29 @@ function ServiceBookingFlow({
   const customerValid =
     customer.fullName.trim().length >= 2 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim()) &&
-    customer.phone.replace(/\D/g, "").length > 0;
+    isValidAuLocalPhone(customer.phone);
+
+  const missingRequirements = useMemo(
+    () =>
+      collectBookingMissingRequirements({
+        requestType,
+        selectedServiceId,
+        customTitle,
+        customDescription,
+        address,
+        preferredSlots,
+        customer,
+      }),
+    [
+      requestType,
+      selectedServiceId,
+      customTitle,
+      customDescription,
+      address,
+      preferredSlots,
+      customer,
+    ],
+  );
 
   const canSubmit =
     requestStepValid &&
@@ -861,7 +864,7 @@ function ServiceBookingFlow({
     field: "fullName" | "email" | "phone",
     value: string,
   ) {
-    const next = field === "phone" ? value.replace(/\D/g, "") : value;
+    const next = field === "phone" ? toAuLocalPhoneDigits(value) : value;
     setCustomer((prev) => ({ ...prev, [field]: next }));
     setSubmitError(null);
   }
@@ -877,36 +880,22 @@ function ServiceBookingFlow({
     setSubmitError(null);
   }
 
-  function addSlot() {
+  const selectedPreferredDates = useMemo(
+    () => preferredSlots.map((slot) => slot.date).filter(Boolean),
+    [preferredSlots],
+  );
+
+  function togglePreferredDay(iso: string) {
     setPreferredSlots((prev) => {
+      const exists = prev.some((slot) => slot.date === iso);
+      if (exists) {
+        return prev.filter((slot) => slot.date !== iso);
+      }
       if (prev.length >= 3) return prev;
-      return [...prev, { date: "", timeRange: "morning" }];
-    });
-  }
-
-  function removeSlot(index: number) {
-    setPreferredSlots((prev) =>
-      prev.length === 1 ? prev : prev.filter((_, idx) => idx !== index),
-    );
-  }
-
-  function handleSlotDateChange(index: number, iso: string) {
-    setPreferredSlots((prev) => {
-      const taken = new Set(
-        prev
-          .filter((_, idx) => idx !== index && _.date)
-          .map((entry) => `${entry.date}-${entry.timeRange}`),
-      );
-      return prev.map((slot, idx) => {
-        if (idx !== index) return slot;
-        let timeRange = slot.timeRange;
-        if (iso && taken.has(`${iso}-${timeRange}`)) {
-          const alt: SlotTimeRange =
-            timeRange === "morning" ? "afternoon" : "morning";
-          if (!taken.has(`${iso}-${alt}`)) timeRange = alt;
-        }
-        return { date: iso, timeRange };
-      });
+      return sortPreferredSlots([
+        ...prev,
+        { date: iso, timeRange: "morning" },
+      ]);
     });
     setSubmitError(null);
   }
@@ -1029,7 +1018,7 @@ function ServiceBookingFlow({
             <span className="material-symbols-outlined material-symbols-filled text-[14px] text-primary">
               event_available
             </span>
-            Inspection visit request
+            Request
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold leading-snug text-on-surface sm:mt-3 sm:text-headline-md">
             Request a visit with {businessName}
@@ -1225,68 +1214,90 @@ function ServiceBookingFlow({
           <BookingStepHeader
             step={3}
             title="Preferred dates & times"
-            hint={`${preferredSlots.length} of 3`}
+            hint={`${selectedPreferredDates.length} of 3 days`}
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Tap a day and morning or afternoon window — up to 3 options. The
-            owner will confirm one (or propose alternatives).
+            First pick up to 3 days that work for you, then choose morning or
+            afternoon for each. The owner will confirm one (or propose
+            alternatives).
           </p>
 
-          <ul className="mt-4 space-y-3">
-            {preferredSlots.map((slot, index) => (
-              <li
-                key={index}
-                className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <span className="material-symbols-outlined text-[14px]">
-                        event
-                      </span>
-                    </span>
-                    Option {index + 1}
-                  </span>
-                  {preferredSlots.length > 1 ? (
-                    <button
-                      type="button"
-                      onClick={() => removeSlot(index)}
-                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-body text-[11px] font-semibold text-on-surface-variant hover:bg-stone-100"
+          <div className="mt-4 rounded-xl border border-stone-200 bg-white p-3 sm:p-4">
+            <SlotDayPicker
+              mode="multiple"
+              selectedIsos={selectedPreferredDates}
+              maxSelections={3}
+              minDate={minDate}
+              dayPage={workingDayPage}
+              onDayPageChange={setWorkingDayPage}
+              onToggle={togglePreferredDay}
+              label="Pick up to 3 days"
+              dayStripLayout="fit"
+            />
+            {selectedPreferredDates.length > 0 ? (
+              <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                Tap a selected day again to remove it.
+              </p>
+            ) : (
+              <p className="mt-3 rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                Choose at least one day to continue.
+              </p>
+            )}
+          </div>
+
+          {selectedPreferredDates.length > 0 ? (
+            <div className="mt-4">
+              <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                Pick a time for each day
+              </span>
+              <ul className="mt-2 space-y-3">
+                {sortPreferredSlots(preferredSlots).map((slot) => {
+                  const slotIndex = preferredSlots.findIndex(
+                    (entry) => entry.date === slot.date,
+                  );
+                  const selectedTimeLabel =
+                    TIME_RANGE_OPTIONS.find(
+                      (option) => option.id === slot.timeRange,
+                    )?.label ?? "";
+                  return (
+                    <li
+                      key={slot.date}
+                      className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4"
                     >
-                      <span className="material-symbols-outlined text-[14px]">
-                        close
-                      </span>
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
-
-                <PreferredSlotPicker
-                  slot={slot}
-                  slotIndex={index}
-                  minDate={minDate}
-                  allSlots={preferredSlots}
-                  dayPage={workingDayPage}
-                  onDayPageChange={setWorkingDayPage}
-                  onDateChange={(iso) => handleSlotDateChange(index, iso)}
-                  onTimeChange={(timeRange) =>
-                    updateSlot(index, "timeRange", timeRange)
-                  }
-                />
-              </li>
-            ))}
-          </ul>
-
-          {preferredSlots.length < 3 ? (
-            <button
-              type="button"
-              onClick={addSlot}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-stone-300 bg-white px-3 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary hover:text-primary"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Add another date
-            </button>
+                      <p className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                          <span className="material-symbols-outlined text-[14px]">
+                            schedule
+                          </span>
+                        </span>
+                        {formatPrettyDate(slot.date)}
+                      </p>
+                      <DayTimePicker
+                        timeRange={slot.timeRange}
+                        onTimeChange={(timeRange) =>
+                          updateSlot(slotIndex, "timeRange", timeRange)
+                        }
+                      />
+                      <p className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 font-body text-[12px] font-semibold text-on-surface">
+                        <span className="material-symbols-outlined text-[16px] text-primary">
+                          event_available
+                        </span>
+                        {formatPrettyDate(slot.date)}
+                        {selectedTimeLabel ? (
+                          <>
+                            <span className="text-on-surface-variant">·</span>
+                            <span className="text-primary">
+                              {selectedTimeLabel}
+                            </span>
+                          </>
+                        ) : null}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ) : null}
         </div>
 
@@ -1326,15 +1337,13 @@ function ServiceBookingFlow({
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
                 Mobile number
               </span>
-              <input
-                type="tel"
-                inputMode="numeric"
+              <AuPhoneInput
                 value={customer.phone}
-                onChange={(e) => updateCustomer("phone", e.target.value)}
-                placeholder="0400000000"
+                onChange={(value) => updateCustomer("phone", value)}
                 autoComplete={BOOKING_AUTOCOMPLETE}
                 readOnly={profileLocked}
-                className={`${BOOKING_INPUT_CLASS} ${
+                size="lg"
+                className={`mt-1 rounded-xl border-stone-200 bg-white shadow-sm focus-within:border-primary/40 focus-within:ring-primary/10 ${
                   profileLocked
                     ? "cursor-not-allowed bg-stone-50 text-on-surface-variant"
                     : ""
@@ -1390,14 +1399,24 @@ function ServiceBookingFlow({
             <motion.button
               type="button"
               whileHover={
-                reducedMotion || !canSubmit ? undefined : { scale: 1.02 }
+                reducedMotion || !canSubmit || submitting
+                  ? undefined
+                  : { scale: 1.02 }
               }
-              whileTap={canSubmit ? { scale: 0.98 } : undefined}
-              disabled={!canSubmit}
+              whileTap={canSubmit && !submitting ? { scale: 0.98 } : undefined}
+              disabled={!canSubmit || submitting}
               onClick={handleSubmit}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-[15px] font-semibold text-on-primary shadow-md transition-opacity disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto sm:text-label-bold"
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 font-body text-[15px] font-semibold text-on-primary shadow-md transition-opacity sm:w-auto sm:text-label-bold ${
+                submitting
+                  ? "cursor-wait opacity-100"
+                  : "disabled:cursor-not-allowed disabled:opacity-45"
+              }`}
             >
-              <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+              <span
+                className={`material-symbols-outlined material-symbols-filled text-[18px] ${
+                  submitting ? "animate-spin" : ""
+                }`}
+              >
                 {submitting
                   ? "progress_activity"
                   : isAuthenticated
@@ -1407,9 +1426,27 @@ function ServiceBookingFlow({
               {submitting
                 ? "Sending request…"
                 : isAuthenticated
-                  ? "Submit inspection request"
+                  ? "Submit request"
                   : "Sign in & submit request"}
             </motion.button>
+            {!submitting && missingRequirements.length > 0 ? (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 font-body text-[12px] text-amber-900"
+              >
+                <p className="inline-flex items-center gap-1 font-semibold">
+                  <span className="material-symbols-outlined text-[16px]">
+                    info
+                  </span>
+                  Complete these required fields to submit:
+                </p>
+                <ul className="mt-1.5 list-inside list-disc space-y-0.5 pl-0.5">
+                  {missingRequirements.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {!isAuthenticated && canSubmit ? (
               <span className="inline-flex items-center justify-center gap-1 font-body text-[11px] text-on-surface-variant sm:justify-start">
                 <span className="material-symbols-outlined text-[14px] text-primary">
