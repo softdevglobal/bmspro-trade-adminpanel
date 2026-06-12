@@ -5,14 +5,17 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export function LoginRedirect() {
-  const { status } = useAuth();
+  const { status, role } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === "authenticated") {
+    if (
+      status === "authenticated" &&
+      (role === "business_owner" || role === "super_admin")
+    ) {
       router.replace("/dashboard");
     }
-  }, [status, router]);
+  }, [status, role, router]);
 
   return null;
 }
