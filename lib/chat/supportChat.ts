@@ -142,6 +142,39 @@ export async function getCustomerConversation(
   return null;
 }
 
+export type OwnerAgentClosedNotice = {
+  message: string;
+  agentName: string | null;
+  closedAt: number | null;
+};
+
+export async function getOwnerAgentClosedNotice(
+  userId: string,
+): Promise<OwnerAgentClosedNotice | null> {
+  const open = await findOpenConversation(userId);
+  if (open) return null;
+
+  const snapshot = await adminDb
+    .collection(CONVERSATIONS_COLLECTION)
+    .where("userId", "==", userId)
+    .where("status", "==", "closed")
+    .limit(30)
+    .get();
+  if (snapshot.empty) return null;
+
+  const sorted = sortByUpdatedAtDesc(snapshot.docs.map(mapConversationDoc));
+  const latest =
+    sorted.find((conversation) => conversation.closedBy === "agent") ?? null;
+  if (!latest) return null;
+
+  const agentName = latest.agentName?.trim() || null;
+  return {
+    message: agentName ? `Chat closed by ${agentName}` : "Chat closed by agent",
+    agentName,
+    closedAt: latest.closedAt,
+  };
+}
+
 export async function customerSendMessage(
   userId: string,
   messageText: string,
@@ -535,7 +568,7 @@ export async function agentCloseConversation(
     });
   }
 
-  await appendSystemMessage(conversationId, "Chat ended");
+  await appendSystemMessage(conversationId, "Chat closed by agent");
 
   await adminDb
     .collection(CALL_CENTER_AGENTS_COLLECTION)
