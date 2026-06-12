@@ -898,6 +898,18 @@ export function CreateInvoiceFromQuotation({
     setCatalogSuggestField(null);
   }
 
+  function openPriceEditor() {
+    setTab("create");
+    const [firstItem] = lineItems;
+    if (!firstItem) {
+      startAddItem();
+      return;
+    }
+    if (lineItems.length === 1) {
+      startEditItem(firstItem);
+    }
+  }
+
   function renderCatalogSuggestions(activeField: "code" | "name") {
     if (catalogSuggestField !== activeField || catalogSuggestions.length === 0) {
       return null;
@@ -1356,6 +1368,13 @@ export function CreateInvoiceFromQuotation({
                           </span>
                           <button
                             type="button"
+                            onClick={() => startEditItem(item)}
+                            className="rounded-full border border-primary/25 px-2.5 py-1 font-body text-[11px] font-semibold text-primary hover:bg-primary/5"
+                          >
+                            Edit price
+                          </button>
+                          <button
+                            type="button"
                             onClick={() =>
                               setLineItems((prev) =>
                                 prev.filter((row) => row.id !== item.id),
@@ -1472,7 +1491,7 @@ export function CreateInvoiceFromQuotation({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>Rate (ex. GST)</span>
+                        <span className={LABEL_CLASS}>Price / rate (ex. GST)</span>
                         <input
                           type="number"
                           min="0"
@@ -1760,6 +1779,22 @@ export function CreateInvoiceFromQuotation({
                   {formatAud(totalAud)}
                 </span>
               </div>
+              <div className="border-t border-outline-variant/30 px-3 py-2.5">
+                <button
+                  type="button"
+                  onClick={openPriceEditor}
+                  className="flex w-full items-center justify-between gap-3 text-left font-body text-[13px] font-semibold text-primary hover:text-primary/80"
+                >
+                  <span>Edit price</span>
+                  <span className="font-body text-[11px] font-medium text-on-surface-variant">
+                    {lineItems.length === 0
+                      ? "Add item"
+                      : lineItems.length === 1
+                        ? "Update item rate"
+                        : "Edit items"}
+                  </span>
+                </button>
+              </div>
               {documentDeposit ? (
                 <>
                   <div className="space-y-1.5 border-t border-outline-variant/40 px-3 py-2.5 font-body text-[12px]">
@@ -1767,7 +1802,7 @@ export function CreateInvoiceFromQuotation({
                       <span>
                         {documentDeposit.paid
                           ? "Deposit paid"
-                          : "Deposit requested"}
+                          : "Deposit not paid"}
                       </span>
                       <span
                         className={`font-numeric font-medium ${
@@ -1781,12 +1816,21 @@ export function CreateInvoiceFromQuotation({
                           : formatAud(documentDeposit.amountAud)}
                       </span>
                     </div>
-                    <p className="text-[10px] text-on-surface-variant">
-                      {formatDepositPaymentNote(documentDeposit)}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[10px] text-on-surface-variant">
+                        {formatDepositPaymentNote(documentDeposit)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setDepositModalOpen(true)}
+                        className="shrink-0 font-body text-[11px] font-semibold text-primary hover:underline"
+                      >
+                        Edit
+                      </button>
+                    </div>
                     <div className="flex items-center justify-between gap-2 pt-0.5">
                       <span className="text-[11px] font-semibold text-on-surface-variant">
-                        Deposit payment
+                        Payment status
                       </span>
                       <div className="flex overflow-hidden rounded-full border border-outline-variant/60">
                         <button
@@ -1816,21 +1860,21 @@ export function CreateInvoiceFromQuotation({
                   </div>
                   <div className="flex items-center justify-between bg-primary px-3 py-2.5">
                     <span className="font-body text-[13px] font-bold text-on-primary">
-                      {documentDeposit.paid ? "Balance due" : "Amount due"}
+                      Balance due
                     </span>
                     <span className="font-numeric text-[15px] font-bold text-on-primary">
                       {formatAud(balanceDueAud)}
                     </span>
                   </div>
                 </>
-              ) : direct ? null : (
+              ) : (
                 <div className="border-t border-outline-variant/30 px-3 py-2.5 text-center">
                   <button
                     type="button"
                     onClick={() => setDepositModalOpen(true)}
                     className="font-body text-[13px] font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
                   >
-                    Add deposit request
+                    Record payment
                   </button>
                 </div>
               )}
@@ -1860,7 +1904,20 @@ export function CreateInvoiceFromQuotation({
         defaultDueDate={dueDate}
         minDueDate={invoiceDate}
         onClose={() => setDepositModalOpen(false)}
-        onSave={(next) => setDeposit(next)}
+        title="Record payment"
+        totalLabel="Invoice total"
+        amountLabel="Payment amount"
+        saveLabel="Save payment"
+        removeLabel="Remove payment"
+        onSave={(next) => {
+          const hadDeposit = Boolean(deposit);
+          setDeposit(next);
+          if (!next) {
+            setDepositPaid(false);
+          } else if (!hadDeposit) {
+            setDepositPaid(true);
+          }
+        }}
       />
     </div>
   );
