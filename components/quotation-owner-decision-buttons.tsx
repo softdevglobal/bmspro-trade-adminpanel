@@ -2,11 +2,12 @@
 
 import { useAuth } from "@/lib/auth/auth-context";
 import { quotationAwaitingCustomerAcceptance } from "@/lib/quotations/actions";
+import type { QuotationStatus } from "@/lib/quotations/types";
 import { useState } from "react";
 
 type QuotationOwnerDecisionButtonsProps = {
   quotationId: string;
-  status: "draft" | "sent";
+  status: QuotationStatus;
   bookingId: string | null;
   customerDecision: "accepted" | "rejected" | null;
   onDecided?: (decision: "accepted" | "rejected") => void;

@@ -26,11 +26,13 @@ import {
 } from "@/lib/quotations/document";
 import {
   formatAddress,
+  STATUS_LABELS,
   type InspectionAddress,
   type InspectionRequestDetail,
   type InspectionRequestType,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import type { QuotationDetail } from "@/lib/quotations/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -127,6 +129,15 @@ function addDaysIso(iso: string, days: number): string {
   const date = new Date(y, m - 1, d);
   date.setDate(date.getDate() + days);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function daysBetweenIso(startIso: string, endIso: string): number | null {
+  const [sy, sm, sd] = startIso.split("-").map(Number);
+  const [ey, em, ed] = endIso.split("-").map(Number);
+  if (![sy, sm, sd, ey, em, ed].every(Number.isFinite)) return null;
+  const start = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  return Math.round((end - start) / 86_400_000);
 }
 
 function formatAud(value: number): string {
@@ -229,6 +240,61 @@ function buildCustomerOptions(
   );
 }
 
+function requestServiceTitle(request: InspectionRequestDetail): string {
+  if (request.requestType === "existing_service") {
+    return request.serviceName ?? "Existing service";
+  }
+  return request.customRequest?.title ?? "Custom quotation request";
+}
+
+function requestHasActiveQuotation(request: InspectionRequestDetail): boolean {
+  if (!request.quotation) return false;
+  return request.quotation.status !== "cancelled";
+}
+
+function requestMatchesQuery(
+  request: InspectionRequestDetail,
+  query: string,
+): boolean {
+  if (!query) return true;
+  const haystack = [
+    request.requestCode,
+    request.id,
+    request.customer.fullName,
+    request.customer.email,
+    request.customer.phone,
+    requestServiceTitle(request),
+    formatAddress(request.address),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function savedLineItemFromQuotation(
+  item: QuotationDetail["lineItems"][number],
+  index: number,
+): SavedLineItem {
+  const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
+  const rate =
+    item.rateAud && item.rateAud > 0
+      ? item.rateAud
+      : Math.round((item.priceAud / quantity) * 100) / 100;
+  const gstPercent = item.gstPercent ?? 0;
+  return {
+    id: `${index}-${item.name}-${crypto.randomUUID()}`,
+    code: item.code ?? "",
+    name: item.name,
+    description: item.description ?? "",
+    quantity,
+    rate,
+    discountPercent: 0,
+    applyGst: gstPercent > 0,
+    amountAud: item.priceAud,
+  };
+}
+
 function SectionLink({
   icon,
   label,
@@ -316,6 +382,8 @@ export function CreateQuotationPage() {
   const [serviceEditing, setServiceEditing] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [requestPickerOpen, setRequestPickerOpen] = useState(false);
+  const [requestSearch, setRequestSearch] = useState("");
   const [customer, setCustomer] = useState({
     fullName: "",
     email: "",
@@ -374,12 +442,31 @@ export function CreateQuotationPage() {
   const [inspectionRequestId, setInspectionRequestId] = useState<string | null>(
     null,
   );
+  const [draftQuotationId, setDraftQuotationId] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const frames: number[] = [];
+    const quotationId =
+      params.get("quotationId")?.trim() || params.get("draftId")?.trim();
+    if (quotationId) {
+      frames.push(requestAnimationFrame(() => setDraftQuotationId(quotationId)));
+    }
+    if (
+      params.get("fromRequests") === "1" ||
+      params.get("selectRequest") === "1"
+    ) {
+      frames.push(requestAnimationFrame(() => setRequestPickerOpen(true)));
+    }
     const id =
       params.get("requestId")?.trim() ||
       params.get("inspectionRequestId")?.trim();
-    if (id) setInspectionRequestId(id);
+    if (id) {
+      frames.push(requestAnimationFrame(() => setInspectionRequestId(id)));
+    }
+    return () => {
+      frames.forEach((frame) => cancelAnimationFrame(frame));
+    };
   }, []);
 
   const boundInspection = useMemo(
@@ -391,35 +478,159 @@ export function CreateQuotationPage() {
   );
 
   const inspectionPrefilledRef = useRef(false);
-  useEffect(() => {
-    if (inspectionPrefilledRef.current || !boundInspection) return;
+  const draftPrefilledRef = useRef(false);
+
+  const availableRequests = useMemo(
+    () =>
+      requests
+        .filter((request) => {
+          if (request.status === "cancelled") return false;
+          if (request.bookingId) return false;
+          if (requestHasActiveQuotation(request)) return false;
+          return true;
+        })
+        .sort(
+          (a, b) =>
+            (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0),
+        ),
+    [requests],
+  );
+
+  const filteredRequests = useMemo(() => {
+    const query = requestSearch.trim().toLowerCase();
+    return availableRequests
+      .filter((request) => requestMatchesQuery(request, query))
+      .slice(0, 12);
+  }, [availableRequests, requestSearch]);
+
+  const applyInspectionRequest = useCallback((request: InspectionRequestDetail) => {
     inspectionPrefilledRef.current = true;
+    setInspectionRequestId(request.id);
     setCustomer({
-      fullName: boundInspection.customer.fullName ?? "",
-      email: boundInspection.customer.email ?? "",
-      phone: boundInspection.customer.phone ?? "",
+      fullName: request.customer.fullName ?? "",
+      email: request.customer.email ?? "",
+      phone: request.customer.phone ?? "",
     });
-    setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
+    setAddress({ ...EMPTY_ADDRESS, ...request.address });
+    setCustomerSearch(request.customer.fullName ?? "");
     setClientOpen(false);
     setServiceEditing(false);
-    if (
-      boundInspection.requestType === "existing_service" &&
-      boundInspection.serviceId
-    ) {
+    if (request.requestType === "existing_service" && request.serviceId) {
       setRequestType("existing_service");
-      setSelectedServiceId(boundInspection.serviceId);
+      setSelectedServiceId(request.serviceId);
+      setCustomServiceTitle("");
+      setCustomServiceDescription("");
     } else {
       setRequestType("custom_quote");
+      setSelectedServiceId(null);
       setCustomServiceTitle(
-        boundInspection.customRequest?.title ??
-          boundInspection.serviceName ??
-          "",
+        request.customRequest?.title ?? request.serviceName ?? "",
       );
-      setCustomServiceDescription(
-        boundInspection.customRequest?.description ?? "",
-      );
+      setCustomServiceDescription(request.customRequest?.description ?? "");
     }
-  }, [boundInspection]);
+    setRequestPickerOpen(false);
+    setRequestSearch("");
+    setError(null);
+  }, []);
+
+  useEffect(() => {
+    if (inspectionPrefilledRef.current || !boundInspection) return;
+    const frame = requestAnimationFrame(() => {
+      applyInspectionRequest(boundInspection);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [applyInspectionRequest, boundInspection]);
+
+  useEffect(() => {
+    if (!user || !draftQuotationId || draftPrefilledRef.current) return;
+    draftPrefilledRef.current = true;
+    void (async () => {
+      setDraftLoading(true);
+      setError(null);
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(
+          `/api/quotations?quotationId=${encodeURIComponent(draftQuotationId)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const data = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          quotation?: QuotationDetail;
+        };
+        if (!response.ok || !data.ok || !data.quotation) {
+          throw new Error(data.error ?? "Could not load draft quotation.");
+        }
+        const quotation = data.quotation;
+        if (quotation.status !== "draft") {
+          throw new Error("Only draft quotations can be edited.");
+        }
+
+        inspectionPrefilledRef.current = true;
+        setInspectionRequestId(quotation.inspectionRequestId);
+        setCustomer({
+          fullName: quotation.customer.fullName ?? "",
+          email: quotation.customer.email ?? "",
+          phone: quotation.customer.phone ?? "",
+        });
+        setAddress({ ...EMPTY_ADDRESS, ...quotation.address });
+        setClientOpen(false);
+        setServiceEditing(false);
+        setCustomServiceTitle(quotation.serviceTitle ?? "");
+        setCustomServiceDescription(quotation.notes ?? "");
+        setLineItems(
+          quotation.lineItems.map((item, index) =>
+            savedLineItemFromQuotation(item, index),
+          ),
+        );
+        setImageUrls(quotation.imageUrls);
+        setTermsAndConditions(quotation.termsAndConditions ?? "");
+        setTermsLoaded(true);
+        setComment(quotation.notes ?? "");
+        setDocumentDiscount(
+          quotation.discountAud > 0
+            ? {
+                mode: "fixed",
+                percent: 0,
+                amountAud: quotation.discountAud,
+              }
+            : null,
+        );
+        setDepositRequest(quotation.depositRequest);
+
+        if (quotation.lineItems.some((item) => (item.gstPercent ?? 0) > 0)) {
+          setGstEnabled(true);
+          const gstPercent = quotation.lineItems.find(
+            (item) => (item.gstPercent ?? 0) > 0,
+          )?.gstPercent;
+          if (gstPercent) setGstPercentage(gstPercent);
+        }
+
+        if (quotation.validUntil) {
+          const today = todayIso();
+          const days = daysBetweenIso(today, quotation.validUntil);
+          const matchingTerms = TERMS_OPTIONS.find(
+            (option) => option.days === days,
+          );
+          if (matchingTerms) {
+            setQuotationDate(today);
+            setTerms(matchingTerms.id);
+          } else {
+            setQuotationDate(quotation.validUntil);
+            setTerms("same_day");
+          }
+        }
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Could not load draft quotation.",
+        );
+      } finally {
+        setDraftLoading(false);
+      }
+    })();
+  }, [user, draftQuotationId]);
 
   const customerOptions = useMemo(
     () => buildCustomerOptions(requests),
@@ -488,17 +699,20 @@ export function CreateQuotationPage() {
   const minQuotationDate = useMemo(() => addDaysIso(todayIso(), -730), []);
 
   useEffect(() => {
-    setLineItems((prev) =>
-      prev.map((item) => ({
-        ...item,
-        amountAud: computeSavedLineAmount(
-          item,
-          gstEnabled,
-          gstPercentage,
-          gstPricing,
-        ),
-      })),
-    );
+    const frame = requestAnimationFrame(() => {
+      setLineItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          amountAud: computeSavedLineAmount(
+            item,
+            gstEnabled,
+            gstPercentage,
+            gstPricing,
+          ),
+        })),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
   }, [gstEnabled, gstPercentage, gstPricing]);
 
   const documentLineItems = useMemo(
@@ -565,9 +779,12 @@ export function CreateQuotationPage() {
     if (!depositRequest || total <= 0) return;
     const capped = Math.min(depositRequest.amountAud, total);
     if (Math.abs(capped - depositRequest.amountAud) > 0.001) {
-      setDepositRequest((prev) =>
-        prev ? { ...prev, amountAud: capped } : prev,
-      );
+      const frame = requestAnimationFrame(() => {
+        setDepositRequest((prev) =>
+          prev ? { ...prev, amountAud: capped } : prev,
+        );
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [total, depositRequest]);
 
@@ -575,9 +792,12 @@ export function CreateQuotationPage() {
     if (!documentDiscount || documentDiscount.mode !== "fixed") return;
     const capped = Math.min(documentDiscount.amountAud, subtotal);
     if (Math.abs(capped - documentDiscount.amountAud) > 0.001) {
-      setDocumentDiscount((prev) =>
-        prev ? { ...prev, amountAud: capped } : prev,
-      );
+      const frame = requestAnimationFrame(() => {
+        setDocumentDiscount((prev) =>
+          prev ? { ...prev, amountAud: capped } : prev,
+        );
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [subtotal, documentDiscount]);
 
@@ -1015,13 +1235,20 @@ export function CreateQuotationPage() {
             ...sharedBody,
           };
 
-      const response = await fetch("/api/quotations", {
-        method: "POST",
+      const endpoint = draftQuotationId
+        ? `/api/quotations/${encodeURIComponent(draftQuotationId)}`
+        : "/api/quotations";
+      const response = await fetch(endpoint, {
+        method: draftQuotationId ? "PATCH" : "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(quotationBody),
+        body: JSON.stringify(
+          draftQuotationId
+            ? { action: "save_draft", ...quotationBody }
+            : quotationBody,
+        ),
       });
       const responseText = await response.text();
       let payload: { ok?: boolean; error?: string };
@@ -1124,7 +1351,11 @@ export function CreateQuotationPage() {
               <span className="material-symbols-outlined">arrow_back</span>
             </Link>
             <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
-              {boundInspection ? "Quotation for visit" : "Create a quotation"}
+              {draftQuotationId
+                ? "Edit draft quotation"
+                : boundInspection
+                  ? "Quotation for visit"
+                  : "Create a quotation"}
             </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -1137,10 +1368,16 @@ export function CreateQuotationPage() {
             <button
               type="button"
               onClick={() => void save(false)}
-              disabled={submitting}
+              disabled={submitting || draftLoading}
               className="inline-flex min-w-[5.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
-              {submitting ? <SaveSpinner label="Saving…" /> : "Save draft"}
+              {submitting || draftLoading ? (
+                <SaveSpinner label={draftLoading ? "Loading…" : "Saving…"} />
+              ) : draftQuotationId ? (
+                "Update draft"
+              ) : (
+                "Save draft"
+              )}
             </button>
           </div>
         </div>
@@ -1174,17 +1411,26 @@ export function CreateQuotationPage() {
       </header>
 
       {boundInspection ? (
-        <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 font-body text-[13px] text-on-surface sm:mx-6">
-          <span className="material-symbols-outlined mt-0.5 text-[18px] text-primary">
-            assignment_turned_in
-          </span>
-          <span>
-            This quotation will be attached to request{" "}
-            <span className="font-semibold">
-              {boundInspection.requestCode ?? boundInspection.id}
+        <div className="mx-4 mt-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 font-body text-[13px] text-on-surface sm:mx-6">
+          <div className="flex min-w-0 items-start gap-2">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px] text-primary">
+              assignment_turned_in
             </span>
-            . The customer details are pre-filled from the visit.
-          </span>
+            <span>
+              This quotation will be attached to request{" "}
+              <span className="font-semibold">
+                {boundInspection.requestCode ?? boundInspection.id}
+              </span>
+              . The customer details are pre-filled from the visit.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRequestPickerOpen(true)}
+            className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
+          >
+            Change request
+          </button>
         </div>
       ) : null}
 
@@ -1202,6 +1448,100 @@ export function CreateQuotationPage() {
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
           {tab === "create" ? (
             <div className="mx-auto max-w-2xl space-y-3">
+              {requestPickerOpen ? (
+                <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-body text-[15px] font-semibold text-on-surface">
+                        Fetch from requests
+                      </h2>
+                      <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                        Choose a request to fill the customer, address, and
+                        service details. Existing quotation items will stay as
+                        they are.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRequestPickerOpen(false)}
+                      className="shrink-0 font-body text-[12px] font-semibold text-on-surface-variant hover:text-on-surface"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <label className="mt-3 block">
+                    <span className={LABEL_CLASS}>Search requests</span>
+                    <input
+                      type="text"
+                      value={requestSearch}
+                      onChange={(event) => setRequestSearch(event.target.value)}
+                      placeholder="Search by request code, customer, phone, email, or service"
+                      className={INPUT_CLASS}
+                    />
+                  </label>
+                  {filteredRequests.length > 0 ? (
+                    <ul className="mt-3 max-h-80 overflow-y-auto rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
+                      {filteredRequests.map((request, index) => (
+                        <li
+                          key={request.id}
+                          className={
+                            index > 0 ? "border-t border-outline-variant/40" : ""
+                          }
+                        >
+                          <button
+                            type="button"
+                            onClick={() => applyInspectionRequest(request)}
+                            className="flex w-full items-start gap-3 p-3 text-left transition-colors hover:bg-surface-container-low"
+                          >
+                            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-primary">
+                              assignment
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono text-[12px] font-semibold text-primary">
+                                  {request.requestCode ?? request.id}
+                                </span>
+                                <span className="rounded-full bg-surface-container-low px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                                  {STATUS_LABELS[request.status]}
+                                </span>
+                              </span>
+                              <span className="mt-1 block font-body text-[14px] font-semibold text-on-surface">
+                                {request.customer.fullName || "Unknown customer"}
+                              </span>
+                              <span className="mt-0.5 block truncate font-body text-[12px] text-on-surface-variant">
+                                {requestServiceTitle(request)}
+                              </span>
+                              <span className="mt-0.5 block truncate font-body text-[12px] text-on-surface-variant">
+                                {request.customer.phone || request.customer.email
+                                  ? `${request.customer.phone || ""}${
+                                      request.customer.phone &&
+                                      request.customer.email
+                                        ? " · "
+                                        : ""
+                                    }${request.customer.email || ""}`
+                                  : formatAddress(request.address)}
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[13px] text-on-surface-variant">
+                      No available requests found. Requests with active
+                      quotations, jobs, or cancellations are hidden to avoid
+                      duplicate quotes.
+                    </p>
+                  )}
+                </section>
+              ) : !boundInspection ? (
+                <SectionLink
+                  icon="assignment"
+                  label="Fetch from requests"
+                  onClick={() => setRequestPickerOpen(true)}
+                />
+              ) : null}
+
               {/* Client */}
               {boundInspection && !clientOpen ? (
                 <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
@@ -2087,11 +2427,11 @@ export function CreateQuotationPage() {
               <button
                 type="button"
                 onClick={() => void save(true)}
-                disabled={submitting || !customer.email.trim()}
+                disabled={submitting || draftLoading || !customer.email.trim()}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
               >
-                {submitting ? (
-                  <SaveSpinner label="Sending…" />
+                {submitting || draftLoading ? (
+                  <SaveSpinner label={draftLoading ? "Loading…" : "Sending…"} />
                 ) : (
                   "Save & send quotation"
                 )}

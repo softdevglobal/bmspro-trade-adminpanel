@@ -137,7 +137,7 @@ export function bookingMinDateFromInspection(
 }
 
 export function canConvertQuotationToBooking(quotation: {
-  status: "draft" | "sent";
+  status: "draft" | "sent" | "cancelled";
   bookingId: string | null;
   bookingStatus?: BookingStatus | null;
   inspectionRequestStatus?: InspectionRequestDetail["status"] | null;

@@ -22,6 +22,7 @@ import {
 
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 export type AuthRole = "super_admin" | "business_owner" | "staff" | null;
+type WebAppAuthRole = Exclude<AuthRole, "staff" | null>;
 
 type AuthContextValue = {
   status: AuthStatus;
@@ -33,6 +34,10 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function canAccessWebApp(role: AuthRole): role is WebAppAuthRole {
+  return role === "super_admin" || role === "business_owner";
+}
 
 async function verifySuperAdmin(user: User): Promise<boolean> {
   const snap = await getDoc(doc(db, "super_admins", user.uid));
@@ -89,7 +94,7 @@ function readAuthCache(uid: string): AuthSessionCache | null {
     const raw = sessionStorage.getItem(AUTH_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AuthSessionCache;
-    if (parsed.uid !== uid || !parsed.role) return null;
+    if (parsed.uid !== uid || !canAccessWebApp(parsed.role)) return null;
     return parsed;
   } catch {
     return null;
@@ -142,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const statusRef = useRef<AuthStatus>("loading");
   const userRef = useRef<User | null>(null);
+  const loginInProgressRef = useRef(false);
 
   useEffect(() => {
     statusRef.current = status;
@@ -169,6 +175,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (loginInProgressRef.current) {
+        setUser(firebaseUser);
+        setRole(null);
+        setBusinessId(null);
+        setStatus("loading");
+        return;
+      }
+
       const cached = readAuthCache(firebaseUser.uid);
       setUser(firebaseUser);
       if (cached) {
@@ -182,7 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const applyResolved = async () => {
         try {
           const resolved = await resolveAuthRole(firebaseUser);
-          if (!resolved.role) {
+          if (!canAccessWebApp(resolved.role)) {
             clearAuthCache();
             await signOut(auth);
             await waitForAuthSignedOut();
@@ -222,42 +236,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const credential = await signInWithEmailAndPassword(
-      auth,
-      email.trim(),
-      password
-    );
-    await credential.user.getIdToken(true);
+    clearAuthCache();
+    setUser(null);
+    setRole(null);
+    setBusinessId(null);
+    setStatus("loading");
+    loginInProgressRef.current = true;
 
-    const resolved = await resolveAuthRole(credential.user);
-    if (!resolved.role) {
-      await signOut(auth);
-      await waitForAuthSignedOut();
-      throw new Error("UNAUTHORIZED");
-    }
+    try {
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+      await credential.user.getIdToken(true);
 
-    writeAuthCache(
-      credential.user.uid,
-      resolved.role,
-      resolved.businessId,
-    );
-    setUser(credential.user);
-    setRole(resolved.role);
-    setBusinessId(resolved.businessId);
-    setStatus("authenticated");
-    if (resolved.role === "business_owner" || resolved.role === "staff") {
-      const token = await credential.user.getIdToken();
-      void postSessionAudit(token, "login");
+      const resolved = await resolveAuthRole(credential.user);
+      if (!canAccessWebApp(resolved.role)) {
+        await signOut(auth);
+        await waitForAuthSignedOut();
+        setUser(null);
+        setRole(null);
+        setBusinessId(null);
+        setStatus("unauthenticated");
+        if (resolved.role === "staff") {
+          throw new Error("STAFF_WEB_LOGIN_DISABLED");
+        }
+        throw new Error("UNAUTHORIZED");
+      }
+
+      writeAuthCache(
+        credential.user.uid,
+        resolved.role,
+        resolved.businessId,
+      );
+      setUser(credential.user);
+      setRole(resolved.role);
+      setBusinessId(resolved.businessId);
+      setStatus("authenticated");
+      if (resolved.role === "business_owner") {
+        const token = await credential.user.getIdToken();
+        void postSessionAudit(token, "login");
+      }
+      router.replace("/dashboard");
+    } catch (error) {
+      if (!auth.currentUser) {
+        setUser(null);
+        setRole(null);
+        setBusinessId(null);
+        setStatus("unauthenticated");
+      }
+      throw error;
+    } finally {
+      loginInProgressRef.current = false;
     }
-    router.replace("/dashboard");
   }, [router]);
 
   const logout = useCallback(async () => {
     const currentUser = userRef.current;
-    if (
-      (role === "business_owner" || role === "staff") &&
-      currentUser
-    ) {
+    if (role === "business_owner" && currentUser) {
       const token = await currentUser.getIdToken();
       await postSessionAudit(token, "logout");
     }

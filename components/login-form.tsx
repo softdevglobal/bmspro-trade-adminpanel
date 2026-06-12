@@ -7,6 +7,13 @@ import { FormEvent, useRef, useState } from "react";
 type FirebaseAuthError = { code?: string; message?: string };
 
 function describeAuthError(error: unknown): string {
+  if (
+    error instanceof Error &&
+    error.message === "STAFF_WEB_LOGIN_DISABLED"
+  ) {
+    return "Staff accounts cannot sign in to this web app.";
+  }
+
   if (error instanceof Error && error.message === "UNAUTHORIZED") {
     return "This account is not authorized. Use an owner or admin login.";
   }

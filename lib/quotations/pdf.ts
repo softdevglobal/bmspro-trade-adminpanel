@@ -814,7 +814,17 @@ export async function generateDocumentPdf(
     ty -= 30;
 
     if (data.deposit) {
-      drawText(data.deposit.paid ? "Deposit paid" : "Deposit due", panelX + 12, ty, {
+      const depositLabel = data.deposit.paid
+        ? "Deposit paid"
+        : kind === "invoice"
+          ? "Deposit not paid"
+          : "Deposit due";
+      const depositBalanceDueAud =
+        kind === "invoice" && !data.deposit.paid
+          ? data.totalAud
+          : data.deposit.balanceDueAud;
+
+      drawText(depositLabel, panelX + 12, ty, {
         size: 9.5,
         color: MUTED,
       });
@@ -846,7 +856,7 @@ export async function generateDocumentPdf(
         color: WHITE,
       });
       drawNumberRight(
-        formatQuoteMoney(data.deposit.balanceDueAud),
+        formatQuoteMoney(depositBalanceDueAud),
         panelX + panelW - 12,
         ty - 9,
         { size: 12, bold: true, color: WHITE },

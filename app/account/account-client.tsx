@@ -1469,7 +1469,7 @@ function BookingCard({
                       You rejected this quotation
                     </p>
                   ) : !booking.bookingId &&
-                    booking.quotation.status !== "draft" ? (
+                    booking.quotation.status === "sent" ? (
                     <div className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3">
                       <p className="font-body text-[12px] font-bold text-amber-900">
                         Do you accept this quotation?

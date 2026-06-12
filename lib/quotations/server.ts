@@ -7,6 +7,7 @@ import type {
   QuotationDepositRequest,
   QuotationDetail,
   QuotationLineItem,
+  QuotationStatus,
 } from "@/lib/quotations/types";
 export type {
   CreateQuotationInput,
@@ -49,6 +50,18 @@ function parseImageUrls(raw: unknown): string[] {
     )
     .map((url) => url.trim())
     .slice(0, 10);
+}
+
+function parseQuotationStatus(raw: unknown): QuotationStatus {
+  if (raw === "sent" || raw === "cancelled") return raw;
+  return "draft";
+}
+
+function parseRestorableQuotationStatus(
+  raw: unknown,
+): Exclude<QuotationStatus, "cancelled"> | null {
+  if (raw === "sent" || raw === "draft") return raw;
+  return null;
 }
 
 function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
@@ -263,7 +276,10 @@ function mapQuotationDoc(
       typeof data.pdfUrl === "string" && data.pdfUrl.trim()
         ? data.pdfUrl.trim()
         : null,
-    status: data.status === "sent" ? "sent" : "draft",
+    status: parseQuotationStatus(data.status),
+    cancelledFromStatus: parseRestorableQuotationStatus(
+      data.cancelledFromStatus,
+    ),
     customerDecision:
       data.customerDecision === "accepted" ||
       data.customerDecision === "rejected"
@@ -718,6 +734,593 @@ export async function createQuotationForInspection(
   return { ok: true, quotation };
 }
 
+export async function updateDraftQuotation(
+  quotationId: string,
+  businessId: string,
+  updatedBy: string,
+  input: CreateQuotationInput,
+): Promise<
+  | { ok: true; quotation: QuotationDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Missing quotation." };
+  }
+
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  const quotationSnap = await quotationRef.get();
+  if (!quotationSnap.exists) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const quotationData = quotationSnap.data() ?? {};
+  if (quotationData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  if (quotationData.status === "sent") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Sent quotations cannot be edited.",
+    };
+  }
+
+  const inspectionId =
+    typeof quotationData.inspectionRequestId === "string"
+      ? quotationData.inspectionRequestId.trim()
+      : input.inspectionRequestId.trim();
+  if (!inspectionId) {
+    return { ok: false, status: 400, error: "Missing request." };
+  }
+
+  const lineItems = parseLineItems(input.lineItems);
+  if (!lineItems || lineItems.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Add at least one line item with a name and price.",
+    };
+  }
+
+  const requestSnap = await adminDb
+    .collection("requests")
+    .doc(inspectionId)
+    .get();
+  if (!requestSnap.exists) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const requestData = requestSnap.data() ?? {};
+  if (requestData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const requestCustomer = (requestData.customer ?? {}) as {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+  };
+  const requestAddress = (requestData.address ?? {}) as InspectionAddress;
+  const customerParsed = parseStandaloneCustomer(input.customer ?? requestCustomer);
+  if (!customerParsed.ok) {
+    return { ok: false, status: 400, error: customerParsed.error };
+  }
+  const addressParsed = parseStandaloneAddress(input.address ?? requestAddress);
+  if (!addressParsed.ok) {
+    return { ok: false, status: 400, error: addressParsed.error };
+  }
+
+  const customer = customerParsed.value;
+  const address = addressParsed.value;
+  const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
+  const discountAud =
+    typeof input.discountAud === "number" &&
+    Number.isFinite(input.discountAud) &&
+    input.discountAud >= 0
+      ? input.discountAud
+      : 0;
+  const computedFinal = Math.max(0, subtotalAud - discountAud);
+  const finalPriceAud =
+    typeof input.finalPriceAud === "number" &&
+    Number.isFinite(input.finalPriceAud) &&
+    input.finalPriceAud >= 0
+      ? input.finalPriceAud
+      : computedFinal;
+  const imageUrls = parseImageUrls(input.imageUrls);
+  const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud, depositRequest);
+  const termsAndConditions =
+    typeof input.termsAndConditions === "string" &&
+    input.termsAndConditions.trim()
+      ? input.termsAndConditions.trim()
+      : null;
+  const notes =
+    typeof input.notes === "string" && input.notes.trim()
+      ? input.notes.trim()
+      : null;
+  const validUntil =
+    typeof input.validUntil === "string" && input.validUntil.trim()
+      ? input.validUntil.trim()
+      : null;
+  const serviceTitle =
+    typeof quotationData.serviceTitle === "string" &&
+    quotationData.serviceTitle.trim()
+      ? quotationData.serviceTitle.trim()
+      : requestHeadline(requestData);
+
+  await requestSnap.ref.set(
+    {
+      customer,
+      address,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  await quotationRef.set(
+    {
+      serviceTitle,
+      customer,
+      address,
+      lineItems: serializeLineItemsForFirestore(lineItems),
+      subtotalAud,
+      finalPriceAud,
+      balanceDueAud,
+      imageUrls,
+      notes,
+      paymentInstructions: null,
+      termsAndConditions,
+      discountAud,
+      depositRequest,
+      validUntil,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  let saved = await quotationRef.get();
+  let quotation = mapQuotationDoc(quotationRef.id, saved.data() ?? {});
+  const businessBranding = await loadQuotationBusinessBranding(businessId);
+
+  let pdfBytes: Buffer | null = null;
+  try {
+    const { generateQuotationPdf } = await import("@/lib/quotations/pdf");
+    const { uploadQuotationPdf } = await import(
+      "@/lib/onboarding/services/upload"
+    );
+    pdfBytes = await generateQuotationPdf(quotation, {
+      businessName: businessBranding.businessName,
+      logoUrl: businessBranding.logoUrl,
+      businessAddress: businessBranding.businessAddress,
+      businessEmail: businessBranding.businessEmail,
+      businessPhone: businessBranding.businessPhone,
+      bookingSlug: businessBranding.bookingSlug,
+      bookingPath: businessBranding.bookingPath,
+      abn: businessBranding.abn,
+      registeredForGst: businessBranding.registeredForGst,
+      gstPercentage: businessBranding.gstPercentage,
+      inspectionRequestCode:
+        typeof requestData.requestCode === "string"
+          ? requestData.requestCode
+          : null,
+    });
+    const uploaded = await uploadQuotationPdf(pdfBytes, {
+      businessId,
+      inspectionRequestId: inspectionId,
+      quotationId: quotationRef.id,
+    });
+    if (uploaded.ok) {
+      await quotationRef.set(
+        { pdfUrl: uploaded.url, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      quotation = { ...quotation, pdfUrl: uploaded.url };
+    }
+  } catch (error) {
+    console.error("draft quotation PDF regeneration failed:", error);
+  }
+
+  const shouldSend = input.send === true;
+  const quotationCode =
+    typeof quotationData.quotationCode === "string" &&
+    quotationData.quotationCode.trim()
+      ? quotationData.quotationCode.trim()
+      : buildQuotationCodeForInspection({
+          id: inspectionId,
+          requestCode:
+            typeof requestData.requestCode === "string"
+              ? requestData.requestCode
+              : null,
+        });
+
+  try {
+    await requestSnap.ref.set(
+      {
+        quotation: {
+          id: quotationRef.id,
+          quotationCode,
+          finalPriceAud,
+          subtotalAud,
+          balanceDueAud,
+          pdfUrl: quotation.pdfUrl ?? null,
+          status: shouldSend ? "sent" : "draft",
+          createdAt:
+            quotationData.createdAt ?? requestData.quotation?.createdAt ?? null,
+        },
+        ...(shouldSend
+          ? {
+              status: "awaiting_decision" satisfies InspectionRequestStatus,
+              ...awaitingBookingFields(),
+            }
+          : {}),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    if (shouldSend) {
+      await quotationRef.set(
+        {
+          status: "sent",
+          ...awaitingBookingFields(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    }
+  } catch (error) {
+    console.error("draft quotation mirror to request failed:", error);
+  }
+
+  try {
+    const { catalogInputFromQuotationLineItem, upsertCatalogItems } =
+      await import("@/lib/items/server");
+    await upsertCatalogItems(
+      businessId,
+      updatedBy,
+      lineItems.map(catalogInputFromQuotationLineItem),
+    );
+  } catch {
+    /* catalog auto-save is best-effort */
+  }
+
+  if (shouldSend) {
+    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    try {
+      const updatedSnap = await requestSnap.ref.get();
+      const updatedRequest = mapInspectionDoc(
+        inspectionId,
+        updatedSnap.data() ?? {},
+      );
+      const { notifyCustomerOfQuotationSent } = await import(
+        "@/lib/notifications/server"
+      );
+      await notifyCustomerOfQuotationSent(updatedRequest, {
+        businessName: businessBranding.businessName,
+        bookingSlug: businessBranding.bookingSlug,
+        logoUrl: businessBranding.logoUrl,
+      });
+    } catch (error) {
+      console.error("draft quotation sent notification failed:", error);
+    }
+  }
+
+  saved = await quotationRef.get();
+  quotation = mapQuotationDoc(quotationRef.id, saved.data() ?? {});
+  return { ok: true, quotation };
+}
+
+export async function cancelQuotation(
+  quotationId: string,
+  businessId: string,
+): Promise<
+  | { ok: true; quotation: QuotationDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Missing quotation." };
+  }
+
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  const quotationSnap = await quotationRef.get();
+  if (!quotationSnap.exists) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const quotationData = quotationSnap.data() ?? {};
+  if (quotationData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  if (quotationData.status === "cancelled") {
+    return { ok: true, quotation: mapQuotationDoc(quotationSnap.id, quotationData) };
+  }
+  if (typeof quotationData.bookingId === "string" && quotationData.bookingId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Quotations with scheduled jobs cannot be cancelled.",
+    };
+  }
+  if (typeof quotationData.invoiceId === "string" && quotationData.invoiceId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Quotations with invoices cannot be cancelled.",
+    };
+  }
+  const invoiceSnap = await adminDb.collection("invoices").doc(id).get();
+  if (invoiceSnap.exists && invoiceSnap.data()?.businessId === businessId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Quotations with invoices cannot be cancelled.",
+    };
+  }
+
+  const inspectionRequestId =
+    typeof quotationData.inspectionRequestId === "string"
+      ? quotationData.inspectionRequestId.trim()
+      : "";
+  const now = FieldValue.serverTimestamp();
+  let cancelledFromRequestStatus: string | null = null;
+  let cancelledFromRequestBookingStatus: string | null = null;
+  let cancelledFromRequestBookingStatusAt: unknown = null;
+
+  if (inspectionRequestId) {
+    const requestSnap = await adminDb
+      .collection("requests")
+      .doc(inspectionRequestId)
+      .get();
+    const requestData = requestSnap.data() ?? {};
+    cancelledFromRequestStatus =
+      typeof requestData.status === "string" ? requestData.status : null;
+    cancelledFromRequestBookingStatus =
+      typeof requestData.bookingStatus === "string"
+        ? requestData.bookingStatus
+        : null;
+    cancelledFromRequestBookingStatusAt = requestData.bookingStatusAt ?? null;
+  }
+
+  await quotationRef.set(
+    {
+      status: "cancelled",
+      cancelledFromStatus:
+        quotationData.status === "sent" || quotationData.status === "draft"
+          ? quotationData.status
+          : "draft",
+      cancelledFromCustomerDecision:
+        quotationData.customerDecision === "accepted" ||
+        quotationData.customerDecision === "rejected"
+          ? quotationData.customerDecision
+          : null,
+      cancelledFromCustomerDecisionAt: quotationData.customerDecisionAt ?? null,
+      cancelledFromBookingStatus:
+        typeof quotationData.bookingStatus === "string"
+          ? quotationData.bookingStatus
+          : null,
+      cancelledFromBookingStatusAt: quotationData.bookingStatusAt ?? null,
+      cancelledFromRequestStatus,
+      cancelledFromRequestBookingStatus,
+      cancelledFromRequestBookingStatusAt,
+      customerDecision: null,
+      customerDecisionAt: null,
+      bookingStatus: null,
+      bookingStatusAt: null,
+      updatedAt: now,
+    },
+    { merge: true },
+  );
+
+  if (inspectionRequestId) {
+    const requestRef = adminDb.collection("requests").doc(inspectionRequestId);
+    const requestSnap = await requestRef.get();
+    if (requestSnap.exists) {
+      const requestData = requestSnap.data() ?? {};
+      const summary = requestData.quotation as
+        | { id?: string; createdAt?: unknown }
+        | null
+        | undefined;
+      if (
+        requestData.businessId === businessId &&
+        summary?.id === quotationRef.id
+      ) {
+        await requestRef.set(
+          {
+            quotation: {
+              ...summary,
+              id: quotationRef.id,
+              quotationCode:
+                typeof quotationData.quotationCode === "string"
+                  ? quotationData.quotationCode
+                  : null,
+              finalPriceAud:
+                typeof quotationData.finalPriceAud === "number"
+                  ? quotationData.finalPriceAud
+                  : 0,
+              subtotalAud:
+                typeof quotationData.subtotalAud === "number"
+                  ? quotationData.subtotalAud
+                  : 0,
+              balanceDueAud:
+                typeof quotationData.balanceDueAud === "number"
+                  ? quotationData.balanceDueAud
+                  : 0,
+              pdfUrl:
+                typeof quotationData.pdfUrl === "string"
+                  ? quotationData.pdfUrl
+                  : null,
+              status: "cancelled",
+            },
+            ...(requestData.status === "awaiting_decision"
+              ? {
+                  status: "completed" satisfies InspectionRequestStatus,
+                  bookingStatus: null,
+                  bookingStatusAt: null,
+                }
+              : {}),
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+      }
+    }
+  }
+
+  const saved = await quotationRef.get();
+  return { ok: true, quotation: mapQuotationDoc(saved.id, saved.data() ?? {}) };
+}
+
+export async function undoCancelQuotation(
+  quotationId: string,
+  businessId: string,
+): Promise<
+  | { ok: true; quotation: QuotationDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Missing quotation." };
+  }
+
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  const quotationSnap = await quotationRef.get();
+  if (!quotationSnap.exists) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const quotationData = quotationSnap.data() ?? {};
+  if (quotationData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  if (quotationData.status !== "cancelled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only cancelled quotations can be restored.",
+    };
+  }
+
+  const restoredStatus =
+    quotationData.cancelledFromStatus === "sent" ? "sent" : "draft";
+  const now = FieldValue.serverTimestamp();
+  const restoredCustomerDecision =
+    quotationData.cancelledFromCustomerDecision === "accepted" ||
+    quotationData.cancelledFromCustomerDecision === "rejected"
+      ? quotationData.cancelledFromCustomerDecision
+      : null;
+  const restoredCustomerDecisionAt =
+    restoredCustomerDecision && quotationData.cancelledFromCustomerDecisionAt
+      ? quotationData.cancelledFromCustomerDecisionAt
+      : null;
+
+  await quotationRef.set(
+    {
+      status: restoredStatus,
+      customerDecision:
+        restoredStatus === "sent" ? restoredCustomerDecision : null,
+      customerDecisionAt:
+        restoredStatus === "sent" ? restoredCustomerDecisionAt : null,
+      ...(restoredStatus === "sent"
+        ? {
+            bookingStatus:
+              quotationData.cancelledFromBookingStatus === "awaiting"
+                ? "awaiting"
+                : "awaiting",
+            bookingStatusAt:
+              quotationData.cancelledFromBookingStatusAt ??
+              FieldValue.serverTimestamp(),
+          }
+        : {
+            bookingStatus: null,
+            bookingStatusAt: null,
+          }),
+      updatedAt: now,
+    },
+    { merge: true },
+  );
+
+  const inspectionRequestId =
+    typeof quotationData.inspectionRequestId === "string"
+      ? quotationData.inspectionRequestId.trim()
+      : "";
+  if (inspectionRequestId) {
+    const requestRef = adminDb.collection("requests").doc(inspectionRequestId);
+    const requestSnap = await requestRef.get();
+    if (requestSnap.exists) {
+      const requestData = requestSnap.data() ?? {};
+      const summary = requestData.quotation as
+        | { id?: string; createdAt?: unknown }
+        | null
+        | undefined;
+      if (
+        requestData.businessId === businessId &&
+        summary?.id === quotationRef.id
+      ) {
+        await requestRef.set(
+          {
+            quotation: {
+              ...summary,
+              id: quotationRef.id,
+              quotationCode:
+                typeof quotationData.quotationCode === "string"
+                  ? quotationData.quotationCode
+                  : null,
+              finalPriceAud:
+                typeof quotationData.finalPriceAud === "number"
+                  ? quotationData.finalPriceAud
+                  : 0,
+              subtotalAud:
+                typeof quotationData.subtotalAud === "number"
+                  ? quotationData.subtotalAud
+                  : 0,
+              balanceDueAud:
+                typeof quotationData.balanceDueAud === "number"
+                  ? quotationData.balanceDueAud
+                  : 0,
+              pdfUrl:
+                typeof quotationData.pdfUrl === "string"
+                  ? quotationData.pdfUrl
+                  : null,
+              status: restoredStatus,
+              customerDecision:
+                restoredStatus === "sent" ? restoredCustomerDecision : null,
+              customerDecisionAt:
+                restoredStatus === "sent" ? restoredCustomerDecisionAt : null,
+            },
+            ...(restoredStatus === "sent"
+              ? {
+                  status: "awaiting_decision" satisfies InspectionRequestStatus,
+                  ...awaitingBookingFields(),
+                }
+              : {
+                  status:
+                    typeof quotationData.cancelledFromRequestStatus ===
+                      "string" &&
+                    (REQUEST_STATUSES as readonly string[]).includes(
+                      quotationData.cancelledFromRequestStatus,
+                    )
+                      ? quotationData.cancelledFromRequestStatus
+                      : requestData.status,
+                  bookingStatus:
+                    quotationData.cancelledFromRequestBookingStatus ?? null,
+                  bookingStatusAt:
+                    quotationData.cancelledFromRequestBookingStatusAt ?? null,
+                }),
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+      }
+    }
+  }
+
+  const saved = await quotationRef.get();
+  return { ok: true, quotation: mapQuotationDoc(saved.id, saved.data() ?? {}) };
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type StandaloneQuotationInput = {
@@ -947,12 +1550,6 @@ export async function createStandaloneQuotation(
 
   const customer = customerParsed.value;
   const address = addressParsed.value;
-  const description =
-    requestType === "custom_quote" && customRequest
-      ? customRequest.description
-      : typeof input.description === "string" && input.description.trim()
-        ? input.description.trim()
-        : "";
 
   const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
   const discountAud =
@@ -1133,7 +1730,12 @@ export async function createStandaloneQuotation(
           status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...(shouldSend ? awaitingBookingFields() : {}),
+        ...(shouldSend
+          ? {
+              status: "awaiting_decision" satisfies InspectionRequestStatus,
+              ...awaitingBookingFields(),
+            }
+          : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -1166,12 +1768,29 @@ export async function createStandaloneQuotation(
     /* catalog auto-save is best-effort */
   }
 
-  // 6. Email the customer their quotation PDF when explicitly sending.
+  // 6. Email the customer their quotation PDF and surface it in the portal when explicitly sending.
   if (shouldSend) {
     try {
       await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
     } catch (error) {
       console.error("standalone quotation email failed:", error);
+    }
+    try {
+      const updatedSnap = await inspectionRef.get();
+      const updatedRequest = mapInspectionDoc(
+        inspectionRef.id,
+        updatedSnap.data() ?? {},
+      );
+      const { notifyCustomerOfQuotationSent } = await import(
+        "@/lib/notifications/server"
+      );
+      await notifyCustomerOfQuotationSent(updatedRequest, {
+        businessName: businessBranding.businessName,
+        bookingSlug: businessBranding.bookingSlug,
+        logoUrl: businessBranding.logoUrl,
+      });
+    } catch (error) {
+      console.error("standalone quotation sent notification failed:", error);
     }
   }
 
@@ -1205,13 +1824,21 @@ export async function listQuotationsForInspection(
     typeof inspectionData.bookingCode === "string"
       ? inspectionData.bookingCode
       : null;
+  const mirroredQuotationStatus =
+    inspectionData.quotation &&
+    typeof inspectionData.quotation === "object" &&
+    typeof (inspectionData.quotation as { status?: unknown }).status ===
+      "string"
+      ? (inspectionData.quotation as { status: string }).status
+      : null;
   const fallbackBookingStatus =
     parseBookingStatus(inspectionData.bookingStatus) ??
     (fallbackBookingId
       ? ("scheduled" as const)
-      : inspectionData.quotation
+      : mirroredQuotationStatus === "sent"
         ? ("awaiting" as const)
-        : inspectionData.status === "awaiting_decision"
+        : !mirroredQuotationStatus &&
+            inspectionData.status === "awaiting_decision"
           ? ("awaiting" as const)
           : null);
   const fallbackBookingStatusAt = toMillis(inspectionData.bookingStatusAt);
@@ -1284,13 +1911,19 @@ async function enrichQuotationsFromInspections(
         typeof data.bookingId === "string" ? data.bookingId : null;
       const bookingCode =
         typeof data.bookingCode === "string" ? data.bookingCode : null;
+      const mirroredQuotationStatus =
+        data.quotation &&
+        typeof data.quotation === "object" &&
+        typeof (data.quotation as { status?: unknown }).status === "string"
+          ? (data.quotation as { status: string }).status
+          : null;
       const bookingStatus =
         parseBookingStatus(data.bookingStatus) ??
         (bookingId
           ? ("scheduled" as const)
-          : data.quotation
+          : mirroredQuotationStatus === "sent"
             ? ("awaiting" as const)
-            : data.status === "awaiting_decision"
+            : !mirroredQuotationStatus && data.status === "awaiting_decision"
               ? ("awaiting" as const)
               : null);
       const status =
