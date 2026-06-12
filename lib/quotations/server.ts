@@ -1730,7 +1730,12 @@ export async function createStandaloneQuotation(
           status: shouldSend ? "sent" : "draft",
           createdAt: FieldValue.serverTimestamp(),
         },
-        ...(shouldSend ? awaitingBookingFields() : {}),
+        ...(shouldSend
+          ? {
+              status: "awaiting_decision" satisfies InspectionRequestStatus,
+              ...awaitingBookingFields(),
+            }
+          : {}),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -1763,12 +1768,29 @@ export async function createStandaloneQuotation(
     /* catalog auto-save is best-effort */
   }
 
-  // 6. Email the customer their quotation PDF when explicitly sending.
+  // 6. Email the customer their quotation PDF and surface it in the portal when explicitly sending.
   if (shouldSend) {
     try {
       await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
     } catch (error) {
       console.error("standalone quotation email failed:", error);
+    }
+    try {
+      const updatedSnap = await inspectionRef.get();
+      const updatedRequest = mapInspectionDoc(
+        inspectionRef.id,
+        updatedSnap.data() ?? {},
+      );
+      const { notifyCustomerOfQuotationSent } = await import(
+        "@/lib/notifications/server"
+      );
+      await notifyCustomerOfQuotationSent(updatedRequest, {
+        businessName: businessBranding.businessName,
+        bookingSlug: businessBranding.bookingSlug,
+        logoUrl: businessBranding.logoUrl,
+      });
+    } catch (error) {
+      console.error("standalone quotation sent notification failed:", error);
     }
   }
 
