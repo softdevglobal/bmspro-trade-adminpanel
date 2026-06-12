@@ -14,6 +14,7 @@ import { MonthCalendarField } from "@/components/month-calendar-field";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import type { InvoiceDetail } from "@/lib/invoices/types";
 import {
   formatAddress,
   type InspectionAddress,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { platformTodayIso } from "@/lib/platform/timezone";
 import {
   buildQuotationDocumentDeposit,
   computeDocumentTotals,
@@ -155,8 +157,7 @@ function formatAud(value: number): string {
 }
 
 function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return platformTodayIso();
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -240,9 +241,12 @@ function toApiLineItems(
 
 export function CreateInvoiceFromQuotation({
   quotationId = "",
+  draftInvoiceId = "",
   direct = false,
 }: {
   quotationId?: string;
+  /** Existing draft invoice to edit and optionally send. */
+  draftInvoiceId?: string;
   /** Create an invoice from scratch — no existing quotation. */
   direct?: boolean;
 }) {
@@ -255,6 +259,7 @@ export function CreateInvoiceFromQuotation({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
+  const [draftInvoice, setDraftInvoice] = useState<InvoiceDetail | null>(null);
 
   const [requestType, setRequestType] =
     useState<InspectionRequestType>("custom_quote");
@@ -299,6 +304,7 @@ export function CreateInvoiceFromQuotation({
   const [businessEmail, setBusinessEmail] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
+  const isEditingDraftInvoice = draftInvoiceId.trim().length > 0;
 
   const loadQuotation = useCallback(async () => {
     if (!user) return;
@@ -306,12 +312,28 @@ export function CreateInvoiceFromQuotation({
     setError(null);
     try {
       const token = await user.getIdToken();
-      const [quotationRes, profileRes, itemsRes, servicesRes] =
+      const sourceQuotationId = isEditingDraftInvoice
+        ? draftInvoiceId.trim()
+        : quotationId.trim();
+      const [draftInvoiceRes, quotationRes, profileRes, itemsRes, servicesRes] =
         await Promise.all([
-          direct
+          isEditingDraftInvoice
+            ? fetch(
+                `/api/invoices?invoiceId=${encodeURIComponent(
+                  draftInvoiceId.trim(),
+                )}`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                  cache: "no-store",
+                },
+              )
+            : Promise.resolve(null),
+          direct && !isEditingDraftInvoice
             ? Promise.resolve(null)
             : fetch(
-                `/api/quotations?quotationId=${encodeURIComponent(quotationId)}`,
+                `/api/quotations?quotationId=${encodeURIComponent(
+                  sourceQuotationId,
+                )}`,
                 {
                   headers: { Authorization: `Bearer ${token}` },
                   cache: "no-store",
@@ -325,13 +347,32 @@ export function CreateInvoiceFromQuotation({
             headers: { Authorization: `Bearer ${token}` },
             cache: "no-store",
           }),
-          direct
+          direct || isEditingDraftInvoice
             ? fetch("/api/services", {
                 headers: { Authorization: `Bearer ${token}` },
                 cache: "no-store",
               })
             : Promise.resolve(null),
         ]);
+
+      let loadedDraftInvoice: InvoiceDetail | null = null;
+      if (draftInvoiceRes) {
+        const invoiceBody = (await draftInvoiceRes.json()) as {
+          ok?: boolean;
+          error?: string;
+          invoice?: InvoiceDetail;
+        };
+        if (!draftInvoiceRes.ok || !invoiceBody.ok || !invoiceBody.invoice) {
+          throw new Error(invoiceBody.error ?? "Could not load draft invoice.");
+        }
+        if (invoiceBody.invoice.status !== "draft") {
+          throw new Error("Only draft invoices can be edited.");
+        }
+        loadedDraftInvoice = invoiceBody.invoice;
+        setDraftInvoice(loadedDraftInvoice);
+      } else {
+        setDraftInvoice(null);
+      }
 
       if (quotationRes) {
         const quotationBody = (await quotationRes.json()) as {
@@ -385,6 +426,54 @@ export function CreateInvoiceFromQuotation({
         setDueDate(q.validUntil?.trim() || addDaysIso(issued, 14));
       }
 
+      if (loadedDraftInvoice) {
+        setCustomerName(loadedDraftInvoice.customer.fullName);
+        setCustomerEmail(loadedDraftInvoice.customer.email);
+        setCustomerPhone(loadedDraftInvoice.customer.phone);
+        setAddress(loadedDraftInvoice.address);
+        setLineItems(loadedDraftInvoice.lineItems.map(quotationLineToSaved));
+        setDiscount(
+          loadedDraftInvoice.discountAud > 0
+            ? {
+                mode: "fixed",
+                percent: 0,
+                amountAud: loadedDraftInvoice.discountAud,
+              }
+            : null,
+        );
+        if (loadedDraftInvoice.depositRequest) {
+          setDeposit({
+            mode: loadedDraftInvoice.depositRequest.mode,
+            percent: loadedDraftInvoice.depositRequest.percent,
+            amountAud: loadedDraftInvoice.depositRequest.amountAud,
+            dueDate: loadedDraftInvoice.depositRequest.dueDate,
+          });
+          setDepositPaid(loadedDraftInvoice.depositRequest.paid === true);
+        } else {
+          setDeposit(null);
+          setDepositPaid(false);
+        }
+        const rawTerms = loadedDraftInvoice.termsAndConditions?.trim() || "";
+        if (loadedDraftInvoice.depositRequest) {
+          const depositNote = formatDepositPaymentNote(
+            loadedDraftInvoice.depositRequest,
+          );
+          setTermsAndConditions(
+            rawTerms.replace(depositNote, "").replace(/\n{3,}/g, "\n\n").trim(),
+          );
+        } else {
+          setTermsAndConditions(rawTerms);
+        }
+        setNotes(loadedDraftInvoice.notes?.trim() ?? "");
+        setInvoiceDate(loadedDraftInvoice.invoiceDate || todayIso());
+        setDueDate(
+          loadedDraftInvoice.dueDate ||
+            addDaysIso(loadedDraftInvoice.invoiceDate || todayIso(), 14),
+        );
+        setRequestType("custom_quote");
+        setCustomServiceTitle(loadedDraftInvoice.serviceTitle);
+      }
+
       const itemsBody = (await itemsRes.json()) as {
         ok?: boolean;
         items?: CatalogItem[];
@@ -428,7 +517,7 @@ export function CreateInvoiceFromQuotation({
         }
       }
 
-      if (direct && servicesRes) {
+      if ((direct || isEditingDraftInvoice) && servicesRes) {
         setServicesLoading(true);
         const servicesData = (await servicesRes.json()) as {
           ok?: boolean;
@@ -439,7 +528,7 @@ export function CreateInvoiceFromQuotation({
           const active = servicesData.services.filter(
             (service) => service.isActive,
           );
-          if (active.length > 0) {
+          if (direct && !isEditingDraftInvoice && active.length > 0) {
             setRequestType("existing_service");
             setSelectedServiceId(active[0]?.id ?? null);
           }
@@ -455,10 +544,13 @@ export function CreateInvoiceFromQuotation({
     } finally {
       setLoading(false);
     }
-  }, [quotationId, direct, user]);
+  }, [quotationId, draftInvoiceId, direct, isEditingDraftInvoice, user]);
 
   useEffect(() => {
-    void loadQuotation();
+    const frame = requestAnimationFrame(() => {
+      void loadQuotation();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [loadQuotation]);
 
   const activeServices = useMemo(
@@ -472,14 +564,17 @@ export function CreateInvoiceFromQuotation({
       null,
     [activeServices, selectedServiceId],
   );
+  const isDirectDraftInvoice =
+    isEditingDraftInvoice && quotation?.createdSource === "invoice_direct";
+  const directMode = direct || isDirectDraftInvoice;
 
   const directServiceTitle = useMemo(() => {
-    if (!direct) return "";
+    if (!directMode) return "";
     if (requestType === "existing_service") {
       return selectedService?.name ?? "";
     }
     return customServiceTitle.trim();
-  }, [direct, requestType, selectedService, customServiceTitle]);
+  }, [directMode, requestType, selectedService, customServiceTitle]);
 
   const catalogSuggestions = useMemo(() => {
     if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
@@ -563,9 +658,10 @@ export function CreateInvoiceFromQuotation({
       : totalAud;
 
   const invoiceCode = useMemo(() => {
+    if (draftInvoice?.invoiceCode) return draftInvoice.invoiceCode;
     if (!quotation) return "Draft";
     return buildInvoiceCodeForQuotation(quotation);
-  }, [quotation]);
+  }, [draftInvoice, quotation]);
 
   const previewDocument = useMemo((): QuotationDocumentData => {
     return {
@@ -640,7 +736,7 @@ export function CreateInvoiceFromQuotation({
       setTab("create");
       return;
     }
-    if (direct) {
+    if (directMode) {
       if (requestType === "existing_service") {
         if (!selectedServiceId) {
           setError("Select a service from your catalog.");
@@ -688,6 +784,28 @@ export function CreateInvoiceFromQuotation({
     setError(null);
     try {
       const token = await user.getIdToken();
+      const directPayload = {
+        serviceTitle: directServiceTitle,
+        description:
+          requestType === "custom_quote"
+            ? customServiceDescription.trim() || null
+            : null,
+        requestType,
+        serviceId: requestType === "existing_service" ? selectedServiceId : null,
+        customRequest:
+          requestType === "custom_quote"
+            ? {
+                title: customServiceTitle.trim(),
+                description: customServiceDescription.trim(),
+              }
+            : null,
+        customer: {
+          fullName: customerName.trim(),
+          email: customerEmail.trim(),
+          phone: customerPhone.trim(),
+        },
+        address,
+      };
       const response = await fetch("/api/invoices", {
         method: "POST",
         headers: {
@@ -695,32 +813,15 @@ export function CreateInvoiceFromQuotation({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          ...(direct
+          ...(direct && !isEditingDraftInvoice
             ? {
                 direct: true,
-                serviceTitle: directServiceTitle,
-                description:
-                  requestType === "custom_quote"
-                    ? customServiceDescription.trim() || null
-                    : null,
-                requestType,
-                serviceId:
-                  requestType === "existing_service" ? selectedServiceId : null,
-                customRequest:
-                  requestType === "custom_quote"
-                    ? {
-                        title: customServiceTitle.trim(),
-                        description: customServiceDescription.trim(),
-                      }
-                    : null,
-                customer: {
-                  fullName: customerName.trim(),
-                  email: customerEmail.trim(),
-                  phone: customerPhone.trim(),
-                },
-                address,
+                ...directPayload,
               }
-            : { quotationId: quotation!.id }),
+            : {
+                quotationId: quotation!.id,
+                ...(isDirectDraftInvoice ? directPayload : {}),
+              }),
           lineItems: toApiLineItems(
             lineItems,
             gstEnabled,
@@ -898,6 +999,18 @@ export function CreateInvoiceFromQuotation({
     setCatalogSuggestField(null);
   }
 
+  function openPriceEditor() {
+    setTab("create");
+    const [firstItem] = lineItems;
+    if (!firstItem) {
+      startAddItem();
+      return;
+    }
+    if (lineItems.length === 1) {
+      startEditItem(firstItem);
+    }
+  }
+
   function renderCatalogSuggestions(activeField: "code" | "name") {
     if (catalogSuggestField !== activeField || catalogSuggestions.length === 0) {
       return null;
@@ -992,15 +1105,27 @@ export function CreateInvoiceFromQuotation({
         <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Link
-              href={direct ? "/dashboard/invoices" : "/dashboard/quotations"}
+              href={
+                direct || isEditingDraftInvoice
+                  ? "/dashboard/invoices"
+                  : "/dashboard/quotations"
+              }
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-low"
-              aria-label={direct ? "Back to invoices" : "Back to quotations"}
+              aria-label={
+                direct || isEditingDraftInvoice
+                  ? "Back to invoices"
+                  : "Back to quotations"
+              }
             >
               <span className="material-symbols-outlined">arrow_back</span>
             </Link>
             <div className="min-w-0">
               <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
-                {direct ? "Create invoice" : "Issue invoice"}
+                {isEditingDraftInvoice
+                  ? "Edit draft invoice"
+                  : direct
+                    ? "Create invoice"
+                    : "Issue invoice"}
               </h1>
               <p className="truncate font-body text-[12px] text-on-surface-variant">
                 {quotation
@@ -1015,7 +1140,11 @@ export function CreateInvoiceFromQuotation({
             disabled={submitting}
             className="inline-flex min-w-[6.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
           >
-            {submitting ? "Saving…" : "Save draft"}
+            {submitting
+              ? "Saving…"
+              : isEditingDraftInvoice
+                ? "Update draft"
+                : "Save draft"}
           </button>
         </div>
 
@@ -1059,7 +1188,7 @@ export function CreateInvoiceFromQuotation({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
         {tab === "create" ? (
           <div className="mx-auto max-w-2xl space-y-4">
-              {direct ? (
+              {directMode ? (
                 <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                   <h2 className="font-body text-[15px] font-semibold text-on-surface">
                     Job
@@ -1240,7 +1369,7 @@ export function CreateInvoiceFromQuotation({
                       className="mt-1"
                     />
                   </label>
-                  {direct ? (
+                  {directMode ? (
                     <>
                       <label className="block sm:col-span-2">
                         <span className={LABEL_CLASS}>Street address</span>
@@ -1354,6 +1483,13 @@ export function CreateInvoiceFromQuotation({
                           <span className="font-numeric text-[14px] font-semibold text-on-surface">
                             {formatAud(item.amountAud)}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => startEditItem(item)}
+                            className="rounded-full border border-primary/25 px-2.5 py-1 font-body text-[11px] font-semibold text-primary hover:bg-primary/5"
+                          >
+                            Edit price
+                          </button>
                           <button
                             type="button"
                             onClick={() =>
@@ -1472,7 +1608,7 @@ export function CreateInvoiceFromQuotation({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>Rate (ex. GST)</span>
+                        <span className={LABEL_CLASS}>Price / rate (ex. GST)</span>
                         <input
                           type="number"
                           min="0"
@@ -1760,6 +1896,22 @@ export function CreateInvoiceFromQuotation({
                   {formatAud(totalAud)}
                 </span>
               </div>
+              <div className="border-t border-outline-variant/30 px-3 py-2.5">
+                <button
+                  type="button"
+                  onClick={openPriceEditor}
+                  className="flex w-full items-center justify-between gap-3 text-left font-body text-[13px] font-semibold text-primary hover:text-primary/80"
+                >
+                  <span>Edit price</span>
+                  <span className="font-body text-[11px] font-medium text-on-surface-variant">
+                    {lineItems.length === 0
+                      ? "Add item"
+                      : lineItems.length === 1
+                        ? "Update item rate"
+                        : "Edit items"}
+                  </span>
+                </button>
+              </div>
               {documentDeposit ? (
                 <>
                   <div className="space-y-1.5 border-t border-outline-variant/40 px-3 py-2.5 font-body text-[12px]">
@@ -1767,7 +1919,7 @@ export function CreateInvoiceFromQuotation({
                       <span>
                         {documentDeposit.paid
                           ? "Deposit paid"
-                          : "Deposit requested"}
+                          : "Deposit not paid"}
                       </span>
                       <span
                         className={`font-numeric font-medium ${
@@ -1781,12 +1933,21 @@ export function CreateInvoiceFromQuotation({
                           : formatAud(documentDeposit.amountAud)}
                       </span>
                     </div>
-                    <p className="text-[10px] text-on-surface-variant">
-                      {formatDepositPaymentNote(documentDeposit)}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[10px] text-on-surface-variant">
+                        {formatDepositPaymentNote(documentDeposit)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setDepositModalOpen(true)}
+                        className="shrink-0 font-body text-[11px] font-semibold text-primary hover:underline"
+                      >
+                        Edit
+                      </button>
+                    </div>
                     <div className="flex items-center justify-between gap-2 pt-0.5">
                       <span className="text-[11px] font-semibold text-on-surface-variant">
-                        Deposit payment
+                        Payment status
                       </span>
                       <div className="flex overflow-hidden rounded-full border border-outline-variant/60">
                         <button
@@ -1816,21 +1977,21 @@ export function CreateInvoiceFromQuotation({
                   </div>
                   <div className="flex items-center justify-between bg-primary px-3 py-2.5">
                     <span className="font-body text-[13px] font-bold text-on-primary">
-                      {documentDeposit.paid ? "Balance due" : "Amount due"}
+                      Balance due
                     </span>
                     <span className="font-numeric text-[15px] font-bold text-on-primary">
                       {formatAud(balanceDueAud)}
                     </span>
                   </div>
                 </>
-              ) : direct ? null : (
+              ) : (
                 <div className="border-t border-outline-variant/30 px-3 py-2.5 text-center">
                   <button
                     type="button"
                     onClick={() => setDepositModalOpen(true)}
                     className="font-body text-[13px] font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
                   >
-                    Add deposit request
+                    Record payment
                   </button>
                 </div>
               )}
@@ -1860,7 +2021,20 @@ export function CreateInvoiceFromQuotation({
         defaultDueDate={dueDate}
         minDueDate={invoiceDate}
         onClose={() => setDepositModalOpen(false)}
-        onSave={(next) => setDeposit(next)}
+        title="Record payment"
+        totalLabel="Invoice total"
+        amountLabel="Payment amount"
+        saveLabel="Save payment"
+        removeLabel="Remove payment"
+        onSave={(next) => {
+          const hadDeposit = Boolean(deposit);
+          setDeposit(next);
+          if (!next) {
+            setDepositPaid(false);
+          } else if (!hadDeposit) {
+            setDepositPaid(true);
+          }
+        }}
       />
     </div>
   );

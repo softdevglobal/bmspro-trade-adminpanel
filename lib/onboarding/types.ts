@@ -1,3 +1,5 @@
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
+
 export const BUSINESS_TYPES = [
   { id: "Plumbing", icon: "plumbing" },
   { id: "Electrical", icon: "electrical_services" },
@@ -41,8 +43,8 @@ export const AU_STATES = [
 export type AuState = (typeof AU_STATES)[number]["id"];
 
 export const AU_TIMEZONES = [
-  { id: "Australia/Sydney", label: "Sydney (NSW) — AEST/AEDT" },
   { id: "Australia/Melbourne", label: "Melbourne (VIC) — AEST/AEDT" },
+  { id: "Australia/Sydney", label: "Sydney (NSW) — AEST/AEDT" },
   { id: "Australia/Brisbane", label: "Brisbane (QLD) — AEST" },
   { id: "Australia/Adelaide", label: "Adelaide (SA) — ACST/ACDT" },
   { id: "Australia/Perth", label: "Perth (WA) — AWST" },
@@ -51,6 +53,7 @@ export const AU_TIMEZONES = [
 ] as const;
 
 export type AuTimezone = (typeof AU_TIMEZONES)[number]["id"];
+export const DEFAULT_AU_TIMEZONE: AuTimezone = PLATFORM_TIME_ZONE;
 
 export const SUBSCRIPTION_PLANS = [
   {

@@ -10,6 +10,7 @@ import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-deci
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   BOOKING_STATUS_LABELS,
   BOOKING_STATUS_TONE,
@@ -40,7 +41,7 @@ function formatAud(value: number | null): string {
 
 function formatWhen(timestamp: number | null): string {
   if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -50,12 +51,66 @@ function formatWhen(timestamp: number | null): string {
 }
 
 type QuotationPreviewMode = "review" | "convert_booking";
+type QuotationFilter =
+  | "pending"
+  | "completed"
+  | "all"
+  | QuotationDetail["status"];
+
+const QUOTATION_TABS: { id: QuotationFilter; label: string }[] = [
+  { id: "pending", label: "Pending" },
+  { id: "draft", label: "Draft" },
+  { id: "sent", label: "Sent" },
+  { id: "completed", label: "Completed" },
+  { id: "cancelled", label: "Cancelled" },
+  { id: "all", label: "All" },
+];
+
+function isCompletedQuotation(quotation: QuotationDetail): boolean {
+  return quotationHasInvoice(quotation);
+}
+
+function isPendingQuotation(quotation: QuotationDetail): boolean {
+  return quotation.status !== "cancelled" && !isCompletedQuotation(quotation);
+}
+
+function quotationFilterLabel(filter: QuotationFilter): string {
+  if (filter === "all") return "";
+  return QUOTATION_TABS.find((tab) => tab.id === filter)?.label ?? "Quotation";
+}
 
 const disabledActionClass =
   "inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 px-4 py-3 font-body text-[14px] font-semibold text-on-surface-variant opacity-50";
 
 const disabledMenuItemClass =
   "flex w-full cursor-not-allowed items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface-variant opacity-50";
+
+function StatusPill({ status }: { status: QuotationDetail["status"] }) {
+  const tone =
+    status === "sent"
+      ? "border-sky-200 bg-sky-50 text-sky-700"
+      : status === "cancelled"
+        ? "border-rose-200 bg-rose-50 text-rose-700"
+        : "border-amber-200 bg-amber-50 text-amber-700";
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${tone}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function CompletedPill() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+      <span className="material-symbols-outlined text-[13px] leading-none">
+        task_alt
+      </span>
+      Completed
+    </span>
+  );
+}
 
 function BookingStatusPill({ status }: { status: BookingStatus }) {
   return (
@@ -135,9 +190,13 @@ function CustomerDecisionPill({
 function QuotationCardMenu({
   quotation,
   onScheduleBooking,
+  onCancelQuotation,
+  onUndoCancel,
 }: {
   quotation: QuotationDetail;
   onScheduleBooking: () => void;
+  onCancelQuotation: () => void;
+  onUndoCancel: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -151,6 +210,10 @@ function QuotationCardMenu({
       ? "The customer rejected this quotation"
       : "Waiting for the customer to accept this quotation";
   const invoiceHref = `/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`;
+  const editDraftHref = `/dashboard/quotations/new?quotationId=${encodeURIComponent(quotation.id)}`;
+  const isCancelled = quotation.status === "cancelled";
+  const canIssueInvoice =
+    quotation.status === "sent" && !hasInvoice && !awaitingCustomer;
 
   useEffect(() => {
     if (!open) return;
@@ -187,6 +250,19 @@ function QuotationCardMenu({
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
+          {quotation.status === "draft" ? (
+            <Link
+              href={editDraftHref}
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                edit_square
+              </span>
+              Edit &amp; send draft
+            </Link>
+          ) : null}
           {canSchedule ? (
             <button
               type="button"
@@ -236,6 +312,17 @@ function QuotationCardMenu({
                 Schedule job
               </Link>
             )
+          ) : isCancelled ? (
+            <span
+              role="menuitem"
+              className={disabledMenuItemClass}
+              title="Cancelled quotations cannot be scheduled"
+            >
+              <span className="material-symbols-outlined text-[18px] text-outline">
+                event_busy
+              </span>
+              Schedule job
+            </span>
           ) : (
             <button
               type="button"
@@ -250,14 +337,18 @@ function QuotationCardMenu({
               Schedule job
             </button>
           )}
-          {hasInvoice || awaitingCustomer ? (
+          {!canIssueInvoice ? (
             <span
               role="menuitem"
               className={disabledMenuItemClass}
               title={
-                hasInvoice
-                  ? "Invoice already issued for this quotation"
-                  : awaitingCustomerTitle
+                isCancelled
+                  ? "Cancelled quotations cannot be invoiced"
+                  : hasInvoice
+                    ? "Invoice already issued for this quotation"
+                    : quotation.status !== "sent"
+                      ? "Send the quotation before issuing an invoice"
+                      : awaitingCustomerTitle
               }
             >
               <span className="material-symbols-outlined text-[18px] text-outline">
@@ -278,6 +369,38 @@ function QuotationCardMenu({
               Issue invoice
             </Link>
           )}
+          {!isCancelled && !hasBooking && !hasInvoice ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`${menuItemClass} text-rose-700 hover:bg-rose-50`}
+              onClick={() => {
+                setOpen(false);
+                onCancelQuotation();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-rose-600">
+                cancel
+              </span>
+              Cancel quotation
+            </button>
+          ) : null}
+          {isCancelled ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`${menuItemClass} text-primary hover:bg-primary/5`}
+              onClick={() => {
+                setOpen(false);
+                onUndoCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                undo
+              </span>
+              Undo cancel
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -289,13 +412,18 @@ function QuotationCard({
   isPreviewOpen,
   onOpen,
   onBook,
+  onCancel,
+  onUndoCancel,
 }: {
   quotation: QuotationDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
   onBook: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
 }) {
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const hasInvoice = quotationHasInvoice(quotation);
   const showFollowUpActions =
     canConvertQuotationToBooking(quotation) && !awaitingCustomer;
   const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
@@ -322,9 +450,8 @@ function QuotationCard({
           <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
             {displayQuotationCode(quotation)}
           </span>
-          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
-            {quotation.status}
-          </span>
+          <StatusPill status={quotation.status} />
+          {hasInvoice ? <CompletedPill /> : null}
           {quotation.bookingStatus && !quotation.bookingId ? (
             <BookingStatusPill status={quotation.bookingStatus} />
           ) : null}
@@ -334,6 +461,8 @@ function QuotationCard({
         <QuotationCardMenu
           quotation={quotation}
           onScheduleBooking={onBook}
+          onCancelQuotation={onCancel}
+          onUndoCancel={onUndoCancel}
         />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
@@ -382,6 +511,8 @@ function QuotationPreviewDrawer({
   onPreviewModeChange,
   onBookingCreated,
   onQuotationDecided,
+  onCancelQuotation,
+  onUndoCancel,
 }: {
   quotation: QuotationDetail | null;
   previewMode: QuotationPreviewMode;
@@ -390,6 +521,8 @@ function QuotationPreviewDrawer({
   onPreviewModeChange: (mode: QuotationPreviewMode) => void;
   onBookingCreated: (request: InspectionRequestDetail) => void;
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
+  onCancelQuotation: (quotation: QuotationDetail) => void;
+  onUndoCancel: (quotation: QuotationDetail) => void;
 }) {
   const open = quotation !== null;
 
@@ -424,6 +557,8 @@ function QuotationPreviewDrawer({
               onPreviewModeChange={onPreviewModeChange}
               onBookingCreated={onBookingCreated}
               onQuotationDecided={onQuotationDecided}
+              onCancelQuotation={onCancelQuotation}
+              onUndoCancel={onUndoCancel}
             />
           </motion.aside>
         </motion.div>
@@ -440,6 +575,8 @@ function QuotationPreviewContent({
   onPreviewModeChange,
   onBookingCreated,
   onQuotationDecided,
+  onCancelQuotation,
+  onUndoCancel,
 }: {
   quotation: QuotationDetail;
   previewMode: QuotationPreviewMode;
@@ -448,6 +585,8 @@ function QuotationPreviewContent({
   onPreviewModeChange: (mode: QuotationPreviewMode) => void;
   onBookingCreated: (request: InspectionRequestDetail) => void;
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
+  onCancelQuotation: (quotation: QuotationDetail) => void;
+  onUndoCancel: (quotation: QuotationDetail) => void;
 }) {
   const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -468,15 +607,18 @@ function QuotationPreviewContent({
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const isCancelled = quotation.status === "cancelled";
   const awaitingCustomerTitle =
     quotation.customerDecision === "rejected"
       ? "The customer rejected this quotation"
       : "Waiting for the customer to accept this quotation";
+  const editDraftHref = `/dashboard/quotations/new?quotationId=${encodeURIComponent(quotation.id)}`;
   const hasFooterActions =
     previewMode === "review" &&
     (quotation.status === "sent" ||
       Boolean(quotation.pdfUrl) ||
-      hasInvoice);
+      hasInvoice ||
+      (!isCancelled && !quotation.bookingId && !hasInvoice));
 
   function closeInvoicePdf() {
     setInvoicePdfOpen(false);
@@ -539,9 +681,7 @@ function QuotationPreviewContent({
             <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-primary">
               {displayQuotationCode(quotation)}
             </span>
-            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-700">
-              {quotation.status}
-            </span>
+            <StatusPill status={quotation.status} />
             {quotation.bookingStatus && !quotation.bookingId ? (
               <BookingStatusPill status={quotation.bookingStatus} />
             ) : null}
@@ -585,6 +725,49 @@ function QuotationPreviewContent({
             <div className="mt-2">
               <CreatedSourcePill source={quotation.createdSource} />
             </div>
+          </section>
+        ) : null}
+
+        {previewMode === "review" && quotation.status === "draft" ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+            <p className="font-body text-[12px] font-semibold text-amber-900">
+              This quotation is saved as a draft.
+            </p>
+            <p className="mt-1 font-body text-[12px] leading-relaxed text-amber-800">
+              Edit it to make changes, then send it to the customer when ready.
+            </p>
+            <Link
+              href={editDraftHref}
+              onClick={onClose}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                edit_square
+              </span>
+              Edit &amp; send draft
+            </Link>
+          </section>
+        ) : null}
+
+        {previewMode === "review" && isCancelled ? (
+          <section className="rounded-xl border border-rose-200 bg-rose-50/80 p-3">
+            <p className="font-body text-[12px] font-semibold text-rose-900">
+              This quotation has been cancelled.
+            </p>
+            <p className="mt-1 font-body text-[12px] leading-relaxed text-rose-800">
+              Cancelled quotations are kept for reference only and cannot be
+              edited, scheduled, or invoiced.
+            </p>
+            <button
+              type="button"
+              onClick={() => onUndoCancel(quotation)}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-white px-4 py-2.5 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-primary/5"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                undo
+              </span>
+              Undo cancel
+            </button>
           </section>
         ) : null}
 
@@ -860,6 +1043,18 @@ function QuotationPreviewContent({
                 {invoicePdfError}
               </p>
             ) : null}
+            {!isCancelled && !quotation.bookingId && !hasInvoice ? (
+              <button
+                type="button"
+                onClick={() => onCancelQuotation(quotation)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  cancel
+                </span>
+                Cancel quotation
+              </button>
+            ) : null}
           </footer>
         ) : null}
         </>
@@ -888,6 +1083,115 @@ function QuotationPreviewContent({
   );
 }
 
+function CancelQuotationConfirmModal({
+  quotation,
+  isLoading,
+  onClose,
+  onConfirm,
+}: {
+  quotation: QuotationDetail | null;
+  isLoading: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const open = quotation !== null;
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isLoading) onClose();
+    }
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, isLoading, onClose]);
+
+  if (!quotation) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close dialog"
+        onClick={onClose}
+        disabled={isLoading}
+        className="absolute inset-0 bg-on-background/50 backdrop-blur-sm"
+      />
+
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="cancel-quotation-title"
+        aria-describedby="cancel-quotation-desc"
+        className="relative w-full max-w-[440px] overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl"
+      >
+        <div className="px-6 pt-6 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600 ring-1 ring-rose-200">
+            <span className="material-symbols-outlined material-symbols-filled text-[28px]">
+              cancel
+            </span>
+          </div>
+          <h2
+            id="cancel-quotation-title"
+            className="font-display text-headline-sm font-semibold text-on-surface"
+          >
+            Cancel this quotation?
+          </h2>
+          <div
+            id="cancel-quotation-desc"
+            className="mt-2 space-y-2 font-body text-body-md text-on-surface-variant"
+          >
+            <p>
+              {displayQuotationCode(quotation)} for{" "}
+              <span className="font-semibold text-on-surface">
+                {quotation.customer.fullName || "this customer"}
+              </span>{" "}
+              will move to the Cancelled tab.
+            </p>
+            <p>
+              It will be kept for reference, but cannot be edited, scheduled,
+              or invoiced after cancellation.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col-reverse gap-2 border-t border-outline-variant bg-surface-container-low px-6 py-4 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isLoading}
+            className="flex h-11 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-lowest px-5 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:opacity-60"
+          >
+            Keep quotation
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isLoading}
+            className="flex h-11 items-center justify-center gap-2 rounded-lg bg-rose-600 px-5 font-body text-[14px] font-semibold text-white transition-all hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isLoading ? (
+              <>
+                <span className="material-symbols-outlined animate-spin text-[18px]">
+                  progress_activity
+                </span>
+                Cancelling...
+              </>
+            ) : (
+              "Yes, cancel quotation"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function QuotationsBoard() {
   const { user, status: authStatus } = useAuth();
   const { requests: inspectionRequests } = useInspectionRequests();
@@ -897,6 +1201,9 @@ export function QuotationsBoard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] =
     useState<QuotationPreviewMode>("review");
+  const [filter, setFilter] = useState<QuotationFilter>("pending");
+  const [cancelTarget, setCancelTarget] = useState<QuotationDetail | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) {
@@ -931,12 +1238,57 @@ export function QuotationsBoard() {
   }, [user]);
 
   useEffect(() => {
-    void load();
+    const frame = requestAnimationFrame(() => {
+      void load();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [load]);
 
   const selected = useMemo(
     () => quotations.find((quotation) => quotation.id === selectedId) ?? null,
     [quotations, selectedId],
+  );
+
+  const counts = useMemo(
+    () => ({
+      all: quotations.length,
+      pending: quotations.filter(isPendingQuotation).length,
+      completed: quotations.filter(isCompletedQuotation).length,
+      draft: quotations.filter(
+        (quotation) =>
+          quotation.status === "draft" && !isCompletedQuotation(quotation),
+      )
+        .length,
+      sent: quotations.filter(
+        (quotation) =>
+          quotation.status === "sent" && !isCompletedQuotation(quotation),
+      )
+        .length,
+      cancelled: quotations.filter(
+        (quotation) => quotation.status === "cancelled",
+      ).length,
+    }),
+    [quotations],
+  );
+
+  const visibleQuotations = useMemo(
+    () => {
+      if (filter === "all") return quotations;
+      if (filter === "pending") {
+        return quotations.filter(isPendingQuotation);
+      }
+      if (filter === "completed") {
+        return quotations.filter(isCompletedQuotation);
+      }
+      if (filter === "cancelled") {
+        return quotations.filter((quotation) => quotation.status === filter);
+      }
+      return quotations.filter(
+        (quotation) =>
+          quotation.status === filter && !isCompletedQuotation(quotation),
+      );
+    },
+    [filter, quotations],
   );
 
   const linkedInspection = useMemo(() => {
@@ -989,6 +1341,84 @@ export function QuotationsBoard() {
     );
   }
 
+  async function confirmCancelQuotation() {
+    if (!user || !cancelTarget) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`/api/quotations/${cancelTarget.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        quotation?: QuotationDetail;
+      };
+      if (!response.ok || !data.ok || !data.quotation) {
+        throw new Error(data.error ?? "Could not cancel quotation.");
+      }
+      setQuotations((prev) =>
+        prev.map((entry) =>
+          entry.id === data.quotation!.id ? data.quotation! : entry,
+        ),
+      );
+      setPreviewMode("review");
+      setFilter("cancelled");
+      setCancelTarget(null);
+    } catch (cancelError) {
+      setError(
+        cancelError instanceof Error
+          ? cancelError.message
+          : "Could not cancel quotation.",
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleUndoCancel(quotation: QuotationDetail) {
+    if (!user) return;
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`/api/quotations/${quotation.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "undo_cancel" }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        quotation?: QuotationDetail;
+      };
+      if (!response.ok || !data.ok || !data.quotation) {
+        throw new Error(data.error ?? "Could not restore quotation.");
+      }
+      setQuotations((prev) =>
+        prev.map((entry) =>
+          entry.id === data.quotation!.id ? data.quotation! : entry,
+        ),
+      );
+      setFilter(data.quotation.status);
+      setPreviewMode("review");
+    } catch (restoreError) {
+      setError(
+        restoreError instanceof Error
+          ? restoreError.message
+          : "Could not restore quotation.",
+      );
+    }
+  }
+
   function handleClosePreview() {
     setSelectedId(null);
     setPreviewMode("review");
@@ -1034,6 +1464,15 @@ export function QuotationsBoard() {
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <Link
+              href="/dashboard/quotations/new?fromRequests=1"
+              className="inline-flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-5 py-2.5 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                assignment
+              </span>
+              From request
+            </Link>
+            <Link
               href="/dashboard/quotations/new"
               className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
             >
@@ -1059,29 +1498,87 @@ export function QuotationsBoard() {
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="font-body text-[12px] text-on-surface-variant">
-          {quotations.length} quotation{quotations.length === 1 ? "" : "s"} · tap
-          a card to open the side preview
+          {counts.pending} pending · {counts.completed} completed · tap a card
+          to open the side preview
         </p>
-        <Link
-          href="/dashboard/quotations/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
-        >
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          New quotation
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/dashboard/quotations/new?fromRequests=1"
+            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-primary/10"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              assignment
+            </span>
+            From request
+          </Link>
+          <Link
+            href="/dashboard/quotations/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            New quotation
+          </Link>
+        </div>
       </div>
-      <ul className="space-y-3">
-        {quotations.map((quotation) => (
-          <li key={quotation.id}>
-            <QuotationCard
-              quotation={quotation}
-              isPreviewOpen={selectedId === quotation.id}
-              onOpen={() => handleOpenQuotation(quotation.id)}
-              onBook={() => handleStartConvertBooking(quotation.id)}
-            />
-          </li>
-        ))}
-      </ul>
+
+      <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/60 bg-surface-container-low p-1">
+        {QUOTATION_TABS.map((tab) => {
+          const selectedTab = filter === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setFilter(tab.id)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 font-body text-[12px] font-bold transition-colors ${
+                selectedTab
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface"
+              }`}
+            >
+              {tab.label}
+              <span
+                className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] ${
+                  selectedTab
+                    ? "bg-on-primary/15 text-on-primary"
+                    : "bg-surface-container-lowest text-on-surface-variant"
+                }`}
+              >
+                {counts[tab.id]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {visibleQuotations.length > 0 ? (
+        <ul className="space-y-3">
+          {visibleQuotations.map((quotation) => (
+            <li key={quotation.id}>
+              <QuotationCard
+                quotation={quotation}
+                isPreviewOpen={selectedId === quotation.id}
+                onOpen={() => handleOpenQuotation(quotation.id)}
+                onBook={() => handleStartConvertBooking(quotation.id)}
+                onCancel={() => setCancelTarget(quotation)}
+                onUndoCancel={() => void handleUndoCancel(quotation)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <section className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-5 py-8 text-center">
+          <p className="font-display text-[17px] font-semibold text-on-surface">
+            No{" "}
+            {filter === "all"
+              ? ""
+              : `${quotationFilterLabel(filter).toLowerCase()} `}
+            quotations
+          </p>
+          <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+            Quotations for this tab will appear here.
+          </p>
+        </section>
+      )}
 
       <QuotationPreviewDrawer
         quotation={selected}
@@ -1091,6 +1588,16 @@ export function QuotationsBoard() {
         onPreviewModeChange={setPreviewMode}
         onBookingCreated={handleBookingCreated}
         onQuotationDecided={handleQuotationDecided}
+        onCancelQuotation={setCancelTarget}
+        onUndoCancel={(quotation) => void handleUndoCancel(quotation)}
+      />
+      <CancelQuotationConfirmModal
+        quotation={cancelTarget}
+        isLoading={cancelling}
+        onClose={() => {
+          if (!cancelling) setCancelTarget(null);
+        }}
+        onConfirm={() => void confirmCancelQuotation()}
       />
     </>
   );

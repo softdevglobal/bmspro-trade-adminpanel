@@ -23,6 +23,7 @@ import {
 } from "@/components/booking-slot-date-picker";
 import { AuPhoneInput } from "@/components/au-phone-input";
 import { formatAddress } from "@/lib/inspection/types";
+import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   isValidAuLocalPhone,
   toAuLocalPhoneDigits,
@@ -669,9 +670,7 @@ const TIME_RANGE_OPTIONS: {
 
 function formatPrettyDate(iso: string): string {
   if (!iso) return "";
-  const parsed = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleDateString(undefined, {
+  return formatIsoDateInPlatformTimeZone(iso, {
     weekday: "short",
     month: "short",
     day: "numeric",

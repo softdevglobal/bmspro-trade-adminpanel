@@ -39,6 +39,7 @@ import {
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   displayBookingCode,
   displayQuotationCode,
@@ -87,6 +88,7 @@ type StatusFilter = "all" | InspectionRequestStatus;
 type DrawerMode =
   | "review"
   | "accept"
+  | "accept_proposed"
   | "set_time"
   | "propose"
   | "assign"
@@ -140,6 +142,7 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
 function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
   return (
     !!request.quotation &&
+    request.quotation.status !== "cancelled" &&
     !request.bookingId &&
     (request.status === "scheduled" ||
       request.status === "completed" ||
@@ -403,18 +406,20 @@ function RequestCard({
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
 }) {
-  const title =
+  const serviceTitle =
     request.requestType === "existing_service"
       ? request.serviceName ?? "Existing service"
       : request.customRequest?.title ?? "Custom quotation request";
 
-  const subtitle =
+  const serviceSubtitle =
     request.requestType === "existing_service"
       ? request.serviceBusinessType ?? "Service request"
       : "Custom quotation request";
 
+  const customerName = request.customer.fullName?.trim() || "Customer";
+
   const created = request.createdAt
-    ? new Date(request.createdAt).toLocaleString(undefined, {
+    ? formatInPlatformTimeZone(request.createdAt, {
         month: "short",
         day: "numeric",
         hour: "numeric",
@@ -432,7 +437,7 @@ function RequestCard({
   );
   const cardQuotationAwaitingCustomer = Boolean(
     request.quotation &&
-      request.quotation.status !== "draft" &&
+      request.quotation.status === "sent" &&
       !request.bookingId &&
       request.quotation.customerDecision !== "accepted",
   );
@@ -467,12 +472,12 @@ function RequestCard({
                   ? "format_list_bulleted"
                   : "request_quote"}
               </span>
-              {subtitle}
+              {serviceSubtitle}
             </span>
             <CreatedSourcePill source={request.createdSource} />
           </div>
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
-            {title}
+            {customerName}
           </h4>
           <p className="mt-1">
             <InspectionRequestCode
@@ -481,7 +486,10 @@ function RequestCard({
             />
           </p>
           <p className="mt-0.5 truncate font-body text-[13px] text-on-surface-variant">
-            {request.customer.fullName} · {request.customer.phone}
+            Service: {serviceTitle}
+          </p>
+          <p className="truncate font-body text-[13px] text-on-surface-variant">
+            {request.customer.phone}
           </p>
           <p className="truncate font-body text-[12px] text-on-surface-variant">
             {formatAddress(request.address)}
@@ -725,6 +733,7 @@ function DrawerReviewFooter({
   request,
   submitting,
   onAccept,
+  onAcceptProposed,
   onPropose,
   onSetTime,
   onAssign,
@@ -737,6 +746,7 @@ function DrawerReviewFooter({
   request: InspectionRequestDetail;
   submitting: boolean;
   onAccept: () => void;
+  onAcceptProposed: () => void;
   onPropose: () => void;
   onSetTime: () => void;
   onAssign: () => void;
@@ -750,7 +760,7 @@ function DrawerReviewFooter({
   const followUp = canFollowUpAfterQuotation(request);
   const quotationAwaitingCustomer = Boolean(
     request.quotation &&
-      request.quotation.status !== "draft" &&
+      request.quotation.status === "sent" &&
       !request.bookingId &&
       request.quotation.customerDecision !== "accepted",
   );
@@ -826,9 +836,7 @@ function DrawerReviewFooter({
                   <QuotationOwnerDecisionButtons
                     className="mt-2.5"
                     quotationId={request.quotation.id}
-                    status={
-                      request.quotation.status === "draft" ? "draft" : "sent"
-                    }
+                    status="sent"
                     bookingId={request.bookingId}
                     customerDecision={request.quotation.customerDecision}
                     onDecided={onQuotationDecided}
@@ -859,6 +867,9 @@ function DrawerReviewFooter({
 
   const hasVisitWindow =
     !!request.scheduledStartTime || !!request.scheduledEndTime;
+  const canAcceptProposedByPhone =
+    request.status === "owner_proposed" &&
+    request.ownerProposedSlots.length > 0;
 
   // The visit happened (staff ended it or it was marked complete) but no
   // quotation exists yet — let the owner create one for this visit. This
@@ -921,10 +932,19 @@ function DrawerReviewFooter({
         </div>
       ) : (
         <div className="space-y-2">
+          {canAcceptProposedByPhone ? (
+            <DrawerFooterAction
+              icon="phone_in_talk"
+              label="Accept proposed date by phone"
+              variant="primary"
+              onClick={onAcceptProposed}
+              disabled={submitting}
+            />
+          ) : null}
           <DrawerFooterAction
             icon="event_available"
             label="Accept a date"
-            variant="primary"
+            variant={canAcceptProposedByPhone ? "secondary" : "primary"}
             onClick={onAccept}
             disabled={submitting}
           />
@@ -1066,6 +1086,13 @@ function DetailDrawerContent({
 
   useEffect(() => {
     if (!initialMode || initialMode === "review") return;
+    if (
+      initialMode === "convert_booking" &&
+      !canFollowUpAfterQuotation(request)
+    ) {
+      onInitialModeConsumed();
+      return;
+    }
     setMode(initialMode);
     onInitialModeConsumed();
   }, [initialMode, onInitialModeConsumed]);
@@ -1203,9 +1230,25 @@ function DetailDrawerContent({
 
   function openAction(nextMode: Exclude<DrawerMode, "review">) {
     setActionError(null);
+    if (
+      nextMode === "convert_booking" &&
+      !canFollowUpAfterQuotation(request)
+    ) {
+      setActionError("Cancelled quotations cannot be converted into jobs.");
+      setMode("review");
+      return;
+    }
     if (nextMode === "set_time") {
       if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
       if (request.scheduledEndTime) setAcceptEndTime(request.scheduledEndTime);
+    }
+    if (nextMode === "accept") {
+      setAcceptedSlot(null);
+      setAcceptNote("");
+    }
+    if (nextMode === "accept_proposed") {
+      setAcceptedSlot(request.ownerProposedSlots[0] ?? null);
+      setAcceptNote("Customer confirmed this proposed date by phone.");
     }
     setMode(nextMode);
   }
@@ -1365,6 +1408,53 @@ function DetailDrawerContent({
           />
         ) : null}
 
+        {mode === "accept_proposed" ? (
+          <AcceptForm
+            title="Accept proposed date by phone"
+            description="Use this when the customer confirms one of your proposed dates during a phone conversation."
+            slots={request.ownerProposedSlots}
+            value={acceptedSlot}
+            note={acceptNote}
+            noteLabel="Confirmation note"
+            notePlaceholder="e.g. Customer confirmed this proposed date by phone."
+            confirmLabel="Confirm phone acceptance"
+            confirmIcon="phone_in_talk"
+            startTime={acceptStartTime}
+            endTime={acceptEndTime}
+            onChange={setAcceptedSlot}
+            onNoteChange={setAcceptNote}
+            onStartTimeChange={setAcceptStartTime}
+            onEndTimeChange={setAcceptEndTime}
+            disabled={submitting}
+            onCancel={() => setMode("review")}
+            onSubmit={() => {
+              if (!acceptedSlot) {
+                setActionError(
+                  "Pick the proposed date the customer accepted by phone.",
+                );
+                return;
+              }
+              if (!acceptStartTime || !acceptEndTime) {
+                setActionError("Set a start and end time for the visit.");
+                return;
+              }
+              if (acceptStartTime >= acceptEndTime) {
+                setActionError("The end time must be after the start time.");
+                return;
+              }
+              void callAction({
+                action: "accept",
+                slot: acceptedSlot,
+                startTime: acceptStartTime,
+                endTime: acceptEndTime,
+                note:
+                  acceptNote.trim() ||
+                  "Customer confirmed this proposed date by phone.",
+              });
+            }}
+          />
+        ) : null}
+
         {mode === "set_time" ? (
           <SetTimeForm
             slot={request.scheduledSlot}
@@ -1485,6 +1575,7 @@ function DetailDrawerContent({
             request={request}
             submitting={submitting}
             onAccept={() => openAction("accept")}
+            onAcceptProposed={() => openAction("accept_proposed")}
             onPropose={() => openAction("propose")}
             onSetTime={() => openAction("set_time")}
             onAssign={() => openAction("assign")}
@@ -1517,7 +1608,7 @@ function DetailDrawerContent({
 type QuotationView = {
   id: string;
   quotationCode: string | null;
-  status: "draft" | "sent";
+  status: "draft" | "sent" | "cancelled";
   customerDecision: "accepted" | "rejected" | null;
   bookingId: string | null;
   bookingCode: string | null;
@@ -1692,7 +1783,7 @@ function QuotationCard({
           </p>
           {quotation.createdAt ? (
             <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
-              {new Date(quotation.createdAt).toLocaleDateString(undefined, {
+              {formatInPlatformTimeZone(quotation.createdAt, {
                 day: "numeric",
                 month: "short",
                 year: "numeric",
@@ -2603,9 +2694,15 @@ function AwaitingDecisionForm({
 }
 
 function AcceptForm({
+  title = "Accept one of the customer's dates",
+  description = "Pick the option that works best, then set the visit time range.",
   slots,
   value,
   note,
+  noteLabel = "Note for customer (optional)",
+  notePlaceholder = "e.g. Our inspector will call ahead 30 minutes before arriving.",
+  confirmLabel = "Confirm visit",
+  confirmIcon = "event_available",
   startTime,
   endTime,
   disabled,
@@ -2616,9 +2713,15 @@ function AcceptForm({
   onCancel,
   onSubmit,
 }: {
+  title?: string;
+  description?: string;
   slots: InspectionSlot[];
   value: InspectionSlot | null;
   note: string;
+  noteLabel?: string;
+  notePlaceholder?: string;
+  confirmLabel?: string;
+  confirmIcon?: string;
   startTime: string;
   endTime: string;
   disabled: boolean;
@@ -2634,10 +2737,10 @@ function AcceptForm({
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">
-        Accept one of the customer&apos;s dates
+        {title}
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Pick the option that works best, then set the visit time range.
+        {description}
       </p>
       <ul className="mt-3 space-y-2">
         {slots.map((slot, idx) => {
@@ -2709,20 +2812,20 @@ function AcceptForm({
 
       <label className="mt-3 block">
         <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Note for customer (optional)
+          {noteLabel}
         </span>
         <textarea
           value={note}
           onChange={(event) => onNoteChange(event.target.value)}
           rows={2}
           maxLength={500}
-          placeholder="e.g. Our inspector will call ahead 30 minutes before arriving."
+          placeholder={notePlaceholder}
           className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
         />
       </label>
       <FormActions
-        confirmLabel="Confirm visit"
-        confirmIcon="event_available"
+        confirmLabel={confirmLabel}
+        confirmIcon={confirmIcon}
         disabled={disabled}
         onCancel={onCancel}
         onSubmit={onSubmit}

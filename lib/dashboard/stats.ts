@@ -1,6 +1,7 @@
 import { toIsoDateLocal } from "@/lib/calendar/events";
 import type { BookingDetail } from "@/lib/bookings/types";
 import type { InspectionRequestDetail } from "@/lib/inspection/types";
+import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import type { NotificationRecord } from "@/lib/notifications/types";
 
 export type DashboardKpi = {
@@ -71,9 +72,7 @@ function visitTitle(request: InspectionRequestDetail): string {
 }
 
 function formatShortDate(iso: string): string {
-  const parsed = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleDateString(undefined, {
+  return formatIsoDateInPlatformTimeZone(iso, {
     weekday: "short",
     month: "short",
     day: "numeric",

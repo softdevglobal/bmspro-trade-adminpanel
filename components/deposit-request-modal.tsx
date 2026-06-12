@@ -19,6 +19,11 @@ type Props = {
   initial: DepositRequest | null;
   defaultDueDate: string;
   minDueDate: string;
+  title?: string;
+  totalLabel?: string;
+  amountLabel?: string;
+  saveLabel?: string;
+  removeLabel?: string;
   onClose: () => void;
   onSave: (deposit: DepositRequest | null) => void;
 };
@@ -38,6 +43,11 @@ export function DepositRequestModal({
   initial,
   defaultDueDate,
   minDueDate,
+  title = "Deposit request",
+  totalLabel = "Quotation total",
+  amountLabel = "Deposit amount",
+  saveLabel = "Save",
+  removeLabel = "Remove deposit request",
   onClose,
   onSave,
 }: Props) {
@@ -134,7 +144,7 @@ export function DepositRequestModal({
             id="deposit-request-title"
             className="font-display text-[18px] font-semibold text-on-surface"
           >
-            Deposit request
+            {title}
           </h2>
           <button
             type="button"
@@ -148,7 +158,7 @@ export function DepositRequestModal({
 
         <div className="space-y-4 px-5 py-5">
           <div className="flex items-center justify-between border-b border-outline-variant/40 pb-3 font-body text-[14px]">
-            <span className="text-on-surface-variant">Quotation total</span>
+            <span className="text-on-surface-variant">{totalLabel}</span>
             <span className="font-numeric font-semibold text-on-surface">
               {formatAud(quotationTotalAud)}
             </span>
@@ -205,7 +215,7 @@ export function DepositRequestModal({
           ) : (
             <label className="block">
               <span className="font-body text-[13px] font-medium text-on-surface">
-                Deposit amount
+                {amountLabel}
               </span>
               <div className="relative mt-1">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-body text-[14px] text-on-surface-variant">
@@ -224,7 +234,7 @@ export function DepositRequestModal({
           )}
 
           <div className="flex items-center justify-between rounded-lg bg-surface-container-low px-3 py-2.5 font-body text-[13px]">
-            <span className="text-on-surface-variant">Deposit amount</span>
+            <span className="text-on-surface-variant">{amountLabel}</span>
             <span className="font-numeric font-semibold text-on-surface">
               {formatAud(depositAmount)}
             </span>
@@ -244,7 +254,7 @@ export function DepositRequestModal({
             onClick={handleSave}
             className="w-full rounded-xl bg-primary py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
           >
-            Save
+            {saveLabel}
           </button>
           {initial ? (
             <button
@@ -252,7 +262,7 @@ export function DepositRequestModal({
               onClick={handleRemove}
               className="w-full py-2 font-body text-[13px] font-semibold text-error hover:underline"
             >
-              Remove deposit request
+              {removeLabel}
             </button>
           ) : null}
         </footer>

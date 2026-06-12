@@ -23,6 +23,12 @@ export type UnifiedChatMessage = {
 
 export type SupportConversationStatus = "waiting" | "connected" | "closed" | null;
 
+export type OwnerClosedNotice = {
+  message: string;
+  agentName: string | null;
+  closedAt: number | null;
+};
+
 export type UnifiedChatSnapshot = {
   messages: UnifiedChatMessage[];
   unreadCount: number;
@@ -32,6 +38,7 @@ export type UnifiedChatSnapshot = {
   supportAgentName: string | null;
   ccAgentName: string | null;
   ccRoomIds: string[];
+  closedNotice: OwnerClosedNotice | null;
 };
 
 export type SendChatMessageResult = {
@@ -92,6 +99,17 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
+async function parseChatJsonResponse<T>(res: Response): Promise<T | null> {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    console.error(
+      `[chat] expected JSON from ${res.url} but got HTTP ${res.status}. If this is 404 HTML, stop and restart the dev server (npm run dev).`,
+    );
+    return null;
+  }
+  return (await res.json()) as T;
+}
+
 function mapApiSupportMessage(
   conversationId: string,
   message: ApiSupportMessage,
@@ -107,19 +125,32 @@ function mapApiSupportMessage(
   };
 }
 
+function clearPanelMessages(state: {
+  messages: Map<string, UnifiedChatMessage>;
+}) {
+  state.messages.clear();
+}
+
 function replaceSupportMessages(
   state: {
     messages: Map<string, UnifiedChatMessage>;
   },
   conversationId: string,
   apiMessages: ApiSupportMessage[],
+  sessionStartedAt: number | null,
 ) {
-  for (const key of [...state.messages.keys()]) {
-    if (key.startsWith("support:")) {
-      state.messages.delete(key);
-    }
-  }
-  for (const message of apiMessages) {
+  clearPanelMessages(state);
+
+  const cutoff =
+    sessionStartedAt !== null ? sessionStartedAt - 1000 : null;
+  const filtered =
+    cutoff === null
+      ? apiMessages
+      : apiMessages.filter(
+          (message) => (message.timestamp ?? 0) >= cutoff,
+        );
+
+  for (const message of filtered) {
     const unified = mapApiSupportMessage(conversationId, message);
     state.messages.set(
       `support:${conversationId}:${unified.id}`,
@@ -141,6 +172,7 @@ export function subscribeUnifiedWorkshopChat(
   let refreshInFlight = false;
   let refreshQueued = false;
   let pinnedSupportConversationId: string | null = null;
+  let panelSessionStartedAt: number | null = null;
 
   const state = {
     supportConversationId: null as string | null,
@@ -149,6 +181,7 @@ export function subscribeUnifiedWorkshopChat(
     ccAgentName: null as string | null,
     ccRoomIds: [] as string[],
     preferredCcChatId: null as string | null,
+    closedNotice: null as OwnerClosedNotice | null,
     supportUnread: 0,
     ccUnread: 0,
     messages: new Map<string, UnifiedChatMessage>(),
@@ -170,6 +203,7 @@ export function subscribeUnifiedWorkshopChat(
       supportAgentName: state.supportAgentName,
       ccAgentName: state.ccAgentName,
       ccRoomIds: state.ccRoomIds,
+      closedNotice: state.closedNotice,
     });
   }
 
@@ -205,33 +239,45 @@ export function subscribeUnifiedWorkshopChat(
             state.messages.delete(existingKey);
           }
         }
-        const mapped = snap.docs.map((messageDoc) => {
-          const data = messageDoc.data();
-          const senderRole =
-            typeof data.senderRole === "string" ? data.senderRole : "";
-          const messageKind =
-            data.messageKind === "system" ? "system" : "user";
-          const sender: UnifiedChatMessage["sender"] =
-            messageKind === "system"
-              ? "system"
-              : senderRole === "call_center"
-                ? "agent"
-                : "customer";
-          const agentLabel =
-            state.ccAgentName?.trim() || "Reception";
-          return {
-            key: `cc:${chatId}:${messageDoc.id}`,
-            message: {
-              id: messageDoc.id,
-              source: "cc" as const,
-              threadId: chatId,
-              text: typeof data.text === "string" ? data.text : "",
-              sender,
-              senderName: sender === "agent" ? agentLabel : "You",
-              timestamp: toMillis(data.createdAt),
-            },
-          };
-        });
+        const sessionCutoff =
+          panelSessionStartedAt !== null
+            ? panelSessionStartedAt - 1000
+            : null;
+        const mapped = snap.docs
+          .map((messageDoc) => {
+            const data = messageDoc.data();
+            const timestamp = toMillis(data.createdAt);
+            if (sessionCutoff !== null && timestamp < sessionCutoff) {
+              return null;
+            }
+            const senderRole =
+              typeof data.senderRole === "string" ? data.senderRole : "";
+            const messageKind =
+              data.messageKind === "system" ? "system" : "user";
+            const sender: UnifiedChatMessage["sender"] =
+              messageKind === "system"
+                ? "system"
+                : senderRole === "call_center"
+                  ? "agent"
+                  : "customer";
+            const agentLabel =
+              state.ccAgentName?.trim() || "Reception";
+            return {
+              key: `cc:${chatId}:${messageDoc.id}`,
+              message: {
+                id: messageDoc.id,
+                source: "cc" as const,
+                threadId: chatId,
+                text: typeof data.text === "string" ? data.text : "",
+                sender,
+                senderName: sender === "agent" ? agentLabel : "You",
+                timestamp,
+              },
+            };
+          })
+          .filter(
+            (item): item is NonNullable<typeof item> => item !== null,
+          );
         mapped.sort((a, b) => a.message.timestamp - b.message.timestamp);
         for (const item of mapped) {
           state.messages.set(item.key, item.message);
@@ -246,6 +292,10 @@ export function subscribeUnifiedWorkshopChat(
   }
 
   function syncCcMessageListeners() {
+    if (!panelOpen) {
+      detachCcMessageListeners();
+      return;
+    }
     detachCcMessageListeners();
     for (const chatId of state.ccRoomIds) {
       attachCcMessages(chatId);
@@ -264,11 +314,13 @@ export function subscribeUnifiedWorkshopChat(
         headers,
         cache: "no-store",
       });
-      const conversationData = (await conversationRes.json()) as {
+      const conversationData = await parseChatJsonResponse<{
         ok?: boolean;
         conversation?: ApiSupportConversation | null;
+        closedNotice?: OwnerClosedNotice | null;
         error?: string;
-      };
+      }>(conversationRes);
+      if (!conversationData) return;
 
       if (!conversationRes.ok || !conversationData.ok) {
         console.error(
@@ -281,16 +333,25 @@ export function subscribeUnifiedWorkshopChat(
       const conversation = conversationData.conversation ?? null;
 
       if (!conversation?.conversationId) {
+        const nextClosedNotice = conversationData.closedNotice ?? null;
+        const closedJustNow =
+          nextClosedNotice !== null &&
+          nextClosedNotice.closedAt !== state.closedNotice?.closedAt;
         pinnedSupportConversationId = null;
         state.supportConversationId = null;
         state.supportStatus = null;
         state.supportAgentName = null;
         state.supportUnread = 0;
-        replaceSupportMessages(state, "", []);
+        state.closedNotice = nextClosedNotice;
+        clearPanelMessages(state);
+        if (closedJustNow && panelOpen) {
+          panelSessionStartedAt = Date.now();
+        }
         emit();
         return;
       }
 
+      state.closedNotice = null;
       const conversationId = conversation.conversationId;
       pinnedSupportConversationId = conversationId;
       state.supportConversationId = conversationId;
@@ -301,15 +362,24 @@ export function subscribeUnifiedWorkshopChat(
           ? conversation.unreadForCustomer
           : 0;
 
+      if (!panelOpen) {
+        emit();
+        return;
+      }
+
       const messagesRes = await fetch(
         `/api/chat/conversations/owner/${encodeURIComponent(conversationId)}/messages?limit=100`,
         { headers, cache: "no-store" },
       );
-      const messagesData = (await messagesRes.json()) as {
+      const messagesData = await parseChatJsonResponse<{
         ok?: boolean;
         messages?: ApiSupportMessage[];
         error?: string;
-      };
+      }>(messagesRes);
+      if (!messagesData) {
+        emit();
+        return;
+      }
 
       if (!messagesRes.ok || !messagesData.ok || !messagesData.messages) {
         console.error(
@@ -324,6 +394,7 @@ export function subscribeUnifiedWorkshopChat(
         state,
         conversationId,
         messagesData.messages,
+        panelSessionStartedAt,
       );
       emit();
     } catch (error) {
@@ -343,7 +414,7 @@ export function subscribeUnifiedWorkshopChat(
       () => {
         void refreshSupportFromApi();
       },
-      panelOpen ? 2000 : 5000,
+      panelOpen ? 1500 : 5000,
     );
   }
 
@@ -422,6 +493,17 @@ export function subscribeUnifiedWorkshopChat(
     ensureCcThread,
     setPanelOpen(open: boolean) {
       panelOpen = open;
+      if (open) {
+        panelSessionStartedAt = Date.now();
+        clearPanelMessages(state);
+        detachCcMessageListeners();
+      } else {
+        panelSessionStartedAt = null;
+        clearPanelMessages(state);
+        detachCcMessageListeners();
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = null;
+      }
       schedulePoll();
       emit();
       if (open) {

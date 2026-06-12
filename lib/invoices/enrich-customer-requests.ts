@@ -37,7 +37,14 @@ function invoiceSummaryFromDoc(
     pdfUrl: pdfUrlRaw.length > 0 ? pdfUrlRaw : null,
     finalPriceAud: readPrice(data.finalPriceAud),
     balanceDueAud: readPrice(data.balanceDueAud),
-    status: data.status === "sent" ? "sent" : data.status === "draft" ? "draft" : null,
+    status:
+      data.status === "paid"
+        ? "paid"
+        : data.status === "sent"
+          ? "sent"
+          : data.status === "draft"
+            ? "draft"
+            : null,
     invoiceDate:
       typeof data.invoiceDate === "string" && data.invoiceDate.trim()
         ? data.invoiceDate.trim()
@@ -76,7 +83,10 @@ export async function enrichRequestsWithInvoices(
     if (!fromCollection) return { ...request, invoice: null };
 
     const fromDoc = invoiceSummaryFromDoc(quotationId, fromCollection);
-    if (mirrored?.pdfUrl && mirrored.status === "sent") {
+    if (
+      mirrored?.pdfUrl &&
+      (mirrored.status === "sent" || mirrored.status === "paid")
+    ) {
       return request;
     }
     return { ...request, invoice: fromDoc };

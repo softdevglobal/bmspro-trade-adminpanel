@@ -191,7 +191,8 @@ function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail
     invoiceDate:
       typeof data.invoiceDate === "string" ? data.invoiceDate : "",
     dueDate: typeof data.dueDate === "string" ? data.dueDate : "",
-    status: data.status === "sent" ? "sent" : "draft",
+    status:
+      data.status === "paid" ? "paid" : data.status === "sent" ? "sent" : "draft",
     pdfUrl:
       typeof data.pdfUrl === "string" && data.pdfUrl.trim()
         ? data.pdfUrl.trim()
@@ -354,6 +355,116 @@ export async function getBusinessInvoicePdf(
   };
 }
 
+export async function markBusinessInvoicePaid(
+  businessId: string,
+  quotationId: string,
+): Promise<
+  | { ok: true; invoice: InvoiceDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Invoice is required." };
+  }
+
+  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
+  }
+
+  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
+  if (invoice.status === "draft") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Draft invoices must be sent before they can be marked paid.",
+    };
+  }
+  if (invoice.status === "paid") {
+    return { ok: true, invoice };
+  }
+
+  await docRef.update({
+    status: "paid",
+    balanceDueAud: 0,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await docRef.get();
+  const paidInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
+  await mirrorInvoiceToInspectionRequest(paidInvoice);
+  return { ok: true, invoice: paidInvoice };
+}
+
+function buildInvoiceValues(input: CreateInvoiceInput):
+  | {
+      ok: true;
+      lineItems: QuotationLineItem[];
+      subtotalAud: number;
+      discountAud: number;
+      gstAud: number;
+      finalPriceAud: number;
+      balanceDueAud: number;
+      depositRequest: QuotationDepositRequest | null;
+      depositRequestData: Record<string, unknown> | null;
+      termsAndConditions: string | null;
+    }
+  | { ok: false; status: number; error: string } {
+  const lineItems = input.lineItems.filter(
+    (item) => item.name.trim() && item.priceAud >= 0,
+  );
+  if (lineItems.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Add at least one line item.",
+    };
+  }
+
+  const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
+  const discountAud = Math.max(0, input.discountAud ?? 0);
+  const gstAud = Math.max(0, input.gstAud ?? 0);
+  const finalPriceAud = Math.max(0, input.finalPriceAud);
+
+  const depositRequest = parseDepositRequest(input.depositRequest);
+  // Only a deposit that has actually been received reduces the balance due;
+  // otherwise the invoice is issued for the full amount.
+  const depositAmount =
+    depositRequest?.paid === true
+      ? Math.min(depositRequest.amountAud, finalPriceAud)
+      : 0;
+  const balanceDueAud =
+    Math.round(Math.max(0, finalPriceAud - depositAmount) * 100) / 100;
+  const termsAndConditions = (() => {
+    const baseTerms = input.termsAndConditions?.trim() || null;
+    if (!depositRequest) return baseTerms;
+    const depositNote = formatDepositPaymentNote(depositRequest);
+    return baseTerms ? `${baseTerms}\n\n${depositNote}` : depositNote;
+  })();
+
+  return {
+    ok: true,
+    lineItems,
+    subtotalAud,
+    discountAud,
+    gstAud,
+    finalPriceAud,
+    balanceDueAud,
+    depositRequest,
+    depositRequestData: depositRequest
+      ? {
+          mode: depositRequest.mode,
+          percent: depositRequest.percent,
+          amountAud: depositRequest.amountAud,
+          dueDate: depositRequest.dueDate,
+          paid: depositRequest.paid === true,
+        }
+      : null,
+    termsAndConditions,
+  };
+}
+
 export async function createInvoiceFromQuotation(
   businessId: string,
   uid: string,
@@ -370,6 +481,9 @@ export async function createInvoiceFromQuotation(
     return { ok: false, status: 404, error: "Quotation not found." };
   }
 
+  const values = buildInvoiceValues(input);
+  if (!values.ok) return values;
+
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(quotation.id);
   const existing = await docRef.get();
   if (existing.exists && existing.data()?.businessId === businessId) {
@@ -377,6 +491,82 @@ export async function createInvoiceFromQuotation(
       existing.id,
       existing.data() ?? {},
     );
+    if (existingInvoice.status === "draft") {
+      const canUpdateDirectDetails =
+        quotation.createdSource === "invoice_direct";
+      const customer =
+        canUpdateDirectDetails && input.customer
+          ? input.customer
+          : quotation.customer;
+      const address =
+        canUpdateDirectDetails && input.address
+          ? {
+              street: input.address.street ?? "",
+              suburb: input.address.suburb ?? "",
+              state: input.address.state ?? "",
+              postcode: input.address.postcode ?? "",
+            }
+          : quotation.address;
+      const serviceTitle =
+        canUpdateDirectDetails && input.serviceTitle?.trim()
+          ? input.serviceTitle.trim()
+          : quotation.serviceTitle;
+      const booking = await completeBookingForInvoicedQuotation({
+        businessId,
+        inspectionRequestId: quotation.inspectionRequestId,
+        quotation: {
+          id: quotation.id,
+          quotationCode: quotation.quotationCode,
+          serviceTitle,
+          customer,
+          address,
+          finalPriceAud: values.finalPriceAud,
+          subtotalAud: values.subtotalAud,
+          balanceDueAud: values.balanceDueAud,
+          status: quotation.status,
+        },
+      });
+
+      const now = FieldValue.serverTimestamp();
+      await docRef.update({
+        serviceTitle,
+        customer,
+        address,
+        lineItems: values.lineItems,
+        subtotalAud: values.subtotalAud,
+        discountAud: values.discountAud,
+        gstAud: values.gstAud,
+        finalPriceAud: values.finalPriceAud,
+        balanceDueAud: values.balanceDueAud,
+        depositRequest: values.depositRequestData,
+        notes: input.notes?.trim() || null,
+        termsAndConditions: values.termsAndConditions,
+        invoiceDate: input.invoiceDate.trim(),
+        dueDate: input.dueDate.trim(),
+        status: input.send ? "sent" : "draft",
+        bookingId: booking?.bookingId ?? existingInvoice.bookingId,
+        bookingCode: booking?.bookingCode ?? existingInvoice.bookingCode,
+        bookingStatus: booking?.bookingStatus ?? existingInvoice.bookingStatus,
+        bookingStatusAt: booking ? now : existingInvoice.bookingStatusAt,
+        pdfUrl: null,
+        updatedAt: now,
+      });
+
+      const saved = await docRef.get();
+      let invoice = mapInvoiceDoc(saved.id, saved.data() ?? {});
+      const persisted = await persistInvoicePdf(invoice, businessId);
+      invoice = persisted.invoice;
+      if (input.send) {
+        await sendInvoiceEmailForDetail(
+          invoice,
+          businessId,
+          persisted.pdfBytes,
+        );
+      }
+      await mirrorInvoiceToInspectionRequest(invoice);
+      return { ok: true, invoice };
+    }
+
     if (!input.send) {
       return { ok: true, invoice: existingInvoice };
     }
@@ -428,6 +618,14 @@ export async function createInvoiceFromQuotation(
     return { ok: true, invoice };
   }
 
+  if (quotation.status === "cancelled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Cancelled quotations cannot be invoiced.",
+    };
+  }
+
   if (
     quotation.status === "sent" &&
     quotation.customerDecision !== "accepted"
@@ -442,32 +640,6 @@ export async function createInvoiceFromQuotation(
     };
   }
 
-  const lineItems = input.lineItems.filter(
-    (item) => item.name.trim() && item.priceAud >= 0,
-  );
-  if (lineItems.length === 0) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Add at least one line item.",
-    };
-  }
-
-  const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
-  const discountAud = Math.max(0, input.discountAud ?? 0);
-  const gstAud = Math.max(0, input.gstAud ?? 0);
-  const finalPriceAud = Math.max(0, input.finalPriceAud);
-
-  const depositRequest = parseDepositRequest(input.depositRequest);
-  // Only a deposit that has actually been received reduces the balance due;
-  // otherwise the invoice is issued for the full amount.
-  const depositAmount =
-    depositRequest?.paid === true
-      ? Math.min(depositRequest.amountAud, finalPriceAud)
-      : 0;
-  const balanceDueAud =
-    Math.round(Math.max(0, finalPriceAud - depositAmount) * 100) / 100;
-
   const invoiceCode = buildInvoiceCodeForQuotation(quotation);
   const now = FieldValue.serverTimestamp();
 
@@ -481,9 +653,9 @@ export async function createInvoiceFromQuotation(
       serviceTitle: quotation.serviceTitle,
       customer: quotation.customer,
       address: quotation.address,
-      finalPriceAud,
-      subtotalAud,
-      balanceDueAud,
+      finalPriceAud: values.finalPriceAud,
+      subtotalAud: values.subtotalAud,
+      balanceDueAud: values.balanceDueAud,
       status: quotation.status,
     },
   });
@@ -497,30 +669,15 @@ export async function createInvoiceFromQuotation(
     serviceTitle: quotation.serviceTitle,
     customer: quotation.customer,
     address: quotation.address,
-    lineItems,
-    subtotalAud,
-    discountAud,
-    gstAud,
-    finalPriceAud,
-    balanceDueAud,
-    depositRequest: depositRequest
-      ? {
-          mode: depositRequest.mode,
-          percent: depositRequest.percent,
-          amountAud: depositRequest.amountAud,
-          dueDate: depositRequest.dueDate,
-          paid: depositRequest.paid === true,
-        }
-      : null,
+    lineItems: values.lineItems,
+    subtotalAud: values.subtotalAud,
+    discountAud: values.discountAud,
+    gstAud: values.gstAud,
+    finalPriceAud: values.finalPriceAud,
+    balanceDueAud: values.balanceDueAud,
+    depositRequest: values.depositRequestData,
     notes: input.notes?.trim() || null,
-    termsAndConditions: (() => {
-      const baseTerms = input.termsAndConditions?.trim() || null;
-      if (!depositRequest) return baseTerms;
-      const depositNote = formatDepositPaymentNote(depositRequest);
-      return baseTerms
-        ? `${baseTerms}\n\n${depositNote}`
-        : depositNote;
-    })(),
+    termsAndConditions: values.termsAndConditions,
     invoiceDate: input.invoiceDate.trim(),
     dueDate: input.dueDate.trim(),
     status: input.send ? "sent" : "draft",

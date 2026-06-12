@@ -644,6 +644,7 @@ export function CalendarBoard() {
           <div className="flex flex-wrap items-center gap-4">
             {[
               { color: "bg-primary", label: "Jobs" },
+              { color: "bg-sky-500", label: "Completed" },
               { color: "bg-green-500", label: "Requests" },
             ].map((item) => (
               <div

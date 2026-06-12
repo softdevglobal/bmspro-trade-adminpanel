@@ -4,13 +4,14 @@ import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal
 import { useAuth } from "@/lib/auth/auth-context";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import { formatAddress } from "@/lib/inspection/types";
+import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type InvoiceFilter = "all" | "sent" | "draft";
+type InvoiceFilter = "due" | "draft" | "paid" | "all";
 
 const BOARD_SHELL_CLASS = "flex min-h-0 flex-1 flex-col";
 
@@ -21,13 +22,28 @@ function formatAud(value: number | null): string {
 
 function formatWhen(timestamp: number | null): string {
   if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString(undefined, {
+  return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function invoiceStatusLabel(invoice: InvoiceDetail): string {
+  if (invoice.status === "sent") return "due";
+  return invoice.status;
+}
+
+function invoiceStatusTone(invoice: InvoiceDetail): string {
+  if (invoice.status === "paid") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (invoice.status === "sent") {
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  }
+  return "border-stone-200 bg-stone-100 text-stone-600";
 }
 
 function FilterChip({
@@ -72,6 +88,10 @@ function InvoiceCard({
   isPreviewOpen: boolean;
   onOpen: () => void;
 }) {
+  const editDraftHref = `/dashboard/invoices?invoice=${encodeURIComponent(
+    invoice.id,
+  )}`;
+
   return (
     <div
       role="button"
@@ -95,15 +115,25 @@ function InvoiceCard({
             {invoice.invoiceCode}
           </span>
           <span
-            className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
-              invoice.status === "sent"
-                ? "border-sky-200 bg-sky-50 text-sky-700"
-                : "border-stone-200 bg-stone-100 text-stone-600"
-            }`}
+            className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${invoiceStatusTone(
+              invoice,
+            )}`}
           >
-            {invoice.status}
+            {invoiceStatusLabel(invoice)}
           </span>
         </div>
+        {invoice.status === "draft" ? (
+          <Link
+            href={editDraftHref}
+            onClick={(event) => event.stopPropagation()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-3 py-1.5 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary/10"
+          >
+            <span className="material-symbols-outlined text-[17px]">
+              edit_square
+            </span>
+            Edit &amp; send
+          </Link>
+        ) : null}
       </div>
 
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
@@ -136,16 +166,23 @@ function InvoiceCard({
 function InvoicePreviewDrawer({
   invoice,
   onClose,
+  onInvoiceUpdated,
 }: {
   invoice: InvoiceDetail | null;
   onClose: () => void;
+  onInvoiceUpdated: (invoice: InvoiceDetail) => void;
 }) {
   const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
   const [pdfSource, setPdfSource] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [markPaidLoading, setMarkPaidLoading] = useState(false);
+  const [markPaidError, setMarkPaidError] = useState<string | null>(null);
   const open = invoice !== null;
+  const editDraftHref = invoice
+    ? `/dashboard/invoices?invoice=${encodeURIComponent(invoice.id)}`
+    : "/dashboard/invoices";
 
   function closePdf() {
     setPdfOpen(false);
@@ -196,6 +233,43 @@ function InvoicePreviewDrawer({
     }
   }
 
+  async function markAsPaid() {
+    if (!invoice || !user) return;
+    setMarkPaidLoading(true);
+    setMarkPaidError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/invoices", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "mark_paid",
+          invoiceId: invoice.id,
+        }),
+      });
+      const body = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        invoice?: InvoiceDetail;
+      };
+      if (!response.ok || !body.ok || !body.invoice) {
+        throw new Error(body.error ?? "Could not mark invoice as paid.");
+      }
+      onInvoiceUpdated(body.invoice);
+    } catch (error) {
+      setMarkPaidError(
+        error instanceof Error
+          ? error.message
+          : "Could not mark invoice as paid.",
+      );
+    } finally {
+      setMarkPaidLoading(false);
+    }
+  }
+
   return (
     <AnimatePresence>
       {open && invoice ? (
@@ -229,13 +303,11 @@ function InvoicePreviewDrawer({
                     {invoice.invoiceCode}
                   </span>
                   <span
-                    className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
-                      invoice.status === "sent"
-                        ? "border-sky-200 bg-sky-50 text-sky-700"
-                        : "border-stone-200 bg-stone-100 text-stone-600"
-                    }`}
+                    className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${invoiceStatusTone(
+                      invoice,
+                    )}`}
                   >
-                    {invoice.status}
+                    {invoiceStatusLabel(invoice)}
                   </span>
                 </div>
                 <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
@@ -384,6 +456,43 @@ function InvoicePreviewDrawer({
             </div>
 
             <footer className="shrink-0 space-y-2 border-t border-outline-variant/40 px-4 py-4 sm:px-5">
+              {invoice.status === "sent" ? (
+                <button
+                  type="button"
+                  onClick={() => void markAsPaid()}
+                  disabled={markPaidLoading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span
+                    className={`material-symbols-outlined text-[20px] ${
+                      markPaidLoading ? "animate-spin" : ""
+                    }`}
+                  >
+                    {markPaidLoading ? "progress_activity" : "paid"}
+                  </span>
+                  {markPaidLoading ? "Marking paid…" : "Mark as paid"}
+                </button>
+              ) : null}
+              {invoice.status === "draft" ? (
+                <Link
+                  href={editDraftHref}
+                  onClick={onClose}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    edit_square
+                  </span>
+                  Edit &amp; send draft
+                </Link>
+              ) : null}
+              {markPaidError ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-700"
+                >
+                  {markPaidError}
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void openPdf()}
@@ -435,7 +544,7 @@ export function InvoicesBoard() {
   const [invoices, setInvoices] = useState<InvoiceDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<InvoiceFilter>("all");
+  const [filter, setFilter] = useState<InvoiceFilter>("due");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -479,10 +588,16 @@ export function InvoicesBoard() {
   }, [user]);
 
   useEffect(() => {
-    void load();
+    const frame = requestAnimationFrame(() => {
+      void load();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [load]);
 
   const filtered = useMemo(() => {
+    if (filter === "due") {
+      return invoices.filter((invoice) => invoice.status === "sent");
+    }
     if (filter === "all") return invoices;
     return invoices.filter((invoice) => invoice.status === filter);
   }, [invoices, filter]);
@@ -490,8 +605,9 @@ export function InvoicesBoard() {
   const counts = useMemo(
     () => ({
       all: invoices.length,
-      sent: invoices.filter((invoice) => invoice.status === "sent").length,
+      due: invoices.filter((invoice) => invoice.status === "sent").length,
       draft: invoices.filter((invoice) => invoice.status === "draft").length,
+      paid: invoices.filter((invoice) => invoice.status === "paid").length,
     }),
     [invoices],
   );
@@ -604,22 +720,28 @@ export function InvoicesBoard() {
 
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterChip
-          label="All"
-          count={counts.all}
-          active={filter === "all"}
-          onClick={() => setFilter("all")}
-        />
-        <FilterChip
-          label="Sent"
-          count={counts.sent}
-          active={filter === "sent"}
-          onClick={() => setFilter("sent")}
+          label="Due"
+          count={counts.due}
+          active={filter === "due"}
+          onClick={() => setFilter("due")}
         />
         <FilterChip
           label="Draft"
           count={counts.draft}
           active={filter === "draft"}
           onClick={() => setFilter("draft")}
+        />
+        <FilterChip
+          label="Paid"
+          count={counts.paid}
+          active={filter === "paid"}
+          onClick={() => setFilter("paid")}
+        />
+        <FilterChip
+          label="All"
+          count={counts.all}
+          active={filter === "all"}
+          onClick={() => setFilter("all")}
         />
       </div>
 
@@ -646,6 +768,16 @@ export function InvoicesBoard() {
       <InvoicePreviewDrawer
         invoice={selected}
         onClose={() => setSelectedId(null)}
+        onInvoiceUpdated={(updatedInvoice) => {
+          setInvoices((current) =>
+            current.map((invoice) =>
+              invoice.id === updatedInvoice.id ? updatedInvoice : invoice,
+            ),
+          );
+          if (updatedInvoice.status === "paid") {
+            setFilter("paid");
+          }
+        }}
       />
     </div>
   );

@@ -1,3 +1,7 @@
+import {
+  logPasswordChanged,
+  resolveAuditIdentityForUid,
+} from "@/lib/audit/action-logs";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
@@ -76,6 +80,17 @@ export async function POST(req: NextRequest) {
 
     // Mark code as used
     await docRef.update({ used: true });
+
+    const identity = await resolveAuditIdentityForUid(uid);
+    await logPasswordChanged({
+      uid,
+      email: trimmedEmail,
+      name: identity.name,
+      role: identity.role,
+      businessId: identity.businessId,
+      source: "admin_panel",
+      method: "reset_code",
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

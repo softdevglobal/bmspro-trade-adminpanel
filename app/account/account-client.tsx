@@ -2,6 +2,7 @@
 
 import { AuPhoneInput } from "@/components/au-phone-input";
 import { AuditLogView } from "@/components/audit-log-view";
+import { CustomerSecuritySettings } from "@/components/customer-security-settings";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
@@ -118,7 +119,10 @@ function documentPdfFilename(
 function customerInvoiceReady(
   invoice: InspectionInvoiceSummary | null | undefined,
 ): invoice is InspectionInvoiceSummary {
-  return Boolean(invoice?.pdfUrl?.trim() && invoice.status === "sent");
+  return Boolean(
+    invoice?.pdfUrl?.trim() &&
+      (invoice.status === "sent" || invoice.status === "paid"),
+  );
 }
 
 const JOB_STATUS_TONE: Record<BookingStatus, string> = {
@@ -433,6 +437,7 @@ function ProfileSection({ slug }: { slug: string }) {
   }
 
   return (
+    <div className="space-y-5">
     <form className="space-y-5" onSubmit={handleSubmit}>
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl border border-stone-200/90 bg-gradient-to-br from-primary/[0.09] via-white to-[#faf8f5] p-4 shadow-sm sm:rounded-3xl sm:p-6">
@@ -619,6 +624,9 @@ function ProfileSection({ slug }: { slug: string }) {
         </div>
       </div>
     </form>
+
+    <CustomerSecuritySettings />
+    </div>
   );
 }
 
@@ -1464,7 +1472,7 @@ function BookingCard({
                       You rejected this quotation
                     </p>
                   ) : !booking.bookingId &&
-                    booking.quotation.status !== "draft" ? (
+                    booking.quotation.status === "sent" ? (
                     <div className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3">
                       <p className="font-body text-[12px] font-bold text-amber-900">
                         Do you accept this quotation?
