@@ -2,6 +2,7 @@
 
 import { AuPhoneInput } from "@/components/au-phone-input";
 import { AuditLogView } from "@/components/audit-log-view";
+import { CustomerSecuritySettings } from "@/components/customer-security-settings";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
@@ -433,6 +434,7 @@ function ProfileSection({ slug }: { slug: string }) {
   }
 
   return (
+    <div className="space-y-5">
     <form className="space-y-5" onSubmit={handleSubmit}>
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl border border-stone-200/90 bg-gradient-to-br from-primary/[0.09] via-white to-[#faf8f5] p-4 shadow-sm sm:rounded-3xl sm:p-6">
@@ -619,6 +621,9 @@ function ProfileSection({ slug }: { slug: string }) {
         </div>
       </div>
     </form>
+
+    <CustomerSecuritySettings />
+    </div>
   );
 }
 

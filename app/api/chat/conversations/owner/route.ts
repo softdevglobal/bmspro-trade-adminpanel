@@ -8,7 +8,7 @@
  * Body:    none
  *
  * Success — 200:
- *   { "ok": true, "conversation": { "conversationId", "status", "lastMessage", ... } | null }
+ *   { "ok": true, "conversation": { ... } | null, "closedNotice": { "message", "agentName", "closedAt" } | null }
  *
  * Errors:
  *   { "ok": false, "error": "Workshop chat access required." }     403
@@ -18,7 +18,10 @@
 
 import { requireWorkshopChatUser } from "@/lib/chat/auth";
 import { chatJson, chatOptions } from "@/lib/chat/cors";
-import { getCustomerConversation } from "@/lib/chat/supportChat";
+import {
+  getCustomerConversation,
+  getOwnerAgentClosedNotice,
+} from "@/lib/chat/supportChat";
 
 export const runtime = "nodejs";
 
@@ -37,6 +40,9 @@ export async function GET(request: Request) {
     return chatJson({ ok: false, error: auth.error }, { status: auth.status });
   }
 
-  const conversation = await getCustomerConversation(auth.uid);
-  return chatJson({ ok: true, conversation });
+  const [conversation, closedNotice] = await Promise.all([
+    getCustomerConversation(auth.uid),
+    getOwnerAgentClosedNotice(auth.uid),
+  ]);
+  return chatJson({ ok: true, conversation, closedNotice });
 }

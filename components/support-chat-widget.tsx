@@ -33,6 +33,20 @@ const WELCOME_MESSAGE: UnifiedChatMessage = {
   timestamp: 0,
 };
 
+function buildClosedByAgentMessage(
+  notice: NonNullable<UnifiedChatSnapshot["closedNotice"]>,
+): UnifiedChatMessage {
+  return {
+    id: "closed-by-agent",
+    source: "support",
+    threadId: "",
+    text: notice.message,
+    sender: "system",
+    senderName: "System",
+    timestamp: notice.closedAt ?? Date.now(),
+  };
+}
+
 function formatMessageTime(timestamp: number): string {
   if (!timestamp) return "";
   return new Intl.DateTimeFormat(undefined, {
@@ -68,6 +82,7 @@ function mergeMessages(
 export function SupportChatWidget() {
   const { user, role, status } = useAuth();
   const [open, setOpen] = useState(false);
+  const [panelKey, setPanelKey] = useState(0);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,10 +98,26 @@ export function SupportChatWidget() {
     supportAgentName: null,
     ccAgentName: null,
     ccRoomIds: [],
+    closedNotice: null,
   });
   const bottomRef = useRef<HTMLDivElement>(null);
   const subscriptionRef = useRef<UnifiedChatSubscription | null>(null);
   const eligible = status === "authenticated" && role === "business_owner";
+
+  const openChat = useCallback(() => {
+    setPanelKey((current) => current + 1);
+    setPendingMessages([]);
+    setError(null);
+    setDraft("");
+    setOpen(true);
+  }, []);
+
+  const closeChat = useCallback(() => {
+    setOpen(false);
+    setPendingMessages([]);
+    setError(null);
+    setDraft("");
+  }, []);
 
   useEffect(() => {
     if (!eligible || !user) return;
@@ -105,16 +136,19 @@ export function SupportChatWidget() {
 
   useEffect(() => {
     subscriptionRef.current?.setPanelOpen(open);
+    if (open) {
+      void subscriptionRef.current?.refresh();
+    }
   }, [open]);
 
   useEffect(() => {
     function handleOpen() {
-      setOpen(true);
+      openChat();
     }
     window.addEventListener(SUPPORT_CHAT_OPEN_EVENT, handleOpen);
     return () =>
       window.removeEventListener(SUPPORT_CHAT_OPEN_EVENT, handleOpen);
-  }, []);
+  }, [openChat]);
 
   useEffect(() => {
     dispatchSupportChatPanelState(open);
@@ -138,7 +172,25 @@ export function SupportChatWidget() {
     snapshot.supportConversationId,
   ]);
 
+  const chatClosedByAgent =
+    snapshot.closedNotice !== null && !snapshot.supportConversationId;
+
+  useEffect(() => {
+    if (!chatClosedByAgent || !snapshot.closedNotice) return;
+    setPendingMessages([]);
+    setDraft("");
+    setPanelKey((current) => current + 1);
+  }, [
+    chatClosedByAgent,
+    snapshot.closedNotice?.message,
+    snapshot.closedNotice?.closedAt,
+  ]);
+
   const displayMessages = useMemo(() => {
+    if (chatClosedByAgent && snapshot.closedNotice) {
+      return [buildClosedByAgentMessage(snapshot.closedNotice)];
+    }
+
     const activeThreadId =
       snapshot.preferredCcChatId ?? snapshot.supportConversationId;
     const relevantPending = pendingMessages.filter((message) => {
@@ -156,11 +208,17 @@ export function SupportChatWidget() {
       );
     });
     const merged = mergeMessages(snapshot.messages, relevantPending);
-    return merged.length > 0 ? merged : [WELCOME_MESSAGE];
+    if (merged.length > 0) return merged;
+    if (snapshot.closedNotice) {
+      return [buildClosedByAgentMessage(snapshot.closedNotice)];
+    }
+    return [WELCOME_MESSAGE];
   }, [
+    chatClosedByAgent,
     snapshot.messages,
     snapshot.supportConversationId,
     snapshot.preferredCcChatId,
+    snapshot.closedNotice,
     pendingMessages,
   ]);
 
@@ -188,7 +246,31 @@ export function SupportChatWidget() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [open, displayMessages]);
 
+  const hasThreadMessages = useMemo(
+    () =>
+      displayMessages.some(
+        (message) =>
+          message.id !== "welcome" && message.id !== "closed-by-agent",
+      ),
+    [displayMessages],
+  );
+
   const header = useMemo(() => {
+    if (chatClosedByAgent && snapshot.closedNotice) {
+      return {
+        title: "Chat with receptionist",
+        subtitle: snapshot.closedNotice.message,
+        dotClass: "bg-white/50",
+      };
+    }
+    if (!hasThreadMessages) {
+      return {
+        title: "Chat with receptionist",
+        subtitle: "Message our reception team",
+        dotClass: "bg-white/70",
+      };
+    }
+
     const agentName =
       snapshot.supportAgentName?.trim() ||
       snapshot.ccAgentName?.trim() ||
@@ -228,6 +310,9 @@ export function SupportChatWidget() {
       dotClass: "bg-white/70",
     };
   }, [
+    chatClosedByAgent,
+    hasThreadMessages,
+    snapshot.closedNotice,
     snapshot.supportStatus,
     snapshot.supportAgentName,
     snapshot.ccAgentName,
@@ -310,13 +395,26 @@ export function SupportChatWidget() {
   const showBadge = !open && snapshot.unreadCount > 0;
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+    <>
       {open ? (
-        <div
-          className="pointer-events-auto flex h-[min(520px,calc(100dvh-6rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#12141c] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.55)]"
-          role="dialog"
-          aria-label="Chat with receptionist"
-        >
+        <button
+          type="button"
+          className="fixed inset-0 z-[59] cursor-default border-0 bg-black/20 p-0"
+          aria-label="Close chat"
+          onClick={closeChat}
+        />
+      ) : null}
+
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+        {open ? (
+          <div
+            key={panelKey}
+            className="pointer-events-auto flex h-[min(520px,calc(100dvh-6rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#12141c] shadow-[0_24px_60px_-12px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-label="Chat with receptionist"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
           <header className="flex items-start gap-3 bg-primary-container px-4 py-4 text-on-primary">
             <span
               aria-hidden
@@ -332,7 +430,7 @@ export function SupportChatWidget() {
             </div>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={closeChat}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-on-primary transition-colors hover:bg-white/10"
               aria-label="Close chat"
             >
@@ -430,23 +528,24 @@ export function SupportChatWidget() {
               </button>
             </form>
           </div>
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full bg-primary-container text-on-primary shadow-[0_12px_28px_-6px_rgba(37,99,235,0.65)] transition-transform hover:scale-[1.03] active:scale-95"
-        aria-label={open ? "Close chat" : "Open chat with receptionist"}
-        aria-expanded={open}
-      >
-        <span className="material-symbols-outlined text-[26px]">chat</span>
-        {showBadge ? (
-          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1 font-body text-[11px] font-bold text-on-error">
-            {snapshot.unreadCount > 9 ? "9+" : snapshot.unreadCount}
-          </span>
+          </div>
         ) : null}
-      </button>
-    </div>
+
+        <button
+          type="button"
+          onClick={() => (open ? closeChat() : openChat())}
+          className="pointer-events-auto relative flex h-14 w-14 items-center justify-center rounded-full bg-primary-container text-on-primary shadow-[0_12px_28px_-6px_rgba(37,99,235,0.65)] transition-transform hover:scale-[1.03] active:scale-95"
+          aria-label={open ? "Close chat" : "Open chat with receptionist"}
+          aria-expanded={open}
+        >
+          <span className="material-symbols-outlined text-[26px]">chat</span>
+          {showBadge ? (
+            <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1 font-body text-[11px] font-bold text-on-error">
+              {snapshot.unreadCount > 9 ? "9+" : snapshot.unreadCount}
+            </span>
+          ) : null}
+        </button>
+      </div>
+    </>
   );
 }
