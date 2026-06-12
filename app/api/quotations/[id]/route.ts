@@ -1,5 +1,8 @@
 import { adminAuth } from "@/lib/firebase/admin";
-import { businessRecordQuotationCustomerDecision } from "@/lib/quotations/server";
+import {
+  businessRecordQuotationCustomerDecision,
+  updateDraftQuotation,
+} from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -31,7 +34,12 @@ async function requireBusinessAuthor(request: Request) {
       };
     }
 
-    return { ok: true as const, businessId };
+    return {
+      ok: true as const,
+      uid: decoded.uid,
+      role: typeof role === "string" ? role : null,
+      businessId,
+    };
   } catch {
     return {
       ok: false as const,
@@ -67,6 +75,100 @@ export async function PATCH(
 
   const payload = (body ?? {}) as Record<string, unknown>;
   const action = typeof payload.action === "string" ? payload.action : "";
+
+  if (action === "save_draft") {
+    const customerPayload = payload.customer;
+    const addressPayload = payload.address;
+    const result = await updateDraftQuotation(id, auth.businessId, auth.uid, {
+      inspectionRequestId:
+        typeof payload.requestId === "string"
+          ? payload.requestId
+          : typeof payload.inspectionRequestId === "string"
+            ? payload.inspectionRequestId
+            : "",
+      lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
+      finalPriceAud:
+        typeof payload.finalPriceAud === "number" &&
+        Number.isFinite(payload.finalPriceAud)
+          ? payload.finalPriceAud
+          : null,
+      notes: typeof payload.notes === "string" ? payload.notes : null,
+      termsAndConditions:
+        typeof payload.termsAndConditions === "string"
+          ? payload.termsAndConditions
+          : null,
+      discountAud:
+        typeof payload.discountAud === "number" &&
+        Number.isFinite(payload.discountAud)
+          ? payload.discountAud
+          : null,
+      validUntil:
+        typeof payload.validUntil === "string" ? payload.validUntil : null,
+      imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],
+      depositRequest: payload.depositRequest ?? null,
+      ...(customerPayload &&
+      typeof customerPayload === "object" &&
+      !Array.isArray(customerPayload)
+        ? {
+            customer: {
+              fullName:
+                typeof (customerPayload as { fullName?: unknown }).fullName ===
+                "string"
+                  ? (customerPayload as { fullName: string }).fullName
+                  : "",
+              email:
+                typeof (customerPayload as { email?: unknown }).email ===
+                "string"
+                  ? (customerPayload as { email: string }).email
+                  : "",
+              phone:
+                typeof (customerPayload as { phone?: unknown }).phone ===
+                "string"
+                  ? (customerPayload as { phone: string }).phone
+                  : "",
+            },
+          }
+        : {}),
+      ...(addressPayload &&
+      typeof addressPayload === "object" &&
+      !Array.isArray(addressPayload)
+        ? {
+            address: {
+              street:
+                typeof (addressPayload as { street?: unknown }).street ===
+                "string"
+                  ? (addressPayload as { street: string }).street
+                  : "",
+              suburb:
+                typeof (addressPayload as { suburb?: unknown }).suburb ===
+                "string"
+                  ? (addressPayload as { suburb: string }).suburb
+                  : "",
+              state:
+                typeof (addressPayload as { state?: unknown }).state ===
+                "string"
+                  ? (addressPayload as { state: string }).state
+                  : "",
+              postcode:
+                typeof (addressPayload as { postcode?: unknown }).postcode ===
+                "string"
+                  ? (addressPayload as { postcode: string }).postcode
+                  : "",
+            },
+          }
+        : {}),
+      send: payload.send === true,
+    });
+
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    return NextResponse.json({ ok: true, quotation: result.quotation });
+  }
 
   if (action !== "customer_decision") {
     return NextResponse.json(

@@ -31,6 +31,7 @@ import {
   type InspectionRequestType,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import type { QuotationDetail } from "@/lib/quotations/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -127,6 +128,15 @@ function addDaysIso(iso: string, days: number): string {
   const date = new Date(y, m - 1, d);
   date.setDate(date.getDate() + days);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function daysBetweenIso(startIso: string, endIso: string): number | null {
+  const [sy, sm, sd] = startIso.split("-").map(Number);
+  const [ey, em, ed] = endIso.split("-").map(Number);
+  if (![sy, sm, sd, ey, em, ed].every(Number.isFinite)) return null;
+  const start = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  return Math.round((end - start) / 86_400_000);
 }
 
 function formatAud(value: number): string {
@@ -227,6 +237,29 @@ function buildCustomerOptions(
   return Array.from(map.values()).sort(
     (a, b) => b.lastActivity - a.lastActivity,
   );
+}
+
+function savedLineItemFromQuotation(
+  item: QuotationDetail["lineItems"][number],
+  index: number,
+): SavedLineItem {
+  const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
+  const rate =
+    item.rateAud && item.rateAud > 0
+      ? item.rateAud
+      : Math.round((item.priceAud / quantity) * 100) / 100;
+  const gstPercent = item.gstPercent ?? 0;
+  return {
+    id: `${index}-${item.name}-${crypto.randomUUID()}`,
+    code: item.code ?? "",
+    name: item.name,
+    description: item.description ?? "",
+    quantity,
+    rate,
+    discountPercent: 0,
+    applyGst: gstPercent > 0,
+    amountAud: item.priceAud,
+  };
 }
 
 function SectionLink({
@@ -374,12 +407,25 @@ export function CreateQuotationPage() {
   const [inspectionRequestId, setInspectionRequestId] = useState<string | null>(
     null,
   );
+  const [draftQuotationId, setDraftQuotationId] = useState<string | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const frames: number[] = [];
+    const quotationId =
+      params.get("quotationId")?.trim() || params.get("draftId")?.trim();
+    if (quotationId) {
+      frames.push(requestAnimationFrame(() => setDraftQuotationId(quotationId)));
+    }
     const id =
       params.get("requestId")?.trim() ||
       params.get("inspectionRequestId")?.trim();
-    if (id) setInspectionRequestId(id);
+    if (id) {
+      frames.push(requestAnimationFrame(() => setInspectionRequestId(id)));
+    }
+    return () => {
+      frames.forEach((frame) => cancelAnimationFrame(frame));
+    };
   }, []);
 
   const boundInspection = useMemo(
@@ -391,35 +437,130 @@ export function CreateQuotationPage() {
   );
 
   const inspectionPrefilledRef = useRef(false);
+  const draftPrefilledRef = useRef(false);
   useEffect(() => {
     if (inspectionPrefilledRef.current || !boundInspection) return;
     inspectionPrefilledRef.current = true;
-    setCustomer({
-      fullName: boundInspection.customer.fullName ?? "",
-      email: boundInspection.customer.email ?? "",
-      phone: boundInspection.customer.phone ?? "",
+    const frame = requestAnimationFrame(() => {
+      setCustomer({
+        fullName: boundInspection.customer.fullName ?? "",
+        email: boundInspection.customer.email ?? "",
+        phone: boundInspection.customer.phone ?? "",
+      });
+      setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
+      setClientOpen(false);
+      setServiceEditing(false);
+      if (
+        boundInspection.requestType === "existing_service" &&
+        boundInspection.serviceId
+      ) {
+        setRequestType("existing_service");
+        setSelectedServiceId(boundInspection.serviceId);
+      } else {
+        setRequestType("custom_quote");
+        setCustomServiceTitle(
+          boundInspection.customRequest?.title ??
+            boundInspection.serviceName ??
+            "",
+        );
+        setCustomServiceDescription(
+          boundInspection.customRequest?.description ?? "",
+        );
+      }
     });
-    setAddress({ ...EMPTY_ADDRESS, ...boundInspection.address });
-    setClientOpen(false);
-    setServiceEditing(false);
-    if (
-      boundInspection.requestType === "existing_service" &&
-      boundInspection.serviceId
-    ) {
-      setRequestType("existing_service");
-      setSelectedServiceId(boundInspection.serviceId);
-    } else {
-      setRequestType("custom_quote");
-      setCustomServiceTitle(
-        boundInspection.customRequest?.title ??
-          boundInspection.serviceName ??
-          "",
-      );
-      setCustomServiceDescription(
-        boundInspection.customRequest?.description ?? "",
-      );
-    }
+    return () => cancelAnimationFrame(frame);
   }, [boundInspection]);
+
+  useEffect(() => {
+    if (!user || !draftQuotationId || draftPrefilledRef.current) return;
+    draftPrefilledRef.current = true;
+    void (async () => {
+      setDraftLoading(true);
+      setError(null);
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(
+          `/api/quotations?quotationId=${encodeURIComponent(draftQuotationId)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const data = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          quotation?: QuotationDetail;
+        };
+        if (!response.ok || !data.ok || !data.quotation) {
+          throw new Error(data.error ?? "Could not load draft quotation.");
+        }
+        const quotation = data.quotation;
+        if (quotation.status !== "draft") {
+          throw new Error("Only draft quotations can be edited.");
+        }
+
+        inspectionPrefilledRef.current = true;
+        setInspectionRequestId(quotation.inspectionRequestId);
+        setCustomer({
+          fullName: quotation.customer.fullName ?? "",
+          email: quotation.customer.email ?? "",
+          phone: quotation.customer.phone ?? "",
+        });
+        setAddress({ ...EMPTY_ADDRESS, ...quotation.address });
+        setClientOpen(false);
+        setServiceEditing(false);
+        setCustomServiceTitle(quotation.serviceTitle ?? "");
+        setCustomServiceDescription(quotation.notes ?? "");
+        setLineItems(
+          quotation.lineItems.map((item, index) =>
+            savedLineItemFromQuotation(item, index),
+          ),
+        );
+        setImageUrls(quotation.imageUrls);
+        setTermsAndConditions(quotation.termsAndConditions ?? "");
+        setTermsLoaded(true);
+        setComment(quotation.notes ?? "");
+        setDocumentDiscount(
+          quotation.discountAud > 0
+            ? {
+                mode: "fixed",
+                percent: 0,
+                amountAud: quotation.discountAud,
+              }
+            : null,
+        );
+        setDepositRequest(quotation.depositRequest);
+
+        if (quotation.lineItems.some((item) => (item.gstPercent ?? 0) > 0)) {
+          setGstEnabled(true);
+          const gstPercent = quotation.lineItems.find(
+            (item) => (item.gstPercent ?? 0) > 0,
+          )?.gstPercent;
+          if (gstPercent) setGstPercentage(gstPercent);
+        }
+
+        if (quotation.validUntil) {
+          const today = todayIso();
+          const days = daysBetweenIso(today, quotation.validUntil);
+          const matchingTerms = TERMS_OPTIONS.find(
+            (option) => option.days === days,
+          );
+          if (matchingTerms) {
+            setQuotationDate(today);
+            setTerms(matchingTerms.id);
+          } else {
+            setQuotationDate(quotation.validUntil);
+            setTerms("same_day");
+          }
+        }
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Could not load draft quotation.",
+        );
+      } finally {
+        setDraftLoading(false);
+      }
+    })();
+  }, [user, draftQuotationId]);
 
   const customerOptions = useMemo(
     () => buildCustomerOptions(requests),
@@ -488,17 +629,20 @@ export function CreateQuotationPage() {
   const minQuotationDate = useMemo(() => addDaysIso(todayIso(), -730), []);
 
   useEffect(() => {
-    setLineItems((prev) =>
-      prev.map((item) => ({
-        ...item,
-        amountAud: computeSavedLineAmount(
-          item,
-          gstEnabled,
-          gstPercentage,
-          gstPricing,
-        ),
-      })),
-    );
+    const frame = requestAnimationFrame(() => {
+      setLineItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          amountAud: computeSavedLineAmount(
+            item,
+            gstEnabled,
+            gstPercentage,
+            gstPricing,
+          ),
+        })),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
   }, [gstEnabled, gstPercentage, gstPricing]);
 
   const documentLineItems = useMemo(
@@ -565,9 +709,12 @@ export function CreateQuotationPage() {
     if (!depositRequest || total <= 0) return;
     const capped = Math.min(depositRequest.amountAud, total);
     if (Math.abs(capped - depositRequest.amountAud) > 0.001) {
-      setDepositRequest((prev) =>
-        prev ? { ...prev, amountAud: capped } : prev,
-      );
+      const frame = requestAnimationFrame(() => {
+        setDepositRequest((prev) =>
+          prev ? { ...prev, amountAud: capped } : prev,
+        );
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [total, depositRequest]);
 
@@ -575,9 +722,12 @@ export function CreateQuotationPage() {
     if (!documentDiscount || documentDiscount.mode !== "fixed") return;
     const capped = Math.min(documentDiscount.amountAud, subtotal);
     if (Math.abs(capped - documentDiscount.amountAud) > 0.001) {
-      setDocumentDiscount((prev) =>
-        prev ? { ...prev, amountAud: capped } : prev,
-      );
+      const frame = requestAnimationFrame(() => {
+        setDocumentDiscount((prev) =>
+          prev ? { ...prev, amountAud: capped } : prev,
+        );
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [subtotal, documentDiscount]);
 
@@ -1015,13 +1165,20 @@ export function CreateQuotationPage() {
             ...sharedBody,
           };
 
-      const response = await fetch("/api/quotations", {
-        method: "POST",
+      const endpoint = draftQuotationId
+        ? `/api/quotations/${encodeURIComponent(draftQuotationId)}`
+        : "/api/quotations";
+      const response = await fetch(endpoint, {
+        method: draftQuotationId ? "PATCH" : "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(quotationBody),
+        body: JSON.stringify(
+          draftQuotationId
+            ? { action: "save_draft", ...quotationBody }
+            : quotationBody,
+        ),
       });
       const responseText = await response.text();
       let payload: { ok?: boolean; error?: string };
@@ -1124,7 +1281,11 @@ export function CreateQuotationPage() {
               <span className="material-symbols-outlined">arrow_back</span>
             </Link>
             <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
-              {boundInspection ? "Quotation for visit" : "Create a quotation"}
+              {draftQuotationId
+                ? "Edit draft quotation"
+                : boundInspection
+                  ? "Quotation for visit"
+                  : "Create a quotation"}
             </h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -1137,10 +1298,16 @@ export function CreateQuotationPage() {
             <button
               type="button"
               onClick={() => void save(false)}
-              disabled={submitting}
+              disabled={submitting || draftLoading}
               className="inline-flex min-w-[5.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
-              {submitting ? <SaveSpinner label="Saving…" /> : "Save draft"}
+              {submitting || draftLoading ? (
+                <SaveSpinner label={draftLoading ? "Loading…" : "Saving…"} />
+              ) : draftQuotationId ? (
+                "Update draft"
+              ) : (
+                "Save draft"
+              )}
             </button>
           </div>
         </div>
@@ -2087,11 +2254,11 @@ export function CreateQuotationPage() {
               <button
                 type="button"
                 onClick={() => void save(true)}
-                disabled={submitting || !customer.email.trim()}
+                disabled={submitting || draftLoading || !customer.email.trim()}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
               >
-                {submitting ? (
-                  <SaveSpinner label="Sending…" />
+                {submitting || draftLoading ? (
+                  <SaveSpinner label={draftLoading ? "Loading…" : "Sending…"} />
                 ) : (
                   "Save & send quotation"
                 )}

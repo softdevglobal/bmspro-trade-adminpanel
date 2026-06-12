@@ -151,6 +151,7 @@ function QuotationCardMenu({
       ? "The customer rejected this quotation"
       : "Waiting for the customer to accept this quotation";
   const invoiceHref = `/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`;
+  const editDraftHref = `/dashboard/quotations/new?quotationId=${encodeURIComponent(quotation.id)}`;
 
   useEffect(() => {
     if (!open) return;
@@ -187,6 +188,19 @@ function QuotationCardMenu({
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
+          {quotation.status === "draft" ? (
+            <Link
+              href={editDraftHref}
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                edit_square
+              </span>
+              Edit &amp; send draft
+            </Link>
+          ) : null}
           {canSchedule ? (
             <button
               type="button"
@@ -472,6 +486,7 @@ function QuotationPreviewContent({
     quotation.customerDecision === "rejected"
       ? "The customer rejected this quotation"
       : "Waiting for the customer to accept this quotation";
+  const editDraftHref = `/dashboard/quotations/new?quotationId=${encodeURIComponent(quotation.id)}`;
   const hasFooterActions =
     previewMode === "review" &&
     (quotation.status === "sent" ||
@@ -585,6 +600,27 @@ function QuotationPreviewContent({
             <div className="mt-2">
               <CreatedSourcePill source={quotation.createdSource} />
             </div>
+          </section>
+        ) : null}
+
+        {previewMode === "review" && quotation.status === "draft" ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+            <p className="font-body text-[12px] font-semibold text-amber-900">
+              This quotation is saved as a draft.
+            </p>
+            <p className="mt-1 font-body text-[12px] leading-relaxed text-amber-800">
+              Edit it to make changes, then send it to the customer when ready.
+            </p>
+            <Link
+              href={editDraftHref}
+              onClick={onClose}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                edit_square
+              </span>
+              Edit &amp; send draft
+            </Link>
           </section>
         ) : null}
 
@@ -931,7 +967,10 @@ export function QuotationsBoard() {
   }, [user]);
 
   useEffect(() => {
-    void load();
+    const frame = requestAnimationFrame(() => {
+      void load();
+    });
+    return () => cancelAnimationFrame(frame);
   }, [load]);
 
   const selected = useMemo(
