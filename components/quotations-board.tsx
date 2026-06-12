@@ -50,14 +50,33 @@ function formatWhen(timestamp: number | null): string {
 }
 
 type QuotationPreviewMode = "review" | "convert_booking";
-type QuotationFilter = "all" | QuotationDetail["status"];
+type QuotationFilter =
+  | "pending"
+  | "completed"
+  | "all"
+  | QuotationDetail["status"];
 
 const QUOTATION_TABS: { id: QuotationFilter; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "pending", label: "Pending" },
   { id: "draft", label: "Draft" },
   { id: "sent", label: "Sent" },
+  { id: "completed", label: "Completed" },
   { id: "cancelled", label: "Cancelled" },
+  { id: "all", label: "All" },
 ];
+
+function isCompletedQuotation(quotation: QuotationDetail): boolean {
+  return quotationHasInvoice(quotation);
+}
+
+function isPendingQuotation(quotation: QuotationDetail): boolean {
+  return quotation.status !== "cancelled" && !isCompletedQuotation(quotation);
+}
+
+function quotationFilterLabel(filter: QuotationFilter): string {
+  if (filter === "all") return "";
+  return QUOTATION_TABS.find((tab) => tab.id === filter)?.label ?? "Quotation";
+}
 
 const disabledActionClass =
   "inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 px-4 py-3 font-body text-[14px] font-semibold text-on-surface-variant opacity-50";
@@ -77,6 +96,17 @@ function StatusPill({ status }: { status: QuotationDetail["status"] }) {
       className={`inline-flex rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${tone}`}
     >
       {status}
+    </span>
+  );
+}
+
+function CompletedPill() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+      <span className="material-symbols-outlined text-[13px] leading-none">
+        task_alt
+      </span>
+      Completed
     </span>
   );
 }
@@ -392,6 +422,7 @@ function QuotationCard({
   onUndoCancel: () => void;
 }) {
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const hasInvoice = quotationHasInvoice(quotation);
   const showFollowUpActions =
     canConvertQuotationToBooking(quotation) && !awaitingCustomer;
   const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
@@ -419,6 +450,7 @@ function QuotationCard({
             {displayQuotationCode(quotation)}
           </span>
           <StatusPill status={quotation.status} />
+          {hasInvoice ? <CompletedPill /> : null}
           {quotation.bookingStatus && !quotation.bookingId ? (
             <BookingStatusPill status={quotation.bookingStatus} />
           ) : null}
@@ -1168,7 +1200,7 @@ export function QuotationsBoard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] =
     useState<QuotationPreviewMode>("review");
-  const [filter, setFilter] = useState<QuotationFilter>("all");
+  const [filter, setFilter] = useState<QuotationFilter>("pending");
   const [cancelTarget, setCancelTarget] = useState<QuotationDetail | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -1219,9 +1251,17 @@ export function QuotationsBoard() {
   const counts = useMemo(
     () => ({
       all: quotations.length,
-      draft: quotations.filter((quotation) => quotation.status === "draft")
+      pending: quotations.filter(isPendingQuotation).length,
+      completed: quotations.filter(isCompletedQuotation).length,
+      draft: quotations.filter(
+        (quotation) =>
+          quotation.status === "draft" && !isCompletedQuotation(quotation),
+      )
         .length,
-      sent: quotations.filter((quotation) => quotation.status === "sent")
+      sent: quotations.filter(
+        (quotation) =>
+          quotation.status === "sent" && !isCompletedQuotation(quotation),
+      )
         .length,
       cancelled: quotations.filter(
         (quotation) => quotation.status === "cancelled",
@@ -1231,10 +1271,22 @@ export function QuotationsBoard() {
   );
 
   const visibleQuotations = useMemo(
-    () =>
-      filter === "all"
-        ? quotations
-        : quotations.filter((quotation) => quotation.status === filter),
+    () => {
+      if (filter === "all") return quotations;
+      if (filter === "pending") {
+        return quotations.filter(isPendingQuotation);
+      }
+      if (filter === "completed") {
+        return quotations.filter(isCompletedQuotation);
+      }
+      if (filter === "cancelled") {
+        return quotations.filter((quotation) => quotation.status === filter);
+      }
+      return quotations.filter(
+        (quotation) =>
+          quotation.status === filter && !isCompletedQuotation(quotation),
+      );
+    },
     [filter, quotations],
   );
 
@@ -1436,8 +1488,8 @@ export function QuotationsBoard() {
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="font-body text-[12px] text-on-surface-variant">
-          {quotations.length} quotation{quotations.length === 1 ? "" : "s"} ·
-          tap a card to open the side preview
+          {counts.pending} pending · {counts.completed} completed · tap a card
+          to open the side preview
         </p>
         <Link
           href="/dashboard/quotations/new"
@@ -1495,7 +1547,11 @@ export function QuotationsBoard() {
       ) : (
         <section className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-5 py-8 text-center">
           <p className="font-display text-[17px] font-semibold text-on-surface">
-            No {filter === "all" ? "" : `${filter} `}quotations
+            No{" "}
+            {filter === "all"
+              ? ""
+              : `${quotationFilterLabel(filter).toLowerCase()} `}
+            quotations
           </p>
           <p className="mt-1 font-body text-[13px] text-on-surface-variant">
             Quotations for this tab will appear here.
