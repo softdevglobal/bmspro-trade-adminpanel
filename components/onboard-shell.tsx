@@ -2,6 +2,7 @@
 
 import { BusinessOnboardingForm } from "@/components/business-onboarding-form";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 type OnboardStep = 1 | 2 | 3;
@@ -33,6 +34,8 @@ const STEP_COPY: Record<
 };
 
 export function OnboardShell() {
+  const searchParams = useSearchParams();
+  const initialPlanId = searchParams.get("planId")?.trim() || undefined;
   const [step, setStep] = useState<OnboardStep>(1);
   const copy = STEP_COPY[step];
   const progressPercent = Math.round((step / 3) * 100);
@@ -152,6 +155,7 @@ export function OnboardShell() {
             endpoint="/api/onboarding/submit"
             submitLabel="Finish & sign in"
             onStepChange={setStep}
+            initialPlanId={initialPlanId}
           />
         </section>
       </main>
