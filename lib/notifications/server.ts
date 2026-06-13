@@ -1,5 +1,6 @@
 import "server-only";
 
+import { normalizeEmail } from "@/lib/customer/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapNotificationDoc as mapNotificationRecord } from "@/lib/notifications/map-notification-doc";
 import {
@@ -78,12 +79,15 @@ async function createNotification(
 ): Promise<string> {
   const collection = notificationCollectionFor(input.audience);
   const ref = adminDb.collection(collection).doc();
+  const customerEmail = input.customerEmail
+    ? normalizeEmail(input.customerEmail)
+    : null;
   await ref.set(
     withoutEmpty({
       id: ref.id,
       businessId: input.businessId,
       customerId: input.customerId,
-      customerEmail: input.customerEmail,
+      customerEmail,
       customerName: input.customerName,
       requestId: input.requestId,
       bookingSlug: input.bookingSlug,
@@ -99,11 +103,11 @@ async function createNotification(
 
   if (
     input.audience === "customer" &&
-    input.customerEmail &&
+    customerEmail &&
     !input.portalOnly
   ) {
     await sendInspectionCustomerNotificationEmail({
-      customerEmail: input.customerEmail,
+      customerEmail,
       customerPhone: input.customerPhone,
       customerName: input.customerName,
       bookingSlug: input.bookingSlug,
@@ -851,16 +855,17 @@ export async function listCustomerNotifications(
   customerId: string,
   customerEmail: string,
 ): Promise<NotificationRecord[]> {
+  const normalizedEmail = customerEmail ? normalizeEmail(customerEmail) : "";
   const [byId, byEmail] = await Promise.all([
     adminDb
       .collection(CUSTOMER_NOTIFICATION_COLLECTION)
       .where("customerId", "==", customerId)
       .limit(NOTIFICATION_LIST_LIMIT)
       .get(),
-    customerEmail
+    normalizedEmail
       ? adminDb
           .collection(CUSTOMER_NOTIFICATION_COLLECTION)
-          .where("customerEmail", "==", customerEmail)
+          .where("customerEmail", "==", normalizedEmail)
           .limit(NOTIFICATION_LIST_LIMIT)
           .get()
       : Promise.resolve(null),
@@ -892,10 +897,11 @@ function ownsNotification(
   if (guard.audience === "business") {
     return data.businessId === guard.businessId;
   }
+  const normalizedEmail = normalizeEmail(guard.customerEmail);
   return (
     data.customerId === guard.customerId ||
     (typeof data.customerEmail === "string" &&
-      data.customerEmail === guard.customerEmail)
+      normalizeEmail(data.customerEmail) === normalizedEmail)
   );
 }
 
@@ -933,16 +939,17 @@ async function collectUnreadNotificationIds(
     return unreadIds;
   }
 
+  const normalizedEmail = normalizeEmail(guard.customerEmail);
   const [byId, byEmail] = await Promise.all([
     adminDb
       .collection(collection)
       .where("customerId", "==", guard.customerId)
       .where("read", "==", false)
       .get(),
-    guard.customerEmail
+    normalizedEmail
       ? adminDb
           .collection(collection)
-          .where("customerEmail", "==", guard.customerEmail)
+          .where("customerEmail", "==", normalizedEmail)
           .where("read", "==", false)
           .get()
       : Promise.resolve(null),
