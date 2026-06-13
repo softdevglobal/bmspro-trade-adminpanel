@@ -777,7 +777,10 @@ export async function generateDocumentPdf(
     if (data.gstAud > 0) h += 18;
     h += 4 + 28; // spacer + total bar
     if (data.deposit) {
-      h += 18 + 12 + 16 + 28; // deposit row, due line, spacer, balance bar
+      h += 18 + 12; // deposit row and due line
+      if (kind === "invoice") {
+        h += 16 + 28; // spacer + balance bar
+      }
     }
     h += 10; // bottom padding
     return h;
@@ -848,10 +851,6 @@ export async function generateDocumentPdf(
         : kind === "invoice"
           ? "Deposit not paid"
           : "Deposit due";
-      const depositBalanceDueAud =
-        kind === "invoice" && !data.deposit.paid
-          ? data.totalAud
-          : data.deposit.balanceDueAud;
 
       drawText(depositLabel, panelX + 12, ty, {
         size: 9.5,
@@ -871,25 +870,30 @@ export async function generateDocumentPdf(
         color: MUTED,
         maxWidth: panelW - 24,
       });
-      ty -= 16;
-      page.drawRectangle({
-        x: panelX,
-        y: ty - 22,
-        width: panelW,
-        height: 28,
-        color: BRAND,
-      });
-      drawText("Balance due", panelX + 12, ty - 8, {
-        size: 11,
-        bold: true,
-        color: WHITE,
-      });
-      drawNumberRight(
-        formatQuoteMoney(depositBalanceDueAud),
-        panelX + panelW - 12,
-        ty - 9,
-        { size: 12, bold: true, color: WHITE },
-      );
+      if (kind === "invoice") {
+        const depositBalanceDueAud = data.deposit.paid
+          ? data.deposit.balanceDueAud
+          : data.totalAud;
+        ty -= 16;
+        page.drawRectangle({
+          x: panelX,
+          y: ty - 22,
+          width: panelW,
+          height: 28,
+          color: BRAND,
+        });
+        drawText("Balance due", panelX + 12, ty - 8, {
+          size: 11,
+          bold: true,
+          color: WHITE,
+        });
+        drawNumberRight(
+          formatQuoteMoney(depositBalanceDueAud),
+          panelX + panelW - 12,
+          ty - 9,
+          { size: 12, bold: true, color: WHITE },
+        );
+      }
     }
   };
 

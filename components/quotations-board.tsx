@@ -24,6 +24,7 @@ import {
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
 import {
+  canCancelQuotation,
   quotationAwaitingCustomerAcceptance,
   quotationHasInvoice,
   quotationJobActionsLocked,
@@ -205,6 +206,7 @@ function QuotationCardMenu({
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const canCancel = canCancelQuotation(quotation);
   const awaitingCustomerTitle =
     quotation.customerDecision === "rejected"
       ? "The customer rejected this quotation"
@@ -369,7 +371,7 @@ function QuotationCardMenu({
               Issue invoice
             </Link>
           )}
-          {!isCancelled && !hasBooking && !hasInvoice ? (
+          {canCancel ? (
             <button
               type="button"
               role="menuitem"
@@ -466,10 +468,13 @@ function QuotationCard({
         />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
-        {quotation.serviceTitle || "Quotation"}
+        {quotation.customer.fullName || "Customer"}
       </h4>
       <p className="font-body text-[13px] text-on-surface-variant">
-        {quotation.customer.fullName} · {quotation.customer.phone}
+        Service: {quotation.serviceTitle || "Quotation"}
+      </p>
+      <p className="font-body text-[13px] text-on-surface-variant">
+        {quotation.customer.phone}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
         {formatAddress(quotation.address)}
@@ -607,6 +612,7 @@ function QuotationPreviewContent({
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const canCancel = canCancelQuotation(quotation);
   const isCancelled = quotation.status === "cancelled";
   const awaitingCustomerTitle =
     quotation.customerDecision === "rejected"
@@ -618,7 +624,7 @@ function QuotationPreviewContent({
     (quotation.status === "sent" ||
       Boolean(quotation.pdfUrl) ||
       hasInvoice ||
-      (!isCancelled && !quotation.bookingId && !hasInvoice));
+      canCancel);
 
   function closeInvoicePdf() {
     setInvoicePdfOpen(false);
@@ -1043,7 +1049,7 @@ function QuotationPreviewContent({
                 {invoicePdfError}
               </p>
             ) : null}
-            {!isCancelled && !quotation.bookingId && !hasInvoice ? (
+            {canCancel ? (
               <button
                 type="button"
                 onClick={() => onCancelQuotation(quotation)}

@@ -137,10 +137,13 @@ function InvoiceCard({
       </div>
 
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
-        {invoice.serviceTitle || "Invoice"}
+        {invoice.customer.fullName || "Customer"}
       </h4>
       <p className="font-body text-[13px] text-on-surface-variant">
-        {invoice.customer.fullName} · {invoice.customer.phone}
+        Service: {invoice.serviceTitle || "Invoice"}
+      </p>
+      <p className="font-body text-[13px] text-on-surface-variant">
+        {invoice.customer.phone}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
         {formatAddress(invoice.address)}

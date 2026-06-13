@@ -333,14 +333,16 @@ export function QuotationDocumentPreview({
                   {formatDepositSummary(document.deposit)}
                 </p>
               </div>
-              <div className="flex items-center justify-between bg-[#0b33a0] px-4 py-3">
-                <span className="text-[13px] font-bold text-white">
-                  Balance due
-                </span>
-                <span className="font-numeric text-[15px] font-bold text-white">
-                  {formatQuoteMoney(depositBalanceDueAud)}
-                </span>
-              </div>
+              {isInvoice ? (
+                <div className="flex items-center justify-between bg-[#0b33a0] px-4 py-3">
+                  <span className="text-[13px] font-bold text-white">
+                    Balance due
+                  </span>
+                  <span className="font-numeric text-[15px] font-bold text-white">
+                    {formatQuoteMoney(depositBalanceDueAud)}
+                  </span>
+                </div>
+              ) : null}
             </>
           ) : null}
           </div>

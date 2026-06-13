@@ -116,7 +116,7 @@ function BookingCard({
             ) : null}
           </div>
           <h4 className="mt-2 font-display text-[16px] font-semibold text-on-surface">
-            {title}
+            {booking.customer.fullName || "Customer"}
           </h4>
           <p className="mt-1 font-body text-[11px] text-on-surface-variant">
             Visit{" "}
@@ -129,7 +129,10 @@ function BookingCard({
             />
           </p>
           <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">
-            {booking.customer.fullName} · {booking.customer.phone}
+            Service: {title}
+          </p>
+          <p className="font-body text-[13px] text-on-surface-variant">
+            {booking.customer.phone}
           </p>
           <p className="font-body text-[12px] text-on-surface-variant">
             {formatAddress(booking.address)}

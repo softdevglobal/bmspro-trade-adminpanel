@@ -1037,13 +1037,6 @@ export async function cancelQuotation(
   if (quotationData.status === "cancelled") {
     return { ok: true, quotation: mapQuotationDoc(quotationSnap.id, quotationData) };
   }
-  if (typeof quotationData.bookingId === "string" && quotationData.bookingId) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Quotations with scheduled jobs cannot be cancelled.",
-    };
-  }
   if (typeof quotationData.invoiceId === "string" && quotationData.invoiceId) {
     return {
       ok: false,
