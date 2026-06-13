@@ -2,6 +2,7 @@ import { logAuditEvent } from "@/lib/audit/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { createInspectionRequest } from "@/lib/inspection/server";
 import { parseInspectionRequestInput } from "@/lib/inspection/types";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -24,14 +25,24 @@ async function readCustomer(
   }
 }
 
-async function resolveBusinessIdFromSlug(slug: string): Promise<string | null> {
+async function resolveBusinessFromSlug(
+  slug: string,
+): Promise<{ id: string; timeZone: string } | null> {
   const snap = await adminDb
     .collection("businesses")
     .where("bookingSlug", "==", slug)
     .limit(1)
     .get();
   if (snap.empty) return null;
-  return snap.docs[0].id;
+  const doc = snap.docs[0];
+  const data = doc.data();
+  return {
+    id: doc.id,
+    timeZone:
+      typeof data.timezone === "string" && data.timezone.trim()
+        ? data.timezone.trim()
+        : PLATFORM_TIME_ZONE,
+  };
 }
 
 export async function POST(request: Request) {
@@ -56,22 +67,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = parseInspectionRequestInput(body);
-  if (!parsed.ok) {
-    return NextResponse.json(parsed, { status: 400 });
-  }
-
-  const businessId = await resolveBusinessIdFromSlug(slug);
-  if (!businessId) {
+  const business = await resolveBusinessFromSlug(slug);
+  if (!business) {
     return NextResponse.json(
       { ok: false, error: "Business not found." },
       { status: 404 },
     );
   }
 
+  const parsed = parseInspectionRequestInput(body, business.timeZone);
+  if (!parsed.ok) {
+    return NextResponse.json(parsed, { status: 400 });
+  }
+
   const customer = await readCustomer(request);
 
-  const result = await createInspectionRequest(businessId, parsed.value, {
+  const result = await createInspectionRequest(business.id, parsed.value, {
     customerId: customer.uid,
     createdSource: "booking_engine",
   });
@@ -80,7 +91,7 @@ export async function POST(request: Request) {
   }
 
   await logAuditEvent({
-    businessId,
+    businessId: business.id,
     category: "inspection",
     action: "inspection.created",
     actor: {

@@ -120,8 +120,8 @@ const EMPTY_ADDRESS: InspectionAddress = {
   postcode: "",
 };
 
-function todayIso(): string {
-  return platformTodayIso();
+function todayIso(timeZone?: string | null): string {
+  return platformTodayIso(new Date(), timeZone);
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -373,6 +373,7 @@ export function CreateQuotationPage() {
   const { user } = useAuth();
   const business = useBusinessProfile();
   const { requests } = useInspectionRequests();
+  const timeZone = business?.timezone;
 
   const [tab, setTab] = useState<Tab>("create");
   const [submitting, setSubmitting] = useState(false);
@@ -419,7 +420,7 @@ export function CreateQuotationPage() {
   const [termsLoaded, setTermsLoaded] = useState(false);
   const [comment, setComment] = useState("");
 
-  const [quotationDate, setQuotationDate] = useState(todayIso());
+  const [quotationDate, setQuotationDate] = useState(todayIso(timeZone));
   const [terms, setTerms] = useState<TermsId>("same_day");
   const [documentDiscount, setDocumentDiscount] =
     useState<DocumentDiscount | null>(null);
@@ -607,7 +608,7 @@ export function CreateQuotationPage() {
         }
 
         if (quotation.validUntil) {
-          const today = todayIso();
+          const today = todayIso(timeZone);
           const days = daysBetweenIso(today, quotation.validUntil);
           const matchingTerms = TERMS_OPTIONS.find(
             (option) => option.days === days,
@@ -630,7 +631,7 @@ export function CreateQuotationPage() {
         setDraftLoading(false);
       }
     })();
-  }, [user, draftQuotationId]);
+  }, [user, draftQuotationId, timeZone]);
 
   const customerOptions = useMemo(
     () => buildCustomerOptions(requests),
@@ -696,7 +697,10 @@ export function CreateQuotationPage() {
     return addDaysIso(quotationDate, opt?.days ?? 0);
   }, [quotationDate, terms]);
 
-  const minQuotationDate = useMemo(() => addDaysIso(todayIso(), -730), []);
+  const minQuotationDate = useMemo(
+    () => addDaysIso(todayIso(timeZone), -730),
+    [timeZone],
+  );
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {

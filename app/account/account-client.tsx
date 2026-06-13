@@ -791,9 +791,11 @@ function BookingDetailRow({
 function BookingSlotsList({
   slots,
   variant = "default",
+  timeZone,
 }: {
   slots: InspectionSlot[];
   variant?: "default" | "proposed" | "confirmed";
+  timeZone?: string | null;
 }) {
   if (slots.length === 0) {
     return (
@@ -835,7 +837,7 @@ function BookingSlotsList({
               <span className="material-symbols-outlined text-[17px] text-primary">
                 event
               </span>
-              {formatSlotDate(slot.date)}
+              {formatSlotDate(slot.date, timeZone)}
             </p>
             <p
               className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
@@ -857,11 +859,13 @@ function ProposedSlotPicker({
   selected,
   disabled,
   onSelect,
+  timeZone,
 }: {
   slots: InspectionSlot[];
   selected: InspectionSlot | null;
   disabled: boolean;
   onSelect: (slot: InspectionSlot) => void;
+  timeZone?: string | null;
 }) {
   return (
     <ul className="mt-1.5 space-y-2">
@@ -885,7 +889,7 @@ function ProposedSlotPicker({
                   <span className="material-symbols-outlined text-[17px] text-primary">
                     event
                   </span>
-                  {formatSlotDate(slot.date)}
+                  {formatSlotDate(slot.date, timeZone)}
                 </span>
                 <span className="mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug text-violet-900">
                   <span className="material-symbols-outlined text-[16px] text-primary/85">
@@ -981,11 +985,13 @@ function ConfirmedVisitHighlight({
   assignedTo,
   startTime,
   endTime,
+  timeZone,
 }: {
   slot: InspectionSlot;
   assignedTo: InspectionAssignment | null;
   startTime: string | null;
   endTime: string | null;
+  timeZone?: string | null;
 }) {
   const visitWindow = formatVisitWindow(startTime, endTime);
   return (
@@ -1008,7 +1014,7 @@ function ConfirmedVisitHighlight({
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-display text-[17px] font-semibold leading-snug text-emerald-950">
-              {formatSlotDate(slot.date)}
+              {formatSlotDate(slot.date, timeZone)}
             </p>
             <p className="mt-1 flex items-center gap-1.5 font-body text-[13px] font-semibold text-emerald-800">
               <span className="material-symbols-outlined text-[17px]">
@@ -1095,6 +1101,7 @@ function BookingCard({
     null,
   );
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const timeZone = booking.businessTimezone;
 
   useEffect(() => {
     if (!isFocused) return;
@@ -1248,7 +1255,8 @@ function BookingCard({
               <span className="material-symbols-outlined text-[16px] text-emerald-600">
                 event_available
               </span>
-              Visit confirmed · {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+              Visit confirmed ·{" "}
+              {formatSlotDate(booking.scheduledSlot.date, timeZone)} ·{" "}
               {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
             </p>
             <p className="mt-1 font-body text-[11px] text-emerald-800/85">
@@ -1350,7 +1358,7 @@ function BookingCard({
                   ) : null}
                   {booking.invoice?.dueDate ? (
                     <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
-                      Due {formatSlotDate(booking.invoice.dueDate)}
+                      Due {formatSlotDate(booking.invoice.dueDate, timeZone)}
                     </p>
                   ) : null}
                   <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
@@ -1429,6 +1437,7 @@ function BookingCard({
               assignedTo={booking.assignedTo}
               startTime={booking.scheduledStartTime}
               endTime={booking.scheduledEndTime}
+              timeZone={timeZone}
             />
           ) : null}
 
@@ -1569,7 +1578,10 @@ function BookingCard({
           />
 
           <BookingDetailRow icon="calendar_month" label="Your preferred times">
-            <BookingSlotsList slots={booking.preferredSlots} />
+            <BookingSlotsList
+              slots={booking.preferredSlots}
+              timeZone={timeZone}
+            />
           </BookingDetailRow>
 
           {booking.ownerProposedSlots.length > 0 ? (
@@ -1582,6 +1594,7 @@ function BookingCard({
                   slots={booking.ownerProposedSlots}
                   disabled={accepting}
                   selected={selectedProposed}
+                  timeZone={timeZone}
                   onSelect={setSelectedProposed}
                 />
                 {acceptError ? (
@@ -1610,6 +1623,7 @@ function BookingCard({
                 <BookingSlotsList
                   slots={booking.ownerProposedSlots}
                   variant="proposed"
+                  timeZone={timeZone}
                 />
               </BookingDetailRow>
             )

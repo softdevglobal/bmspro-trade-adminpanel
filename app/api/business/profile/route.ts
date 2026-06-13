@@ -11,6 +11,7 @@ import {
   updateBusinessProfile,
 } from "@/lib/onboarding/server";
 import {
+  isAuTimezone,
   MIN_SERVICE_AREAS,
   normaliseServiceAreas,
 } from "@/lib/onboarding/types";
@@ -81,6 +82,7 @@ export async function PATCH(request: Request) {
     businessEmail?: string | null;
     businessPhone?: string | null;
     abn?: string | null;
+    timezone?: string;
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
@@ -182,6 +184,16 @@ export async function PATCH(request: Request) {
       }
       updates.abn = trimmed || null;
     }
+  }
+
+  if ("timezone" in raw) {
+    if (!isAuTimezone(raw.timezone)) {
+      return NextResponse.json(
+        { ok: false, error: "Please select a valid timezone." },
+        { status: 400 },
+      );
+    }
+    updates.timezone = raw.timezone;
   }
 
   if ("logoUrl" in raw) {

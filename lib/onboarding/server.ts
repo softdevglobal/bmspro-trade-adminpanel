@@ -399,6 +399,7 @@ export async function updateBusinessProfile(
     businessEmail?: string | null;
     businessPhone?: string | null;
     abn?: string | null;
+    timezone?: string;
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
@@ -428,6 +429,10 @@ export async function updateBusinessProfile(
 
   if ("abn" in updates) {
     payload.abn = updates.abn;
+  }
+
+  if ("timezone" in updates) {
+    payload.timezone = updates.timezone;
   }
 
   if ("logoUrl" in updates) {

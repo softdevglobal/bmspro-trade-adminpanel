@@ -5,10 +5,12 @@ import { BusinessGstSettings } from "@/components/business-gst-settings";
 import { BusinessProfileSettings } from "@/components/business-profile-settings";
 import { BusinessSecuritySettings } from "@/components/business-security-settings";
 import { BusinessTermsSettings } from "@/components/business-terms-settings";
+import { BusinessTimezoneSettings } from "@/components/business-timezone-settings";
 import { SettingsIdentityHero } from "@/components/settings-identity-hero";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type { BusinessProfilePlan } from "@/lib/onboarding/server";
+import type { AuTimezone } from "@/lib/onboarding/types";
 import { useEffect, useMemo, useState } from "react";
 
 export type ProfileFormState = {
@@ -126,6 +128,10 @@ export function BusinessSettingsPanel() {
     setForm(next);
   }
 
+  function handleTimezoneSaved(timezone: AuTimezone) {
+    setMeta((current) => ({ ...current, timezone }));
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
@@ -137,6 +143,13 @@ export function BusinessSettingsPanel() {
         loading={metaLoading}
         onFormChange={setForm}
         onSaved={handleProfileSaved}
+      />
+
+      <BusinessTimezoneSettings
+        key={meta.timezone ?? "default-timezone"}
+        timezone={meta.timezone}
+        loading={metaLoading}
+        onSaved={handleTimezoneSaved}
       />
 
       <BusinessGstSettings />

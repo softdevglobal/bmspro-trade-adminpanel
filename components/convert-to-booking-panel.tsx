@@ -10,6 +10,7 @@ import {
 } from "@/components/booking-staff-assign-section";
 import { JobEstimateSelect } from "@/components/job-estimate-select";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import {
   estimateMinutesFromTimeRange,
@@ -125,6 +126,7 @@ export function bookingMinDateFromInspection(
     InspectionRequestDetail,
     "scheduledSlot" | "preferredSlots"
   > | null,
+  timeZone?: string | null,
 ): string {
   const scheduled = request?.scheduledSlot?.date?.trim();
   if (scheduled) return scheduled;
@@ -133,7 +135,7 @@ export function bookingMinDateFromInspection(
     .filter((date): date is string => Boolean(date))
     .sort();
   if (preferredDates.length > 0) return preferredDates[0];
-  return todayIso();
+  return todayIso(timeZone);
 }
 
 export function canConvertQuotationToBooking(quotation: {
@@ -168,7 +170,9 @@ export function ConvertToBookingPanel({
   onCancel: () => void;
 }) {
   const { user } = useAuth();
+  const profile = useBusinessProfile();
   const { staff } = useBusinessStaffSummary();
+  const timeZone = profile?.timezone;
   const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("owner");
   const [staffId, setStaffId] = useState("");
   const [slot, setSlot] = useState<InspectionSlot>({
@@ -296,6 +300,7 @@ export function ConvertToBookingPanel({
           onSelect={(iso) => setSlot({ ...slot, date: iso })}
           disabled={submitting}
           dayStripLayout="fit"
+          timeZone={timeZone}
         />
       </div>
 

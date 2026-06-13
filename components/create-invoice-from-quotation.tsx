@@ -156,8 +156,8 @@ function formatAud(value: number): string {
   return `Aus $${value.toFixed(2)}`;
 }
 
-function todayIso(): string {
-  return platformTodayIso();
+function todayIso(timeZone?: string | null): string {
+  return platformTodayIso(new Date(), timeZone);
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -253,6 +253,7 @@ export function CreateInvoiceFromQuotation({
   const router = useRouter();
   const { user } = useAuth();
   const business = useBusinessProfile();
+  const timeZone = business?.timezone;
 
   const [tab, setTab] = useState<Tab>("create");
   const [loading, setLoading] = useState(true);
@@ -291,8 +292,8 @@ export function CreateInvoiceFromQuotation({
   const [depositPaid, setDepositPaid] = useState(false);
   const [termsAndConditions, setTermsAndConditions] = useState("");
   const [notes, setNotes] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(todayIso());
-  const [dueDate, setDueDate] = useState(addDaysIso(todayIso(), 14));
+  const [invoiceDate, setInvoiceDate] = useState(todayIso(timeZone));
+  const [dueDate, setDueDate] = useState(addDaysIso(todayIso(timeZone), 14));
 
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -421,7 +422,7 @@ export function CreateInvoiceFromQuotation({
           setTermsAndConditions(rawTerms);
         }
         setNotes(q.notes?.trim() ?? "");
-        const issued = todayIso();
+        const issued = todayIso(timeZone);
         setInvoiceDate(issued);
         setDueDate(q.validUntil?.trim() || addDaysIso(issued, 14));
       }
@@ -465,10 +466,10 @@ export function CreateInvoiceFromQuotation({
           setTermsAndConditions(rawTerms);
         }
         setNotes(loadedDraftInvoice.notes?.trim() ?? "");
-        setInvoiceDate(loadedDraftInvoice.invoiceDate || todayIso());
+        setInvoiceDate(loadedDraftInvoice.invoiceDate || todayIso(timeZone));
         setDueDate(
           loadedDraftInvoice.dueDate ||
-            addDaysIso(loadedDraftInvoice.invoiceDate || todayIso(), 14),
+            addDaysIso(loadedDraftInvoice.invoiceDate || todayIso(timeZone), 14),
         );
         setRequestType("custom_quote");
         setCustomServiceTitle(loadedDraftInvoice.serviceTitle);
@@ -544,7 +545,14 @@ export function CreateInvoiceFromQuotation({
     } finally {
       setLoading(false);
     }
-  }, [quotationId, draftInvoiceId, direct, isEditingDraftInvoice, user]);
+  }, [
+    quotationId,
+    draftInvoiceId,
+    direct,
+    isEditingDraftInvoice,
+    user,
+    timeZone,
+  ]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {

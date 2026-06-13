@@ -11,6 +11,7 @@ import {
   parseInspectionRequestInput,
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -97,7 +98,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = parseInspectionRequestInput(body);
+  const businessSnap = await adminDb
+    .collection("businesses")
+    .doc(auth.businessId)
+    .get();
+  const businessData = businessSnap.data() ?? {};
+  const timeZone =
+    typeof businessData.timezone === "string" && businessData.timezone.trim()
+      ? businessData.timezone.trim()
+      : PLATFORM_TIME_ZONE;
+
+  const parsed = parseInspectionRequestInput(body, timeZone);
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
   }
@@ -107,11 +118,6 @@ export async function POST(request: Request) {
   let customerId: string | null = null;
   let customerCreated = false;
   try {
-    const businessSnap = await adminDb
-      .collection("businesses")
-      .doc(auth.businessId)
-      .get();
-    const businessData = businessSnap.data() ?? {};
     const account = await ensureCustomerAccount({
       email: parsed.value.customer.email,
       fullName: parsed.value.customer.fullName,

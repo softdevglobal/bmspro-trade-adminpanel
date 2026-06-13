@@ -55,6 +55,10 @@ export const AU_TIMEZONES = [
 export type AuTimezone = (typeof AU_TIMEZONES)[number]["id"];
 export const DEFAULT_AU_TIMEZONE: AuTimezone = PLATFORM_TIME_ZONE;
 
+export function isAuTimezone(value: unknown): value is AuTimezone {
+  return typeof value === "string" && AU_TIMEZONES.some((tz) => tz.id === value);
+}
+
 export const SUBSCRIPTION_PLANS = [
   {
     id: "booking_management",

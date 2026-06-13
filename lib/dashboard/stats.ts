@@ -1,7 +1,9 @@
-import { toIsoDateLocal } from "@/lib/calendar/events";
 import type { BookingDetail } from "@/lib/bookings/types";
 import type { InspectionRequestDetail } from "@/lib/inspection/types";
-import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
+import {
+  formatIsoDateInPlatformTimeZone,
+  platformTodayIso,
+} from "@/lib/platform/timezone";
 import type { NotificationRecord } from "@/lib/notifications/types";
 
 export type DashboardKpi = {
@@ -71,12 +73,16 @@ function visitTitle(request: InspectionRequestDetail): string {
     : (request.customRequest?.title ?? "Custom quote visit");
 }
 
-function formatShortDate(iso: string): string {
-  return formatIsoDateInPlatformTimeZone(iso, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+function formatShortDate(iso: string, timeZone?: string | null): string {
+  return formatIsoDateInPlatformTimeZone(
+    iso,
+    {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    },
+    timeZone,
+  );
 }
 
 export function computeDashboardOverview(input: {
@@ -85,8 +91,9 @@ export function computeDashboardOverview(input: {
   notifications: NotificationRecord[];
   staffCount: number;
   today?: Date;
+  timeZone?: string | null;
 }): DashboardOverview {
-  const todayIso = toIsoDateLocal(input.today ?? new Date());
+  const todayIso = platformTodayIso(input.today ?? new Date(), input.timeZone);
 
   const todayBookings = input.bookings.filter((booking) =>
     isTodayBooking(booking, todayIso),
@@ -217,7 +224,7 @@ export function computeDashboardOverview(input: {
         id: booking.id,
         kind: "booking",
         title: bookingTitle(booking),
-        dateLabel: formatShortDate(date),
+        dateLabel: formatShortDate(date, input.timeZone),
         statusLabel:
           booking.status === "ongoing" ? "Ongoing" : "Scheduled",
         href: "/dashboard/jobs",
@@ -234,7 +241,7 @@ export function computeDashboardOverview(input: {
         id: request.id,
         kind: "visit",
         title: visitTitle(request),
-        dateLabel: formatShortDate(date),
+        dateLabel: formatShortDate(date, input.timeZone),
         statusLabel: "Inspection",
         href: `/dashboard/requests?request=${request.id}`,
       },

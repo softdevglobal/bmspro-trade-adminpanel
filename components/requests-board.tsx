@@ -12,6 +12,7 @@ import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
   BOOKING_STATUS_LABELS,
   BOOKING_STATUS_TONE,
@@ -47,7 +48,20 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+const RequestsTimezoneContext = createContext<string | null>(null);
+
+function useRequestsTimeZone(): string | null {
+  return useContext(RequestsTimezoneContext);
+}
 
 function CreatedSourcePill({
   source,
@@ -151,7 +165,8 @@ function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
 }
 
 export function RequestsBoard() {
-  const { user, status: authStatus } = useAuth();
+  const { status: authStatus } = useAuth();
+  const profile = useBusinessProfile();
   const {
     requests,
     loading: requestsLoading,
@@ -169,6 +184,7 @@ export function RequestsBoard() {
     null,
   );
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const timeZone = profile?.timezone ?? null;
 
   useEffect(() => {
     setRequestsLocal(requests);
@@ -249,7 +265,8 @@ export function RequestsBoard() {
   }
 
   return (
-    <div className="w-full min-w-0 max-w-full space-y-4 sm:space-y-5">
+    <RequestsTimezoneContext.Provider value={timeZone}>
+      <div className="w-full min-w-0 max-w-full space-y-4 sm:space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div
           className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-1 sm:flex-wrap sm:gap-2"
@@ -358,7 +375,8 @@ export function RequestsBoard() {
           if (requestId) setSelectedId(requestId);
         }}
       />
-    </div>
+      </div>
+    </RequestsTimezoneContext.Provider>
   );
 }
 
@@ -406,6 +424,7 @@ function RequestCard({
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
 }) {
+  const timeZone = useRequestsTimeZone();
   const serviceTitle =
     request.requestType === "existing_service"
       ? request.serviceName ?? "Existing service"
@@ -419,12 +438,16 @@ function RequestCard({
   const customerName = request.customer.fullName?.trim() || "Customer";
 
   const created = request.createdAt
-    ? formatInPlatformTimeZone(request.createdAt, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })
+    ? formatInPlatformTimeZone(
+        request.createdAt,
+        {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        },
+        timeZone,
+      )
     : "—";
 
   const showScheduledOnly =
@@ -514,7 +537,7 @@ function RequestCard({
             <span className="material-symbols-outlined text-[12px] leading-none">
               event_available
             </span>
-            {formatSlotDate(request.scheduledSlot.date)} ·{" "}
+            {formatSlotDate(request.scheduledSlot.date, timeZone)} ·{" "}
             {TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange]}
             {visitWindow ? ` · ${visitWindow}` : null}
           </span>
@@ -532,7 +555,8 @@ function RequestCard({
                 <span className="material-symbols-outlined text-[12px] leading-none">
                   event_available
                 </span>
-                Scheduled · {formatSlotDate(request.scheduledSlot.date)} ·{" "}
+                Scheduled ·{" "}
+                {formatSlotDate(request.scheduledSlot.date, timeZone)} ·{" "}
                 {TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange]}
               </span>
             ) : null}
@@ -615,6 +639,7 @@ function SlotPill({
   slot: InspectionSlot;
   tone: "customer" | "owner";
 }) {
+  const timeZone = useRequestsTimeZone();
   return (
     <span
       className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 font-body text-[10px] font-semibold sm:px-2.5 sm:text-[11px] ${
@@ -627,7 +652,8 @@ function SlotPill({
         event
       </span>
       <span className="truncate">
-        {formatSlotDate(slot.date)} · {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
+        {formatSlotDate(slot.date, timeZone)} ·{" "}
+        {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
       </span>
     </span>
   );
@@ -756,6 +782,7 @@ function DrawerReviewFooter({
   onAwaitingDecision: () => void;
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
+  const timeZone = useRequestsTimeZone();
   const [pdfOpen, setPdfOpen] = useState(false);
   const followUp = canFollowUpAfterQuotation(request);
   const quotationAwaitingCustomer = Boolean(
@@ -977,6 +1004,7 @@ function CompactRequestSummary({
   request: InspectionRequestDetail;
   onShowFullDetails: () => void;
 }) {
+  const timeZone = useRequestsTimeZone();
   const headline =
     request.requestType === "existing_service"
       ? request.serviceName ?? "Existing service"
@@ -998,7 +1026,7 @@ function CompactRequestSummary({
               event_available
             </span>
             <span className="min-w-0">
-              {formatSlotDate(request.scheduledSlot.date)} ·{" "}
+              {formatSlotDate(request.scheduledSlot.date, timeZone)} ·{" "}
               {TIME_RANGE_LABELS[request.scheduledSlot.timeRange]}
               {formatVisitWindow(
                 request.scheduledStartTime,
@@ -1042,6 +1070,7 @@ function DetailDrawerContent({
 }) {
   const { user } = useAuth();
   const router = useRouter();
+  const timeZone = useRequestsTimeZone();
   const [mode, setMode] = useState<DrawerMode>(initialMode ?? "review");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1300,7 +1329,7 @@ function DetailDrawerContent({
         {inBookingMode ? (
           <ConvertToBookingPanel
             inspectionRequestId={request.id}
-            minBookingDate={bookingMinDateFromRequest(request)}
+            minBookingDate={bookingMinDateFromRequest(request, timeZone)}
             initialStartTime={bookingTimeDefaults.start}
             initialEndTime={bookingTimeDefaults.end}
             onSuccess={(updated) => {
@@ -1734,6 +1763,7 @@ function QuotationCard({
   quotation: QuotationView;
   mirroredDecision: "accepted" | "rejected" | null;
 }) {
+  const timeZone = useRequestsTimeZone();
   const [pdfOpen, setPdfOpen] = useState(false);
   const effectiveDecision =
     quotation.customerDecision ?? mirroredDecision;
@@ -1783,11 +1813,15 @@ function QuotationCard({
           </p>
           {quotation.createdAt ? (
             <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
-              {formatInPlatformTimeZone(quotation.createdAt, {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
+              {formatInPlatformTimeZone(
+                quotation.createdAt,
+                {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                },
+                timeZone,
+              )}
             </p>
           ) : null}
         </div>
@@ -1891,6 +1925,7 @@ function BookingDetailsSection({
   bookingCode: string | null;
 }) {
   const { user } = useAuth();
+  const timeZone = useRequestsTimeZone();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2006,7 +2041,7 @@ function BookingDetailsSection({
               <span className="material-symbols-outlined text-[16px] text-primary">
                 event
               </span>
-              {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+              {formatSlotDate(booking.scheduledSlot.date, timeZone)} ·{" "}
               {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
             </p>
             {visitWindow ? (
@@ -2138,6 +2173,7 @@ function InspectionSlotsList({
   variant?: "customer" | "proposed" | "scheduled";
   timeWindow?: string | null;
 }) {
+  const timeZone = useRequestsTimeZone();
   if (slots.length === 0) return null;
 
   const cardClass =
@@ -2174,7 +2210,7 @@ function InspectionSlotsList({
               <span className="material-symbols-outlined text-[17px] text-primary">
                 event
               </span>
-              {formatSlotDate(slot.date)}
+              {formatSlotDate(slot.date, timeZone)}
             </p>
             <p
               className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
@@ -2253,6 +2289,7 @@ function SlotsOverview({
   request: InspectionRequestDetail;
   inlineVisitTime?: InlineVisitTimeControl;
 }) {
+  const timeZone = useRequestsTimeZone();
   return (
     <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
       <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
@@ -2547,6 +2584,7 @@ function CancelForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const timeZone = useRequestsTimeZone();
   return (
     <section className="rounded-xl border border-rose-200 bg-rose-50/50 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">
@@ -2599,6 +2637,8 @@ function SetTimeForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const timeZone = useRequestsTimeZone();
+
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">
@@ -2606,7 +2646,8 @@ function SetTimeForm({
       </p>
       {slot ? (
         <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-          {formatSlotDate(slot.date)} · {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
+          {formatSlotDate(slot.date, timeZone)} ·{" "}
+          {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
         </p>
       ) : null}
       <label className="mt-3 block">
@@ -2636,7 +2677,10 @@ function SetTimeForm({
 }
 
 /** Earliest selectable job day: request date (inclusive), then later days only. */
-function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
+function bookingMinDateFromRequest(
+  request: InspectionRequestDetail,
+  timeZone?: string | null,
+): string {
   const scheduled = request.scheduledSlot?.date?.trim();
   if (scheduled) return scheduled;
   const preferredDates = request.preferredSlots
@@ -2644,7 +2688,7 @@ function bookingMinDateFromRequest(request: InspectionRequestDetail): string {
     .filter((date): date is string => Boolean(date))
     .sort();
   if (preferredDates.length > 0) return preferredDates[0];
-  return todayIso();
+  return todayIso(timeZone);
 }
 
 function AwaitingDecisionForm({
@@ -2732,6 +2776,7 @@ function AcceptForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const timeZone = useRequestsTimeZone();
   const selectedRange = value?.timeRange ?? null;
 
   return (
@@ -2764,7 +2809,7 @@ function AcceptForm({
                     <span className="material-symbols-outlined text-[16px] text-primary">
                       event
                     </span>
-                    {formatSlotDate(slot.date)}
+                    {formatSlotDate(slot.date, timeZone)}
                   </span>
                   <span className="mt-1 flex items-center gap-1.5 font-body text-[12px] text-on-surface-variant">
                     <span className="material-symbols-outlined text-[15px] text-primary/80">
@@ -2868,6 +2913,7 @@ function ProposeSlotOption({
   ) => void;
   onRemove: () => void;
 }) {
+  const timeZone = useRequestsTimeZone();
   const [dayPage, setDayPage] = useState(0);
 
   const customerBlocked = useMemo(
@@ -2925,6 +2971,7 @@ function ProposeSlotOption({
           disabled={disabled}
           blockedCombos={blockedCombos}
           dayStripLayout="fit"
+          timeZone={timeZone}
         />
       </div>
 
@@ -3010,7 +3057,8 @@ function ProposeForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
-  const minDate = todayIso();
+  const timeZone = useRequestsTimeZone();
+  const minDate = todayIso(timeZone);
 
   function updateSlot<K extends keyof InspectionSlot>(
     index: number,

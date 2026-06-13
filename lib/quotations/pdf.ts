@@ -11,6 +11,7 @@ import {
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
 import type { QuotationDetail } from "@/lib/quotations/types";
+import { platformTodayIso } from "@/lib/platform/timezone";
 import { displayQuotationCode } from "@/lib/reference-codes";
 import {
   PDFDocument,
@@ -273,6 +274,7 @@ export function buildQuotationDocumentFromDetail(
     abn?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
+    timezone?: string | null;
   },
 ): QuotationDocumentData {
   const gstPercentage = branding.registeredForGst
@@ -284,9 +286,9 @@ export function buildQuotationDocumentFromDetail(
 
   const quoteDate = quotation.createdAt
     ? formatQuoteDate(
-        new Date(quotation.createdAt).toISOString().slice(0, 10),
+        platformTodayIso(new Date(quotation.createdAt), branding.timezone),
       )
-    : formatQuoteDate(new Date().toISOString().slice(0, 10));
+    : formatQuoteDate(platformTodayIso(new Date(), branding.timezone));
 
   const totalAud = quotation.finalPriceAud || totals.totalAud;
 
@@ -1060,6 +1062,7 @@ export async function generateQuotationPdf(
     registeredForGst?: boolean;
     gstPercentage?: number | null;
     inspectionRequestCode?: string | null;
+    timezone?: string | null;
   } = {},
 ): Promise<Buffer> {
   const data = buildQuotationDocumentFromDetail(quotation, options);

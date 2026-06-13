@@ -2,6 +2,7 @@
 
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import { formatAddress } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
@@ -20,7 +21,7 @@ function formatAud(value: number | null): string {
   return `Aus $${value.toFixed(2)}`;
 }
 
-function formatWhen(timestamp: number | null): string {
+function formatWhen(timestamp: number | null, timeZone?: string | null): string {
   if (!timestamp) return "—";
   return formatInPlatformTimeZone(timestamp, {
     month: "short",
@@ -28,7 +29,7 @@ function formatWhen(timestamp: number | null): string {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }, timeZone);
 }
 
 function invoiceStatusLabel(invoice: InvoiceDetail): string {
@@ -170,10 +171,12 @@ function InvoicePreviewDrawer({
   invoice,
   onClose,
   onInvoiceUpdated,
+  timeZone,
 }: {
   invoice: InvoiceDetail | null;
   onClose: () => void;
   onInvoiceUpdated: (invoice: InvoiceDetail) => void;
+  timeZone?: string | null;
 }) {
   const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -520,7 +523,7 @@ function InvoicePreviewDrawer({
                 </p>
               ) : null}
               <p className="text-center font-body text-[11px] text-on-surface-variant">
-                Created {formatWhen(invoice.createdAt)}
+                Created {formatWhen(invoice.createdAt, timeZone)}
               </p>
             </footer>
           </motion.aside>
@@ -544,11 +547,13 @@ function InvoicePreviewDrawer({
 
 export function InvoicesBoard() {
   const { user, status: authStatus } = useAuth();
+  const profile = useBusinessProfile();
   const [invoices, setInvoices] = useState<InvoiceDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<InvoiceFilter>("due");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const timeZone = profile?.timezone;
 
   const load = useCallback(async () => {
     if (!user) {
@@ -771,6 +776,7 @@ export function InvoicesBoard() {
       <InvoicePreviewDrawer
         invoice={selected}
         onClose={() => setSelectedId(null)}
+        timeZone={timeZone}
         onInvoiceUpdated={(updatedInvoice) => {
           setInvoices((current) =>
             current.map((invoice) =>

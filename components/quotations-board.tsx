@@ -10,6 +10,7 @@ import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-deci
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   BOOKING_STATUS_LABELS,
@@ -40,7 +41,7 @@ function formatAud(value: number | null): string {
   return `Aus $${value.toFixed(2)}`;
 }
 
-function formatWhen(timestamp: number | null): string {
+function formatWhen(timestamp: number | null, timeZone?: string | null): string {
   if (!timestamp) return "—";
   return formatInPlatformTimeZone(timestamp, {
     month: "short",
@@ -48,7 +49,7 @@ function formatWhen(timestamp: number | null): string {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }, timeZone);
 }
 
 type QuotationPreviewMode = "review" | "convert_booking";
@@ -416,6 +417,7 @@ function QuotationCard({
   onBook,
   onCancel,
   onUndoCancel,
+  timeZone,
 }: {
   quotation: QuotationDetail;
   isPreviewOpen: boolean;
@@ -423,6 +425,7 @@ function QuotationCard({
   onBook: () => void;
   onCancel: () => void;
   onUndoCancel: () => void;
+  timeZone?: string | null;
 }) {
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
   const hasInvoice = quotationHasInvoice(quotation);
@@ -484,7 +487,7 @@ function QuotationCard({
           {formatAud(quotation.finalPriceAud)}
         </span>
         <span className="font-body text-[11px] text-on-surface-variant">
-          {formatWhen(quotation.createdAt)}
+          {formatWhen(quotation.createdAt, timeZone)}
         </span>
         {showFollowUpActions ? (
           <FollowUpActionButtons
@@ -518,6 +521,7 @@ function QuotationPreviewDrawer({
   onQuotationDecided,
   onCancelQuotation,
   onUndoCancel,
+  timeZone,
 }: {
   quotation: QuotationDetail | null;
   previewMode: QuotationPreviewMode;
@@ -528,6 +532,7 @@ function QuotationPreviewDrawer({
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
   onCancelQuotation: (quotation: QuotationDetail) => void;
   onUndoCancel: (quotation: QuotationDetail) => void;
+  timeZone?: string | null;
 }) {
   const open = quotation !== null;
 
@@ -564,6 +569,7 @@ function QuotationPreviewDrawer({
               onQuotationDecided={onQuotationDecided}
               onCancelQuotation={onCancelQuotation}
               onUndoCancel={onUndoCancel}
+              timeZone={timeZone}
             />
           </motion.aside>
         </motion.div>
@@ -582,6 +588,7 @@ function QuotationPreviewContent({
   onQuotationDecided,
   onCancelQuotation,
   onUndoCancel,
+  timeZone,
 }: {
   quotation: QuotationDetail;
   previewMode: QuotationPreviewMode;
@@ -592,6 +599,7 @@ function QuotationPreviewContent({
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
   onCancelQuotation: (quotation: QuotationDetail) => void;
   onUndoCancel: (quotation: QuotationDetail) => void;
+  timeZone?: string | null;
 }) {
   const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -698,7 +706,7 @@ function QuotationPreviewContent({
             {title}
           </h3>
           <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-            Sent {formatWhen(quotation.createdAt)}
+            Sent {formatWhen(quotation.createdAt, timeZone)}
           </p>
         </div>
         <button
@@ -715,7 +723,10 @@ function QuotationPreviewContent({
         {previewMode === "convert_booking" ? (
           <ConvertToBookingPanel
             inspectionRequestId={quotation.inspectionRequestId}
-            minBookingDate={bookingMinDateFromInspection(linkedInspection)}
+            minBookingDate={bookingMinDateFromInspection(
+              linkedInspection,
+              timeZone,
+            )}
             initialStartTime={linkedInspection?.scheduledStartTime ?? "10:00"}
             initialEndTime={linkedInspection?.scheduledEndTime ?? "11:00"}
             onSuccess={onBookingCreated}
@@ -1200,6 +1211,7 @@ function CancelQuotationConfirmModal({
 
 export function QuotationsBoard() {
   const { user, status: authStatus } = useAuth();
+  const profile = useBusinessProfile();
   const { requests: inspectionRequests } = useInspectionRequests();
   const [quotations, setQuotations] = useState<QuotationDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1210,6 +1222,7 @@ export function QuotationsBoard() {
   const [filter, setFilter] = useState<QuotationFilter>("pending");
   const [cancelTarget, setCancelTarget] = useState<QuotationDetail | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const timeZone = profile?.timezone;
 
   const load = useCallback(async () => {
     if (!user) {
@@ -1567,6 +1580,7 @@ export function QuotationsBoard() {
                 onBook={() => handleStartConvertBooking(quotation.id)}
                 onCancel={() => setCancelTarget(quotation)}
                 onUndoCancel={() => void handleUndoCancel(quotation)}
+                timeZone={timeZone}
               />
             </li>
           ))}
@@ -1596,6 +1610,7 @@ export function QuotationsBoard() {
         onQuotationDecided={handleQuotationDecided}
         onCancelQuotation={setCancelTarget}
         onUndoCancel={(quotation) => void handleUndoCancel(quotation)}
+        timeZone={timeZone}
       />
       <CancelQuotationConfirmModal
         quotation={cancelTarget}

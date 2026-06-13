@@ -36,6 +36,7 @@ import {
 } from "@/lib/reference-codes";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
 export const QUOTATION_COLLECTION = "quotations";
 
@@ -391,6 +392,7 @@ type QuotationBusinessBranding = {
   abn: string | null;
   registeredForGst: boolean;
   gstPercentage: number | null;
+  timezone: string;
 };
 
 async function loadQuotationBusinessBranding(
@@ -436,6 +438,10 @@ async function loadQuotationBusinessBranding(
       abn: typeof businessData.abn === "string" ? businessData.abn : null,
       registeredForGst,
       gstPercentage: registeredForGst ? gstPercentage : null,
+      timezone:
+        typeof businessData.timezone === "string" && businessData.timezone.trim()
+          ? businessData.timezone.trim()
+          : PLATFORM_TIME_ZONE,
     };
   } catch {
     return {
@@ -449,6 +455,7 @@ async function loadQuotationBusinessBranding(
       abn: null,
       registeredForGst: false,
       gstPercentage: null,
+      timezone: PLATFORM_TIME_ZONE,
     };
   }
 }
@@ -632,6 +639,7 @@ export async function createQuotationForInspection(
       abn: businessBranding.abn,
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
+      timezone: businessBranding.timezone,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
           ? requestData.requestCode
@@ -725,6 +733,7 @@ export async function createQuotationForInspection(
         businessName: businessBranding.businessName,
         bookingSlug: businessBranding.bookingSlug,
         logoUrl: businessBranding.logoUrl,
+        timezone: businessBranding.timezone,
       });
     } catch (error) {
       console.error("quotation sent notification failed:", error);
@@ -900,6 +909,7 @@ export async function updateDraftQuotation(
       abn: businessBranding.abn,
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
+      timezone: businessBranding.timezone,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
           ? requestData.requestCode
@@ -1001,6 +1011,7 @@ export async function updateDraftQuotation(
         businessName: businessBranding.businessName,
         bookingSlug: businessBranding.bookingSlug,
         logoUrl: businessBranding.logoUrl,
+        timezone: businessBranding.timezone,
       });
     } catch (error) {
       console.error("draft quotation sent notification failed:", error);
@@ -1689,6 +1700,7 @@ export async function createStandaloneQuotation(
       abn: businessBranding.abn,
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
+      timezone: businessBranding.timezone,
       inspectionRequestCode: requestCode,
     });
     const uploaded = await uploadQuotationPdf(pdfBytes, {
@@ -1781,6 +1793,7 @@ export async function createStandaloneQuotation(
         businessName: businessBranding.businessName,
         bookingSlug: businessBranding.bookingSlug,
         logoUrl: businessBranding.logoUrl,
+        timezone: businessBranding.timezone,
       });
     } catch (error) {
       console.error("standalone quotation sent notification failed:", error);
