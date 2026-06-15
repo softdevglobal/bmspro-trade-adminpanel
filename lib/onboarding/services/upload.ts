@@ -252,6 +252,48 @@ export async function uploadBusinessLogo(
   }
 }
 
+/** Uploads a subscription package marketing image (super-admin catalog). */
+export async function uploadPackageImage(
+  file: Buffer,
+  contentType: string,
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  if (!ALLOWED_TYPES.has(contentType)) {
+    return {
+      ok: false,
+      error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF.",
+    };
+  }
+  if (file.length > MAX_BYTES) {
+    return { ok: false, error: "Image must be 5 MB or smaller." };
+  }
+
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const bucket = getStorage().bucket(bucketName);
+  const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+  const path = `packages/${Date.now()}-${randomUUID()}.${ext}`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType,
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, imageUrl };
+  } catch (error) {
+    console.error("uploadPackageImage failed:", error);
+    return { ok: false, error: "Could not upload image." };
+  }
+}
+
 /**
  * Uploads a quotation attachment (image or PDF) to Firebase Storage.
  */

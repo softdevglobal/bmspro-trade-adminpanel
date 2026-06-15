@@ -16,6 +16,11 @@ import {
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import { customerAuth } from "@/lib/firebase/customer-client";
+import {
+  formatAuditDateTime,
+  SUPER_ADMIN_AUDIT_TIMEZONE,
+  timezoneLabel,
+} from "@/lib/onboarding/tenant-display";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type AuditLogScope = "platform" | "tenant" | "customer";
@@ -29,6 +34,8 @@ export type AuditLogViewProps = {
 
 type TenantOption = { id: string; businessName: string };
 
+const AUDIT_LOG_PAGE_SIZE = 20;
+
 const SOURCE_BADGE: Record<AuditSource, string> = {
   customer_portal:
     "bg-tertiary-fixed text-on-tertiary-fixed-variant border border-on-tertiary-fixed-variant/30",
@@ -41,24 +48,6 @@ const SOURCE_BADGE: Record<AuditSource, string> = {
   system:
     "bg-surface-variant text-on-surface-variant border border-outline-variant",
 };
-
-function relativeTime(millis: number | null): string {
-  if (!millis) return "—";
-  const diff = Date.now() - millis;
-  const mins = Math.round(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(millis).toLocaleDateString();
-}
-
-function fullTimestamp(millis: number | null): string {
-  if (!millis) return "Unknown time";
-  return new Date(millis).toLocaleString();
-}
 
 export function AuditLogView({
   scope: scopeProp,
@@ -85,6 +74,10 @@ export function AuditLogView({
   const [businessId, setBusinessId] = useState<string>("");
   const [category, setCategory] = useState<AuditCategory | "all">("all");
   const [source, setSource] = useState<AuditSource | "all">("all");
+  const [page, setPage] = useState(1);
+  const [displayTimezone, setDisplayTimezone] = useState(() =>
+    isPlatform ? SUPER_ADMIN_AUDIT_TIMEZONE : "Australia/Sydney",
+  );
 
   const loadTenants = useCallback(async () => {
     if (!isPlatform || !user) return;
@@ -138,6 +131,7 @@ export function AuditLogView({
         ok?: boolean;
         error?: string;
         logs?: AuditLogEntry[];
+        displayTimezone?: string;
       }>(res);
       if (!res.ok || !data.ok) {
         setErrorMessage(data.error ?? "Could not load the audit log.");
@@ -146,6 +140,9 @@ export function AuditLogView({
         return;
       }
       setLogs(data.logs ?? []);
+      if (typeof data.displayTimezone === "string" && data.displayTimezone) {
+        setDisplayTimezone(data.displayTimezone);
+      }
     } catch {
       setErrorMessage("Network error loading the audit log.");
     } finally {
@@ -167,6 +164,10 @@ export function AuditLogView({
       setCategory("all");
     }
   }, [isPlatform, category]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [category, source, businessId]);
 
   const processedLogs = useMemo(
     () => normalizeAuditLogEntries(logs),
@@ -216,6 +217,20 @@ export function AuditLogView({
       ),
     [processedLogs, category, isTenantOwner],
   );
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(visibleLogs.length / AUDIT_LOG_PAGE_SIZE),
+  );
+  const safePage = Math.min(page, totalPages);
+  const pageStart =
+    visibleLogs.length === 0 ? 0 : (safePage - 1) * AUDIT_LOG_PAGE_SIZE;
+  const pageEnd = Math.min(safePage * AUDIT_LOG_PAGE_SIZE, visibleLogs.length);
+  const paginatedLogs = visibleLogs.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const categoryOptions = useMemo(() => {
     const categories = AUDIT_CATEGORIES.filter((cat) => {
@@ -331,16 +346,82 @@ export function AuditLogView({
             </p>
           </div>
         ) : (
-          <ul className="divide-y divide-outline-variant/60">
-            {visibleLogs.map((entry) => (
-              <AuditRow
-                key={entry.id}
-                entry={entry}
-                showTenant={isPlatform && !businessId}
+          <>
+            <ul className="divide-y divide-outline-variant/60">
+              {paginatedLogs.map((entry) => (
+                <AuditRow
+                  key={entry.id}
+                  entry={entry}
+                  showTenant={isPlatform && !businessId}
+                  displayTimezone={displayTimezone}
+                />
+              ))}
+            </ul>
+            {visibleLogs.length > AUDIT_LOG_PAGE_SIZE ? (
+              <AuditLogPagination
+                page={safePage}
+                totalPages={totalPages}
+                pageStart={pageStart}
+                pageEnd={pageEnd}
+                totalItems={visibleLogs.length}
+                onPageChange={setPage}
               />
-            ))}
-          </ul>
+            ) : null}
+          </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AuditLogPagination({
+  page,
+  totalPages,
+  pageStart,
+  pageEnd,
+  totalItems,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  pageStart: number;
+  pageEnd: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 border-t border-outline-variant/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="font-body text-[12px] text-on-surface-variant">
+        Showing {pageStart + 1}–{pageEnd} of {totalItems}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+          aria-label="Previous page"
+          className="inline-flex h-9 items-center gap-1 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <span className="material-symbols-outlined text-[18px]">
+            chevron_left
+          </span>
+          Previous
+        </button>
+        <span className="min-w-[5.5rem] text-center font-body text-[12px] font-medium text-on-surface-variant">
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages}
+          aria-label="Next page"
+          className="inline-flex h-9 items-center gap-1 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Next
+          <span className="material-symbols-outlined text-[18px]">
+            chevron_right
+          </span>
+        </button>
       </div>
     </div>
   );
@@ -349,9 +430,11 @@ export function AuditLogView({
 function AuditRow({
   entry,
   showTenant,
+  displayTimezone,
 }: {
   entry: AuditLogEntry;
   showTenant: boolean;
+  displayTimezone: string;
 }) {
   const actorLabel =
     entry.actorName ||
@@ -393,10 +476,10 @@ function AuditRow({
       </div>
       <div className="shrink-0 text-right">
         <p
-          className="font-body text-[12px] font-medium text-on-surface-variant"
-          title={fullTimestamp(entry.createdAt)}
+          className="whitespace-nowrap font-body text-[12px] font-medium text-on-surface-variant"
+          title={timezoneLabel(displayTimezone)}
         >
-          {relativeTime(entry.createdAt)}
+          {formatAuditDateTime(entry.createdAt, displayTimezone)}
         </p>
       </div>
     </li>

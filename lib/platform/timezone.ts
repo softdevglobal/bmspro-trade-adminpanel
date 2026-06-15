@@ -1,20 +1,30 @@
 export const PLATFORM_TIME_ZONE = "Australia/Melbourne" as const;
 export const PLATFORM_TIME_ZONE_LABEL = "Melbourne (VIC) — AEST/AEDT";
 
+export function resolvePlatformTimeZone(timeZone?: string | null): string {
+  return typeof timeZone === "string" && timeZone.trim()
+    ? timeZone.trim()
+    : PLATFORM_TIME_ZONE;
+}
+
 export function formatInPlatformTimeZone(
   value: Date | number,
   options: Intl.DateTimeFormatOptions,
+  timeZone?: string | null,
 ): string {
   const date = value instanceof Date ? value : new Date(value);
   return new Intl.DateTimeFormat(undefined, {
-    timeZone: PLATFORM_TIME_ZONE,
+    timeZone: resolvePlatformTimeZone(timeZone),
     ...options,
   }).format(date);
 }
 
-export function platformTodayIso(value = new Date()): string {
+export function platformTodayIso(
+  value = new Date(),
+  timeZone?: string | null,
+): string {
   const parts = new Intl.DateTimeFormat("en-AU", {
-    timeZone: PLATFORM_TIME_ZONE,
+    timeZone: resolvePlatformTimeZone(timeZone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -28,11 +38,13 @@ export function platformTodayIso(value = new Date()): string {
 export function formatIsoDateInPlatformTimeZone(
   iso: string,
   options: Intl.DateTimeFormatOptions,
+  timeZone?: string | null,
 ): string {
   const [year, month, day] = iso.split("-").map(Number);
   if (!year || !month || !day) return iso;
   return formatInPlatformTimeZone(
     new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0)),
     options,
+    timeZone,
   );
 }

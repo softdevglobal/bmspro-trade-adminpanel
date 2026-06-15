@@ -1,5 +1,6 @@
 import { OnboardShell } from "@/components/onboard-shell";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
   title: "Set Up Your Business - BMS Pro Trade",
@@ -8,5 +9,9 @@ export const metadata: Metadata = {
 };
 
 export default function OnboardPage() {
-  return <OnboardShell />;
+  return (
+    <Suspense fallback={null}>
+      <OnboardShell />
+    </Suspense>
+  );
 }

@@ -55,46 +55,12 @@ export const AU_TIMEZONES = [
 export type AuTimezone = (typeof AU_TIMEZONES)[number]["id"];
 export const DEFAULT_AU_TIMEZONE: AuTimezone = PLATFORM_TIME_ZONE;
 
-export const SUBSCRIPTION_PLANS = [
-  {
-    id: "booking_management",
-    name: "Job Management",
-    price: 299,
-    period: "7-day",
-    billingNote: "Weekly • 7-day renewal",
-    branches: 1,
-    staff: 5,
-    trialDays: null as number | null,
-    description:
-      "Jobs, calendar, customers, staff assignment and job tracking for your trade business.",
-  },
-  {
-    id: "trade_pro",
-    name: "Trade Pro",
-    price: 399,
-    period: "7-day",
-    billingNote: "Weekly • 7-day renewal",
-    branches: 1,
-    staff: 5,
-    trialDays: 7,
-    description:
-      "Everything in Job Management plus quotes, invoices, contractor connections and partner jobs.",
-  },
-  {
-    id: "trade_pro_front_desk",
-    name: "Trade Pro + Front Desk",
-    price: 399,
-    period: "7-day",
-    billingNote: "Weekly • 7-day renewal",
-    branches: 1,
-    staff: 5,
-    trialDays: 14,
-    description:
-      "Includes reception service and trade software — we answer calls, make bookings, get work approvals, and give you the system to manage jobs, staff and daily activity.",
-  },
-] as const;
+export function isAuTimezone(value: unknown): value is AuTimezone {
+  return typeof value === "string" && AU_TIMEZONES.some((tz) => tz.id === value);
+}
 
-export type PlanId = (typeof SUBSCRIPTION_PLANS)[number]["id"];
+/** Firestore `subscription_plans` document id selected at onboarding. */
+export type PlanId = string;
 
 export type OnboardingPayload = {
   businessType: BusinessType;
@@ -257,18 +223,22 @@ export function validateAccountStep(
 }
 
 export function validatePlanStep(
-  payload: Partial<OnboardingPayload>
+  payload: Partial<OnboardingPayload>,
+  availablePlanIds?: readonly string[],
 ): { ok: true } | { ok: false; error: string } {
-  const planId = payload.selectedPlanId;
-  if (!planId || !SUBSCRIPTION_PLANS.some((p) => p.id === planId)) {
+  const planId = payload.selectedPlanId?.trim();
+  if (!planId) {
     return { ok: false, error: "Please select a subscription plan." };
+  }
+  if (availablePlanIds && !availablePlanIds.includes(planId)) {
+    return { ok: false, error: "Please select a valid subscription plan." };
   }
   return { ok: true };
 }
 
 export function validateOnboardingPayload(
   payload: Partial<OnboardingPayload>,
-  options: { requirePassword: boolean }
+  options: { requirePassword: boolean; availablePlanIds?: readonly string[] },
 ): { ok: true; value: OnboardingPayload } | { ok: false; error: string } {
   const business = validateBusinessStep(payload);
   if (!business.ok) return business;
@@ -276,7 +246,7 @@ export function validateOnboardingPayload(
   const account = validateAccountStep(payload, options);
   if (!account.ok) return account;
 
-  const plan = validatePlanStep(payload);
+  const plan = validatePlanStep(payload, options.availablePlanIds);
   if (!plan.ok) return plan;
 
   const value: OnboardingPayload = {

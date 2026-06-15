@@ -10,6 +10,7 @@ import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-deci
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   BOOKING_STATUS_LABELS,
@@ -24,12 +25,14 @@ import {
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
 import {
+  canCancelQuotation,
   quotationAwaitingCustomerAcceptance,
   quotationHasInvoice,
   quotationJobActionsLocked,
 } from "@/lib/quotations/actions";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -39,7 +42,7 @@ function formatAud(value: number | null): string {
   return `Aus $${value.toFixed(2)}`;
 }
 
-function formatWhen(timestamp: number | null): string {
+function formatWhen(timestamp: number | null, timeZone?: string | null): string {
   if (!timestamp) return "—";
   return formatInPlatformTimeZone(timestamp, {
     month: "short",
@@ -47,7 +50,7 @@ function formatWhen(timestamp: number | null): string {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }, timeZone);
 }
 
 type QuotationPreviewMode = "review" | "convert_booking";
@@ -205,6 +208,7 @@ function QuotationCardMenu({
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const canCancel = canCancelQuotation(quotation);
   const awaitingCustomerTitle =
     quotation.customerDecision === "rejected"
       ? "The customer rejected this quotation"
@@ -369,7 +373,7 @@ function QuotationCardMenu({
               Issue invoice
             </Link>
           )}
-          {!isCancelled && !hasBooking && !hasInvoice ? (
+          {canCancel ? (
             <button
               type="button"
               role="menuitem"
@@ -414,6 +418,7 @@ function QuotationCard({
   onBook,
   onCancel,
   onUndoCancel,
+  timeZone,
 }: {
   quotation: QuotationDetail;
   isPreviewOpen: boolean;
@@ -421,6 +426,7 @@ function QuotationCard({
   onBook: () => void;
   onCancel: () => void;
   onUndoCancel: () => void;
+  timeZone?: string | null;
 }) {
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
   const hasInvoice = quotationHasInvoice(quotation);
@@ -466,10 +472,18 @@ function QuotationCard({
         />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
-        {quotation.serviceTitle || "Quotation"}
+        {quotation.customer.fullName || "Customer"}
       </h4>
       <p className="font-body text-[13px] text-on-surface-variant">
-        {quotation.customer.fullName} · {quotation.customer.phone}
+        Service: {quotation.serviceTitle || "Quotation"}
+      </p>
+      {quotation.serviceDescription ? (
+        <p className="line-clamp-2 font-body text-[12px] text-on-surface-variant">
+          {quotation.serviceDescription}
+        </p>
+      ) : null}
+      <p className="font-body text-[13px] text-on-surface-variant">
+        {quotation.customer.phone}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
         {formatAddress(quotation.address)}
@@ -479,7 +493,7 @@ function QuotationCard({
           {formatAud(quotation.finalPriceAud)}
         </span>
         <span className="font-body text-[11px] text-on-surface-variant">
-          {formatWhen(quotation.createdAt)}
+          {formatWhen(quotation.createdAt, timeZone)}
         </span>
         {showFollowUpActions ? (
           <FollowUpActionButtons
@@ -513,6 +527,7 @@ function QuotationPreviewDrawer({
   onQuotationDecided,
   onCancelQuotation,
   onUndoCancel,
+  timeZone,
 }: {
   quotation: QuotationDetail | null;
   previewMode: QuotationPreviewMode;
@@ -523,8 +538,10 @@ function QuotationPreviewDrawer({
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
   onCancelQuotation: (quotation: QuotationDetail) => void;
   onUndoCancel: (quotation: QuotationDetail) => void;
+  timeZone?: string | null;
 }) {
   const open = quotation !== null;
+  useRegisterRightDrawer(open, "lg");
 
   return (
     <AnimatePresence>
@@ -559,6 +576,7 @@ function QuotationPreviewDrawer({
               onQuotationDecided={onQuotationDecided}
               onCancelQuotation={onCancelQuotation}
               onUndoCancel={onUndoCancel}
+              timeZone={timeZone}
             />
           </motion.aside>
         </motion.div>
@@ -577,6 +595,7 @@ function QuotationPreviewContent({
   onQuotationDecided,
   onCancelQuotation,
   onUndoCancel,
+  timeZone,
 }: {
   quotation: QuotationDetail;
   previewMode: QuotationPreviewMode;
@@ -587,6 +606,7 @@ function QuotationPreviewContent({
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
   onCancelQuotation: (quotation: QuotationDetail) => void;
   onUndoCancel: (quotation: QuotationDetail) => void;
+  timeZone?: string | null;
 }) {
   const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -607,6 +627,7 @@ function QuotationPreviewContent({
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
+  const canCancel = canCancelQuotation(quotation);
   const isCancelled = quotation.status === "cancelled";
   const awaitingCustomerTitle =
     quotation.customerDecision === "rejected"
@@ -618,7 +639,7 @@ function QuotationPreviewContent({
     (quotation.status === "sent" ||
       Boolean(quotation.pdfUrl) ||
       hasInvoice ||
-      (!isCancelled && !quotation.bookingId && !hasInvoice));
+      canCancel);
 
   function closeInvoicePdf() {
     setInvoicePdfOpen(false);
@@ -692,7 +713,7 @@ function QuotationPreviewContent({
             {title}
           </h3>
           <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-            Sent {formatWhen(quotation.createdAt)}
+            Sent {formatWhen(quotation.createdAt, timeZone)}
           </p>
         </div>
         <button
@@ -709,7 +730,10 @@ function QuotationPreviewContent({
         {previewMode === "convert_booking" ? (
           <ConvertToBookingPanel
             inspectionRequestId={quotation.inspectionRequestId}
-            minBookingDate={bookingMinDateFromInspection(linkedInspection)}
+            minBookingDate={bookingMinDateFromInspection(
+              linkedInspection,
+              timeZone,
+            )}
             initialStartTime={linkedInspection?.scheduledStartTime ?? "10:00"}
             initialEndTime={linkedInspection?.scheduledEndTime ?? "11:00"}
             onSuccess={onBookingCreated}
@@ -788,6 +812,17 @@ function QuotationPreviewContent({
             {formatAddress(quotation.address)}
           </p>
         </section>
+
+        {quotation.serviceDescription ? (
+          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Job description
+            </p>
+            <p className="mt-1 whitespace-pre-line font-body text-[13px] text-on-surface">
+              {quotation.serviceDescription}
+            </p>
+          </section>
+        ) : null}
 
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
@@ -1043,7 +1078,7 @@ function QuotationPreviewContent({
                 {invoicePdfError}
               </p>
             ) : null}
-            {!isCancelled && !quotation.bookingId && !hasInvoice ? (
+            {canCancel ? (
               <button
                 type="button"
                 onClick={() => onCancelQuotation(quotation)}
@@ -1194,6 +1229,7 @@ function CancelQuotationConfirmModal({
 
 export function QuotationsBoard() {
   const { user, status: authStatus } = useAuth();
+  const profile = useBusinessProfile();
   const { requests: inspectionRequests } = useInspectionRequests();
   const [quotations, setQuotations] = useState<QuotationDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1204,6 +1240,7 @@ export function QuotationsBoard() {
   const [filter, setFilter] = useState<QuotationFilter>("pending");
   const [cancelTarget, setCancelTarget] = useState<QuotationDetail | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const timeZone = profile?.timezone;
 
   const load = useCallback(async () => {
     if (!user) {
@@ -1561,6 +1598,7 @@ export function QuotationsBoard() {
                 onBook={() => handleStartConvertBooking(quotation.id)}
                 onCancel={() => setCancelTarget(quotation)}
                 onUndoCancel={() => void handleUndoCancel(quotation)}
+                timeZone={timeZone}
               />
             </li>
           ))}
@@ -1590,6 +1628,7 @@ export function QuotationsBoard() {
         onQuotationDecided={handleQuotationDecided}
         onCancelQuotation={setCancelTarget}
         onUndoCancel={(quotation) => void handleUndoCancel(quotation)}
+        timeZone={timeZone}
       />
       <CancelQuotationConfirmModal
         quotation={cancelTarget}

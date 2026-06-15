@@ -7,6 +7,7 @@ import {
   type InspectionRequestDetail,
   type InspectionRequestStatus,
 } from "@/lib/inspection/types";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -269,6 +270,7 @@ function CustomerPreviewDrawer({
   onClose: () => void;
 }) {
   const open = customer !== null;
+  useRegisterRightDrawer(open, "sm");
 
   return (
     <AnimatePresence>

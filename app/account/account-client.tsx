@@ -10,8 +10,8 @@ import { CustomerNotificationBanner } from "@/components/customer-notification-b
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
-  NOTIFICATION_STATUS_ICON,
-  NOTIFICATION_STATUS_TONE,
+  notificationCardIcon,
+  notificationCardTone,
 } from "@/lib/notifications/types";
 import {
   BOOKING_STATUS_LABELS,
@@ -132,6 +132,74 @@ const JOB_STATUS_TONE: Record<BookingStatus, string> = {
   cancelled: "border-stone-200 bg-stone-100 text-stone-600",
   completed: "border-sky-200 bg-sky-50 text-sky-800",
 };
+
+type CustomerJobDisplayStatus = BookingStatus | "pending_payment";
+
+const CUSTOMER_JOB_STATUS_LABELS: Record<CustomerJobDisplayStatus, string> = {
+  ...BOOKING_STATUS_LABELS,
+  pending_payment: "Pending payment",
+};
+
+const CUSTOMER_JOB_STATUS_TONE: Record<CustomerJobDisplayStatus, string> = {
+  ...JOB_STATUS_TONE,
+  pending_payment: "border-amber-200 bg-amber-50 text-amber-800",
+};
+
+const CUSTOMER_JOB_STATUS_ICON: Record<CustomerJobDisplayStatus, string> = {
+  awaiting: "pending_actions",
+  scheduled: "event_available",
+  ongoing: "engineering",
+  cancelled: "cancel",
+  completed: "check_circle",
+  pending_payment: "pending_actions",
+};
+
+function customerJobDisplayStatus(
+  booking: CustomerBooking,
+): CustomerJobDisplayStatus | null {
+  if (booking.invoice?.status === "sent") return "pending_payment";
+  if (booking.invoice?.status === "paid") return "completed";
+  if (booking.quotation?.status === "sent") {
+    if (booking.quotation.customerDecision === "accepted") {
+      return booking.bookingStatus ?? "awaiting";
+    }
+    if (booking.quotation.customerDecision === "rejected") return null;
+    return null;
+  }
+  return booking.bookingStatus;
+}
+
+function customerPrimaryStatus(booking: CustomerBooking): {
+  label: string;
+  tone: string;
+  icon: string;
+} {
+  const displayJobStatus = customerJobDisplayStatus(booking);
+  if (displayJobStatus) {
+    return {
+      label: CUSTOMER_JOB_STATUS_LABELS[displayJobStatus],
+      tone: CUSTOMER_JOB_STATUS_TONE[displayJobStatus],
+      icon: CUSTOMER_JOB_STATUS_ICON[displayJobStatus],
+    };
+  }
+
+  if (
+    booking.quotation?.status === "sent" &&
+    !booking.quotation.customerDecision
+  ) {
+    return {
+      label: STATUS_LABELS.awaiting_decision,
+      tone: STATUS_TONE.awaiting_decision,
+      icon: STATUS_ICON.awaiting_decision,
+    };
+  }
+
+  return {
+    label: STATUS_LABELS[booking.status],
+    tone: STATUS_TONE[booking.status],
+    icon: STATUS_ICON[booking.status],
+  };
+}
 
 function DocumentPdfActions({
   pdfUrl,
@@ -791,9 +859,11 @@ function BookingDetailRow({
 function BookingSlotsList({
   slots,
   variant = "default",
+  timeZone,
 }: {
   slots: InspectionSlot[];
   variant?: "default" | "proposed" | "confirmed";
+  timeZone?: string | null;
 }) {
   if (slots.length === 0) {
     return (
@@ -835,7 +905,7 @@ function BookingSlotsList({
               <span className="material-symbols-outlined text-[17px] text-primary">
                 event
               </span>
-              {formatSlotDate(slot.date)}
+              {formatSlotDate(slot.date, timeZone)}
             </p>
             <p
               className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
@@ -857,11 +927,13 @@ function ProposedSlotPicker({
   selected,
   disabled,
   onSelect,
+  timeZone,
 }: {
   slots: InspectionSlot[];
   selected: InspectionSlot | null;
   disabled: boolean;
   onSelect: (slot: InspectionSlot) => void;
+  timeZone?: string | null;
 }) {
   return (
     <ul className="mt-1.5 space-y-2">
@@ -885,7 +957,7 @@ function ProposedSlotPicker({
                   <span className="material-symbols-outlined text-[17px] text-primary">
                     event
                   </span>
-                  {formatSlotDate(slot.date)}
+                  {formatSlotDate(slot.date, timeZone)}
                 </span>
                 <span className="mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug text-violet-900">
                   <span className="material-symbols-outlined text-[16px] text-primary/85">
@@ -981,11 +1053,13 @@ function ConfirmedVisitHighlight({
   assignedTo,
   startTime,
   endTime,
+  timeZone,
 }: {
   slot: InspectionSlot;
   assignedTo: InspectionAssignment | null;
   startTime: string | null;
   endTime: string | null;
+  timeZone?: string | null;
 }) {
   const visitWindow = formatVisitWindow(startTime, endTime);
   return (
@@ -1008,7 +1082,7 @@ function ConfirmedVisitHighlight({
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-display text-[17px] font-semibold leading-snug text-emerald-950">
-              {formatSlotDate(slot.date)}
+              {formatSlotDate(slot.date, timeZone)}
             </p>
             <p className="mt-1 flex items-center gap-1.5 font-body text-[13px] font-semibold text-emerald-800">
               <span className="material-symbols-outlined text-[17px]">
@@ -1095,6 +1169,7 @@ function BookingCard({
     null,
   );
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const timeZone = booking.businessTimezone;
 
   useEffect(() => {
     if (!isFocused) return;
@@ -1187,6 +1262,12 @@ function BookingCard({
     .join(", ");
   const invoiceReady = customerInvoiceReady(booking.invoice);
   const jobStatus = booking.bookingStatus;
+  const displayJobStatus = customerJobDisplayStatus(booking);
+  const primaryStatus = customerPrimaryStatus(booking);
+  const paymentPending = displayJobStatus === "pending_payment";
+  const awaitingQuotationDecision =
+    booking.quotation?.status === "sent" &&
+    !booking.quotation.customerDecision;
   const jobAssignee = booking.jobAssignedTo ?? booking.assignedTo;
 
   return (
@@ -1218,15 +1299,15 @@ function BookingCard({
           </div>
           <span
             className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wider ${
-              STATUS_TONE[booking.status]
+              primaryStatus.tone
             }`}
           >
             <span className="material-symbols-outlined text-[14px]">
-              {STATUS_ICON[booking.status]}
+              {primaryStatus.icon}
             </span>
-            <span className="hidden sm:inline">{STATUS_LABELS[booking.status]}</span>
+            <span className="hidden sm:inline">{primaryStatus.label}</span>
             <span className="sm:hidden">
-              {STATUS_LABELS[booking.status].split(" ")[0]}
+              {primaryStatus.label.split(" ")[0]}
             </span>
           </span>
         </div>
@@ -1248,7 +1329,8 @@ function BookingCard({
               <span className="material-symbols-outlined text-[16px] text-emerald-600">
                 event_available
               </span>
-              Visit confirmed · {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+              Visit confirmed ·{" "}
+              {formatSlotDate(booking.scheduledSlot.date, timeZone)} ·{" "}
               {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
             </p>
             <p className="mt-1 font-body text-[11px] text-emerald-800/85">
@@ -1258,12 +1340,24 @@ function BookingCard({
         ) : null}
 
         {invoiceReady && !expanded ? (
-          <div className="mt-3 rounded-xl border border-sky-200/80 bg-sky-50/70 px-3 py-2.5">
-            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-sky-800">
+          <div
+            className={`mt-3 rounded-xl border px-3 py-2.5 ${
+              paymentPending
+                ? "border-amber-200/80 bg-amber-50/70"
+                : "border-sky-200/80 bg-sky-50/70"
+            }`}
+          >
+            <p
+              className={`inline-flex items-center gap-1.5 font-body text-[12px] font-semibold ${
+                paymentPending ? "text-amber-800" : "text-sky-800"
+              }`}
+            >
               <span className="material-symbols-outlined text-[16px]">
-                receipt_long
+                {paymentPending ? "pending_actions" : "check_circle"}
               </span>
-              Invoice ready — expand to view or download
+              {paymentPending
+                ? "Invoice issued — payment pending"
+                : "Invoice paid — job completed"}
             </p>
           </div>
         ) : null}
@@ -1279,13 +1373,24 @@ function BookingCard({
           </div>
         ) : null}
 
-        {booking.quotation?.pdfUrl && !expanded ? (
+        {booking.quotation?.pdfUrl && !expanded && !awaitingQuotationDecision ? (
           <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2.5">
             <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-primary">
               <span className="material-symbols-outlined text-[16px]">
                 picture_as_pdf
               </span>
               Quotation ready — expand to view or download
+            </p>
+          </div>
+        ) : null}
+
+        {awaitingQuotationDecision && !expanded ? (
+          <div className="mt-3 rounded-xl border border-orange-200/80 bg-orange-50/70 px-3 py-2.5">
+            <p className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-orange-800">
+              <span className="material-symbols-outlined text-[16px]">
+                request_quote
+              </span>
+              Quotation sent — awaiting your decision
             </p>
           </div>
         ) : null}
@@ -1350,7 +1455,7 @@ function BookingCard({
                   ) : null}
                   {booking.invoice?.dueDate ? (
                     <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
-                      Due {formatSlotDate(booking.invoice.dueDate)}
+                      Due {formatSlotDate(booking.invoice.dueDate, timeZone)}
                     </p>
                   ) : null}
                   <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
@@ -1366,18 +1471,24 @@ function BookingCard({
                         : "Invoice PDF"
                     }
                   />
-                  <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 font-body text-[12px] font-bold text-sky-800">
+                  <p
+                    className={`mt-3 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-body text-[12px] font-bold ${
+                      paymentPending
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-sky-200 bg-sky-50 text-sky-800"
+                    }`}
+                  >
                     <span className="material-symbols-outlined text-[16px]">
-                      mark_email_read
+                      {paymentPending ? "pending_actions" : "paid"}
                     </span>
-                    Invoice sent to your email
+                    {paymentPending ? "Payment pending" : "Invoice marked paid"}
                   </p>
                 </div>
               </div>
             </section>
           ) : null}
 
-          {booking.bookingId && jobStatus ? (
+          {displayJobStatus ? (
             <section className="rounded-xl border border-sky-200/80 bg-sky-50/50 p-4 shadow-sm">
               <div className="flex items-start gap-3">
                 <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
@@ -1390,14 +1501,20 @@ function BookingCard({
                     Your job
                   </p>
                   <p className="mt-1 font-display text-[18px] font-semibold text-on-surface">
-                    {BOOKING_STATUS_LABELS[jobStatus]}
+                    {CUSTOMER_JOB_STATUS_LABELS[displayJobStatus]}
                   </p>
                   {booking.bookingCode ? (
                     <p className="mt-0.5 font-mono text-[12px] font-semibold text-sky-800">
                       {booking.bookingCode}
                     </p>
                   ) : null}
-                  {jobStatus === "completed" ? (
+                  {displayJobStatus === "pending_payment" ? (
+                    <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                      Your invoice has been issued. This job will show as
+                      completed once payment is marked paid.
+                    </p>
+                  ) : null}
+                  {displayJobStatus === "completed" ? (
                     <p className="mt-1 font-body text-[12px] text-on-surface-variant">
                       The work for this visit has been marked complete.
                     </p>
@@ -1406,7 +1523,7 @@ function BookingCard({
                     <AssigneeHighlight
                       assignedTo={jobAssignee}
                       label={
-                        jobStatus === "completed"
+                        displayJobStatus === "completed"
                           ? "Who completed the job"
                           : "Assigned to"
                       }
@@ -1415,9 +1532,9 @@ function BookingCard({
                   ) : null}
                 </div>
                 <span
-                  className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wider ${JOB_STATUS_TONE[jobStatus]}`}
+                  className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wider ${CUSTOMER_JOB_STATUS_TONE[displayJobStatus]}`}
                 >
-                  {BOOKING_STATUS_LABELS[jobStatus]}
+                  {CUSTOMER_JOB_STATUS_LABELS[displayJobStatus]}
                 </span>
               </div>
             </section>
@@ -1429,6 +1546,7 @@ function BookingCard({
               assignedTo={booking.assignedTo}
               startTime={booking.scheduledStartTime}
               endTime={booking.scheduledEndTime}
+              timeZone={timeZone}
             />
           ) : null}
 
@@ -1569,7 +1687,10 @@ function BookingCard({
           />
 
           <BookingDetailRow icon="calendar_month" label="Your preferred times">
-            <BookingSlotsList slots={booking.preferredSlots} />
+            <BookingSlotsList
+              slots={booking.preferredSlots}
+              timeZone={timeZone}
+            />
           </BookingDetailRow>
 
           {booking.ownerProposedSlots.length > 0 ? (
@@ -1582,6 +1703,7 @@ function BookingCard({
                   slots={booking.ownerProposedSlots}
                   disabled={accepting}
                   selected={selectedProposed}
+                  timeZone={timeZone}
                   onSelect={setSelectedProposed}
                 />
                 {acceptError ? (
@@ -1610,6 +1732,7 @@ function BookingCard({
                 <BookingSlotsList
                   slots={booking.ownerProposedSlots}
                   variant="proposed"
+                  timeZone={timeZone}
                 />
               </BookingDetailRow>
             )
@@ -1663,7 +1786,10 @@ function NotificationsSection({ slug }: { slug: string }) {
   function openRequest(note: NotificationRecord) {
     if (!note.requestId) return;
     const scope =
-      note.status === "completed" || note.status === "cancelled"
+      note.status === "completed" ||
+      note.status === "cancelled" ||
+      note.type === "job_completed" ||
+      note.type === "invoice_sent"
         ? "history"
         : "active";
     router.push(accountBookingFocusPath(slug, note.requestId, scope));
@@ -1776,9 +1902,9 @@ function NotificationsSection({ slug }: { slug: string }) {
               className="flex min-w-0 flex-1 gap-3 rounded-2xl p-3 text-left transition-colors hover:bg-stone-50/80 sm:p-4"
             >
               <span
-                className={`material-symbols-outlined material-symbols-filled mt-0.5 shrink-0 text-[20px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                className={`material-symbols-outlined material-symbols-filled mt-0.5 shrink-0 text-[20px] ${notificationCardTone(note)}`}
               >
-                {NOTIFICATION_STATUS_ICON[note.status]}
+                {notificationCardIcon(note)}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block font-body text-[13px] font-bold text-on-surface">
@@ -1793,7 +1919,9 @@ function NotificationsSection({ slug }: { slug: string }) {
                     : ""}
                 </span>
                 <span className="mt-2 inline-flex items-center gap-0.5 font-body text-[11px] font-semibold text-primary">
-                  Open request
+                  {note.type === "invoice_sent"
+                    ? "Open invoice"
+                    : "Open request"}
                   <span className="material-symbols-outlined text-[14px]">
                     arrow_forward
                   </span>

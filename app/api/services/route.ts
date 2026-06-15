@@ -6,6 +6,7 @@
  */
 
 import { logAuditEvent } from "@/lib/audit/server";
+import { requireBusinessMember } from "@/lib/onboarding/server";
 import {
   createBusinessService,
   listBusinessServices,
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
 
 /** Returns all services scoped to the caller's businessId. */
 export async function GET(request: Request) {
-  const auth = await requireBusinessOwner(request);
+  const auth = await requireBusinessMember(request);
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },

@@ -2,13 +2,15 @@ import {
   logQuotationCreated,
   logQuotationSent,
 } from "@/lib/audit/action-logs";
-import { adminAuth } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
   createStandaloneQuotation,
   getBusinessQuotationById,
   listBusinessQuotations,
   listQuotationsForInspection,
+  listQuotationsForMember,
+  listStaffQuotations,
 } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
 
@@ -27,9 +29,25 @@ async function requireQuotationAuthor(request: Request) {
 
   try {
     const decoded = await adminAuth.verifyIdToken(match[1]);
-    const businessId =
+    let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
-    const role = decoded.role;
+    let role = typeof decoded.role === "string" ? decoded.role : null;
+
+    if (!businessId || !role) {
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      if (userSnap.exists) {
+        const data = userSnap.data() ?? {};
+        if (!businessId && typeof data.businessId === "string") {
+          businessId = data.businessId;
+        }
+        if (!role && typeof data.role === "string") {
+          role = data.role;
+        }
+      }
+    }
+
+    if (role === "business_owner") role = "owner";
+
     if (
       !businessId ||
       (role !== "staff" && role !== "owner" && role !== "admin")
@@ -41,13 +59,27 @@ async function requireQuotationAuthor(request: Request) {
       };
     }
 
+    if (role === "staff") {
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      const canCreateQuotation =
+        userSnap.exists && userSnap.data()?.canget_qutaion === true;
+      if (!canCreateQuotation) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "You do not have permission to create quotations.",
+        };
+      }
+    }
+
     return {
       ok: true as const,
       uid: decoded.uid,
       email: decoded.email ?? null,
       name: typeof decoded.name === "string" ? decoded.name : null,
-      role: typeof role === "string" ? role : null,
+      role,
       businessId,
+      restrictToOwnQuotations: role === "staff",
     };
   } catch {
     return {
@@ -64,6 +96,7 @@ type QuotationAuthor = {
   name: string | null;
   role: string | null;
   businessId: string;
+  restrictToOwnQuotations: boolean;
 };
 
 export async function POST(request: Request) {
@@ -223,6 +256,11 @@ export async function POST(request: Request) {
     auth.uid,
     {
       inspectionRequestId,
+      ...(typeof payload.serviceDescription === "string"
+        ? { serviceDescription: payload.serviceDescription }
+        : payload.serviceDescription === null
+          ? { serviceDescription: null }
+          : {}),
       lineItems: Array.isArray(lineItems) ? lineItems : [],
       finalPriceAud,
       notes,
@@ -325,6 +363,12 @@ export async function GET(request: Request) {
         { status: 404 },
       );
     }
+    if (auth.role === "staff" && quotation.createdBy !== auth.uid) {
+      return NextResponse.json(
+        { ok: false, error: "Quotation not found." },
+        { status: 404 },
+      );
+    }
     return NextResponse.json({ ok: true, quotation });
   }
 
@@ -334,7 +378,12 @@ export async function GET(request: Request) {
     "";
 
   if (!inspectionRequestId) {
-    const quotations = await listBusinessQuotations(auth.businessId);
+    const scopeOwn = url.searchParams.get("scope") === "own";
+    const restrictToOwn =
+      auth.restrictToOwnQuotations || scopeOwn;
+    const quotations = restrictToOwn
+      ? await listQuotationsForMember(auth.businessId, auth.uid)
+      : await listBusinessQuotations(auth.businessId);
     return NextResponse.json({ ok: true, quotations });
   }
 
@@ -343,5 +392,10 @@ export async function GET(request: Request) {
     inspectionRequestId,
   );
 
-  return NextResponse.json({ ok: true, quotations });
+  const visibleQuotations =
+    auth.restrictToOwnQuotations || url.searchParams.get("scope") === "own"
+      ? quotations.filter((quotation) => quotation.createdBy === auth.uid)
+      : quotations;
+
+  return NextResponse.json({ ok: true, quotations: visibleQuotations });
 }

@@ -6,6 +6,7 @@ import {
   type ServiceTemplateDetail,
 } from "@/lib/onboarding/services/display";
 import { iconForServiceSkill } from "@/lib/onboarding/services/types";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect } from "react";
 
@@ -40,6 +41,7 @@ function formatDate(ms: number | null): string {
 
 export function ServiceDetailDrawer({ target, onClose }: Props) {
   const open = target !== null;
+  useRegisterRightDrawer(open, "md");
 
   useEffect(() => {
     if (!open) return;

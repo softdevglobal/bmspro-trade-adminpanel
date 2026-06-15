@@ -30,6 +30,7 @@ import { useCalendarFilterOptions } from "@/lib/calendar/use-calendar-filter-opt
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -314,6 +315,8 @@ export function CalendarBoard() {
   const [viewTab, setViewTab] = useState<(typeof VIEW_TABS)[number]>("Month");
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  useRegisterRightDrawer(bookingDrawerOpen, "md");
+  useRegisterRightDrawer(filterDrawerOpen, "md");
   const [selectedIsoDate, setSelectedIsoDate] = useState<string | null>(null);
   const [filters, setFilters] = useState<CalendarFilters>(() =>
     emptyCalendarFilters(null),

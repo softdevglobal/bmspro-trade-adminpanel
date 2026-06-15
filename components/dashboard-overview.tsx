@@ -12,7 +12,10 @@ import {
 } from "@/lib/dashboard/stats";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useBusinessNotifications } from "@/lib/notifications/business-notifications-context";
-import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
+import {
+  formatInPlatformTimeZone,
+  resolvePlatformTimeZone,
+} from "@/lib/platform/timezone";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -112,22 +115,38 @@ function greetingForHour(hour: number): string {
   return "Good evening";
 }
 
-function formatActivityTime(timestamp: number): string {
+function formatActivityTime(
+  timestamp: number,
+  timeZone?: string | null,
+): string {
   if (!timestamp) return "";
   return formatInPlatformTimeZone(timestamp, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }, timeZone);
 }
 
-function formatTodayLabel(): string {
+function formatTodayLabel(timeZone?: string | null): string {
   return formatInPlatformTimeZone(new Date(), {
     weekday: "long",
     month: "long",
     day: "numeric",
-  });
+  }, timeZone);
+}
+
+function currentHourInTimeZone(timeZone?: string | null): number {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: resolvePlatformTimeZone(timeZone),
+    hour: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const hour = Number.parseInt(
+    parts.find((part) => part.type === "hour")?.value ?? "",
+    10,
+  );
+  return Number.isFinite(hour) ? hour : new Date().getHours();
 }
 
 export function DashboardOverview() {
@@ -146,6 +165,7 @@ function BusinessDashboardOverview() {
   const { notifications, loading: notificationsLoading, unread } =
     useBusinessNotifications();
   const { staff, loading: staffLoading } = useBusinessStaffSummary();
+  const timeZone = profile?.timezone;
 
   const loading =
     bookingsLoading || requestsLoading || notificationsLoading || staffLoading;
@@ -157,12 +177,13 @@ function BusinessDashboardOverview() {
         requests,
         notifications,
         staffCount: staff.length,
+        timeZone,
       }),
-    [bookings, requests, notifications, staff.length],
+    [bookings, requests, notifications, staff.length, timeZone],
   );
 
   const businessName = profile?.businessName?.trim() || "your business";
-  const greeting = greetingForHour(new Date().getHours());
+  const greeting = greetingForHour(currentHourInTimeZone(timeZone));
 
   return (
     <DashboardShell title="Dashboard" hidePageHeader>
@@ -184,7 +205,7 @@ function BusinessDashboardOverview() {
           <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <p className="font-body text-[12px] font-bold uppercase tracking-[0.18em] text-on-primary/70">
-                {formatTodayLabel()}
+                {formatTodayLabel(timeZone)}
               </p>
               <h1 className="mt-2 font-display text-[28px] font-bold leading-tight sm:text-[34px]">
                 {greeting}, {businessName}
@@ -351,7 +372,7 @@ function BusinessDashboardOverview() {
                         {item.text}
                       </p>
                       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                        {formatActivityTime(item.createdAt)}
+                        {formatActivityTime(item.createdAt, timeZone)}
                       </p>
                     </div>
                   </li>

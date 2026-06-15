@@ -7,6 +7,7 @@
  */
 
 import { logAuditEvent } from "@/lib/audit/server";
+import { requireBusinessMember } from "@/lib/onboarding/server";
 import {
   deleteBusinessService,
   getBusinessService,
@@ -21,7 +22,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 /** Loads a single service; 404 if missing or not owned by caller. */
 export async function GET(request: Request, context: RouteContext) {
-  const auth = await requireBusinessOwner(request);
+  const auth = await requireBusinessMember(request);
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },

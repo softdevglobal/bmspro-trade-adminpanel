@@ -7,7 +7,6 @@ import {
   BUSINESS_TYPES,
   DEFAULT_AU_TIMEZONE,
   MAX_SERVICE_AREAS,
-  SUBSCRIPTION_PLANS,
   ADMIN_CREATED_DEFAULT_PASSWORD,
   iconForBusinessType,
   formatAbn,
@@ -23,6 +22,13 @@ import {
   type BusinessType,
   type PlanId,
 } from "@/lib/onboarding/types";
+import { formatBillingNote } from "@/lib/subscription-plans/helpers";
+import {
+  formatLimitLabel,
+  formatRenewalLabel,
+  planThemeGradient,
+} from "@/lib/subscription-plans/theme";
+import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -55,6 +61,8 @@ type Props = {
   onStepChange?: (step: OnboardingWizardStep) => void;
   onSubmittingChange?: (isSubmitting: boolean) => void;
   getRequestHeaders?: () => Promise<Record<string, string> | null>;
+  /** Pre-select a plan from `/onboard?planId=...`. */
+  initialPlanId?: string;
 };
 
 type FormState = {
@@ -206,6 +214,7 @@ export const BusinessOnboardingForm = forwardRef<
     onStepChange,
     onSubmittingChange,
     getRequestHeaders,
+    initialPlanId,
   },
   ref,
 ) {
@@ -217,6 +226,9 @@ export const BusinessOnboardingForm = forwardRef<
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState<string | null>(null);
 
   const requirePassword = mode === "self_signup";
   const strength = passwordStrength(form.password);
@@ -228,7 +240,71 @@ export const BusinessOnboardingForm = forwardRef<
     strong: "bg-primary",
   }[strength];
 
-  const selectedPlan = SUBSCRIPTION_PLANS.find((p) => p.id === form.selectedPlanId);
+  const planIds = useMemo(() => plans.map((plan) => plan.id), [plans]);
+  const selectedPlan = plans.find((p) => p.id === form.selectedPlanId);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPlans() {
+      setPlansLoading(true);
+      setPlansError(null);
+      try {
+        const headers: Record<string, string> = {};
+        if (getRequestHeaders) {
+          const extra = await getRequestHeaders();
+          if (extra) Object.assign(headers, extra);
+        }
+        const url =
+          mode === "super_admin_create" && headers.Authorization
+            ? "/api/packages"
+            : "/api/packages/public";
+        const res = await fetch(url, {
+          headers,
+          cache: "no-store",
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          plans?: SubscriptionPlan[];
+          error?: string;
+        };
+        if (!active) return;
+        if (!res.ok || !data.ok) {
+          setPlans([]);
+          setPlansError(data.error ?? "Could not load subscription plans.");
+          return;
+        }
+        const loaded = data.plans ?? [];
+        setPlans(loaded);
+        const preferred =
+          initialPlanId?.trim() &&
+          loaded.some((plan) => plan.id === initialPlanId.trim())
+            ? initialPlanId.trim()
+            : loaded.length === 1
+              ? loaded[0].id
+              : null;
+        if (preferred) {
+          setForm((current) =>
+            current.selectedPlanId
+              ? current
+              : { ...current, selectedPlanId: preferred },
+          );
+        }
+      } catch {
+        if (active) {
+          setPlans([]);
+          setPlansError("Could not load subscription plans.");
+        }
+      } finally {
+        if (active) setPlansLoading(false);
+      }
+    }
+
+    void loadPlans();
+    return () => {
+      active = false;
+    };
+  }, [mode, getRequestHeaders, initialPlanId]);
 
   useEffect(() => {
     onStepChange?.(step);
@@ -343,7 +419,7 @@ export const BusinessOnboardingForm = forwardRef<
       const result = validateAccountStep(form, { requirePassword });
       return result.ok ? null : result.error;
     }
-    const result = validatePlanStep(form);
+    const result = validatePlanStep(form, planIds);
     return result.ok ? null : result.error;
   }
 
@@ -1002,71 +1078,113 @@ export const BusinessOnboardingForm = forwardRef<
               subtitle="Select a subscription plan for this trade business."
             />
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              {SUBSCRIPTION_PLANS.map((plan) => {
-                const isActive = form.selectedPlanId === plan.id;
-                return (
-                  <button
-                    type="button"
-                    key={plan.id}
-                    onClick={() => update("selectedPlanId", plan.id)}
-                    className={`flex flex-col rounded-xl border p-4 text-left transition-all ${
-                      isActive
-                        ? "border-2 border-primary bg-primary-fixed/20 shadow-md shadow-primary/10"
-                        : "border-outline-variant bg-surface-container-lowest hover:border-primary/30"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-display text-[15px] font-semibold text-on-surface">
-                        {plan.name}
-                      </h3>
-                      {plan.trialDays && (
-                        <span className="shrink-0 rounded-full bg-primary-fixed px-2 py-0.5 font-body text-[10px] font-bold text-primary">
-                          {plan.trialDays}-day free trial
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2 font-display text-[22px] font-bold text-on-surface">
-                      AU${plan.price}
-                      <span className="font-body text-[13px] font-normal text-on-surface-variant">
-                        /{plan.period}
-                      </span>
-                    </p>
-                    <p className="font-body text-[12px] text-on-surface-variant">
-                      {plan.billingNote}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-3 font-body text-[12px] text-on-surface-variant">
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[16px]">
-                          store
-                        </span>
-                        {plan.branches} Branch
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[16px]">
-                          group
-                        </span>
-                        {plan.staff} Staff
-                      </span>
-                    </div>
-                    {plan.description && (
-                      <p className="mt-3 border-t border-outline-variant pt-3 font-body text-[12px] leading-relaxed text-on-surface-variant">
-                        {plan.description}
-                      </p>
-                    )}
-                    <span
-                      className={`mt-4 inline-flex h-9 items-center justify-center rounded-lg font-body text-[13px] font-semibold ${
+            {plansLoading ? (
+              <div className="flex min-h-[160px] items-center justify-center rounded-xl border border-outline-variant bg-surface-container-lowest">
+                <span className="material-symbols-outlined animate-spin text-[28px] text-primary">
+                  progress_activity
+                </span>
+              </div>
+            ) : plansError ? (
+              <p className="rounded-xl border border-error/30 bg-error-container/40 px-4 py-3 font-body text-[13px] text-on-error-container">
+                {plansError}
+              </p>
+            ) : plans.length === 0 ? (
+              <p className="rounded-xl border border-outline-variant bg-surface-container-lowest px-4 py-3 font-body text-[13px] text-on-surface-variant">
+                No subscription plans are available yet. Ask your platform admin to
+                create packages first.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                {plans.map((plan) => {
+                  const isActive = form.selectedPlanId === plan.id;
+                  const gradient = planThemeGradient(plan.color);
+                  return (
+                    <button
+                      type="button"
+                      key={plan.id}
+                      onClick={() => update("selectedPlanId", plan.id)}
+                      className={`overflow-hidden rounded-2xl border text-left transition-all ${
                         isActive
-                          ? "bg-primary text-on-primary"
-                          : "bg-surface-container text-on-surface"
+                          ? "border-2 border-primary shadow-lg shadow-primary/15 ring-2 ring-primary/10"
+                          : "border-outline-variant hover:border-primary/30 hover:shadow-md"
                       }`}
                     >
-                      {isActive ? "Selected" : "Select Plan"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                      <div
+                        className={`bg-gradient-to-br ${gradient} px-4 py-4 text-white`}
+                      >
+                        {plan.popular ? (
+                          <span className="mb-2 inline-flex rounded-full bg-white/20 px-2 py-0.5 font-body text-[10px] font-bold uppercase">
+                            Most Popular
+                          </span>
+                        ) : null}
+                        <h3 className="font-display text-[16px] font-bold leading-tight">
+                          {plan.name}
+                        </h3>
+                        <p className="mt-2 font-display text-[22px] font-bold">
+                          {plan.priceLabel}
+                        </p>
+                        <p className="mt-1 font-body text-[11px] text-white/85">
+                          {formatRenewalLabel(
+                            plan.billingCycle,
+                            plan.validityDays,
+                          )}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-3 font-body text-[11px] text-white/90">
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">
+                              storefront
+                            </span>
+                            {formatLimitLabel(plan.branches, "Branch")}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">
+                              groups
+                            </span>
+                            {formatLimitLabel(plan.staff, "Staff", "Staff")}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="bg-surface-container-lowest px-4 py-3">
+                        {plan.trialDays > 0 ? (
+                          <p className="font-body text-[11px] font-semibold text-primary">
+                            {plan.trialDays}-day free trial included
+                          </p>
+                        ) : null}
+                        {plan.description ? (
+                          <p className="mt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
+                            {plan.description}
+                          </p>
+                        ) : null}
+                        {plan.features.length > 0 ? (
+                          <ul className="mt-2 space-y-1.5">
+                            {plan.features.slice(0, 3).map((feature) => (
+                              <li
+                                key={feature}
+                                className="flex items-start gap-1.5 font-body text-[11px] text-on-surface-variant"
+                              >
+                                <span className="material-symbols-outlined text-[14px] text-primary">
+                                  check_circle
+                                </span>
+                                <span>{feature}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <span
+                          className={`mt-3 inline-flex h-9 w-full items-center justify-center rounded-lg font-body text-[13px] font-semibold ${
+                            isActive
+                              ? "bg-primary text-on-primary"
+                              : "bg-surface-container text-on-surface"
+                          }`}
+                        >
+                          {isActive ? "Selected" : "Select Plan"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
         </OnboardingFormScrollArea>
@@ -1201,7 +1319,7 @@ function PreviewPanel({
   step: Step;
   completion: number;
   mode: Mode;
-  selectedPlan: (typeof SUBSCRIPTION_PLANS)[number] | undefined;
+  selectedPlan: SubscriptionPlan | undefined;
 }) {
   return (
     <>

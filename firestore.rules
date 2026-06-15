@@ -52,6 +52,17 @@ service cloud.firestore {
       return isBusinessOwner() && request.auth.token.businessId == businessId;
     }
 
+    function belongsToBusiness(businessId) {
+      return ownsBusiness(businessId)
+        || userOwnsBusiness(businessId)
+        || (isBusinessStaff() && request.auth.token.businessId == businessId)
+        || (
+          signedInUserDocExists()
+          && userDocData().businessId == businessId
+          && userDocData().role in ['staff', 'salon_staff']
+        );
+    }
+
     // Login gate: each user may read only their own super_admins document.
     match /super_admins/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
@@ -163,7 +174,7 @@ service cloud.firestore {
     }
 
     match /services/{serviceId} {
-      allow read: if isSuperAdmin() || ownsBusiness(resource.data.businessId);
+      allow read: if isSuperAdmin() || belongsToBusiness(resource.data.businessId);
       allow create, update, delete: if false;
     }
 
@@ -379,6 +390,12 @@ service cloud.firestore {
     match /call_center_agents/{uid} {
       allow read: if isSuperAdmin()
         || (isSignedIn() && request.auth.uid == uid);
+      allow create, update, delete: if false;
+    }
+
+    // Subscription plan catalog — public read for onboarding; writes via Admin SDK.
+    match /subscription_plans/{planId} {
+      allow read: if true;
       allow create, update, delete: if false;
     }
 

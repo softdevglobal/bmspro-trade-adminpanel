@@ -8,9 +8,11 @@
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import {
   getBusinessProfile,
+  requireBusinessMember,
   updateBusinessProfile,
 } from "@/lib/onboarding/server";
 import {
+  isAuTimezone,
   MIN_SERVICE_AREAS,
   normaliseServiceAreas,
 } from "@/lib/onboarding/types";
@@ -44,7 +46,9 @@ function parseGstPercentageInput(
 }
 
 export async function GET(request: Request) {
-  const auth = await requireBusinessOwner(request);
+  // Read-only profile is needed by staff who can create quotations (GST,
+  // terms, branding). Editing (PATCH) remains owner-only.
+  const auth = await requireBusinessMember(request);
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
@@ -81,6 +85,7 @@ export async function PATCH(request: Request) {
     businessEmail?: string | null;
     businessPhone?: string | null;
     abn?: string | null;
+    timezone?: string;
     logoUrl?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
@@ -182,6 +187,16 @@ export async function PATCH(request: Request) {
       }
       updates.abn = trimmed || null;
     }
+  }
+
+  if ("timezone" in raw) {
+    if (!isAuTimezone(raw.timezone)) {
+      return NextResponse.json(
+        { ok: false, error: "Please select a valid timezone." },
+        { status: 400 },
+      );
+    }
+    updates.timezone = raw.timezone;
   }
 
   if ("logoUrl" in raw) {

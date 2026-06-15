@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import {
   createContext,
@@ -17,6 +18,7 @@ export type BusinessProfileLite = {
   logoUrl: string | null;
   bookingSlug: string | null;
   bookingPath: string | null;
+  timezone: string;
 };
 
 const PROFILE_CACHE_KEY = "bms.business.profile";
@@ -36,7 +38,13 @@ function readProfileCache(businessId: string): BusinessProfileLite | null {
     const parsed = JSON.parse(raw) as ProfileCache;
     if (parsed.businessId !== businessId) return null;
     if (Date.now() - parsed.cachedAt > PROFILE_CACHE_TTL_MS) return null;
-    return parsed.profile;
+    return {
+      ...parsed.profile,
+      timezone:
+        typeof parsed.profile.timezone === "string" && parsed.profile.timezone
+          ? parsed.profile.timezone
+          : PLATFORM_TIME_ZONE,
+    };
   } catch {
     return null;
   }
@@ -55,6 +63,9 @@ function writeProfileCache(businessId: string, profile: BusinessProfileLite): vo
 }
 
 const BusinessProfileContext = createContext<BusinessProfileLite | null>(null);
+const BusinessProfileActionsContext = createContext<{
+  mergeBusinessProfile: (profile: Partial<BusinessProfileLite>) => void;
+} | null>(null);
 
 /** Loads business profile via API on demand (no Firestore listener). */
 export function BusinessProfileProvider({ children }: { children: ReactNode }) {
@@ -84,6 +95,7 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
           logoUrl: string | null;
           bookingSlug?: string | null;
           bookingPath?: string | null;
+          timezone?: string | null;
         };
       };
       if (!response.ok || !body.ok || !body.profile) return;
@@ -102,6 +114,10 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
             : slug
               ? `/booknow/${slug}`
               : null,
+        timezone:
+          typeof body.profile.timezone === "string" && body.profile.timezone
+            ? body.profile.timezone
+            : PLATFORM_TIME_ZONE,
       };
       writeProfileCache(businessId, next);
       setProfile(next);
@@ -132,15 +148,44 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
     };
   }, [role, businessId, pageVisible, loadProfile]);
 
+  const mergeBusinessProfile = useCallback(
+    (patch: Partial<BusinessProfileLite>) => {
+      if (role !== "business_owner" || !businessId) return;
+      setProfile((current) => {
+        const next: BusinessProfileLite = {
+          businessName: current?.businessName ?? null,
+          logoUrl: current?.logoUrl ?? null,
+          bookingSlug: current?.bookingSlug ?? null,
+          bookingPath: current?.bookingPath ?? null,
+          timezone: current?.timezone ?? PLATFORM_TIME_ZONE,
+          ...patch,
+        };
+        writeProfileCache(businessId, next);
+        return next;
+      });
+    },
+    [role, businessId],
+  );
+
   const value = useMemo(() => profile, [profile]);
+  const actions = useMemo(
+    () => ({ mergeBusinessProfile }),
+    [mergeBusinessProfile],
+  );
 
   return (
-    <BusinessProfileContext.Provider value={value}>
-      {children}
-    </BusinessProfileContext.Provider>
+    <BusinessProfileActionsContext.Provider value={actions}>
+      <BusinessProfileContext.Provider value={value}>
+        {children}
+      </BusinessProfileContext.Provider>
+    </BusinessProfileActionsContext.Provider>
   );
 }
 
 export function useBusinessProfile(): BusinessProfileLite | null {
   return useContext(BusinessProfileContext);
+}
+
+export function useBusinessProfileActions() {
+  return useContext(BusinessProfileActionsContext);
 }

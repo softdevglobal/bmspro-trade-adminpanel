@@ -1,16 +1,5 @@
-import { BusinessOwnerGuard } from "@/components/business-owner-guard";
-import { DashboardShell } from "@/components/dashboard-shell";
-import { TeamStaffForm } from "@/components/team-staff-form";
+import { redirect } from "next/navigation";
 
 export default function TeamPage() {
-  return (
-    <DashboardShell
-      title="Team"
-      subtitle="View staff members and setup new users for your business."
-    >
-      <BusinessOwnerGuard>
-        <TeamStaffForm />
-      </BusinessOwnerGuard>
-    </DashboardShell>
-  );
+  redirect("/dashboard/team/management");
 }

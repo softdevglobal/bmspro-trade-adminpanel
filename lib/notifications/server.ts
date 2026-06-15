@@ -1,5 +1,6 @@
 import "server-only";
 
+import { normalizeEmail } from "@/lib/customer/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapNotificationDoc as mapNotificationRecord } from "@/lib/notifications/map-notification-doc";
 import {
@@ -78,12 +79,15 @@ async function createNotification(
 ): Promise<string> {
   const collection = notificationCollectionFor(input.audience);
   const ref = adminDb.collection(collection).doc();
+  const customerEmail = input.customerEmail
+    ? normalizeEmail(input.customerEmail)
+    : null;
   await ref.set(
     withoutEmpty({
       id: ref.id,
       businessId: input.businessId,
       customerId: input.customerId,
-      customerEmail: input.customerEmail,
+      customerEmail,
       customerName: input.customerName,
       requestId: input.requestId,
       bookingSlug: input.bookingSlug,
@@ -99,11 +103,11 @@ async function createNotification(
 
   if (
     input.audience === "customer" &&
-    input.customerEmail &&
+    customerEmail &&
     !input.portalOnly
   ) {
     await sendInspectionCustomerNotificationEmail({
-      customerEmail: input.customerEmail,
+      customerEmail,
       customerPhone: input.customerPhone,
       customerName: input.customerName,
       bookingSlug: input.bookingSlug,
@@ -138,8 +142,8 @@ function requestHeadline(request: InspectionRequestDetail): string {
   );
 }
 
-function slotLabel(slot: InspectionSlot): string {
-  return `${formatSlotDate(slot.date)} · ${TIME_RANGE_SHORT_LABELS[slot.timeRange]}`;
+function slotLabel(slot: InspectionSlot, timeZone?: string | null): string {
+  return `${formatSlotDate(slot.date, timeZone)} · ${TIME_RANGE_SHORT_LABELS[slot.timeRange]}`;
 }
 
 /** Confirm to the customer that their request was received. */
@@ -148,6 +152,7 @@ export async function notifyCustomerOfNewRequest(
   context: CustomerNotifyContext = {},
 ): Promise<void> {
   const business = context.businessName?.trim() || "the business";
+  const timeZone = context.timezone;
   const headline = requestHeadline(request);
   const email = request.customer.email?.trim();
   if (!email) return;
@@ -163,13 +168,13 @@ export async function notifyCustomerOfNewRequest(
         request.preferredSlots.length === 1
           ? "Preferred time"
           : `Preferred time ${index + 1}`,
-      value: slotLabel(slot),
+      value: slotLabel(slot, timeZone),
     });
   });
 
   const preferredSummary =
     request.preferredSlots.length > 0
-      ? request.preferredSlots.map((slot) => slotLabel(slot)).join(" · ")
+      ? request.preferredSlots.map((slot) => slotLabel(slot, timeZone)).join(" · ")
       : null;
 
   try {
@@ -244,6 +249,7 @@ type CustomerNotifyContext = {
   bookingSlug?: string | null;
   businessName?: string | null;
   logoUrl?: string | null;
+  timezone?: string | null;
 };
 
 /**
@@ -256,6 +262,7 @@ export async function notifyCustomerOfStatusChange(
   context: CustomerNotifyContext = {},
 ): Promise<void> {
   const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
   const headline = requestHeadline(request);
 
   let type: NotificationType = "request_scheduled";
@@ -275,13 +282,16 @@ export async function notifyCustomerOfStatusChange(
       );
       body = request.scheduledSlot
         ? visitWindow
-          ? `Your visit is set for ${slotLabel(request.scheduledSlot)}, arriving ${visitWindow}.`
-          : `Your visit is set for ${slotLabel(request.scheduledSlot)}. We'll confirm the exact arrival time shortly.`
+          ? `Your visit is set for ${slotLabel(request.scheduledSlot, timeZone)}, arriving ${visitWindow}.`
+          : `Your visit is set for ${slotLabel(request.scheduledSlot, timeZone)}. We'll confirm the exact arrival time shortly.`
         : `${headline} is now scheduled.`;
       if (request.scheduledSlot) {
         emailDetails = [
           { label: "Service", value: headline },
-          { label: "Date", value: formatSlotDate(request.scheduledSlot.date) },
+          {
+            label: "Date",
+            value: formatSlotDate(request.scheduledSlot.date, timeZone),
+          },
           {
             label: "Time of day",
             value: TIME_RANGE_LABELS[request.scheduledSlot.timeRange],
@@ -298,7 +308,9 @@ export async function notifyCustomerOfStatusChange(
     }
     case "owner_proposed": {
       type = "request_proposed";
-      const proposed = request.ownerProposedSlots.map(slotLabel).join(", ");
+      const proposed = request.ownerProposedSlots
+        .map((slot) => slotLabel(slot, timeZone))
+        .join(", ");
       title = `${business} proposed new times`;
       body = proposed
         ? `${business} suggested new times for ${headline}. Open your request to accept one.`
@@ -308,7 +320,7 @@ export async function notifyCustomerOfStatusChange(
           { label: "Service", value: headline },
           ...request.ownerProposedSlots.map((slot, index) => ({
             label: `Option ${index + 1}`,
-            value: slotLabel(slot),
+            value: slotLabel(slot, timeZone),
           })),
         ];
       }
@@ -409,6 +421,7 @@ export async function notifyCustomerOfAssignment(
 ): Promise<void> {
   if (!request.assignedTo) return;
   const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
   const visitWindow = formatVisitWindow(
     request.scheduledStartTime,
     request.scheduledEndTime,
@@ -420,7 +433,7 @@ export async function notifyCustomerOfAssignment(
   if (request.scheduledSlot) {
     emailDetails.push({
       label: "Date",
-      value: formatSlotDate(request.scheduledSlot.date),
+      value: formatSlotDate(request.scheduledSlot.date, timeZone),
     });
     emailDetails.push({
       label: "Time of day",
@@ -470,6 +483,7 @@ export async function notifyCustomerOfBookingOnTheWay(
   if (!booking.assignedTo) return;
 
   const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
   const technician = booking.assignedTo.name;
   const headline = bookingHeadline(booking);
   const visitWindow = formatVisitWindow(
@@ -491,7 +505,7 @@ export async function notifyCustomerOfBookingOnTheWay(
   if (booking.scheduledSlot) {
     emailDetails.push({
       label: "Date",
-      value: formatSlotDate(booking.scheduledSlot.date),
+      value: formatSlotDate(booking.scheduledSlot.date, timeZone),
     });
   }
 
@@ -619,6 +633,7 @@ export async function notifyCustomerOfInvoiceSent(
   if (!email && !customerId) return;
 
   const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
   const serviceTitle = invoice.serviceTitle.trim() || "your job";
   const emailDetails: EmailDetailRow[] = [
     { label: "Invoice", value: invoice.invoiceCode.trim() || "—" },
@@ -635,7 +650,7 @@ export async function notifyCustomerOfInvoiceSent(
   if (invoice.dueDate?.trim()) {
     emailDetails.push({
       label: "Due date",
-      value: formatSlotDate(invoice.dueDate.trim()),
+      value: formatSlotDate(invoice.dueDate.trim(), timeZone),
     });
   }
 
@@ -673,6 +688,7 @@ export async function notifyCustomerOfVisitOnTheWay(
   if (!request.assignedTo) return;
 
   const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
   const inspector = request.assignedTo.name;
   const headline = requestHeadline(request);
   const visitWindow = formatVisitWindow(
@@ -691,7 +707,7 @@ export async function notifyCustomerOfVisitOnTheWay(
   if (request.scheduledSlot) {
     emailDetails.push({
       label: "Date",
-      value: formatSlotDate(request.scheduledSlot.date),
+      value: formatSlotDate(request.scheduledSlot.date, timeZone),
     });
   }
 
@@ -728,7 +744,7 @@ export async function notifyCustomerOfVisitOnTheWay(
 export async function notifyBusinessOfQuotationDecision(
   request: InspectionRequestDetail,
   decision: "accepted" | "rejected",
-  context: { bookingSlug?: string | null; businessName?: string | null } = {},
+  context: CustomerNotifyContext = {},
 ): Promise<void> {
   const who = request.customer.fullName?.trim() || "The customer";
   const headline = requestHeadline(request);
@@ -785,10 +801,12 @@ export async function notifyBusinessOfQuotationDecision(
  */
 export async function notifyBusinessOfCustomerAcceptance(
   request: InspectionRequestDetail,
-  context: { bookingSlug?: string | null; businessName?: string | null } = {},
+  context: CustomerNotifyContext = {},
 ): Promise<void> {
   const who = request.customer.fullName?.trim() || "The customer";
-  const when = request.scheduledSlot ? slotLabel(request.scheduledSlot) : "";
+  const when = request.scheduledSlot
+    ? slotLabel(request.scheduledSlot, context.timezone)
+    : "";
   try {
     await createNotification({
       audience: "business",
@@ -837,16 +855,17 @@ export async function listCustomerNotifications(
   customerId: string,
   customerEmail: string,
 ): Promise<NotificationRecord[]> {
+  const normalizedEmail = customerEmail ? normalizeEmail(customerEmail) : "";
   const [byId, byEmail] = await Promise.all([
     adminDb
       .collection(CUSTOMER_NOTIFICATION_COLLECTION)
       .where("customerId", "==", customerId)
       .limit(NOTIFICATION_LIST_LIMIT)
       .get(),
-    customerEmail
+    normalizedEmail
       ? adminDb
           .collection(CUSTOMER_NOTIFICATION_COLLECTION)
-          .where("customerEmail", "==", customerEmail)
+          .where("customerEmail", "==", normalizedEmail)
           .limit(NOTIFICATION_LIST_LIMIT)
           .get()
       : Promise.resolve(null),
@@ -878,10 +897,11 @@ function ownsNotification(
   if (guard.audience === "business") {
     return data.businessId === guard.businessId;
   }
+  const normalizedEmail = normalizeEmail(guard.customerEmail);
   return (
     data.customerId === guard.customerId ||
     (typeof data.customerEmail === "string" &&
-      data.customerEmail === guard.customerEmail)
+      normalizeEmail(data.customerEmail) === normalizedEmail)
   );
 }
 
@@ -919,16 +939,17 @@ async function collectUnreadNotificationIds(
     return unreadIds;
   }
 
+  const normalizedEmail = normalizeEmail(guard.customerEmail);
   const [byId, byEmail] = await Promise.all([
     adminDb
       .collection(collection)
       .where("customerId", "==", guard.customerId)
       .where("read", "==", false)
       .get(),
-    guard.customerEmail
+    normalizedEmail
       ? adminDb
           .collection(collection)
-          .where("customerEmail", "==", guard.customerEmail)
+          .where("customerEmail", "==", normalizedEmail)
           .where("read", "==", false)
           .get()
       : Promise.resolve(null),

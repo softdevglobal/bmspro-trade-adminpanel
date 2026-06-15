@@ -1,6 +1,7 @@
 import { BookingEngine } from "@/components/booking-engine";
 import { loadBookingServices, type BookingService } from "@/lib/booking/public";
 import { adminDb } from "@/lib/firebase/admin";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export type BookingBusiness = {
   businessAddress: string | null;
   state: string | null;
   postcode: string | null;
+  timezone: string;
   serviceAreas: string[];
   logoUrl: string | null;
   isActive: boolean;
@@ -49,6 +51,10 @@ async function loadBusinessBySlug(
         : null,
     state: typeof data.state === "string" ? data.state : null,
     postcode: typeof data.postcode === "string" ? data.postcode : null,
+    timezone:
+      typeof data.timezone === "string" && data.timezone.trim()
+        ? data.timezone.trim()
+        : PLATFORM_TIME_ZONE,
     logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
     serviceAreas: Array.isArray(data.serviceAreas)
       ? (data.serviceAreas as unknown[])
