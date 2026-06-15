@@ -8,6 +8,7 @@
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import {
   getBusinessProfile,
+  requireBusinessMember,
   updateBusinessProfile,
 } from "@/lib/onboarding/server";
 import {
@@ -45,7 +46,9 @@ function parseGstPercentageInput(
 }
 
 export async function GET(request: Request) {
-  const auth = await requireBusinessOwner(request);
+  // Read-only profile is needed by staff who can create quotations (GST,
+  // terms, branding). Editing (PATCH) remains owner-only.
+  const auth = await requireBusinessMember(request);
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },

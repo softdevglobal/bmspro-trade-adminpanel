@@ -11,6 +11,7 @@ import {
   parseInspectionRequestInput,
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
+import { requireBusinessMember } from "@/lib/onboarding/server";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
@@ -66,7 +67,10 @@ async function requireBusinessOwner(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireBusinessOwner(request);
+  // Read access is granted to any business member (owner, admin, staff) so
+  // that staff who can create quotations can pull existing customers for the
+  // customer autocomplete. Creating requests (POST) remains owner-only.
+  const auth = await requireBusinessMember(request);
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
