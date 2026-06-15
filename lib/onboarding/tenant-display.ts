@@ -51,6 +51,55 @@ export function timezoneLabel(timezoneId: string | null): string {
   return match?.label ?? effectiveTimezone;
 }
 
+/** Super-admin audit log timestamps always use Melbourne time. */
+export const SUPER_ADMIN_AUDIT_TIMEZONE = "Australia/Melbourne";
+
+const DEFAULT_AUDIT_TIMEZONE = "Australia/Sydney";
+
+const auditDateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function auditDateTimeFormatter(timezone: string): Intl.DateTimeFormat {
+  let formatter = auditDateTimeFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-AU", {
+      timeZone: timezone,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    auditDateTimeFormatters.set(timezone, formatter);
+  }
+  return formatter;
+}
+
+export function isKnownAuTimezone(
+  timezoneId: string | null | undefined,
+): timezoneId is (typeof AU_TIMEZONES)[number]["id"] {
+  return Boolean(
+    timezoneId && AU_TIMEZONES.some((timezone) => timezone.id === timezoneId),
+  );
+}
+
+export function resolveAuditDisplayTimezone(
+  scope: "platform" | "tenant" | "customer",
+  businessTimezone: string | null | undefined,
+): string {
+  if (scope === "platform") return SUPER_ADMIN_AUDIT_TIMEZONE;
+  if (isKnownAuTimezone(businessTimezone)) return businessTimezone;
+  return DEFAULT_AUDIT_TIMEZONE;
+}
+
+export function formatAuditDateTime(
+  millis: number | null,
+  timezone: string,
+): string {
+  if (!millis) return "—";
+  return auditDateTimeFormatter(timezone).format(new Date(millis));
+}
+
 export function formatTenantDate(ms: number | null): string {
   if (!ms) return "—";
   return formatInPlatformTimeZone(ms, {
