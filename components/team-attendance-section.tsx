@@ -1,21 +1,16 @@
 "use client";
 
 import { BookingMonthCalendar } from "@/components/booking-slot-date-picker";
+import {
+  TeamAttendanceDetailDrawer,
+  type AttendanceDetailRecord,
+} from "@/components/team-attendance-detail-drawer";
 import { formatWorkingDuration } from "@/lib/team/attendance";
+import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type AttendanceRecord = {
-  id: string;
-  staffId: string;
-  staffName: string;
-  staffRole: string | null;
-  checkInTime: string;
-  checkOutTime: string | null;
-  status: string;
-  workingSeconds: number;
-  totalBreakSeconds: number;
-};
+type AttendanceRecord = AttendanceDetailRecord;
 
 function formatDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -63,6 +58,9 @@ export function TeamAttendanceSection() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(
+    null,
+  );
 
   const loadAttendance = useCallback(async () => {
     if (!user) return;
@@ -106,6 +104,10 @@ export function TeamAttendanceSection() {
     void loadAttendance();
   }, [loadAttendance]);
 
+  useEffect(() => {
+    setSelectedRecord(null);
+  }, [selectedDate]);
+
   const activeCount = useMemo(
     () => attendance.filter((record) => record.status === "checked_in").length,
     [attendance],
@@ -132,8 +134,11 @@ export function TeamAttendanceSection() {
     setSelectedDate(new Date());
   }
 
+  const selectedDayLabel = formatHeadingDate(selectedDate);
+
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-outline-variant/60 bg-surface-container-lowest p-4 shadow-sm">
+    <>
+      <section className="flex flex-col gap-4 rounded-2xl border border-outline-variant/60 bg-surface-container-lowest p-4 shadow-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="font-display text-headline-sm font-semibold text-on-surface">
@@ -168,7 +173,7 @@ export function TeamAttendanceSection() {
               Selected day
             </p>
             <p className="mt-1 font-body text-[14px] font-semibold text-on-surface">
-              {formatHeadingDate(selectedDate)}
+              {selectedDayLabel}
             </p>
           </div>
 
@@ -266,59 +271,89 @@ export function TeamAttendanceSection() {
               </div>
 
               <div className="divide-y divide-outline-variant/60">
-                {attendance.map((record) => (
-                  <article
-                    key={record.id}
-                    className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[1.4fr_0.9fr_0.9fr_0.8fr_0.8fr_0.7fr] md:items-center"
-                  >
-                    <div>
-                      <p className="font-body text-[14px] font-semibold text-on-surface">
-                        {record.staffName}
-                      </p>
-                      <p className="font-body text-[12px] text-on-surface-variant">
-                        {record.staffRole?.trim() || "Staff"}
-                      </p>
-                    </div>
+                {attendance.map((record) => {
+                  const isSelected = selectedRecord?.id === record.id;
+                  return (
+                    <button
+                      key={record.id}
+                      type="button"
+                      onClick={() => setSelectedRecord(record)}
+                      className={`grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition-colors md:grid-cols-[1.4fr_0.9fr_0.9fr_0.8fr_0.8fr_0.7fr] md:items-center ${
+                        isSelected
+                          ? "bg-primary/5"
+                          : "hover:bg-surface-container-low/80"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={staffAvatarUrl({
+                            id: record.staffId,
+                            fullName: record.staffName,
+                          })}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded-xl border border-outline-variant/60 bg-white object-cover"
+                        />
+                        <div className="min-w-0">
+                          <p className="font-body text-[14px] font-semibold text-on-surface">
+                            {record.staffName}
+                          </p>
+                          <p className="font-body text-[12px] text-on-surface-variant">
+                            {record.staffRole?.trim() || "Staff"}
+                          </p>
+                        </div>
+                      </div>
 
-                    <AttendanceCell
-                      label="Clock in"
-                      value={formatTime(record.checkInTime)}
-                    />
-                    <AttendanceCell
-                      label="Clock out"
-                      value={formatTime(record.checkOutTime)}
-                    />
-                    <AttendanceCell
-                      label="Worked"
-                      value={formatWorkingDuration(record.workingSeconds)}
-                    />
-                    <AttendanceCell
-                      label="Break"
-                      value={
-                        record.totalBreakSeconds > 0
-                          ? formatWorkingDuration(record.totalBreakSeconds)
-                          : "—"
-                      }
-                    />
-                    <div>
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wide ${
-                          record.status === "checked_in"
-                            ? "bg-primary/10 text-primary"
-                            : "bg-surface-container-high text-on-surface-variant"
-                        }`}
-                      >
-                        {record.status === "checked_in" ? "Active" : "Done"}
-                      </span>
-                    </div>
-                  </article>
-                ))}
+                      <AttendanceCell
+                        label="Clock in"
+                        value={formatTime(record.checkInTime)}
+                      />
+                      <AttendanceCell
+                        label="Clock out"
+                        value={formatTime(record.checkOutTime)}
+                      />
+                      <AttendanceCell
+                        label="Worked"
+                        value={formatWorkingDuration(record.workingSeconds)}
+                      />
+                      <AttendanceCell
+                        label="Break"
+                        value={
+                          record.totalBreakSeconds > 0
+                            ? formatWorkingDuration(record.totalBreakSeconds)
+                            : "—"
+                        }
+                      />
+                      <div className="flex items-center justify-between gap-2 md:justify-start">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wide ${
+                            record.status === "checked_in"
+                              ? "bg-primary/10 text-primary"
+                              : "bg-surface-container-high text-on-surface-variant"
+                          }`}
+                        >
+                          {record.status === "checked_in" ? "Active" : "Done"}
+                        </span>
+                        <span className="material-symbols-outlined text-[18px] text-on-surface-variant md:hidden">
+                          chevron_right
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       </div>
     </section>
+
+      <TeamAttendanceDetailDrawer
+        record={selectedRecord}
+        selectedDateLabel={selectedDayLabel}
+        onClose={() => setSelectedRecord(null)}
+      />
+    </>
   );
 }
 

@@ -399,13 +399,13 @@ export function SupportChatWidget() {
       {open ? (
         <button
           type="button"
-          className="fixed inset-0 z-[59] cursor-default border-0 bg-black/20 p-0"
+          className="fixed inset-0 z-[104] cursor-default border-0 bg-black/20 p-0"
           aria-label="Close chat"
           onClick={closeChat}
         />
       ) : null}
 
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[105] flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
         {open ? (
           <div
             key={panelKey}
