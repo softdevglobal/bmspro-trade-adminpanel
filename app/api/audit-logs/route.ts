@@ -15,7 +15,11 @@ import {
   parseAuditCategory,
   parseAuditSource,
 } from "@/lib/audit/types";
-import { resolveAuditLogAccess } from "@/lib/onboarding/server";
+import {
+  getBusinessProfile,
+  resolveAuditLogAccess,
+} from "@/lib/onboarding/server";
+import { resolveAuditDisplayTimezone } from "@/lib/onboarding/tenant-display";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -69,10 +73,22 @@ export async function GET(request: Request) {
 
   logs = logs.slice(0, limit);
 
+  let businessTimezone: string | null = null;
+  if (access.scope === "tenant" || access.scope === "customer") {
+    const profile = await getBusinessProfile(access.businessId);
+    businessTimezone = profile?.timezone ?? null;
+  }
+
+  const displayTimezone = resolveAuditDisplayTimezone(
+    access.scope,
+    businessTimezone,
+  );
+
   return NextResponse.json({
     ok: true,
     scope: access.scope,
     total: logs.length,
     logs,
+    displayTimezone,
   });
 }
