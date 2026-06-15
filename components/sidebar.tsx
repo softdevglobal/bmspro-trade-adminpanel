@@ -5,6 +5,7 @@ import { useAuth, type AuthRole } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { countPendingInspectionRequests } from "@/lib/inspection/request-counts";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
+import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -82,6 +83,11 @@ const NAV_ITEMS: NavItem[] = [
         label: "Attendance",
         icon: "schedule",
       },
+      {
+        href: "/dashboard/team/leave-requests",
+        label: "Leave requests",
+        icon: "beach_access",
+      },
     ],
   },
   {
@@ -138,6 +144,7 @@ export function Sidebar({
     () => countPendingInspectionRequests(requests),
     [requests],
   );
+  const { pendingCount: pendingLeaveCount } = useLeaveRequests();
   const brandName = business?.businessName?.trim() || "BMS Pro Trade";
   const brandLogo =
     role === "business_owner" ? (business?.logoUrl ?? null) : null;
@@ -290,8 +297,13 @@ export function Sidebar({
               ? false
               : isNavItemActive(pathname, item.href);
             const groupOpen = hasChildren ? isGroupOpen(item.label) : false;
-            const showPendingBadge =
-              item.href === "/dashboard/requests" && pendingRequestCount > 0;
+            const badgeCount =
+              item.href === "/dashboard/requests"
+                ? pendingRequestCount
+                : item.href === "/dashboard/team"
+                  ? pendingLeaveCount
+                  : 0;
+            const showPendingBadge = badgeCount > 0;
 
             const inner = (
               <>
@@ -299,7 +311,7 @@ export function Sidebar({
                   <span className={navIconClass(isActive)}>{item.icon}</span>
                   {showPendingBadge && !showLabels ? (
                     <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 font-body text-[9px] font-bold text-white ring-2 ring-on-background">
-                      {pendingRequestCount > 9 ? "9+" : pendingRequestCount}
+                      {badgeCount > 9 ? "9+" : badgeCount}
                     </span>
                   ) : null}
                 </span>
@@ -311,8 +323,12 @@ export function Sidebar({
                   </span>
                 )}
                 {showPendingBadge && showLabels ? (
-                  <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white">
-                    {pendingRequestCount > 99 ? "99+" : pendingRequestCount}
+                  <span
+                    className={`inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white ${
+                      hasChildren ? "mr-1" : "ml-auto"
+                    }`}
+                  >
+                    {badgeCount > 99 ? "99+" : badgeCount}
                   </span>
                 ) : null}
                 {hasChildren && showLabels ? (
@@ -330,7 +346,7 @@ export function Sidebar({
                       ? "Overview"
                       : item.label}
                     {showPendingBadge
-                      ? `, ${pendingRequestCount} new request${pendingRequestCount === 1 ? "" : "s"}`
+                      ? `, ${badgeCount} pending${badgeCount === 1 ? "" : ""}`
                       : ""}
                   </span>
                 )}
@@ -369,6 +385,12 @@ export function Sidebar({
                       {child.icon}
                     </span>
                     <span className={navLabelClass(true)}>{child.label}</span>
+                    {child.href === "/dashboard/team/leave-requests" &&
+                    pendingLeaveCount > 0 ? (
+                      <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white">
+                        {pendingLeaveCount > 99 ? "99+" : pendingLeaveCount}
+                      </span>
+                    ) : null}
                   </Link>
                 );
               });
@@ -397,7 +419,7 @@ export function Sidebar({
                     <div
                       className={`ml-1 flex flex-col gap-0.5 overflow-hidden border-l border-on-secondary-fixed-variant/30 pl-1 transition-[max-height,opacity] duration-300 ease-in-out ${
                         groupOpen
-                          ? "max-h-24 opacity-100"
+                          ? "max-h-44 opacity-100"
                           : "pointer-events-none max-h-0 opacity-0"
                       }`}
                       aria-hidden={!groupOpen}
@@ -440,6 +462,15 @@ export function Sidebar({
                               <span className={navLabelClass(true)}>
                                 {child.label}
                               </span>
+                              {child.href ===
+                                "/dashboard/team/leave-requests" &&
+                              pendingLeaveCount > 0 ? (
+                                <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white">
+                                  {pendingLeaveCount > 99
+                                    ? "99+"
+                                    : pendingLeaveCount}
+                                </span>
+                              ) : null}
                             </Link>
                           );
                         })}

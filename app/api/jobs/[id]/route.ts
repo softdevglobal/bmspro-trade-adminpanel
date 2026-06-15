@@ -7,6 +7,7 @@ import {
   startBusinessBookingVisit,
 } from "@/lib/bookings/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { findApprovedLeaveBlocking } from "@/lib/leave/server";
 import type { InspectionAssignment } from "@/lib/inspection/types";
 import {
   extractBearerToken,
@@ -15,6 +16,15 @@ import {
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+function clockToMinutes(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const parts = raw.split(":");
+  const h = Number.parseInt(parts[0] ?? "", 10);
+  const m = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
+  if (Number.isNaN(h)) return null;
+  return h * 60 + (Number.isNaN(m) ? 0 : m);
+}
 
 async function resolveStaffAssignment(
   businessId: string,
@@ -295,6 +305,29 @@ export async function PATCH(
         { ok: false, error: "Choose who should run this job." },
         { status: 400 },
       );
+    }
+
+    if (assignment.type === "staff") {
+      const booking = await getBusinessBooking(auth.businessId, id);
+      const scheduledDate = booking?.scheduledSlot?.date ?? null;
+      if (scheduledDate) {
+        const blocking = await findApprovedLeaveBlocking(
+          auth.businessId,
+          assignment.uid,
+          scheduledDate,
+          clockToMinutes(booking?.scheduledStartTime) ?? undefined,
+          clockToMinutes(booking?.scheduledEndTime) ?? undefined,
+        );
+        if (blocking) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `${assignment.name} has approved time off on ${scheduledDate} and cannot be assigned that day.`,
+            },
+            { status: 409 },
+          );
+        }
+      }
     }
 
     const result = await assignBusinessBooking(

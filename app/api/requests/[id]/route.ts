@@ -15,10 +15,43 @@ import {
   type InspectionSlot,
 } from "@/lib/inspection/types";
 import { getRequestDocument } from "@/lib/inspection/request-document";
+import { findApprovedLeaveBlocking } from "@/lib/leave/server";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+function clockToMinutes(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const parts = raw.split(":");
+  const h = Number.parseInt(parts[0] ?? "", 10);
+  const m = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
+  if (Number.isNaN(h)) return null;
+  return h * 60 + (Number.isNaN(m) ? 0 : m);
+}
+
+/**
+ * Blocks assigning a staff member to work on a calendar day they have approved
+ * leave for. Returns an error message if blocked, otherwise null.
+ */
+async function leaveBlockMessage(
+  businessId: string,
+  assignment: InspectionAssignment | null,
+  ymd: string | null,
+  windowStart?: number | null,
+  windowEnd?: number | null,
+): Promise<string | null> {
+  if (!assignment || assignment.type !== "staff" || !ymd) return null;
+  const blocking = await findApprovedLeaveBlocking(
+    businessId,
+    assignment.uid,
+    ymd,
+    windowStart ?? undefined,
+    windowEnd ?? undefined,
+  );
+  if (!blocking) return null;
+  return `${assignment.name} has approved time off on ${ymd} and cannot be assigned that day.`;
+}
 
 async function requireBusinessOwner(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -458,6 +491,28 @@ export async function PATCH(
       );
     }
 
+    if (assignment.type === "staff") {
+      const requestSnap = await getRequestDocument(id);
+      const requestData = requestSnap?.data() as
+        | Record<string, unknown>
+        | undefined;
+      const scheduledSlot = requestData?.scheduledSlot as
+        | { date?: unknown }
+        | undefined;
+      const scheduledDate =
+        typeof scheduledSlot?.date === "string" ? scheduledSlot.date : null;
+      const blocked = await leaveBlockMessage(
+        auth.businessId,
+        assignment,
+        scheduledDate,
+        clockToMinutes(requestData?.scheduledStartTime),
+        clockToMinutes(requestData?.scheduledEndTime),
+      );
+      if (blocked) {
+        return NextResponse.json({ ok: false, error: blocked }, { status: 409 });
+      }
+    }
+
     const result = await applyOwnerAction(
       id,
       auth.businessId,
@@ -566,6 +621,20 @@ export async function PATCH(
           { status: 400 },
         );
       }
+    }
+
+    const convertBlocked = await leaveBlockMessage(
+      auth.businessId,
+      assignedTo,
+      slot.date,
+      clockToMinutes(window.startTime),
+      clockToMinutes(window.endTime),
+    );
+    if (convertBlocked) {
+      return NextResponse.json(
+        { ok: false, error: convertBlocked },
+        { status: 409 },
+      );
     }
 
     const result = await applyOwnerAction(
