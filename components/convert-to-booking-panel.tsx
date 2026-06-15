@@ -336,6 +336,9 @@ export function ConvertToBookingPanel({
           choice={assignChoice}
           staffId={staffId}
           disabled={submitting}
+          assignmentDate={slot.date}
+          startTime={startTime}
+          endTime={endTime}
           onChoiceChange={(next) => {
             setAssignChoice(next);
             if (next !== "staff") setStaffId("");
