@@ -88,6 +88,11 @@ export async function PATCH(
           : typeof payload.inspectionRequestId === "string"
             ? payload.inspectionRequestId
             : "",
+      ...(typeof payload.serviceDescription === "string"
+        ? { serviceDescription: payload.serviceDescription }
+        : payload.serviceDescription === null
+          ? { serviceDescription: null }
+          : {}),
       lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
       finalPriceAud:
         typeof payload.finalPriceAud === "number" &&

@@ -247,6 +247,10 @@ function mapQuotationDoc(
         : "",
     serviceTitle:
       typeof data.serviceTitle === "string" ? data.serviceTitle : "",
+    serviceDescription:
+      typeof data.serviceDescription === "string" && data.serviceDescription.trim()
+        ? data.serviceDescription.trim()
+        : null,
     customer,
     address,
     lineItems,
@@ -327,6 +331,23 @@ function requestHeadline(data: Record<string, unknown>): string {
     if (typeof title === "string" && title.trim()) return title.trim();
   }
   return "Custom quotation request";
+}
+
+function requestJobDescription(data: Record<string, unknown>): string | null {
+  if (data.requestType !== "custom_quote") return null;
+  const custom = data.customRequest;
+  if (!custom || typeof custom !== "object") return null;
+  const description = (custom as Record<string, unknown>).description;
+  return typeof description === "string" && description.trim()
+    ? description.trim()
+    : null;
+}
+
+function normalizeServiceDescription(
+  raw: string | null | undefined,
+): string | null | undefined {
+  if (typeof raw === "string") return raw.trim() || null;
+  return raw === null ? null : undefined;
 }
 
 function parseLineItems(raw: unknown): QuotationLineItem[] | null {
@@ -568,6 +589,13 @@ export async function createQuotationForInspection(
       ? `${baseTerms}\n\n${depositPaymentNote(depositRequest)}`
       : depositPaymentNote(depositRequest)
     : baseTerms;
+  const serviceDescriptionInput = normalizeServiceDescription(
+    input.serviceDescription,
+  );
+  const serviceDescription =
+    serviceDescriptionInput !== undefined
+      ? serviceDescriptionInput
+      : requestJobDescription(requestData);
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
   const quotationCode = buildQuotationCodeForInspection({
     id: inspectionId,
@@ -591,6 +619,7 @@ export async function createQuotationForInspection(
     businessId,
     inspectionRequestId: inspectionId,
     serviceTitle: requestHeadline(requestData),
+    serviceDescription,
     customer,
     address,
     lineItems: serializeLineItemsForFirestore(lineItems),
@@ -857,6 +886,16 @@ export async function updateDraftQuotation(
     quotationData.serviceTitle.trim()
       ? quotationData.serviceTitle.trim()
       : requestHeadline(requestData);
+  const serviceDescriptionInput = normalizeServiceDescription(
+    input.serviceDescription,
+  );
+  const serviceDescription =
+    serviceDescriptionInput !== undefined
+      ? serviceDescriptionInput
+      : typeof quotationData.serviceDescription === "string" &&
+          quotationData.serviceDescription.trim()
+        ? quotationData.serviceDescription.trim()
+        : requestJobDescription(requestData);
 
   await requestSnap.ref.set(
     {
@@ -870,6 +909,7 @@ export async function updateDraftQuotation(
   await quotationRef.set(
     {
       serviceTitle,
+      serviceDescription,
       customer,
       address,
       lineItems: serializeLineItemsForFirestore(lineItems),
@@ -1481,6 +1521,7 @@ export async function createStandaloneQuotation(
   let serviceName: string | null = null;
   let serviceBusinessType: string | null = null;
   let customRequest: { title: string; description: string } | null = null;
+  let serviceDescription: string | null = null;
   let quotationTitle = (input.title ?? "").trim();
 
   if (requestType === "existing_service") {
@@ -1532,6 +1573,7 @@ export async function createStandaloneQuotation(
       };
     }
     customRequest = { title: customTitle, description: customDescription };
+    serviceDescription = customDescription;
     quotationTitle = customTitle;
   }
 
@@ -1654,6 +1696,7 @@ export async function createStandaloneQuotation(
     businessId,
     inspectionRequestId: inspectionRef.id,
     serviceTitle: quotationTitle,
+    serviceDescription,
     customer,
     address,
     lineItems: serializeLineItemsForFirestore(lineItems),
@@ -1848,6 +1891,7 @@ export async function listQuotationsForInspection(
           ? ("awaiting" as const)
           : null);
   const fallbackBookingStatusAt = toMillis(inspectionData.bookingStatusAt);
+  const fallbackServiceDescription = requestJobDescription(inspectionData);
 
   return snap.docs
     .map((doc) => {
@@ -1858,7 +1902,10 @@ export async function listQuotationsForInspection(
         (!quotation.bookingStatus || !quotation.bookingStatusAt);
       const withSource = inspectionCreatedSource
         ? { ...quotation, createdSource: inspectionCreatedSource }
-        : quotation;
+        : { ...quotation };
+      if (!withSource.serviceDescription && fallbackServiceDescription) {
+        withSource.serviceDescription = fallbackServiceDescription;
+      }
       if (!needsBookingId && !needsBookingStatus) return withSource;
       return {
         ...withSource,
@@ -1901,6 +1948,7 @@ async function enrichQuotationsFromInspections(
     bookingCode: string | null;
     bookingStatus: ReturnType<typeof parseBookingStatus>;
     bookingStatusAt: number | null;
+    serviceDescription: string | null;
   };
 
   const metaById = new Map<string, InspectionMeta>();
@@ -1944,6 +1992,7 @@ async function enrichQuotationsFromInspections(
         bookingCode,
         bookingStatus,
         bookingStatusAt: toMillis(data.bookingStatusAt),
+        serviceDescription: requestJobDescription(data),
       });
     }
   }
@@ -1961,6 +2010,9 @@ async function enrichQuotationsFromInspections(
       ...quotation,
       ...(meta.createdSource ? { createdSource: meta.createdSource } : {}),
       ...(meta.status ? { inspectionRequestStatus: meta.status } : {}),
+      ...(!quotation.serviceDescription && meta.serviceDescription
+        ? { serviceDescription: meta.serviceDescription }
+        : {}),
       ...(needsBookingId
         ? {
             bookingId: meta.bookingId,

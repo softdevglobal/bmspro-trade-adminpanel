@@ -476,6 +476,11 @@ function QuotationCard({
       <p className="font-body text-[13px] text-on-surface-variant">
         Service: {quotation.serviceTitle || "Quotation"}
       </p>
+      {quotation.serviceDescription ? (
+        <p className="line-clamp-2 font-body text-[12px] text-on-surface-variant">
+          {quotation.serviceDescription}
+        </p>
+      ) : null}
       <p className="font-body text-[13px] text-on-surface-variant">
         {quotation.customer.phone}
       </p>
@@ -805,6 +810,17 @@ function QuotationPreviewContent({
             {formatAddress(quotation.address)}
           </p>
         </section>
+
+        {quotation.serviceDescription ? (
+          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Job description
+            </p>
+            <p className="mt-1 whitespace-pre-line font-body text-[13px] text-on-surface">
+              {quotation.serviceDescription}
+            </p>
+          </section>
+        ) : null}
 
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">

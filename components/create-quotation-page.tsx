@@ -578,7 +578,7 @@ export function CreateQuotationPage() {
         setClientOpen(false);
         setServiceEditing(false);
         setCustomServiceTitle(quotation.serviceTitle ?? "");
-        setCustomServiceDescription(quotation.notes ?? "");
+        setCustomServiceDescription(quotation.serviceDescription ?? "");
         setLineItems(
           quotation.lineItems.map((item, index) =>
             savedLineItemFromQuotation(item, index),
@@ -670,6 +670,11 @@ export function CreateQuotationPage() {
     const title = customServiceTitle.trim();
     return title.length >= 3 ? title : null;
   }, [requestType, selectedService, customServiceTitle]);
+
+  const previewServiceDescription = useMemo(() => {
+    if (requestType !== "custom_quote") return null;
+    return customServiceDescription.trim() || null;
+  }, [requestType, customServiceDescription]);
 
   const catalogSuggestions = useMemo(() => {
     if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
@@ -1197,6 +1202,7 @@ export function CreateQuotationPage() {
         })),
         finalPriceAud: total,
         discountAud: discountAmount,
+        serviceDescription: previewServiceDescription,
         termsAndConditions: termsAndConditions.trim() || null,
         notes: comment.trim() || null,
         validUntil: dueDate,
@@ -1290,6 +1296,7 @@ export function CreateQuotationPage() {
       quoteDate: formatQuoteDate(quotationDate),
       validUntil: dueDate,
       serviceTitle: previewServiceTitle,
+      serviceDescription: previewServiceDescription,
       customer: {
         fullName: customer.fullName.trim(),
         email: customer.email.trim(),
@@ -1320,6 +1327,7 @@ export function CreateQuotationPage() {
     quotationDate,
     dueDate,
     previewServiceTitle,
+    previewServiceDescription,
     customer,
     address,
     documentLineItems,

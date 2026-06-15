@@ -299,6 +299,9 @@ export function buildQuotationDocumentFromDetail(
     serviceTitle: quotation.serviceTitle?.trim()
       ? quotation.serviceTitle.trim()
       : null,
+    serviceDescription: quotation.serviceDescription?.trim()
+      ? quotation.serviceDescription.trim()
+      : null,
     customer: quotation.customer,
     customerAddress: quotation.address,
     lineItems,
@@ -546,9 +549,22 @@ export async function generateDocumentPdf(
   y -= cardH + 16;
 
   // ── Service strip ──
-  if (data.serviceTitle) {
-    ensureSpace(40);
-    const serviceH = 34;
+  if (data.serviceTitle || data.serviceDescription?.trim()) {
+    const titleLines = data.serviceTitle
+      ? wrapText(data.serviceTitle, fontBold, 10.5, CONTENT_WIDTH - 28)
+      : [];
+    const descriptionLines = data.serviceDescription?.trim()
+      ? wrapText(data.serviceDescription, font, 8.5, CONTENT_WIDTH - 28)
+      : [];
+    const serviceH = Math.max(
+      34,
+      24 +
+        titleLines.length * 13 +
+        (descriptionLines.length > 0
+          ? 4 + descriptionLines.length * 11
+          : 0),
+    );
+    ensureSpace(serviceH + 10);
     page.drawRectangle({
       x: MARGIN,
       y: y - serviceH,
@@ -571,10 +587,24 @@ export async function generateDocumentPdf(
       bold: true,
       color: MUTED,
     });
-    drawText(data.serviceTitle, MARGIN + 14, y - 26, {
-      size: 10.5,
-      bold: true,
+    let serviceY = y - 26;
+    titleLines.forEach((line) => {
+      drawText(line, MARGIN + 14, serviceY, {
+        size: 10.5,
+        bold: true,
+      });
+      serviceY -= 13;
     });
+    if (descriptionLines.length > 0) {
+      serviceY -= titleLines.length > 0 ? 1 : 0;
+      descriptionLines.forEach((line) => {
+        drawText(line, MARGIN + 14, serviceY, {
+          size: 8.5,
+          color: MUTED,
+        });
+        serviceY -= 11;
+      });
+    }
     y -= serviceH + 10;
   }
 
