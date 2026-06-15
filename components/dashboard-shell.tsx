@@ -12,6 +12,8 @@ const PAGE_ICONS: Record<string, string> = {
   Jobs: "assignment",
   "Requests": "event_available",
   Team: "groups",
+  "Team management": "manage_accounts",
+  Attendance: "schedule",
   Customers: "group",
   Services: "settings_suggest",
   Settings: "settings",
