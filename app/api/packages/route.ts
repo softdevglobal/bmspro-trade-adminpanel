@@ -7,48 +7,63 @@ import {
   updateSubscriptionPlan,
 } from "@/lib/subscription-plans/server";
 import type { SubscriptionPlanInput } from "@/lib/subscription-plans/types";
+import { validatePlanDescription } from "@/lib/subscription-plans/helpers";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-function parsePlanBody(body: unknown): SubscriptionPlanInput | null {
-  if (!body || typeof body !== "object") return null;
+function parsePlanBody(
+  body: unknown,
+): { ok: true; input: SubscriptionPlanInput } | { ok: false; error: string } {
+  if (!body || typeof body !== "object") {
+    return { ok: false, error: "Invalid request body." };
+  }
   const raw = body as Record<string, unknown>;
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
-  if (!name) return null;
+  if (!name) {
+    return { ok: false, error: "Plan name is required." };
+  }
+
+  const description = validatePlanDescription(raw.description);
+  if (!description.ok) {
+    return description;
+  }
 
   return {
-    name,
-    price:
-      typeof raw.price === "number" && Number.isFinite(raw.price) ? raw.price : 0,
-    priceLabel:
-      typeof raw.priceLabel === "string" ? raw.priceLabel : undefined,
-    branches:
-      typeof raw.branches === "number" && Number.isFinite(raw.branches)
-        ? raw.branches
-        : 1,
-    staff:
-      typeof raw.staff === "number" && Number.isFinite(raw.staff)
-        ? raw.staff
-        : 5,
-    features: Array.isArray(raw.features)
-      ? raw.features.filter((f): f is string => typeof f === "string")
-      : [],
-    popular: raw.popular === true,
-    color: typeof raw.color === "string" ? raw.color : undefined,
-    image: typeof raw.image === "string" ? raw.image : undefined,
-    icon: typeof raw.icon === "string" ? raw.icon : undefined,
-    active: raw.active !== false,
-    hidden: raw.hidden === true,
-    stripePriceId:
-      typeof raw.stripePriceId === "string" ? raw.stripePriceId : null,
-    trialDays:
-      typeof raw.trialDays === "number" && Number.isFinite(raw.trialDays)
-        ? raw.trialDays
-        : 0,
-    plan_key: typeof raw.plan_key === "string" ? raw.plan_key : null,
-    billingCycle: raw.billingCycle === "monthly" ? "monthly" : "weekly",
-    description: typeof raw.description === "string" ? raw.description : null,
+    ok: true,
+    input: {
+      name,
+      price:
+        typeof raw.price === "number" && Number.isFinite(raw.price) ? raw.price : 0,
+      priceLabel:
+        typeof raw.priceLabel === "string" ? raw.priceLabel : undefined,
+      branches:
+        typeof raw.branches === "number" && Number.isFinite(raw.branches)
+          ? raw.branches
+          : 1,
+      staff:
+        typeof raw.staff === "number" && Number.isFinite(raw.staff)
+          ? raw.staff
+          : 5,
+      features: Array.isArray(raw.features)
+        ? raw.features.filter((f): f is string => typeof f === "string")
+        : [],
+      popular: raw.popular === true,
+      color: typeof raw.color === "string" ? raw.color : undefined,
+      image: typeof raw.image === "string" ? raw.image : undefined,
+      icon: typeof raw.icon === "string" ? raw.icon : undefined,
+      active: raw.active !== false,
+      hidden: raw.hidden === true,
+      stripePriceId:
+        typeof raw.stripePriceId === "string" ? raw.stripePriceId : null,
+      trialDays:
+        typeof raw.trialDays === "number" && Number.isFinite(raw.trialDays)
+          ? raw.trialDays
+          : 0,
+      plan_key: typeof raw.plan_key === "string" ? raw.plan_key : null,
+      billingCycle: raw.billingCycle === "monthly" ? "monthly" : "weekly",
+      description: description.value,
+    },
   };
 }
 
@@ -90,16 +105,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const input = parsePlanBody(body);
-  if (!input) {
+  const parsed = parsePlanBody(body);
+  if (!parsed.ok) {
     return NextResponse.json(
-      { ok: false, error: "Plan name is required." },
+      { ok: false, error: parsed.error },
       { status: 400 },
     );
   }
 
   try {
-    const plan = await createSubscriptionPlan(input);
+    const plan = await createSubscriptionPlan(parsed.input);
     return NextResponse.json({ ok: true, plan }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
@@ -149,15 +164,15 @@ export async function PUT(request: Request) {
     );
   }
 
-  const input = parsePlanBody(body);
-  if (!input) {
+  const parsed = parsePlanBody(body);
+  if (!parsed.ok) {
     return NextResponse.json(
-      { ok: false, error: "Plan name is required." },
+      { ok: false, error: parsed.error },
       { status: 400 },
     );
   }
 
-  const plan = await updateSubscriptionPlan(planId, input);
+  const plan = await updateSubscriptionPlan(planId, parsed.input);
   if (!plan) {
     return NextResponse.json(
       { ok: false, error: "Plan not found." },
