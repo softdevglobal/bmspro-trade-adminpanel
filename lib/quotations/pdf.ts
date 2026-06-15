@@ -12,6 +12,7 @@ import {
 } from "@/lib/quotations/document";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { platformTodayIso } from "@/lib/platform/timezone";
+import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { displayQuotationCode } from "@/lib/reference-codes";
 import {
   PDFDocument,
@@ -501,10 +502,11 @@ export async function generateDocumentPdf(
 
   // ── Customer card ──
   ensureSpace(72);
+  const displayCustomerPhone = formatAuPhoneDisplay(data.customer.phone);
   const customerLines =
     (data.customer.fullName ? 1 : 0) +
     (data.customer.email ? 1 : 0) +
-    (data.customer.phone ? 1 : 0);
+    (displayCustomerPhone ? 1 : 0);
   const cardH = Math.max(58, 28 + customerLines * 14);
   page.drawRectangle({
     x: MARGIN,
@@ -540,8 +542,8 @@ export async function generateDocumentPdf(
     });
     cardY -= 13;
   }
-  if (data.customer.phone) {
-    drawNumber(data.customer.phone, MARGIN + 14, cardY, {
+  if (displayCustomerPhone) {
+    drawNumber(displayCustomerPhone, MARGIN + 14, cardY, {
       size: 10,
       color: MUTED,
     });

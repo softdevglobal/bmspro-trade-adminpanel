@@ -45,6 +45,10 @@ import {
   displayBookingCode,
   displayQuotationCode,
 } from "@/lib/reference-codes";
+import {
+  formatAuPhoneDisplay,
+  formatAuPhoneTelHref,
+} from "@/lib/phone/au-phone";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
@@ -465,6 +469,7 @@ function RequestCard({
       !request.bookingId &&
       request.quotation.customerDecision !== "accepted",
   );
+  const displayPhone = formatAuPhoneDisplay(request.customer.phone);
   const showPostQuoteActions =
     canFollowUpAfterQuotation(request) && !cardQuotationAwaitingCustomer;
   const hasLinkedBooking = Boolean(request.bookingId);
@@ -513,7 +518,7 @@ function RequestCard({
             Service: {serviceTitle}
           </p>
           <p className="truncate font-body text-[13px] text-on-surface-variant">
-            {request.customer.phone}
+            {displayPhone}
           </p>
           <p className="truncate font-body text-[12px] text-on-surface-variant">
             {formatAddress(request.address)}
@@ -1011,6 +1016,7 @@ function CompactRequestSummary({
     request.requestType === "existing_service"
       ? request.serviceName ?? "Existing service"
       : request.customRequest?.title ?? "Custom quotation request";
+  const displayPhone = formatAuPhoneDisplay(request.customer.phone);
 
   return (
     <section className="overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-low">
@@ -1020,7 +1026,7 @@ function CompactRequestSummary({
         </p>
         <p className="font-body text-[12px] text-on-surface-variant">
           {request.customer.fullName}
-          {request.customer.phone ? ` · ${request.customer.phone}` : ""}
+          {displayPhone ? ` · ${displayPhone}` : ""}
         </p>
         {request.scheduledSlot ? (
           <p className="flex items-start gap-1.5 pt-1 font-body text-[12px] font-semibold leading-snug text-emerald-800">
@@ -2077,9 +2083,8 @@ function BookingDetailsSection({
 }
 
 function CustomerSection({ request }: { request: InspectionRequestDetail }) {
-  const phoneHref = request.customer.phone
-    ? `tel:${request.customer.phone}`
-    : null;
+  const displayPhone = formatAuPhoneDisplay(request.customer.phone);
+  const phoneHref = formatAuPhoneTelHref(request.customer.phone);
   const emailHref = request.customer.email
     ? `mailto:${request.customer.email}`
     : null;
@@ -2100,7 +2105,7 @@ function CustomerSection({ request }: { request: InspectionRequestDetail }) {
           <span className="material-symbols-outlined text-[16px] text-primary">
             call
           </span>
-          {request.customer.phone || "—"}
+          {displayPhone || "—"}
         </a>
         <a
           href={emailHref ?? "#"}

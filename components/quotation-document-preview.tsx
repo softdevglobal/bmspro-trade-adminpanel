@@ -6,6 +6,7 @@ import {
   formatDepositSummary,
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
+import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 
 type Props = {
   document: QuotationDocumentData;
@@ -28,6 +29,7 @@ export function QuotationDocumentPreview({
   const docLabel = isInvoice ? "Invoice" : "Quote";
   const numberLabel = isInvoice ? "Invoice No" : "Quote No";
   const dateLabel = isInvoice ? "Due date" : "Valid until";
+  const displayCustomerPhone = formatAuPhoneDisplay(document.customer.phone);
   const depositBalanceDueAud =
     document.deposit && isInvoice && !document.deposit.paid
       ? document.totalAud
@@ -120,9 +122,9 @@ export function QuotationDocumentPreview({
                   {document.customer.email}
                 </p>
               ) : null}
-              {document.customer.phone ? (
+              {displayCustomerPhone ? (
                 <p className="text-[12px] text-[#6b7280]">
-                  {document.customer.phone}
+                  {displayCustomerPhone}
                 </p>
               ) : null}
             </div>
