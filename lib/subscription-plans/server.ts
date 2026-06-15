@@ -7,6 +7,7 @@ import {
   formatPeriodLabel,
   formatPriceLabel,
   normalizeBillingCycle,
+  validatePlanDescription,
   validityDaysForCycle,
 } from "@/lib/subscription-plans/helpers";
 import { normalizePlanThemeId } from "@/lib/subscription-plans/theme";
@@ -180,9 +181,14 @@ export async function createSubscriptionPlan(
     throw new Error("Plan name is required.");
   }
 
+  const description = validatePlanDescription(input.description);
+  if (!description.ok) {
+    throw new Error(description.error);
+  }
+
   const ref = adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).doc();
   const data = {
-    ...normalisePlanInput({ ...input, name }),
+    ...normalisePlanInput({ ...input, name, description: description.value }),
     createdAt: FieldValue.serverTimestamp(),
   };
   await ref.set(data);
@@ -222,6 +228,12 @@ export async function updateSubscriptionPlan(
     description:
       input.description !== undefined ? input.description : existing.description,
   };
+
+  const description = validatePlanDescription(merged.description);
+  if (!description.ok) {
+    throw new Error(description.error);
+  }
+  merged.description = description.value;
 
   await ref.update(normalisePlanInput(merged));
   const updated = await ref.get();

@@ -19,6 +19,10 @@ import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import {
+  formatAuPhoneDisplay,
+  formatAuPhoneTelHref,
+} from "@/lib/phone/au-phone";
+import {
   useBusinessStaffSummary,
 } from "@/lib/team/use-business-staff-summary";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
@@ -95,6 +99,7 @@ function BookingCard({
     booking.scheduledEndTime,
   );
   const estimate = formatEstimatedMinutes(booking.estimatedDurationMinutes);
+  const displayPhone = formatAuPhoneDisplay(booking.customer.phone);
 
   return (
     <button
@@ -136,7 +141,7 @@ function BookingCard({
             Service: {title}
           </p>
           <p className="font-body text-[13px] text-on-surface-variant">
-            {booking.customer.phone}
+            {displayPhone}
           </p>
           <p className="font-body text-[12px] text-on-surface-variant">
             {formatAddress(booking.address)}
@@ -464,9 +469,8 @@ function BookingPreviewContent({
     booking.scheduledEndTime,
   );
   const estimate = formatEstimatedMinutes(booking.estimatedDurationMinutes);
-  const phoneHref = booking.customer.phone
-    ? `tel:${booking.customer.phone}`
-    : null;
+  const displayPhone = formatAuPhoneDisplay(booking.customer.phone);
+  const phoneHref = formatAuPhoneTelHref(booking.customer.phone);
   const emailHref = booking.customer.email
     ? `mailto:${booking.customer.email}`
     : null;
@@ -582,7 +586,7 @@ function BookingPreviewContent({
               <span className="material-symbols-outlined text-[16px] text-primary">
                 call
               </span>
-              {booking.customer.phone || "—"}
+              {displayPhone || "—"}
             </a>
             <a
               href={emailHref ?? "#"}

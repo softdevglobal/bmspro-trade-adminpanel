@@ -7,6 +7,7 @@ import {
   type InspectionRequestDetail,
   type InspectionRequestStatus,
 } from "@/lib/inspection/types";
+import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
@@ -115,10 +116,15 @@ export function CustomersBoard() {
     const q = query.trim().toLowerCase();
     if (!q) return customers;
     return customers.filter(
-      (customer) =>
-        customer.fullName.toLowerCase().includes(q) ||
-        customer.email.toLowerCase().includes(q) ||
-        customer.phone.includes(q),
+      (customer) => {
+        const displayPhone = formatAuPhoneDisplay(customer.phone).toLowerCase();
+        return (
+          customer.fullName.toLowerCase().includes(q) ||
+          customer.email.toLowerCase().includes(q) ||
+          customer.phone.includes(q) ||
+          displayPhone.includes(q)
+        );
+      },
     );
   }, [customers, query]);
 
@@ -218,6 +224,11 @@ function CustomerRow({
   isPreviewOpen: boolean;
   onOpen: () => void;
 }) {
+  const displayPhone = formatAuPhoneDisplay(customer.phone);
+  const contactLine =
+    [customer.email, displayPhone].filter(Boolean).join(" · ") ||
+    "No contact on file";
+
   return (
     <button
       type="button"
@@ -236,7 +247,7 @@ function CustomerRow({
           {customer.fullName}
         </span>
         <span className="mt-0.5 block truncate font-body text-[13px] text-on-surface-variant">
-          {customer.email || customer.phone || "No contact on file"}
+          {contactLine}
         </span>
         <span className="mt-2 inline-flex items-center gap-2 font-body text-[12px] text-on-surface-variant">
           <span className="inline-flex items-center gap-1 font-semibold text-primary">
@@ -313,6 +324,7 @@ function CustomerPreviewContent({
   const sortedRequests = [...customer.requests].sort(
     (a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0),
   );
+  const displayPhone = formatAuPhoneDisplay(customer.phone);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -360,7 +372,7 @@ function CustomerPreviewContent({
                 Phone
               </dt>
               <dd className="mt-1 font-body text-[14px] font-medium text-on-surface">
-                {customer.phone || "—"}
+                {displayPhone || "—"}
               </dd>
             </div>
           </dl>

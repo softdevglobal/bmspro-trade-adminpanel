@@ -16,7 +16,10 @@ import {
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
-import { toAuLocalPhoneDigits } from "@/lib/phone/au-phone";
+import {
+  formatAuPhoneDisplay,
+  toAuLocalPhoneDigits,
+} from "@/lib/phone/au-phone";
 import {
   useCallback,
   useEffect,
@@ -533,7 +536,10 @@ function InspectionPreview({
 
       <PreviewSection title="Customer" icon="person">
         <PreviewRow label="Name" value={form.customer.fullName.trim()} />
-        <PreviewRow label="Mobile" value={form.customer.phone} />
+        <PreviewRow
+          label="Mobile"
+          value={formatAuPhoneDisplay(form.customer.phone)}
+        />
         <PreviewRow label="Email" value={form.customer.email.trim()} />
       </PreviewSection>
 

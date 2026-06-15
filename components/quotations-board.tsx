@@ -30,6 +30,7 @@ import {
   quotationHasInvoice,
   quotationJobActionsLocked,
 } from "@/lib/quotations/actions";
+import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
@@ -433,6 +434,7 @@ function QuotationCard({
   const showFollowUpActions =
     canConvertQuotationToBooking(quotation) && !awaitingCustomer;
   const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
+  const displayPhone = formatAuPhoneDisplay(quotation.customer.phone);
 
   return (
     <div
@@ -483,7 +485,7 @@ function QuotationCard({
         </p>
       ) : null}
       <p className="font-body text-[13px] text-on-surface-variant">
-        {quotation.customer.phone}
+        {displayPhone || "—"}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
         {formatAddress(quotation.address)}
@@ -640,6 +642,9 @@ function QuotationPreviewContent({
       Boolean(quotation.pdfUrl) ||
       hasInvoice ||
       canCancel);
+  const displayPhone = formatAuPhoneDisplay(quotation.customer.phone);
+  const contactLine =
+    [displayPhone, quotation.customer.email].filter(Boolean).join(" · ") || "—";
 
   function closeInvoicePdf() {
     setInvoicePdfOpen(false);
@@ -805,8 +810,7 @@ function QuotationPreviewContent({
             {quotation.customer.fullName}
           </p>
           <p className="mt-1 font-body text-[13px] text-on-surface-variant">
-            {quotation.customer.phone}
-            {quotation.customer.email ? ` · ${quotation.customer.email}` : ""}
+            {contactLine}
           </p>
           <p className="mt-2 font-body text-[13px] text-on-surface">
             {formatAddress(quotation.address)}
