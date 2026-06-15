@@ -1,7 +1,8 @@
-import { adminAuth } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   businessRecordQuotationCustomerDecision,
   cancelQuotation,
+  getBusinessQuotationById,
   undoCancelQuotation,
   updateDraftQuotation,
 } from "@/lib/quotations/server";
@@ -22,9 +23,25 @@ async function requireBusinessAuthor(request: Request) {
 
   try {
     const decoded = await adminAuth.verifyIdToken(match[1]);
-    const businessId =
+    let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
-    const role = decoded.role;
+    let role = typeof decoded.role === "string" ? decoded.role : null;
+
+    if (!businessId || !role) {
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      if (userSnap.exists) {
+        const data = userSnap.data() ?? {};
+        if (!businessId && typeof data.businessId === "string") {
+          businessId = data.businessId;
+        }
+        if (!role && typeof data.role === "string") {
+          role = data.role;
+        }
+      }
+    }
+
+    if (role === "business_owner") role = "owner";
+
     if (
       !businessId ||
       (role !== "staff" && role !== "owner" && role !== "admin")
@@ -36,10 +53,23 @@ async function requireBusinessAuthor(request: Request) {
       };
     }
 
+    if (role === "staff") {
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      const canCreateQuotation =
+        userSnap.exists && userSnap.data()?.canget_qutaion === true;
+      if (!canCreateQuotation) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: "You do not have permission to update this quotation.",
+        };
+      }
+    }
+
     return {
       ok: true as const,
       uid: decoded.uid,
-      role: typeof role === "string" ? role : null,
+      role,
       businessId,
     };
   } catch {
@@ -49,6 +79,20 @@ async function requireBusinessAuthor(request: Request) {
       error: "Invalid or expired session.",
     };
   }
+}
+
+async function assertStaffOwnsQuotation(
+  auth: { role: string; uid: string; businessId: string },
+  quotationId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (auth.role !== "staff") return { ok: true };
+
+  const quotation = await getBusinessQuotationById(auth.businessId, quotationId);
+  if (!quotation || quotation.createdBy !== auth.uid) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  return { ok: true };
 }
 
 export async function PATCH(
@@ -64,6 +108,14 @@ export async function PATCH(
   }
 
   const { id } = await context.params;
+
+  const ownership = await assertStaffOwnsQuotation(auth, id);
+  if (!ownership.ok) {
+    return NextResponse.json(
+      { ok: false, error: ownership.error },
+      { status: ownership.status },
+    );
+  }
 
   let body: unknown;
   try {

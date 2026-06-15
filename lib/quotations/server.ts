@@ -2074,6 +2074,29 @@ export async function listBusinessQuotations(
   return enrichQuotationsWithInvoices(enriched);
 }
 
+/** Lists quotations created by a specific staff member (newest first). */
+export async function listStaffQuotations(
+  businessId: string,
+  createdBy: string,
+): Promise<QuotationDetail[]> {
+  const snapshot = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .where("businessId", "==", businessId)
+    .where("createdBy", "==", createdBy)
+    .orderBy("createdAt", "desc")
+    .limit(QUOTATION_LIST_LIMIT)
+    .get();
+
+  const quotations = snapshot.docs.map((doc) =>
+    mapQuotationDoc(doc.id, doc.data() ?? {}),
+  );
+  const enriched = await enrichQuotationsFromInspections(quotations);
+  const { enrichQuotationsWithInvoices } = await import(
+    "@/lib/invoices/enrich-quotations"
+  );
+  return enrichQuotationsWithInvoices(enriched);
+}
+
 async function applyQuotationCustomerDecision(
   requestSnap: FirebaseFirestore.DocumentSnapshot,
   quotationId: string,
