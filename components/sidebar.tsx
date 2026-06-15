@@ -191,27 +191,29 @@ export function Sidebar({
     }
   }
 
-  function navItemClass(isActive: boolean) {
-    const base =
-      "box-border flex h-10 min-h-10 max-h-10 w-full shrink-0 items-center justify-start gap-2.5 rounded-lg px-3 text-left transition-colors duration-200";
+  function navItemClass(isActive: boolean, isChild = false) {
+    const padding = isChild ? "pl-9 pr-3" : "px-3";
+    const base = `box-border flex h-10 min-h-10 max-h-10 w-full shrink-0 items-center justify-start gap-2.5 rounded-xl ${padding} text-left transition-[background-color,color,box-shadow] duration-300 ease-out`;
     if (showLabels) {
       return isActive
-        ? `${base} bg-on-primary-fixed-variant text-primary-fixed-dim shadow-md`
-        : `${base} bg-transparent text-outline-variant hover:bg-on-secondary-fixed-variant hover:text-surface-bright`;
+        ? `${base} bg-on-primary-fixed-variant text-primary-fixed-dim shadow-sm`
+        : `${base} bg-transparent text-outline-variant hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright`;
     }
     return isActive
-      ? "box-border flex h-11 min-h-11 max-h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-on-primary-fixed-variant text-primary-fixed-dim shadow-md transition-colors duration-200"
-      : "box-border flex h-11 min-h-11 max-h-11 w-11 shrink-0 items-center justify-center rounded-lg text-outline-variant transition-colors duration-200 hover:bg-on-secondary-fixed-variant hover:text-surface-bright";
+      ? "box-border flex h-11 min-h-11 max-h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-on-primary-fixed-variant text-primary-fixed-dim shadow-sm transition-[background-color,color,box-shadow] duration-300 ease-out"
+      : "box-border flex h-11 min-h-11 max-h-11 w-11 shrink-0 items-center justify-center rounded-xl text-outline-variant transition-[background-color,color] duration-300 ease-out hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright";
   }
 
-  function navIconClass(isActive: boolean) {
-    return `material-symbols-outlined block shrink-0 text-[22px] ${
-      isActive ? "material-symbols-filled" : ""
+  function navIconClass(isActive: boolean, isChild = false) {
+    return `material-symbols-outlined block shrink-0 ${
+      isChild ? "text-[20px]" : "text-[22px]"
+    } ${isActive ? "material-symbols-filled" : ""}`;
+  }
+
+  function navLabelClass(isChild = false) {
+    return `min-w-0 flex-1 truncate font-body font-medium ${
+      isChild ? "text-[13px]" : "text-[14px]"
     }`;
-  }
-
-  function navLabelClass() {
-    return "min-w-0 flex-1 truncate font-body text-[14px] font-medium";
   }
 
   return (
@@ -315,7 +317,7 @@ export function Sidebar({
                 ) : null}
                 {hasChildren && showLabels ? (
                   <span
-                    className={`material-symbols-outlined ml-auto shrink-0 text-[22px] leading-none transition-transform duration-200 ${
+                    className={`material-symbols-outlined ml-auto shrink-0 text-[22px] leading-none transition-transform duration-300 ease-in-out ${
                       groupOpen ? "rotate-180" : ""
                     }`}
                   >
@@ -361,10 +363,12 @@ export function Sidebar({
                       onCloseMobile();
                       setFlyoutGroup(null);
                     }}
-                    className={navItemClass(childActive)}
+                    className={navItemClass(childActive, true)}
                   >
-                    <span className={navIconClass(childActive)}>{child.icon}</span>
-                    <span className={navLabelClass()}>{child.label}</span>
+                    <span className={navIconClass(childActive, true)}>
+                      {child.icon}
+                    </span>
+                    <span className={navLabelClass(true)}>{child.label}</span>
                   </Link>
                 );
               });
@@ -391,7 +395,7 @@ export function Sidebar({
 
                   {showLabels ? (
                     <div
-                      className={`flex flex-col gap-0.5 overflow-hidden transition-[max-height,opacity] duration-200 ease-out ${
+                      className={`ml-1 flex flex-col gap-0.5 overflow-hidden border-l border-on-secondary-fixed-variant/30 pl-1 transition-[max-height,opacity] duration-300 ease-in-out ${
                         groupOpen
                           ? "max-h-24 opacity-100"
                           : "pointer-events-none max-h-0 opacity-0"
@@ -428,12 +432,12 @@ export function Sidebar({
                                 onCloseMobile();
                                 setFlyoutGroup(null);
                               }}
-                              className={navItemClass(childActive)}
+                              className={navItemClass(childActive, true)}
                             >
-                              <span className={navIconClass(childActive)}>
+                              <span className={navIconClass(childActive, true)}>
                                 {child.icon}
                               </span>
-                              <span className={navLabelClass()}>
+                              <span className={navLabelClass(true)}>
                                 {child.label}
                               </span>
                             </Link>
@@ -495,8 +499,8 @@ export function Sidebar({
             title="Sign out"
             className={
               showLabels
-                ? "flex h-10 w-full items-center gap-2.5 rounded-lg px-3 text-outline-variant transition-all hover:bg-on-secondary-fixed-variant hover:text-surface-bright"
-                : "flex h-11 w-11 items-center justify-center rounded-lg text-outline-variant transition-all hover:bg-on-secondary-fixed-variant hover:text-surface-bright"
+                ? "flex h-10 w-full items-center gap-2.5 rounded-xl px-3 text-outline-variant transition-[background-color,color] duration-300 ease-out hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright"
+                : "flex h-11 w-11 items-center justify-center rounded-xl text-outline-variant transition-[background-color,color] duration-300 ease-out hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright"
             }
           >
             <span className="material-symbols-outlined shrink-0 text-[22px]">
