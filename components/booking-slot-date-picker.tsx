@@ -103,8 +103,8 @@ export function formatLocalDateInput(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-export function todayIso(): string {
-  return platformTodayIso();
+export function todayIso(timeZone?: string | null): string {
+  return platformTodayIso(new Date(), timeZone);
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -124,16 +124,27 @@ function firstBookableDay(from = new Date()): Date {
   return atLocalNoon(from);
 }
 
-export function buildSlotDayOption(date: Date): SlotDayOption {
+export function buildSlotDayOption(
+  date: Date,
+  timeZone?: string | null,
+): SlotDayOption {
   const iso = formatLocalDateInput(date);
-  const today = todayIso();
+  const today = todayIso(timeZone);
   const tomorrow = addDaysIso(today, 1);
 
   return {
     iso,
-    weekdayShort: formatIsoDateInPlatformTimeZone(iso, { weekday: "short" }),
+    weekdayShort: formatIsoDateInPlatformTimeZone(
+      iso,
+      { weekday: "short" },
+      timeZone,
+    ),
     dayNum: date.getDate(),
-    monthShort: formatIsoDateInPlatformTimeZone(iso, { month: "short" }),
+    monthShort: formatIsoDateInPlatformTimeZone(
+      iso,
+      { month: "short" },
+      timeZone,
+    ),
     isToday: iso === today,
     isTomorrow: iso === tomorrow,
   };
@@ -144,8 +155,9 @@ export function getSlotDayPage(
   pageIndex: number,
   pageSize: number,
   anchorDate?: string,
+  timeZone?: string | null,
 ): SlotDayOption[] {
-  const anchor = anchorDate?.trim() || todayIso();
+  const anchor = anchorDate?.trim() || todayIso(timeZone);
   const parsed = new Date(`${anchor}T12:00:00`);
   const cursor = Number.isNaN(parsed.getTime())
     ? firstBookableDay()
@@ -158,18 +170,21 @@ export function getSlotDayPage(
 
   const options: SlotDayOption[] = [];
   for (let i = 0; i < pageSize; i += 1) {
-    options.push(buildSlotDayOption(cursor));
+    options.push(buildSlotDayOption(cursor, timeZone));
     cursor.setDate(cursor.getDate() + 1);
   }
 
   return options;
 }
 
-function dayOptionFromIso(iso: string): SlotDayOption | null {
+function dayOptionFromIso(
+  iso: string,
+  timeZone?: string | null,
+): SlotDayOption | null {
   if (!iso) return null;
   const parsed = new Date(`${iso}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return null;
-  return buildSlotDayOption(parsed);
+  return buildSlotDayOption(parsed, timeZone);
 }
 
 function isBeforeMinDate(iso: string, minDate: string): boolean {
@@ -195,6 +210,7 @@ export function BookingMonthCalendar({
   onToggle,
   blockedCombos,
   className = "",
+  timeZone,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
@@ -206,6 +222,7 @@ export function BookingMonthCalendar({
   /** Date+time combos that cannot be chosen (e.g. customer's original picks). */
   blockedCombos?: Set<string>;
   className?: string;
+  timeZone?: string | null;
 }) {
   const initialView = selectedIso
     ? new Date(`${selectedIso}T12:00:00`)
@@ -213,10 +230,11 @@ export function BookingMonthCalendar({
   const [viewYear, setViewYear] = useState(initialView.getFullYear());
   const [viewMonth, setViewMonth] = useState(initialView.getMonth());
 
-  const today = todayIso();
+  const today = todayIso(timeZone);
   const monthLabel = formatInPlatformTimeZone(
     new Date(viewYear, viewMonth, 1, 12, 0, 0, 0),
     { month: "long", year: "numeric" },
+    timeZone,
   );
 
   const minView = useMemo(() => {
@@ -363,6 +381,7 @@ export function SlotDayPicker({
   blockedCombos,
   /** Customer booking: horizontal scroll strip. Admin propose dates: fit row, no scroll. */
   dayStripLayout = "scroll",
+  timeZone,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
@@ -377,6 +396,7 @@ export function SlotDayPicker({
   label?: string;
   blockedCombos?: Set<string>;
   dayStripLayout?: SlotDayStripLayout;
+  timeZone?: string | null;
 }) {
   const [showMonthCalendar, setShowMonthCalendar] = useState(false);
   const isMobile = useIsMobileViewport();
@@ -384,8 +404,8 @@ export function SlotDayPicker({
   const fitStrip = dayStripLayout === "fit" || isMobile;
 
   const pageDays = useMemo(
-    () => getSlotDayPage(dayPage, daysPerPage, minDate),
-    [dayPage, daysPerPage, minDate],
+    () => getSlotDayPage(dayPage, daysPerPage, minDate, timeZone),
+    [dayPage, daysPerPage, minDate, timeZone],
   );
 
   const offPageSelections = useMemo(() => {
@@ -393,15 +413,15 @@ export function SlotDayPicker({
       const onPage = new Set(pageDays.map((day) => day.iso));
       return (selectedIsos ?? [])
         .filter((iso) => !onPage.has(iso))
-        .map((iso) => dayOptionFromIso(iso))
+        .map((iso) => dayOptionFromIso(iso, timeZone))
         .filter((day): day is SlotDayOption => day !== null);
     }
     if (!selectedIso || pageDays.some((day) => day.iso === selectedIso)) {
       return [];
     }
-    const option = dayOptionFromIso(selectedIso);
+    const option = dayOptionFromIso(selectedIso, timeZone);
     return option ? [option] : [];
-  }, [mode, selectedIso, selectedIsos, pageDays]);
+  }, [mode, selectedIso, selectedIsos, pageDays, timeZone]);
 
   const displayDays = useMemo(() => {
     if (offPageSelections.length === 0) return pageDays;
@@ -600,6 +620,7 @@ export function SlotDayPicker({
           maxSelections={maxSelections}
           minDate={minDate}
           blockedCombos={blockedCombos}
+          timeZone={timeZone}
           onSelect={(iso) => {
             onSelect?.(iso);
             setShowMonthCalendar(false);

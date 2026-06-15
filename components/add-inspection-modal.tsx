@@ -3,6 +3,7 @@
 import { AuPhoneInput } from "@/components/au-phone-input";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type {
   InspectionRequestType,
   InspectionSlot,
@@ -365,9 +366,11 @@ function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
 function PreferredDayTimeRow({
   slot,
   onTimeChange,
+  timeZone,
 }: {
   slot: InspectionSlot;
   onTimeChange: (range: InspectionTimeRange) => void;
+  timeZone?: string | null;
 }) {
   return (
     <li className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
@@ -375,7 +378,7 @@ function PreferredDayTimeRow({
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
           <span className="material-symbols-outlined text-[14px]">schedule</span>
         </span>
-        {formatSlotDate(slot.date)}
+        {formatSlotDate(slot.date, timeZone)}
       </p>
       <div className="mt-3">
         <span className={LABEL_CLASS}>Pick a time window</span>
@@ -469,9 +472,11 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
 function InspectionPreview({
   form,
   selectedServiceName,
+  timeZone,
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
+  timeZone?: string | null;
 }) {
   const jobSummary =
     form.requestType === "existing_service"
@@ -518,7 +523,8 @@ function InspectionPreview({
                 {index + 1}
               </span>
               <span>
-                {formatSlotDate(slot.date)} · {TIME_RANGE_LABELS[slot.timeRange]}
+                {formatSlotDate(slot.date, timeZone)} ·{" "}
+                {TIME_RANGE_LABELS[slot.timeRange]}
               </span>
             </li>
           ))}
@@ -556,6 +562,7 @@ function createInitialForm() {
 
 export function AddInspectionModal({ open, onClose, onCreated }: Props) {
   const { user } = useAuth();
+  const profile = useBusinessProfile();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(createInitialForm);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
@@ -578,7 +585,8 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
     [activeServices, form.selectedServiceId],
   );
 
-  const minDate = useMemo(() => todayIso(), []);
+  const timeZone = profile?.timezone;
+  const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
 
   const reset = useCallback(() => {
     setStep(1);
@@ -1329,6 +1337,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                       }}
                       label="Pick up to 3 days"
                       dayStripLayout="fit"
+                      timeZone={timeZone}
                     />
                     {selectedPreferredDates.length > 0 ? (
                       <p className="mt-3 font-body text-[12px] text-on-surface-variant">
@@ -1355,6 +1364,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                             <PreferredDayTimeRow
                               key={slot.date}
                               slot={slot}
+                              timeZone={timeZone}
                               onTimeChange={(range) => {
                                 touchField("preferredSlots");
                                 updateSlotTime(slotIndex, range);
@@ -1372,6 +1382,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                 <InspectionPreview
                   form={form}
                   selectedServiceName={selectedService?.name ?? null}
+                  timeZone={timeZone}
                 />
               ) : null}
 

@@ -34,6 +34,7 @@ export type QuotationDetail = {
   businessId: string;
   inspectionRequestId: string;
   serviceTitle: string;
+  serviceDescription: string | null;
   customer: InspectionCustomer;
   address: InspectionAddress;
   lineItems: QuotationLineItem[];
@@ -74,6 +75,7 @@ export type QuotationDetail = {
 
 export type CreateQuotationInput = {
   inspectionRequestId: string;
+  serviceDescription?: string | null;
   lineItems: QuotationLineItem[];
   finalPriceAud?: number | null;
   notes?: string | null;

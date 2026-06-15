@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
   BOOKING_STATUS_LABELS,
   BOOKING_STATUS_TONE,
@@ -43,7 +44,7 @@ function formatEstimatedMinutes(minutes: number | null): string | null {
   return `${hours} hr ${rem} min`;
 }
 
-function formatWhen(timestamp: number | null): string {
+function formatWhen(timestamp: number | null, timeZone?: string | null): string {
   if (!timestamp) return "—";
   return formatInPlatformTimeZone(timestamp, {
     month: "short",
@@ -51,7 +52,7 @@ function formatWhen(timestamp: number | null): string {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }, timeZone);
 }
 
 function formatAud(value: number | null): string {
@@ -80,10 +81,12 @@ function BookingCard({
   booking,
   isPreviewOpen,
   onOpen,
+  timeZone,
 }: {
   booking: BookingDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
+  timeZone?: string | null;
 }) {
   const title = bookingTitle(booking);
   const visitWindow = formatVisitWindow(
@@ -116,7 +119,7 @@ function BookingCard({
             ) : null}
           </div>
           <h4 className="mt-2 font-display text-[16px] font-semibold text-on-surface">
-            {title}
+            {booking.customer.fullName || "Customer"}
           </h4>
           <p className="mt-1 font-body text-[11px] text-on-surface-variant">
             Visit{" "}
@@ -129,7 +132,10 @@ function BookingCard({
             />
           </p>
           <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">
-            {booking.customer.fullName} · {booking.customer.phone}
+            Service: {title}
+          </p>
+          <p className="font-body text-[13px] text-on-surface-variant">
+            {booking.customer.phone}
           </p>
           <p className="font-body text-[12px] text-on-surface-variant">
             {formatAddress(booking.address)}
@@ -143,7 +149,7 @@ function BookingCard({
             <span className="material-symbols-outlined text-[14px]">
               event
             </span>
-            {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+            {formatSlotDate(booking.scheduledSlot.date, timeZone)} ·{" "}
             {TIME_RANGE_SHORT_LABELS[booking.scheduledSlot.timeRange]}
             {visitWindow ? ` · ${visitWindow}` : null}
           </span>
@@ -174,11 +180,13 @@ function BookingPreviewDrawer({
   staff,
   onClose,
   onUpdated,
+  timeZone,
 }: {
   booking: BookingDetail | null;
   staff: StaffSummary[];
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
+  timeZone?: string | null;
 }) {
   const open = booking !== null;
 
@@ -211,6 +219,7 @@ function BookingPreviewDrawer({
               staff={staff}
               onClose={onClose}
               onUpdated={onUpdated}
+              timeZone={timeZone}
             />
           </motion.aside>
         </motion.div>
@@ -432,11 +441,13 @@ function BookingPreviewContent({
   staff,
   onClose,
   onUpdated,
+  timeZone,
 }: {
   booking: BookingDetail;
   staff: StaffSummary[];
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
+  timeZone?: string | null;
 }) {
   const { user } = useAuth();
   const [mode, setMode] = useState<PreviewMode>("review");
@@ -524,7 +535,7 @@ function BookingPreviewContent({
             {title}
           </h3>
           <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-            Created {formatWhen(booking.createdAt)}
+            Created {formatWhen(booking.createdAt, timeZone)}
           </p>
         </div>
         <button
@@ -629,7 +640,7 @@ function BookingPreviewContent({
                 <span className="material-symbols-outlined text-[16px] text-primary">
                   event
                 </span>
-                {formatSlotDate(booking.scheduledSlot.date)} ·{" "}
+                {formatSlotDate(booking.scheduledSlot.date, timeZone)} ·{" "}
                 {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
               </p>
               {visitWindow ? (
@@ -795,6 +806,7 @@ function BookingPreviewContent({
 
 export function JobsBoard() {
   const { status: authStatus } = useAuth();
+  const profile = useBusinessProfile();
   const { bookings, loading, error } = useBookings();
   const { staff } = useBusinessStaffSummary();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -827,6 +839,7 @@ export function JobsBoard() {
     );
   }, [displayBookings]);
   const visibleBookings = groupedBookings[filter];
+  const timeZone = profile?.timezone;
 
   const selected = useMemo(
     () => visibleBookings.find((booking) => booking.id === selectedId) ?? null,
@@ -953,6 +966,7 @@ export function JobsBoard() {
                 booking={booking}
                 isPreviewOpen={selectedId === booking.id}
                 onOpen={() => setSelectedId(booking.id)}
+                timeZone={timeZone}
               />
             </li>
           ))}
@@ -973,6 +987,7 @@ export function JobsBoard() {
         staff={staff}
         onClose={() => setSelectedId(null)}
         onUpdated={handleBookingUpdated}
+        timeZone={timeZone}
       />
     </>
   );

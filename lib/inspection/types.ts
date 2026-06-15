@@ -310,9 +310,12 @@ export function isIsoDate(value: string): boolean {
   );
 }
 
-export function isFutureOrTodayDate(value: string): boolean {
+export function isFutureOrTodayDate(
+  value: string,
+  timeZone?: string | null,
+): boolean {
   if (!isIsoDate(value)) return false;
-  return value >= platformTodayIso();
+  return value >= platformTodayIso(new Date(), timeZone);
 }
 
 export function isTimeRange(value: unknown): value is InspectionTimeRange {
@@ -331,12 +334,12 @@ function digitsOnly(value: unknown): string {
   return typeof value === "string" ? value.replace(/\D/g, "") : "";
 }
 
-function parseSlot(raw: unknown): InspectionSlot | null {
+function parseSlot(raw: unknown, timeZone?: string | null): InspectionSlot | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
   const date = trimString(item.date);
   const timeRange = item.timeRange;
-  if (!isFutureOrTodayDate(date)) return null;
+  if (!isFutureOrTodayDate(date, timeZone)) return null;
   if (!isTimeRange(timeRange)) return null;
   return { date, timeRange };
 }
@@ -353,16 +356,23 @@ function dedupeSlots(slots: InspectionSlot[]): InspectionSlot[] {
   return result;
 }
 
-export function parseSlotsArray(raw: unknown, max = 3): InspectionSlot[] {
+export function parseSlotsArray(
+  raw: unknown,
+  max = 3,
+  timeZone?: string | null,
+): InspectionSlot[] {
   if (!Array.isArray(raw)) return [];
   const parsed = raw
-    .map(parseSlot)
+    .map((slot) => parseSlot(slot, timeZone))
     .filter((slot): slot is InspectionSlot => slot !== null);
   return dedupeSlots(parsed).slice(0, max);
 }
 
 /** Validates and normalises a raw payload from the booking page. */
-export function parseInspectionRequestInput(raw: unknown):
+export function parseInspectionRequestInput(
+  raw: unknown,
+  timeZone?: string | null,
+):
   | { ok: true; value: InspectionRequestInput }
   | { ok: false; error: string } {
   if (!raw || typeof raw !== "object") {
@@ -428,7 +438,7 @@ export function parseInspectionRequestInput(raw: unknown):
     customRequest = { title, description };
   }
 
-  const preferredSlots = parseSlotsArray(input.preferredSlots, 3);
+  const preferredSlots = parseSlotsArray(input.preferredSlots, 3, timeZone);
   if (preferredSlots.length === 0) {
     return {
       ok: false,
@@ -495,14 +505,14 @@ export function formatBudgetAud(amount: number | null | undefined): string | nul
   return `Aus $${formatted}`;
 }
 
-export function formatSlotDate(date: string): string {
+export function formatSlotDate(date: string, timeZone?: string | null): string {
   if (!isIsoDate(date)) return date;
   return formatIsoDateInPlatformTimeZone(date, {
     weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",
-  });
+  }, timeZone);
 }
 
 /** @deprecated Prefer `displayInspectionRequestCode` from `@/lib/reference-codes`. */

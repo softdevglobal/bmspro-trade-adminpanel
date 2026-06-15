@@ -3,8 +3,8 @@
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
-  NOTIFICATION_STATUS_ICON,
-  NOTIFICATION_STATUS_TONE,
+  notificationCardIcon,
+  notificationCardTone,
 } from "@/lib/notifications/types";
 import {
   accountBookingFocusPath,
@@ -176,9 +176,9 @@ export function CustomerNotificationBell() {
                       className="flex min-w-0 flex-1 gap-2 px-3 py-2.5 text-left transition-colors hover:bg-stone-50"
                     >
                       <span
-                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] ${NOTIFICATION_STATUS_TONE[note.status]}`}
+                        className={`material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] ${notificationCardTone(note)}`}
                       >
-                        {NOTIFICATION_STATUS_ICON[note.status]}
+                        {notificationCardIcon(note)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="line-clamp-2 block font-body text-[13px] font-semibold text-on-surface">

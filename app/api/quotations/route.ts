@@ -223,6 +223,11 @@ export async function POST(request: Request) {
     auth.uid,
     {
       inspectionRequestId,
+      ...(typeof payload.serviceDescription === "string"
+        ? { serviceDescription: payload.serviceDescription }
+        : payload.serviceDescription === null
+          ? { serviceDescription: null }
+          : {}),
       lineItems: Array.isArray(lineItems) ? lineItems : [],
       finalPriceAud,
       notes,

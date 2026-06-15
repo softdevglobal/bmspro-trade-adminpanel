@@ -22,6 +22,7 @@ import {
   enrichRequestsWithJobAssignees,
 } from "@/lib/invoices/enrich-customer-requests";
 import { toMillis } from "@/lib/onboarding/services/display";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -29,6 +30,7 @@ export const runtime = "nodejs";
 export type CustomerBooking = InspectionRequestDetail & {
   businessName: string | null;
   bookingSlug: string | null;
+  businessTimezone: string;
   jobAssignedTo: InspectionAssignment | null;
 };
 
@@ -192,12 +194,25 @@ function mapBookingDoc(
 
 async function loadBusinessSummaries(
   ids: string[],
-): Promise<Map<string, { businessName: string | null; bookingSlug: string | null }>> {
+): Promise<
+  Map<
+    string,
+    {
+      businessName: string | null;
+      bookingSlug: string | null;
+      businessTimezone: string;
+    }
+  >
+> {
   if (ids.length === 0) return new Map();
   const unique = Array.from(new Set(ids));
   const result = new Map<
     string,
-    { businessName: string | null; bookingSlug: string | null }
+    {
+      businessName: string | null;
+      bookingSlug: string | null;
+      businessTimezone: string;
+    }
   >();
 
   for (let i = 0; i < unique.length; i += 30) {
@@ -206,7 +221,11 @@ async function loadBusinessSummaries(
     const snaps = await adminDb.getAll(...refs);
     for (const snap of snaps) {
       if (!snap.exists) {
-        result.set(snap.id, { businessName: null, bookingSlug: null });
+        result.set(snap.id, {
+          businessName: null,
+          bookingSlug: null,
+          businessTimezone: PLATFORM_TIME_ZONE,
+        });
         continue;
       }
       const data = snap.data() ?? {};
@@ -215,6 +234,10 @@ async function loadBusinessSummaries(
           typeof data.businessName === "string" ? data.businessName : null,
         bookingSlug:
           typeof data.bookingSlug === "string" ? data.bookingSlug : null,
+        businessTimezone:
+          typeof data.timezone === "string" && data.timezone.trim()
+            ? data.timezone.trim()
+            : PLATFORM_TIME_ZONE,
       });
     }
   }
@@ -268,6 +291,7 @@ export async function GET(request: Request) {
         ...req,
         businessName: summary?.businessName ?? null,
         bookingSlug: summary?.bookingSlug ?? null,
+        businessTimezone: summary?.businessTimezone ?? PLATFORM_TIME_ZONE,
         jobAssignedTo: req.jobAssignedTo ?? null,
       } satisfies CustomerBooking;
     })

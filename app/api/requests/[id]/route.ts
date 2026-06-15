@@ -15,6 +15,7 @@ import {
   type InspectionSlot,
 } from "@/lib/inspection/types";
 import { getRequestDocument } from "@/lib/inspection/request-document";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -59,12 +60,12 @@ async function requireBusinessOwner(request: Request) {
   }
 }
 
-function parseSlot(raw: unknown): InspectionSlot | null {
+function parseSlot(raw: unknown, timeZone?: string | null): InspectionSlot | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
   const date = typeof item.date === "string" ? item.date : "";
   const timeRange = item.timeRange;
-  if (!isFutureOrTodayDate(date)) return null;
+  if (!isFutureOrTodayDate(date, timeZone)) return null;
   if (!isTimeRange(timeRange)) return null;
   return { date, timeRange };
 }
@@ -323,11 +324,17 @@ export async function PATCH(
     actor: ownerActor,
     source: "admin_panel",
   };
+  const businessSnap = await adminDb.collection("businesses").doc(auth.businessId).get();
+  const businessData = businessSnap.data() ?? {};
+  const timeZone =
+    typeof businessData.timezone === "string" && businessData.timezone.trim()
+      ? businessData.timezone.trim()
+      : PLATFORM_TIME_ZONE;
 
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
 
   if (action === "accept") {
-    const slot = parseSlot(payload.slot);
+    const slot = parseSlot(payload.slot, timeZone);
     if (!slot) {
       return NextResponse.json(
         { ok: false, error: "Choose a valid date and time range." },
@@ -393,7 +400,7 @@ export async function PATCH(
     const rawSlots = Array.isArray(payload.slots) ? payload.slots : [];
     const slots = dedupeSlots(
       rawSlots
-        .map(parseSlot)
+        .map((slot) => parseSlot(slot, timeZone))
         .filter((slot): slot is InspectionSlot => slot !== null),
     ).slice(0, 3);
     if (slots.length === 0) {

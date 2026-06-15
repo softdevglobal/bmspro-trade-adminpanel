@@ -45,6 +45,7 @@ export type QuotationDocumentData = {
   quoteDate: string;
   validUntil: string | null;
   serviceTitle: string | null;
+  serviceDescription?: string | null;
   customer: QuotationDocumentCustomer;
   customerAddress: InspectionAddress;
   lineItems: QuotationDocumentLineItem[];

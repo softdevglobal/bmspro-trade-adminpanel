@@ -29,6 +29,7 @@ const EMAIL_PRESENTATION: Record<
   request_completed: { eyebrow: "Visit completed", tone: "success" },
   job_completed: { eyebrow: "Job completed", tone: "success" },
   invoice_sent: { eyebrow: "Invoice", tone: "brand" },
+  quotation_sent: { eyebrow: "Quotation", tone: "brand" },
   quotation_accepted: { eyebrow: "Quotation accepted", tone: "success" },
   quotation_rejected: { eyebrow: "Quotation rejected", tone: "danger" },
 };

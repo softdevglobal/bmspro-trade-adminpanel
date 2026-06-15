@@ -860,5 +860,6 @@ async function sendInvoiceEmailForDetail(
     businessName: profile?.businessName ?? null,
     bookingSlug: profile?.bookingSlug ?? null,
     logoUrl: profile?.logoUrl ?? null,
+    timezone: profile?.timezone ?? null,
   });
 }

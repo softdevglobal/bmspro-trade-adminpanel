@@ -31,6 +31,7 @@ import {
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { FieldValue } from "firebase-admin/firestore";
 
 /** Who triggered an inspection action — used for audit logging. */
@@ -66,6 +67,7 @@ async function loadBusinessSummary(
   businessName: string | null;
   bookingSlug: string | null;
   logoUrl: string | null;
+  timezone: string;
 }> {
   try {
     const snap = await adminDb.collection("businesses").doc(businessId).get();
@@ -76,9 +78,18 @@ async function loadBusinessSummary(
       bookingSlug:
         typeof data.bookingSlug === "string" ? data.bookingSlug : null,
       logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+      timezone:
+        typeof data.timezone === "string" && data.timezone.trim()
+          ? data.timezone.trim()
+          : PLATFORM_TIME_ZONE,
     };
   } catch {
-    return { businessName: null, bookingSlug: null, logoUrl: null };
+    return {
+      businessName: null,
+      bookingSlug: null,
+      logoUrl: null,
+      timezone: PLATFORM_TIME_ZONE,
+    };
   }
 }
 

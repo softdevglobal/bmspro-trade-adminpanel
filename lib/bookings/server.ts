@@ -25,6 +25,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
 import type { BookingStatus } from "@/lib/bookings/types";
+import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
 export const BOOKING_LIST_LIMIT = 80;
 
@@ -299,6 +300,7 @@ async function loadBusinessSummary(businessId: string): Promise<{
   businessName: string | null;
   bookingSlug: string | null;
   logoUrl: string | null;
+  timezone: string;
 }> {
   try {
     const snap = await adminDb.collection("businesses").doc(businessId).get();
@@ -309,9 +311,18 @@ async function loadBusinessSummary(businessId: string): Promise<{
       bookingSlug:
         typeof data.bookingSlug === "string" ? data.bookingSlug : null,
       logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+      timezone:
+        typeof data.timezone === "string" && data.timezone.trim()
+          ? data.timezone.trim()
+          : PLATFORM_TIME_ZONE,
     };
   } catch {
-    return { businessName: null, bookingSlug: null, logoUrl: null };
+    return {
+      businessName: null,
+      bookingSlug: null,
+      logoUrl: null,
+      timezone: PLATFORM_TIME_ZONE,
+    };
   }
 }
 

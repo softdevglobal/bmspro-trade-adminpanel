@@ -23,6 +23,7 @@ export function QuotationDocumentPreview({
   kind = "quote",
 }: Props) {
   const { business, lineItems } = document;
+  const serviceDescription = document.serviceDescription?.trim() ?? "";
   const isInvoice = kind === "invoice";
   const docLabel = isInvoice ? "Invoice" : "Quote";
   const numberLabel = isInvoice ? "Invoice No" : "Quote No";
@@ -128,16 +129,23 @@ export function QuotationDocumentPreview({
           </div>
         </div>
 
-        {document.serviceTitle ? (
+        {document.serviceTitle || serviceDescription ? (
           <div className="relative mt-4 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px]">
             <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
             <div className="px-5 py-3 pl-6">
               <p className="text-[10px] font-bold uppercase tracking-wider text-[#6b7280]">
                 Service
               </p>
-              <p className="mt-1 text-[13px] font-bold text-[#1e2430]">
-                {document.serviceTitle}
-              </p>
+              {document.serviceTitle ? (
+                <p className="mt-1 text-[13px] font-bold text-[#1e2430]">
+                  {document.serviceTitle}
+                </p>
+              ) : null}
+              {serviceDescription ? (
+                <p className="mt-1 whitespace-pre-line text-[11px] leading-relaxed text-[#6b7280]">
+                  {serviceDescription}
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -333,14 +341,16 @@ export function QuotationDocumentPreview({
                   {formatDepositSummary(document.deposit)}
                 </p>
               </div>
-              <div className="flex items-center justify-between bg-[#0b33a0] px-4 py-3">
-                <span className="text-[13px] font-bold text-white">
-                  Balance due
-                </span>
-                <span className="font-numeric text-[15px] font-bold text-white">
-                  {formatQuoteMoney(depositBalanceDueAud)}
-                </span>
-              </div>
+              {isInvoice ? (
+                <div className="flex items-center justify-between bg-[#0b33a0] px-4 py-3">
+                  <span className="text-[13px] font-bold text-white">
+                    Balance due
+                  </span>
+                  <span className="font-numeric text-[15px] font-bold text-white">
+                    {formatQuoteMoney(depositBalanceDueAud)}
+                  </span>
+                </div>
+              ) : null}
             </>
           ) : null}
           </div>

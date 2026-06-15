@@ -11,6 +11,7 @@ import {
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
 import type { QuotationDetail } from "@/lib/quotations/types";
+import { platformTodayIso } from "@/lib/platform/timezone";
 import { displayQuotationCode } from "@/lib/reference-codes";
 import {
   PDFDocument,
@@ -273,6 +274,7 @@ export function buildQuotationDocumentFromDetail(
     abn?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
+    timezone?: string | null;
   },
 ): QuotationDocumentData {
   const gstPercentage = branding.registeredForGst
@@ -284,9 +286,9 @@ export function buildQuotationDocumentFromDetail(
 
   const quoteDate = quotation.createdAt
     ? formatQuoteDate(
-        new Date(quotation.createdAt).toISOString().slice(0, 10),
+        platformTodayIso(new Date(quotation.createdAt), branding.timezone),
       )
-    : formatQuoteDate(new Date().toISOString().slice(0, 10));
+    : formatQuoteDate(platformTodayIso(new Date(), branding.timezone));
 
   const totalAud = quotation.finalPriceAud || totals.totalAud;
 
@@ -296,6 +298,9 @@ export function buildQuotationDocumentFromDetail(
     validUntil: quotation.validUntil,
     serviceTitle: quotation.serviceTitle?.trim()
       ? quotation.serviceTitle.trim()
+      : null,
+    serviceDescription: quotation.serviceDescription?.trim()
+      ? quotation.serviceDescription.trim()
       : null,
     customer: quotation.customer,
     customerAddress: quotation.address,
@@ -544,9 +549,22 @@ export async function generateDocumentPdf(
   y -= cardH + 16;
 
   // ── Service strip ──
-  if (data.serviceTitle) {
-    ensureSpace(40);
-    const serviceH = 34;
+  if (data.serviceTitle || data.serviceDescription?.trim()) {
+    const titleLines = data.serviceTitle
+      ? wrapText(data.serviceTitle, fontBold, 10.5, CONTENT_WIDTH - 28)
+      : [];
+    const descriptionLines = data.serviceDescription?.trim()
+      ? wrapText(data.serviceDescription, font, 8.5, CONTENT_WIDTH - 28)
+      : [];
+    const serviceH = Math.max(
+      34,
+      24 +
+        titleLines.length * 13 +
+        (descriptionLines.length > 0
+          ? 4 + descriptionLines.length * 11
+          : 0),
+    );
+    ensureSpace(serviceH + 10);
     page.drawRectangle({
       x: MARGIN,
       y: y - serviceH,
@@ -569,10 +587,24 @@ export async function generateDocumentPdf(
       bold: true,
       color: MUTED,
     });
-    drawText(data.serviceTitle, MARGIN + 14, y - 26, {
-      size: 10.5,
-      bold: true,
+    let serviceY = y - 26;
+    titleLines.forEach((line) => {
+      drawText(line, MARGIN + 14, serviceY, {
+        size: 10.5,
+        bold: true,
+      });
+      serviceY -= 13;
     });
+    if (descriptionLines.length > 0) {
+      serviceY -= titleLines.length > 0 ? 1 : 0;
+      descriptionLines.forEach((line) => {
+        drawText(line, MARGIN + 14, serviceY, {
+          size: 8.5,
+          color: MUTED,
+        });
+        serviceY -= 11;
+      });
+    }
     y -= serviceH + 10;
   }
 
@@ -777,7 +809,10 @@ export async function generateDocumentPdf(
     if (data.gstAud > 0) h += 18;
     h += 4 + 28; // spacer + total bar
     if (data.deposit) {
-      h += 18 + 12 + 16 + 28; // deposit row, due line, spacer, balance bar
+      h += 18 + 12; // deposit row and due line
+      if (kind === "invoice") {
+        h += 16 + 28; // spacer + balance bar
+      }
     }
     h += 10; // bottom padding
     return h;
@@ -848,10 +883,6 @@ export async function generateDocumentPdf(
         : kind === "invoice"
           ? "Deposit not paid"
           : "Deposit due";
-      const depositBalanceDueAud =
-        kind === "invoice" && !data.deposit.paid
-          ? data.totalAud
-          : data.deposit.balanceDueAud;
 
       drawText(depositLabel, panelX + 12, ty, {
         size: 9.5,
@@ -871,25 +902,30 @@ export async function generateDocumentPdf(
         color: MUTED,
         maxWidth: panelW - 24,
       });
-      ty -= 16;
-      page.drawRectangle({
-        x: panelX,
-        y: ty - 22,
-        width: panelW,
-        height: 28,
-        color: BRAND,
-      });
-      drawText("Balance due", panelX + 12, ty - 8, {
-        size: 11,
-        bold: true,
-        color: WHITE,
-      });
-      drawNumberRight(
-        formatQuoteMoney(depositBalanceDueAud),
-        panelX + panelW - 12,
-        ty - 9,
-        { size: 12, bold: true, color: WHITE },
-      );
+      if (kind === "invoice") {
+        const depositBalanceDueAud = data.deposit.paid
+          ? data.deposit.balanceDueAud
+          : data.totalAud;
+        ty -= 16;
+        page.drawRectangle({
+          x: panelX,
+          y: ty - 22,
+          width: panelW,
+          height: 28,
+          color: BRAND,
+        });
+        drawText("Balance due", panelX + 12, ty - 8, {
+          size: 11,
+          bold: true,
+          color: WHITE,
+        });
+        drawNumberRight(
+          formatQuoteMoney(depositBalanceDueAud),
+          panelX + panelW - 12,
+          ty - 9,
+          { size: 12, bold: true, color: WHITE },
+        );
+      }
     }
   };
 
@@ -1056,6 +1092,7 @@ export async function generateQuotationPdf(
     registeredForGst?: boolean;
     gstPercentage?: number | null;
     inspectionRequestCode?: string | null;
+    timezone?: string | null;
   } = {},
 ): Promise<Buffer> {
   const data = buildQuotationDocumentFromDetail(quotation, options);

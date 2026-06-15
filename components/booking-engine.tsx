@@ -113,6 +113,7 @@ export function BookingEngine({ business, services }: Props) {
               slug={business.slug}
               businessName={business.businessName}
               services={services}
+              timeZone={business.timezone}
               reducedMotion={!!reducedMotion}
               phoneHref={phoneHref}
               emailHref={emailHref}
@@ -668,14 +669,18 @@ const TIME_RANGE_OPTIONS: {
   { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
 ];
 
-function formatPrettyDate(iso: string): string {
+function formatPrettyDate(iso: string, timeZone?: string | null): string {
   if (!iso) return "";
-  return formatIsoDateInPlatformTimeZone(iso, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatIsoDateInPlatformTimeZone(
+    iso,
+    {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    },
+    timeZone,
+  );
 }
 
 function sortPreferredSlots(slots: PreferredSlot[]): PreferredSlot[] {
@@ -743,6 +748,7 @@ function ServiceBookingFlow({
   slug,
   businessName,
   services,
+  timeZone,
   phoneHref,
   emailHref,
   reducedMotion,
@@ -750,6 +756,7 @@ function ServiceBookingFlow({
   slug: string;
   businessName: string;
   services: BookingService[];
+  timeZone: string;
   phoneHref: string | null;
   emailHref: string | null;
   reducedMotion: boolean;
@@ -801,7 +808,7 @@ function ServiceBookingFlow({
 
   const profileLocked = isAuthenticated;
 
-  const minDate = useMemo(() => todayIso(), []);
+  const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
   const selectedService =
     services.find((service) => service.id === selectedServiceId) ?? null;
 
@@ -1000,6 +1007,7 @@ function ServiceBookingFlow({
         selectedServiceName={selectedService?.name ?? customTitle}
         address={address}
         preferredSlots={preferredSlots}
+        timeZone={timeZone}
         phoneHref={phoneHref}
         emailHref={emailHref}
         reducedMotion={reducedMotion}
@@ -1233,6 +1241,7 @@ function ServiceBookingFlow({
               onToggle={togglePreferredDay}
               label="Pick up to 3 days"
               dayStripLayout="fit"
+              timeZone={timeZone}
             />
             {selectedPreferredDates.length > 0 ? (
               <p className="mt-3 font-body text-[12px] text-on-surface-variant">
@@ -1270,7 +1279,7 @@ function ServiceBookingFlow({
                             schedule
                           </span>
                         </span>
-                        {formatPrettyDate(slot.date)}
+                        {formatPrettyDate(slot.date, timeZone)}
                       </p>
                       <DayTimePicker
                         timeRange={slot.timeRange}
@@ -1282,7 +1291,7 @@ function ServiceBookingFlow({
                         <span className="material-symbols-outlined text-[16px] text-primary">
                           event_available
                         </span>
-                        {formatPrettyDate(slot.date)}
+                        {formatPrettyDate(slot.date, timeZone)}
                         {selectedTimeLabel ? (
                           <>
                             <span className="text-on-surface-variant">·</span>
@@ -1556,6 +1565,7 @@ function SubmittedConfirmation({
   selectedServiceName,
   address,
   preferredSlots,
+  timeZone,
   phoneHref,
   emailHref,
   reducedMotion,
@@ -1565,6 +1575,7 @@ function SubmittedConfirmation({
   selectedServiceName: string;
   address: ServiceAddress;
   preferredSlots: PreferredSlot[];
+  timeZone: string;
   phoneHref: string | null;
   emailHref: string | null;
   reducedMotion: boolean;
@@ -1605,7 +1616,7 @@ function SubmittedConfirmation({
                   <span className="material-symbols-outlined text-[16px] text-primary">
                     event_available
                   </span>
-                  {formatPrettyDate(slot.date)} · {slot.timeRange}
+                  {formatPrettyDate(slot.date, timeZone)} · {slot.timeRange}
                 </li>
               ))}
             </ul>
