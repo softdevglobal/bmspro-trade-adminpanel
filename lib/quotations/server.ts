@@ -2074,6 +2074,50 @@ export async function listBusinessQuotations(
   return enrichQuotationsWithInvoices(enriched);
 }
 
+/** Lists quotations created by a specific staff member (newest first). */
+export async function listStaffQuotations(
+  businessId: string,
+  createdBy: string,
+): Promise<QuotationDetail[]> {
+  const snapshot = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .where("businessId", "==", businessId)
+    .where("createdBy", "==", createdBy)
+    .orderBy("createdAt", "desc")
+    .limit(QUOTATION_LIST_LIMIT)
+    .get();
+
+  const quotations = snapshot.docs.map((doc) =>
+    mapQuotationDoc(doc.id, doc.data() ?? {}),
+  );
+  const enriched = await enrichQuotationsFromInspections(quotations);
+  const { enrichQuotationsWithInvoices } = await import(
+    "@/lib/invoices/enrich-quotations"
+  );
+  return enrichQuotationsWithInvoices(enriched);
+}
+
+/** Staff-scoped list with indexed query, falling back to in-memory filter. */
+export async function listQuotationsForMember(
+  businessId: string,
+  memberUid: string,
+): Promise<QuotationDetail[]> {
+  const uid = memberUid.trim();
+  if (!uid) return [];
+
+  try {
+    const staffList = await listStaffQuotations(businessId, uid);
+    return staffList.filter((quotation) => quotation.createdBy === uid);
+  } catch (error) {
+    console.error(
+      "listStaffQuotations failed, filtering business list in memory:",
+      error,
+    );
+    const all = await listBusinessQuotations(businessId);
+    return all.filter((quotation) => quotation.createdBy === uid);
+  }
+}
+
 async function applyQuotationCustomerDecision(
   requestSnap: FirebaseFirestore.DocumentSnapshot,
   quotationId: string,

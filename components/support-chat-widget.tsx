@@ -14,6 +14,7 @@ import {
   type UnifiedChatSnapshot,
   type UnifiedChatSubscription,
 } from "@/lib/unifiedWorkshopChatClient";
+import { useRightDrawerInset } from "@/lib/ui/right-drawer-slot";
 import {
   useCallback,
   useEffect,
@@ -390,7 +391,16 @@ export function SupportChatWidget() {
     ],
   );
 
-  if (!eligible) return null;
+  const drawerInset = useRightDrawerInset();
+  const hasDrawer = drawerInset > 0;
+
+  useEffect(() => {
+    if (hasDrawer && open) {
+      closeChat();
+    }
+  }, [hasDrawer, open, closeChat]);
+
+  if (!eligible || hasDrawer) return null;
 
   const showBadge = !open && snapshot.unreadCount > 0;
 

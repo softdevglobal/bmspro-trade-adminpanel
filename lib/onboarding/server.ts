@@ -510,9 +510,24 @@ export async function requireBusinessMember(req: Request): Promise<
 
   try {
     const decoded = await adminAuth.verifyIdToken(match[1]);
-    const businessId =
+    let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
-    const role = decoded.role;
+    let role = typeof decoded.role === "string" ? decoded.role : null;
+
+    if (!businessId || !role) {
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      if (userSnap.exists) {
+        const data = userSnap.data() ?? {};
+        if (!businessId && typeof data.businessId === "string") {
+          businessId = data.businessId;
+        }
+        if (!role && typeof data.role === "string") {
+          role = data.role;
+        }
+      }
+    }
+
+    if (role === "business_owner") role = "owner";
 
     if (
       !businessId ||
@@ -530,7 +545,7 @@ export async function requireBusinessMember(req: Request): Promise<
       uid: decoded.uid,
       email: decoded.email,
       businessId,
-      role: typeof role === "string" ? role : "staff",
+      role,
     };
   } catch {
     return { ok: false, status: 401, error: "Invalid or expired session." };

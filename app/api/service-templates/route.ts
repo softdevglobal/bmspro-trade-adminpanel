@@ -5,10 +5,11 @@
  *       Business owner: active templates matching their business trade type.
  */
 
+import { requireBusinessMember } from "@/lib/onboarding/server";
 import {
   getBusinessTradeType,
   listServiceTemplates,
-  requireSession,
+  requireSuperAdmin,
 } from "@/lib/onboarding/services/server";
 import { NextResponse } from "next/server";
 
@@ -19,36 +20,37 @@ export const runtime = "nodejs";
  * trade type plus their businessType in the response.
  */
 export async function GET(request: Request) {
-  const auth = await requireSession(request);
-  if (!auth.ok) {
+  const superAdmin = await requireSuperAdmin(request);
+  if (!superAdmin.ok) {
+    const member = await requireBusinessMember(request);
+    if (member.ok) {
+      const businessType = await getBusinessTradeType(member.businessId);
+      if (!businessType) {
+        return NextResponse.json(
+          { ok: false, error: "Could not load your business trade type." },
+          { status: 400 },
+        );
+      }
+
+      const result = await listServiceTemplates({
+        activeOnly: true,
+        businessType,
+      });
+      if (!result.ok) {
+        return NextResponse.json(result, { status: 500 });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        templates: result.templates,
+        businessType,
+      });
+    }
+
     return NextResponse.json(
-      { ok: false, error: auth.error },
-      { status: auth.status },
+      { ok: false, error: member.error },
+      { status: member.status },
     );
-  }
-
-  if (auth.role === "business_owner") {
-    const businessType = await getBusinessTradeType(auth.businessId);
-    if (!businessType) {
-      return NextResponse.json(
-        { ok: false, error: "Could not load your business trade type." },
-        { status: 400 },
-      );
-    }
-
-    const result = await listServiceTemplates({
-      activeOnly: true,
-      businessType,
-    });
-    if (!result.ok) {
-      return NextResponse.json(result, { status: 500 });
-    }
-
-    return NextResponse.json({
-      ok: true,
-      templates: result.templates,
-      businessType,
-    });
   }
 
   const result = await listServiceTemplates();

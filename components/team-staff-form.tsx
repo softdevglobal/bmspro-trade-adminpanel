@@ -8,6 +8,7 @@ import {
 } from "@/lib/phone/au-phone";
 import { useAuth } from "@/lib/auth/auth-context";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const STEPS = ["Details", "Role & areas", "Review"] as const;
@@ -1540,6 +1541,9 @@ function StaffDetailDrawer({
   onEdit: (member: StaffMember) => void;
   onToggleStatus: (member: StaffMember) => void;
 }) {
+  const open = member !== null;
+  useRegisterRightDrawer(open, "md");
+
   useEffect(() => {
     if (!member) return;
 

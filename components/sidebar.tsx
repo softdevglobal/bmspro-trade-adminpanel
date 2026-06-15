@@ -26,6 +26,11 @@ type NavItem = {
   businessOwner?: boolean;
   /** When set, only these dashboard roles see the link. */
   roles?: Exclude<AuthRole, null>[];
+  children?: Array<{
+    href: string;
+    label: string;
+    icon: string;
+  }>;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -66,6 +71,18 @@ const NAV_ITEMS: NavItem[] = [
     label: "Team",
     icon: "groups",
     businessOwner: true,
+    children: [
+      {
+        href: "/dashboard/team/management",
+        label: "Team management",
+        icon: "manage_accounts",
+      },
+      {
+        href: "/dashboard/team/attendance",
+        label: "Attendance",
+        icon: "schedule",
+      },
+    ],
   },
   {
     href: "/dashboard/customers",
@@ -135,12 +152,34 @@ export function Sidebar({
           : "User";
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>({});
+  const [flyoutGroup, setFlyoutGroup] = useState<string | null>(null);
 
   const showLabels = isExpanded || isMobileOpen;
 
   useEffect(() => {
+    if (pathname.startsWith("/dashboard/team")) {
+      setOpenNavGroups((current) =>
+        current.Team ? current : { ...current, Team: true },
+      );
+    }
+  }, [pathname]);
+
+  useEffect(() => {
     onCloseMobile();
+    setFlyoutGroup(null);
   }, [pathname, onCloseMobile]);
+
+  function isGroupOpen(label: string) {
+    return openNavGroups[label] === true;
+  }
+
+  function toggleNavGroup(label: string) {
+    setOpenNavGroups((current) => ({
+      ...current,
+      [label]: !current[label],
+    }));
+  }
 
   async function confirmSignOut() {
     setIsSigningOut(true);
@@ -152,15 +191,29 @@ export function Sidebar({
     }
   }
 
-  function navItemClass(isActive: boolean) {
+  function navItemClass(isActive: boolean, isChild = false) {
+    const padding = isChild ? "pl-9 pr-3" : "px-3";
+    const base = `box-border flex h-10 min-h-10 max-h-10 w-full shrink-0 items-center justify-start gap-2.5 rounded-xl ${padding} text-left transition-[background-color,color,box-shadow] duration-300 ease-out`;
     if (showLabels) {
       return isActive
-        ? "flex h-11 w-full items-center gap-3 rounded-xl bg-on-primary-fixed-variant px-3 text-primary-fixed-dim shadow-md transition-all duration-200"
-        : "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-outline-variant transition-all duration-200 hover:bg-on-secondary-fixed-variant hover:text-surface-bright";
+        ? `${base} bg-on-primary-fixed-variant text-primary-fixed-dim shadow-sm`
+        : `${base} bg-transparent text-outline-variant hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright`;
     }
     return isActive
-      ? "flex h-12 w-12 items-center justify-center rounded-xl bg-on-primary-fixed-variant text-primary-fixed-dim shadow-md transition-all duration-200"
-      : "flex h-12 w-12 items-center justify-center rounded-xl text-outline-variant transition-all duration-200 hover:bg-on-secondary-fixed-variant hover:text-surface-bright";
+      ? "box-border flex h-11 min-h-11 max-h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-on-primary-fixed-variant text-primary-fixed-dim shadow-sm transition-[background-color,color,box-shadow] duration-300 ease-out"
+      : "box-border flex h-11 min-h-11 max-h-11 w-11 shrink-0 items-center justify-center rounded-xl text-outline-variant transition-[background-color,color] duration-300 ease-out hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright";
+  }
+
+  function navIconClass(isActive: boolean, isChild = false) {
+    return `material-symbols-outlined block shrink-0 ${
+      isChild ? "text-[20px]" : "text-[22px]"
+    } ${isActive ? "material-symbols-filled" : ""}`;
+  }
+
+  function navLabelClass(isChild = false) {
+    return `min-w-0 flex-1 truncate font-body font-medium ${
+      isChild ? "text-[13px]" : "text-[14px]"
+    }`;
   }
 
   return (
@@ -186,7 +239,7 @@ export function Sidebar({
       >
         {/* Header: logo + expand toggle (desktop) */}
         <div
-          className={`mb-6 mt-2 flex shrink-0 items-center px-3 ${
+          className={`mb-4 mt-2 flex shrink-0 items-center px-3 ${
             showLabels ? "justify-between gap-2" : "justify-center"
           }`}
         >
@@ -219,7 +272,7 @@ export function Sidebar({
         </div>
 
         <nav
-          className={`flex flex-1 flex-col gap-1 overflow-y-auto ${
+          className={`flex flex-1 flex-col gap-0.5 overflow-y-auto [scrollbar-gutter:stable] ${
             showLabels ? "px-3" : "items-center px-2"
           }`}
         >
@@ -231,20 +284,19 @@ export function Sidebar({
             if (item.businessOwner && role !== "business_owner") return false;
             return true;
           }).map((item) => {
-            const isActive = isNavItemActive(pathname, item.href);
+            const childItems = item.children ?? [];
+            const hasChildren = childItems.length > 0;
+            const isActive = hasChildren
+              ? false
+              : isNavItemActive(pathname, item.href);
+            const groupOpen = hasChildren ? isGroupOpen(item.label) : false;
             const showPendingBadge =
               item.href === "/dashboard/requests" && pendingRequestCount > 0;
 
             const inner = (
               <>
                 <span className="relative shrink-0">
-                  <span
-                    className={`material-symbols-outlined block text-[22px] ${
-                      isActive ? "material-symbols-filled" : ""
-                    }`}
-                  >
-                    {item.icon}
-                  </span>
+                  <span className={navIconClass(isActive)}>{item.icon}</span>
                   {showPendingBadge && !showLabels ? (
                     <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 font-body text-[9px] font-bold text-white ring-2 ring-on-background">
                       {pendingRequestCount > 9 ? "9+" : pendingRequestCount}
@@ -252,7 +304,7 @@ export function Sidebar({
                   ) : null}
                 </span>
                 {showLabels && (
-                  <span className="min-w-0 flex-1 truncate font-body text-[14px] font-medium">
+                  <span className={navLabelClass()}>
                     {item.href === "/dashboard" && role === "super_admin"
                       ? "Overview"
                       : item.label}
@@ -261,6 +313,15 @@ export function Sidebar({
                 {showPendingBadge && showLabels ? (
                   <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white">
                     {pendingRequestCount > 99 ? "99+" : pendingRequestCount}
+                  </span>
+                ) : null}
+                {hasChildren && showLabels ? (
+                  <span
+                    className={`material-symbols-outlined ml-auto shrink-0 text-[22px] leading-none transition-transform duration-300 ease-in-out ${
+                      groupOpen ? "rotate-180" : ""
+                    }`}
+                  >
+                    expand_more
                   </span>
                 ) : null}
                 {!showLabels && (
@@ -287,6 +348,105 @@ export function Sidebar({
                 >
                   {inner}
                 </span>
+              );
+            }
+
+            if (hasChildren) {
+              const childLinks = childItems.map((child) => {
+                const childActive = isNavItemActive(pathname, child.href);
+                return (
+                  <Link
+                    key={child.href}
+                    href={child.href}
+                    title={child.label}
+                    onClick={() => {
+                      onCloseMobile();
+                      setFlyoutGroup(null);
+                    }}
+                    className={navItemClass(childActive, true)}
+                  >
+                    <span className={navIconClass(childActive, true)}>
+                      {child.icon}
+                    </span>
+                    <span className={navLabelClass(true)}>{child.label}</span>
+                  </Link>
+                );
+              });
+
+              return (
+                <div key={item.label} className="relative flex flex-col gap-0.5">
+                  <button
+                    type="button"
+                    title={item.label}
+                    aria-expanded={groupOpen || flyoutGroup === item.label}
+                    onClick={() => {
+                      if (showLabels) {
+                        toggleNavGroup(item.label);
+                        return;
+                      }
+                      setFlyoutGroup((current) =>
+                        current === item.label ? null : item.label,
+                      );
+                    }}
+                    className={`${className} m-0 cursor-pointer border-0 font-inherit leading-none outline-none focus-visible:ring-2 focus-visible:ring-primary/30`}
+                  >
+                    {inner}
+                  </button>
+
+                  {showLabels ? (
+                    <div
+                      className={`ml-1 flex flex-col gap-0.5 overflow-hidden border-l border-on-secondary-fixed-variant/30 pl-1 transition-[max-height,opacity] duration-300 ease-in-out ${
+                        groupOpen
+                          ? "max-h-24 opacity-100"
+                          : "pointer-events-none max-h-0 opacity-0"
+                      }`}
+                      aria-hidden={!groupOpen}
+                    >
+                      {childLinks}
+                    </div>
+                  ) : null}
+
+                  {!showLabels && flyoutGroup === item.label ? (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Close team menu"
+                        className="fixed inset-0 z-40 lg:hidden"
+                        onClick={() => setFlyoutGroup(null)}
+                      />
+                      <div className="absolute left-full top-0 z-50 ml-2 min-w-[210px] rounded-xl border border-on-secondary-fixed-variant/30 bg-on-background py-2 shadow-xl">
+                        <p className="px-4 pb-2 font-body text-[11px] font-bold uppercase tracking-wider text-outline-variant">
+                          {item.label}
+                        </p>
+                        {childItems.map((child) => {
+                          const childActive = isNavItemActive(
+                            pathname,
+                            child.href,
+                          );
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              title={child.label}
+                              onClick={() => {
+                                onCloseMobile();
+                                setFlyoutGroup(null);
+                              }}
+                              className={navItemClass(childActive, true)}
+                            >
+                              <span className={navIconClass(childActive, true)}>
+                                {child.icon}
+                              </span>
+                              <span className={navLabelClass(true)}>
+                                {child.label}
+                              </span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
               );
             }
 
@@ -329,7 +489,7 @@ export function Sidebar({
         </div>
 
         <div
-          className={`flex shrink-0 flex-col gap-2 border-t border-on-secondary-fixed-variant/30 pt-4 ${
+          className={`flex shrink-0 flex-col gap-1 border-t border-on-secondary-fixed-variant/30 pt-3 ${
             showLabels ? "px-3" : "items-center px-2"
           }`}
         >
@@ -339,8 +499,8 @@ export function Sidebar({
             title="Sign out"
             className={
               showLabels
-                ? "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-outline-variant transition-all hover:bg-on-secondary-fixed-variant hover:text-surface-bright"
-                : "flex h-12 w-12 items-center justify-center rounded-xl text-outline-variant transition-all hover:bg-on-secondary-fixed-variant hover:text-surface-bright"
+                ? "flex h-10 w-full items-center gap-2.5 rounded-xl px-3 text-outline-variant transition-[background-color,color] duration-300 ease-out hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright"
+                : "flex h-11 w-11 items-center justify-center rounded-xl text-outline-variant transition-[background-color,color] duration-300 ease-out hover:bg-on-secondary-fixed-variant/80 hover:text-surface-bright"
             }
           >
             <span className="material-symbols-outlined shrink-0 text-[22px]">

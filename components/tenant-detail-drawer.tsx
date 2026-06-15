@@ -6,6 +6,7 @@ import {
   type TenantDetail,
 } from "@/lib/onboarding/tenant-display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 
@@ -37,6 +38,7 @@ const panelTransition = {
 
 export function TenantDetailDrawer({ tenant, onClose }: Props) {
   const open = tenant !== null;
+  useRegisterRightDrawer(open, "md");
 
   useEffect(() => {
     if (!open) return;

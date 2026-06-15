@@ -32,6 +32,7 @@ import {
 } from "@/lib/quotations/actions";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -540,6 +541,7 @@ function QuotationPreviewDrawer({
   timeZone?: string | null;
 }) {
   const open = quotation !== null;
+  useRegisterRightDrawer(open, "lg");
 
   return (
     <AnimatePresence>
