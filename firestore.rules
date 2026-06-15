@@ -382,6 +382,12 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Subscription plan catalog — public read for onboarding; writes via Admin SDK.
+    match /subscription_plans/{planId} {
+      allow read: if true;
+      allow create, update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();

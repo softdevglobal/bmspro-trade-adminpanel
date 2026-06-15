@@ -6,12 +6,16 @@ import {
 } from "@/lib/onboarding/booking-slug";
 import {
   validateOnboardingPayload,
-  SUBSCRIPTION_PLANS,
   ADMIN_CREATED_DEFAULT_PASSWORD,
   type OnboardingPayload,
   type TenantSource,
   type TenantStatus,
 } from "@/lib/onboarding/types";
+import {
+  buildTenantSubscriptionFields,
+  getSubscriptionPlanById,
+} from "@/lib/subscription-plans/server";
+import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import { sendOwnerWelcomeEmail } from "@/lib/email/templates";
 import {
   findStaffOwnerPhoneConflict,
@@ -91,6 +95,20 @@ export async function requireSuperAdmin(req: Request): Promise<
   }
 }
 
+async function resolveOnboardingPlan(
+  selectedPlanId: string,
+  options: { allowHidden?: boolean },
+): Promise<{ ok: true; plan: SubscriptionPlan } | { ok: false; error: string }> {
+  const plan = await getSubscriptionPlanById(selectedPlanId);
+  if (!plan || !plan.active) {
+    return { ok: false, error: "Please select a valid subscription plan." };
+  }
+  if (plan.hidden && !options.allowHidden) {
+    return { ok: false, error: "This plan is not available for signup." };
+  }
+  return { ok: true, plan };
+}
+
 export async function createTenantFromPayload(
   raw: Partial<OnboardingPayload>,
   options: CreateTenantOptions
@@ -100,7 +118,14 @@ export async function createTenantFromPayload(
     return { ok: false, error: validated.error };
   }
 
-  return createTenantWithOwnerAccount(validated.value, {
+  const planResult = await resolveOnboardingPlan(validated.value.selectedPlanId, {
+    allowHidden: true,
+  });
+  if (!planResult.ok) {
+    return { ok: false, error: planResult.error };
+  }
+
+  return createTenantWithOwnerAccount(validated.value, planResult.plan, {
     password: ADMIN_CREATED_DEFAULT_PASSWORD,
     status: options.status,
     source: options.source,
@@ -111,6 +136,7 @@ export async function createTenantFromPayload(
 
 async function createTenantWithOwnerAccount(
   value: OnboardingPayload,
+  selectedPlan: SubscriptionPlan,
   options: {
     password: string;
     status: TenantStatus;
@@ -162,16 +188,18 @@ async function createTenantWithOwnerAccount(
       businessId: tenantId,
     });
 
+    const subscriptionFields = buildTenantSubscriptionFields(selectedPlan);
     const batch = adminDb.batch();
     batch.set(
       businessRef,
-      businessDocument(businessRef, value, {
+      businessDocument(businessRef, value, selectedPlan, {
         status: options.status,
         source: options.source,
         ownerUid: uid,
         bookingSlug,
         createdByUid: options.createdByUid ?? null,
         createdByEmail: options.createdByEmail ?? null,
+        subscriptionFields: subscriptionFields.business,
       })
     );
     batch.set(adminDb.collection("users").doc(uid), {
@@ -180,21 +208,19 @@ async function createTenantWithOwnerAccount(
       fullName: value.ownerFullName || null,
       businessId: tenantId,
       role: "owner",
+      ...subscriptionFields.ownerUser,
       createdAt: now,
       updatedAt: now,
     });
     await batch.commit();
 
-    const planName =
-      SUBSCRIPTION_PLANS.find((p) => p.id === value.selectedPlanId)?.name ??
-      null;
     await sendOwnerWelcomeEmail({
       email: value.accountEmail,
       phone: value.businessPhone || null,
       ownerName: value.ownerFullName || null,
       businessName: value.businessName,
       bookingSlug,
-      planName,
+      planName: selectedPlan.name,
       logoUrl: value.logoUrl ?? null,
       temporaryPassword:
         options.source === "super_admin_create"
@@ -231,6 +257,7 @@ async function createTenantWithOwnerAccount(
 function businessDocument(
   ref: DocumentReference,
   value: OnboardingPayload,
+  _selectedPlan: SubscriptionPlan,
   options: {
     status: TenantStatus;
     source: TenantSource;
@@ -238,9 +265,9 @@ function businessDocument(
     bookingSlug: string;
     createdByUid?: string | null;
     createdByEmail?: string | null;
+    subscriptionFields: Record<string, unknown>;
   }
 ) {
-  const selectedPlan = SUBSCRIPTION_PLANS.find((p) => p.id === value.selectedPlanId);
   const now = FieldValue.serverTimestamp();
 
   return {
@@ -267,15 +294,7 @@ function businessDocument(
       fullName: value.ownerFullName || null,
       email: value.accountEmail,
     },
-    plan: selectedPlan
-      ? {
-          id: selectedPlan.id,
-          name: selectedPlan.name,
-          price: selectedPlan.price,
-          period: selectedPlan.period,
-          trialDays: selectedPlan.trialDays,
-        }
-      : null,
+    ...options.subscriptionFields,
     status: options.status,
     source: options.source,
     isActive: options.status === "active",
@@ -648,7 +667,14 @@ export async function registerSelfSignupTenant(
   const value = validated.value;
   const password = value.password!;
 
-  return createTenantWithOwnerAccount(value, {
+  const planResult = await resolveOnboardingPlan(value.selectedPlanId, {
+    allowHidden: false,
+  });
+  if (!planResult.ok) {
+    return { ok: false, error: planResult.error };
+  }
+
+  return createTenantWithOwnerAccount(value, planResult.plan, {
     password,
     status: "active",
     source: "self_signup",

@@ -86,6 +86,12 @@ const NAV_ITEMS: NavItem[] = [
     superAdmin: true,
   },
   {
+    href: "/dashboard/packages",
+    label: "Packages",
+    icon: "inventory_2",
+    superAdmin: true,
+  },
+  {
     href: "/dashboard/audit-log",
     label: "Audit logs",
     icon: "history",

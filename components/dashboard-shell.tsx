@@ -16,6 +16,7 @@ const PAGE_ICONS: Record<string, string> = {
   Services: "settings_suggest",
   Settings: "settings",
   Tenants: "domain",
+  Packages: "inventory_2",
   "Audit logs": "history",
 };
 
