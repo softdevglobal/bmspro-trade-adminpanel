@@ -8,6 +8,7 @@ import { formatAddress } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
+import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
@@ -93,6 +94,7 @@ function InvoiceCard({
   const editDraftHref = `/dashboard/invoices?invoice=${encodeURIComponent(
     invoice.id,
   )}`;
+  const displayPhone = formatAuPhoneDisplay(invoice.customer.phone);
 
   return (
     <div
@@ -145,7 +147,7 @@ function InvoiceCard({
         Service: {invoice.serviceTitle || "Invoice"}
       </p>
       <p className="font-body text-[13px] text-on-surface-variant">
-        {invoice.customer.phone}
+        {displayPhone || "—"}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
         {formatAddress(invoice.address)}
@@ -191,6 +193,12 @@ function InvoicePreviewDrawer({
   const editDraftHref = invoice
     ? `/dashboard/invoices?invoice=${encodeURIComponent(invoice.id)}`
     : "/dashboard/invoices";
+  const displayPhone = invoice
+    ? formatAuPhoneDisplay(invoice.customer.phone)
+    : "";
+  const contactLine = invoice
+    ? [displayPhone, invoice.customer.email].filter(Boolean).join(" · ") || "—"
+    : "—";
 
   function closePdf() {
     setPdfOpen(false);
@@ -345,8 +353,7 @@ function InvoicePreviewDrawer({
                   {invoice.customer.fullName}
                 </p>
                 <p className="mt-1 font-body text-[13px] text-on-surface-variant">
-                  {invoice.customer.phone}
-                  {invoice.customer.email ? ` · ${invoice.customer.email}` : ""}
+                  {contactLine}
                 </p>
                 <p className="mt-2 font-body text-[13px] text-on-surface">
                   {formatAddress(invoice.address)}
