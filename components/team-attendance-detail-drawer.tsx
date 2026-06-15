@@ -5,6 +5,7 @@ import {
   type AttendanceBreakPeriod,
 } from "@/lib/team/attendance";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect } from "react";
 
@@ -76,6 +77,7 @@ export function TeamAttendanceDetailDrawer({
   onClose,
 }: Props) {
   const open = record !== null;
+  useRegisterRightDrawer(open, "md");
 
   useEffect(() => {
     if (!open) return;

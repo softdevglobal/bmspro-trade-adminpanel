@@ -23,6 +23,7 @@ import {
 } from "@/lib/team/use-business-staff-summary";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -189,6 +190,7 @@ function BookingPreviewDrawer({
   timeZone?: string | null;
 }) {
   const open = booking !== null;
+  useRegisterRightDrawer(open, "lg");
 
   return (
     <AnimatePresence>

@@ -45,6 +45,7 @@ import {
   displayBookingCode,
   displayQuotationCode,
 } from "@/lib/reference-codes";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -679,6 +680,7 @@ function RequestDetailDrawer({
   onUpdated: (next: InspectionRequestDetail) => void;
 }) {
   const open = request !== null;
+  useRegisterRightDrawer(open, "lg");
 
   return (
     <AnimatePresence>

@@ -8,6 +8,7 @@ import { formatAddress } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
+import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -186,6 +187,7 @@ function InvoicePreviewDrawer({
   const [markPaidLoading, setMarkPaidLoading] = useState(false);
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
   const open = invoice !== null;
+  useRegisterRightDrawer(open, "lg");
   const editDraftHref = invoice
     ? `/dashboard/invoices?invoice=${encodeURIComponent(invoice.id)}`
     : "/dashboard/invoices";

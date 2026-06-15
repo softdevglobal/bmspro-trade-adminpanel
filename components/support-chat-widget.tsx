@@ -14,6 +14,7 @@ import {
   type UnifiedChatSnapshot,
   type UnifiedChatSubscription,
 } from "@/lib/unifiedWorkshopChatClient";
+import { useRightDrawerInset } from "@/lib/ui/right-drawer-slot";
 import {
   useCallback,
   useEffect,
@@ -390,7 +391,16 @@ export function SupportChatWidget() {
     ],
   );
 
-  if (!eligible) return null;
+  const drawerInset = useRightDrawerInset();
+  const hasDrawer = drawerInset > 0;
+
+  useEffect(() => {
+    if (hasDrawer && open) {
+      closeChat();
+    }
+  }, [hasDrawer, open, closeChat]);
+
+  if (!eligible || hasDrawer) return null;
 
   const showBadge = !open && snapshot.unreadCount > 0;
 
@@ -399,13 +409,13 @@ export function SupportChatWidget() {
       {open ? (
         <button
           type="button"
-          className="fixed inset-0 z-[104] cursor-default border-0 bg-black/20 p-0"
+          className="fixed inset-0 z-[59] cursor-default border-0 bg-black/20 p-0"
           aria-label="Close chat"
           onClick={closeChat}
         />
       ) : null}
 
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[105] flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
         {open ? (
           <div
             key={panelKey}
