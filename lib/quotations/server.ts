@@ -2097,6 +2097,27 @@ export async function listStaffQuotations(
   return enrichQuotationsWithInvoices(enriched);
 }
 
+/** Staff-scoped list with indexed query, falling back to in-memory filter. */
+export async function listQuotationsForMember(
+  businessId: string,
+  memberUid: string,
+): Promise<QuotationDetail[]> {
+  const uid = memberUid.trim();
+  if (!uid) return [];
+
+  try {
+    const staffList = await listStaffQuotations(businessId, uid);
+    return staffList.filter((quotation) => quotation.createdBy === uid);
+  } catch (error) {
+    console.error(
+      "listStaffQuotations failed, filtering business list in memory:",
+      error,
+    );
+    const all = await listBusinessQuotations(businessId);
+    return all.filter((quotation) => quotation.createdBy === uid);
+  }
+}
+
 async function applyQuotationCustomerDecision(
   requestSnap: FirebaseFirestore.DocumentSnapshot,
   quotationId: string,

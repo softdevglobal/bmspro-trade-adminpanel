@@ -9,6 +9,7 @@ import {
   getBusinessQuotationById,
   listBusinessQuotations,
   listQuotationsForInspection,
+  listQuotationsForMember,
   listStaffQuotations,
 } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
@@ -78,6 +79,7 @@ async function requireQuotationAuthor(request: Request) {
       name: typeof decoded.name === "string" ? decoded.name : null,
       role,
       businessId,
+      restrictToOwnQuotations: role === "staff",
     };
   } catch {
     return {
@@ -94,6 +96,7 @@ type QuotationAuthor = {
   name: string | null;
   role: string | null;
   businessId: string;
+  restrictToOwnQuotations: boolean;
 };
 
 export async function POST(request: Request) {
@@ -375,10 +378,12 @@ export async function GET(request: Request) {
     "";
 
   if (!inspectionRequestId) {
-    const quotations =
-      auth.role === "staff"
-        ? await listStaffQuotations(auth.businessId, auth.uid)
-        : await listBusinessQuotations(auth.businessId);
+    const scopeOwn = url.searchParams.get("scope") === "own";
+    const restrictToOwn =
+      auth.restrictToOwnQuotations || scopeOwn;
+    const quotations = restrictToOwn
+      ? await listQuotationsForMember(auth.businessId, auth.uid)
+      : await listBusinessQuotations(auth.businessId);
     return NextResponse.json({ ok: true, quotations });
   }
 
@@ -388,7 +393,7 @@ export async function GET(request: Request) {
   );
 
   const visibleQuotations =
-    auth.role === "staff"
+    auth.restrictToOwnQuotations || url.searchParams.get("scope") === "own"
       ? quotations.filter((quotation) => quotation.createdBy === auth.uid)
       : quotations;
 
