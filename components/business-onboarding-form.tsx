@@ -26,6 +26,7 @@ import {
   formatLimitLabel,
   formatRenewalLabel,
   planThemeGradient,
+  planThemeSurface,
 } from "@/lib/subscription-plans/theme";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import Link from "next/link";
@@ -348,6 +349,16 @@ export const BusinessOnboardingForm = forwardRef<
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function selectPlan(planId: string) {
+    setForm((current) => ({ ...current, selectedPlanId: planId }));
+    setErrorMessage((current) =>
+      current === "Please select a subscription plan." ||
+      current === "Please select a valid subscription plan."
+        ? null
+        : current,
+    );
+  }
+
   function updateServiceArea(index: number, value: string) {
     setForm((current) => {
       const next = [...current.serviceAreas];
@@ -607,14 +618,20 @@ export const BusinessOnboardingForm = forwardRef<
         </nav>
         ) : null}
 
-        {errorMessage && (
+        {errorMessage &&
+        !(
+          step === 3 &&
+          form.selectedPlanId &&
+          (errorMessage === "Please select a subscription plan." ||
+            errorMessage === "Please select a valid subscription plan.")
+        ) ? (
           <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
             <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
               error
             </span>
             <span>{errorMessage}</span>
           </div>
-        )}
+        ) : null}
         {successMessage && (
           <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary-fixed/40 px-3 py-2.5 font-body text-[13px] text-on-primary-fixed-variant">
             <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-primary">
@@ -1093,29 +1110,35 @@ export const BusinessOnboardingForm = forwardRef<
                 create packages first.
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:items-stretch">
                 {plans.map((plan) => {
                   const isActive = form.selectedPlanId === plan.id;
                   const gradient = planThemeGradient(plan.color);
+                  const featurePreview = plan.features.slice(0, 3);
                   return (
-                    <button
-                      type="button"
+                    <div
                       key={plan.id}
-                      onClick={() => update("selectedPlanId", plan.id)}
-                      className={`overflow-hidden rounded-2xl border text-left transition-all ${
+                      className={`flex min-h-[26rem] flex-col overflow-hidden rounded-2xl transition-all ${
                         isActive
                           ? "border-2 border-primary shadow-lg shadow-primary/15 ring-2 ring-primary/10"
-                          : "border-outline-variant hover:border-primary/30 hover:shadow-md"
+                          : "border border-outline-variant hover:border-primary/30 hover:shadow-md"
                       }`}
                     >
-                      <div
-                        className={`bg-gradient-to-br ${gradient} px-4 py-4 text-white`}
+                      <button
+                        type="button"
+                        onClick={() => selectPlan(plan.id)}
+                        className="flex h-full flex-col p-0 text-left"
                       >
-                        {plan.popular ? (
-                          <span className="mb-2 inline-flex rounded-full bg-white/20 px-2 py-0.5 font-body text-[10px] font-bold uppercase">
-                            Most Popular
-                          </span>
-                        ) : null}
+                        <div
+                          className={`shrink-0 bg-gradient-to-br ${gradient} px-4 py-4 text-white`}
+                        >
+                          <div className="mb-2 h-5">
+                            {plan.popular ? (
+                              <span className="inline-flex rounded-full bg-white/20 px-2 py-0.5 font-body text-[10px] font-bold uppercase">
+                                Most Popular
+                              </span>
+                            ) : null}
+                          </div>
                         <h3 className="font-display text-[16px] font-bold leading-tight">
                           {plan.name}
                         </h3>
@@ -1143,20 +1166,26 @@ export const BusinessOnboardingForm = forwardRef<
                           </span>
                         </div>
                       </div>
-                      <div className="bg-surface-container-lowest px-4 py-3">
-                        {plan.trialDays > 0 ? (
-                          <p className="font-body text-[11px] font-semibold text-primary">
-                            {plan.trialDays}-day free trial included
-                          </p>
-                        ) : null}
-                        {plan.description ? (
-                          <p className="mt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
-                            {plan.description}
-                          </p>
-                        ) : null}
-                        {plan.features.length > 0 ? (
-                          <ul className="mt-2 space-y-1.5">
-                            {plan.features.slice(0, 3).map((feature) => (
+                      <div
+                        className={`flex min-h-0 flex-1 flex-col ${planThemeSurface(plan.color)} px-4 py-3`}
+                      >
+                        <div className="flex-1">
+                          <div className="min-h-[1.125rem]">
+                            {plan.trialDays > 0 ? (
+                              <p className="font-body text-[11px] font-semibold text-primary">
+                                {plan.trialDays}-day free trial included
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 min-h-[3.75rem]">
+                            {plan.description ? (
+                              <p className="line-clamp-3 font-body text-[12px] leading-relaxed text-on-surface-variant">
+                                {plan.description}
+                              </p>
+                            ) : null}
+                          </div>
+                          <ul className="mt-2 min-h-[4.5rem] space-y-1.5">
+                            {featurePreview.map((feature) => (
                               <li
                                 key={feature}
                                 className="flex items-start gap-1.5 font-body text-[11px] text-on-surface-variant"
@@ -1168,18 +1197,19 @@ export const BusinessOnboardingForm = forwardRef<
                               </li>
                             ))}
                           </ul>
-                        ) : null}
+                        </div>
                         <span
-                          className={`mt-3 inline-flex h-9 w-full items-center justify-center rounded-lg font-body text-[13px] font-semibold ${
+                          className={`mt-3 inline-flex h-9 w-full shrink-0 items-center justify-center rounded-lg font-body text-[13px] font-semibold ${
                             isActive
                               ? "bg-primary text-on-primary"
-                              : "bg-surface-container text-on-surface"
+                              : "bg-white/80 text-on-surface shadow-sm"
                           }`}
                         >
                           {isActive ? "Selected" : "Select Plan"}
                         </span>
                       </div>
                     </button>
+                    </div>
                   );
                 })}
               </div>

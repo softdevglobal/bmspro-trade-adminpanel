@@ -5,6 +5,7 @@ import {
   PackageBuildModal,
   packageBodyFromForm,
   packageFormFromPlan,
+  validatePackageForm,
   type PackageFormState,
 } from "@/components/package-build-modal";
 import { readJsonResponse } from "@/lib/api/read-json-response";
@@ -14,6 +15,7 @@ import {
   formatLimitLabel,
   formatRenewalLabel,
   planThemeGradient,
+  planThemeSurface,
 } from "@/lib/subscription-plans/theme";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import { useCallback, useEffect, useState } from "react";
@@ -29,12 +31,12 @@ function PlanShowcaseCard({
 
   return (
     <article
-      className="group overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+      className="group overflow-hidden rounded-2xl border border-stone-200 shadow-sm transition-shadow hover:shadow-md"
     >
       <button
         type="button"
         onClick={onEdit}
-        className="w-full text-left"
+        className="block w-full p-0 text-left"
       >
         <div
           className={`relative bg-gradient-to-br ${gradient} px-5 py-6 text-white`}
@@ -78,7 +80,7 @@ function PlanShowcaseCard({
             </span>
           </div>
         </div>
-        <div className="px-5 py-4">
+        <div className={`${planThemeSurface(plan.color)} px-5 py-4`}>
           {plan.description ? (
             <p className="font-body text-[13px] leading-relaxed text-on-surface-variant">
               {plan.description}
@@ -220,7 +222,11 @@ export function PackagesBoard() {
   }
 
   async function handleSave() {
-    if (!user || !form.name.trim()) return;
+    const validationError = validatePackageForm(form);
+    if (!user || validationError) {
+      if (validationError) setError(validationError);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

@@ -2,7 +2,7 @@
 
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
-import { formatBillingNote } from "@/lib/subscription-plans/helpers";
+import { formatBillingNote, validatePlanDescription } from "@/lib/subscription-plans/helpers";
 import {
   PLAN_THEME_OPTIONS,
   formatLimitLabel,
@@ -80,6 +80,12 @@ export function packageFormFromPlan(plan: SubscriptionPlan): PackageFormState {
   };
 }
 
+export function validatePackageForm(form: PackageFormState): string | null {
+  if (!form.name.trim()) return "Package name is required.";
+  const description = validatePlanDescription(form.description);
+  return description.ok ? null : description.error;
+}
+
 export function packageBodyFromForm(form: PackageFormState, id?: string) {
   const billingCycle = form.billingCycle;
   const validityDays = billingCycle === "monthly" ? 28 : 7;
@@ -98,7 +104,7 @@ export function packageBodyFromForm(form: PackageFormState, id?: string) {
     trialDays: Number.parseInt(form.trialDays, 10) || 0,
     plan_key: form.plan_key.trim() || null,
     billingCycle,
-    description: form.description.trim() || null,
+    description: form.description.trim(),
     features: form.featuresText
       .split("\n")
       .map((line) => line.trim())
@@ -322,6 +328,20 @@ export function PackageBuildModal({
                     </button>
                   </div>
                 </div>
+                <label className="block">
+                  <FieldLabel required>Description</FieldLabel>
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => set("description", e.target.value)}
+                    rows={3}
+                    placeholder="Everything in Job Management plus quotes, invoices, contractor connections and partner jobs."
+                    className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5 font-body text-[14px] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+                  />
+                  <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+                    Shown on the plan card during onboarding — summarise what this
+                    package includes.
+                  </p>
+                </label>
               </section>
 
               <section className="space-y-3">
@@ -552,6 +572,13 @@ export function PackageBuildModal({
                   </span>
                 </div>
               </div>
+              <div className="px-4 py-3">
+                {form.description.trim() ? (
+                  <p className="font-body text-[12px] leading-relaxed text-on-surface-variant">
+                    {form.description.trim()}
+                  </p>
+                ) : null}
+              </div>
               {previewFeatures.length > 0 ? (
                 <ul className="space-y-2 px-4 py-3">
                   {previewFeatures.slice(0, 4).map((feature) => (
@@ -631,7 +658,9 @@ export function PackageBuildModal({
             </button>
             <button
               type="button"
-              disabled={saving || !form.name.trim()}
+              disabled={
+                saving || !form.name.trim() || !form.description.trim()
+              }
               onClick={onSave}
               className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#1a1d24] px-5 py-2.5 font-body text-[13px] font-semibold text-white disabled:opacity-60"
             >
