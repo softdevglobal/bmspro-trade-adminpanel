@@ -437,6 +437,14 @@ function BookingPreviewContent({
     ? `mailto:${booking.customer.email}`
     : null;
   const canAssign = booking.status === "scheduled";
+  const invoiceHref = booking.quotation?.id
+    ? `/dashboard/invoices?quotation=${encodeURIComponent(booking.quotation.id)}`
+    : null;
+  const canCreateInvoice =
+    booking.status === "scheduled" &&
+    Boolean(invoiceHref) &&
+    booking.quotation?.status === "sent" &&
+    booking.quotation.customerDecision !== "rejected";
 
   async function submitAssign() {
     if (!user) return;
@@ -722,6 +730,18 @@ function BookingPreviewContent({
                   </span>
                   View PDF
                 </a>
+              ) : null}
+              {canCreateInvoice && invoiceHref ? (
+                <Link
+                  href={invoiceHref}
+                  onClick={onClose}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    receipt_long
+                  </span>
+                  Create invoice
+                </Link>
               ) : null}
             </div>
           </section>
