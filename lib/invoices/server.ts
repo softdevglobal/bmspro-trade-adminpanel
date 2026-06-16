@@ -336,23 +336,33 @@ async function mirrorInvoiceToInspectionRequest(
   const requestId = invoice.inspectionRequestId?.trim();
   if (!requestId) return;
 
+  const closesRequest = invoice.status === "sent" || invoice.status === "paid";
+  const now = FieldValue.serverTimestamp();
+  const requestPatch: Record<string, unknown> = {
+    invoice: {
+      id: invoice.id,
+      invoiceCode: invoice.invoiceCode?.trim() || null,
+      pdfUrl: invoice.pdfUrl?.trim() || null,
+      finalPriceAud: invoice.finalPriceAud,
+      balanceDueAud: invoice.balanceDueAud,
+      status: invoice.status,
+      invoiceDate: invoice.invoiceDate,
+      dueDate: invoice.dueDate,
+    },
+    updatedAt: now,
+  };
+
+  if (closesRequest) {
+    requestPatch.status = "completed";
+    requestPatch.bookingStatus = "completed";
+    requestPatch.bookingStatusAt = now;
+  }
+
   try {
-    await adminDb.collection(REQUESTS_COLLECTION).doc(requestId).set(
-      {
-        invoice: {
-          id: invoice.id,
-          invoiceCode: invoice.invoiceCode?.trim() || null,
-          pdfUrl: invoice.pdfUrl?.trim() || null,
-          finalPriceAud: invoice.finalPriceAud,
-          balanceDueAud: invoice.balanceDueAud,
-          status: invoice.status,
-          invoiceDate: invoice.invoiceDate,
-          dueDate: invoice.dueDate,
-        },
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    await adminDb
+      .collection(REQUESTS_COLLECTION)
+      .doc(requestId)
+      .set(requestPatch, { merge: true });
   } catch (error) {
     console.error("[invoice] request mirror failed:", error);
   }

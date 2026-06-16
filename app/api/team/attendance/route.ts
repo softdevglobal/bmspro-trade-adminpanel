@@ -1,7 +1,7 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
-  filterAttendanceByDate,
-  parseAttendanceDateParam,
+  filterAttendanceByDateRange,
+  parseAttendanceRangeParams,
   serializeAttendanceRecord,
   type TeamAttendanceRecord,
 } from "@/lib/team/attendance";
@@ -52,12 +52,15 @@ export async function GET(request: Request) {
     );
   }
 
-  const dateParam = parseAttendanceDateParam(
-    new URL(request.url).searchParams.get("date"),
-  );
-  if (!dateParam) {
+  const searchParams = new URL(request.url).searchParams;
+  const dateRange = parseAttendanceRangeParams({
+    date: searchParams.get("date"),
+    start: searchParams.get("start"),
+    end: searchParams.get("end"),
+  });
+  if (!dateRange) {
     return NextResponse.json(
-      { ok: false, error: "Invalid date. Use YYYY-MM-DD." },
+      { ok: false, error: "Invalid date range. Use YYYY-MM-DD." },
       { status: 400 },
     );
   }
@@ -81,15 +84,19 @@ export async function GET(request: Request) {
     }
   }
 
-  const attendance = filterAttendanceByDate(Array.from(merged.values()), dateParam)
-    .sort(
-      (a, b) =>
-        new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime(),
-    );
+  const attendance = filterAttendanceByDateRange(
+    Array.from(merged.values()),
+    dateRange,
+  ).sort(
+    (a, b) =>
+      new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime(),
+  );
 
   return NextResponse.json({
     ok: true,
-    date: dateParam,
+    date: dateRange.startDate,
+    startDate: dateRange.startDate,
+    endDate: dateRange.endDate,
     attendance,
   });
 }

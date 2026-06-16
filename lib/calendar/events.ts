@@ -90,9 +90,7 @@ export function dotColorForCalendarSource(
 }
 
 /** Requests only (jobs use the `jobs` collection). */
-export function calendarSourceForRequest(
-  _request: InspectionRequestDetail,
-): CalendarSource {
+export function calendarSourceForRequest(): CalendarSource {
   return "requests";
 }
 
@@ -164,7 +162,7 @@ export function calendarCardView(event: CalendarEvent): CalendarCardView | null 
       scheduledSlot: booking.scheduledSlot,
       ownerProposedSlots: [],
       preferredSlots: [],
-      openHref: `/dashboard/requests?request=${encodeURIComponent(booking.inspectionRequestId)}`,
+      openHref: `/dashboard/jobs?job=${encodeURIComponent(booking.id)}`,
     };
   }
 
@@ -192,7 +190,7 @@ export function matchesCalendarSource(
   source: CalendarSource,
 ): boolean {
   if (request.status === "cancelled") return false;
-  if (calendarSourceForRequest(request) !== source) return false;
+  if (calendarSourceForRequest() !== source) return false;
   return datesForRequestOnCalendar(request).length > 0;
 }
 
@@ -336,7 +334,7 @@ export function buildInspectionCalendarEvents(
   for (const request of requests) {
     if (!matchesCalendarFilters(request, filters)) continue;
 
-    const source = calendarSourceForRequest(request);
+    const source = calendarSourceForRequest();
     if (sourceFilter && source !== sourceFilter) continue;
 
     const dates = datesForRequestOnCalendar(request);
