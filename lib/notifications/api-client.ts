@@ -1,5 +1,7 @@
 "use client";
 
+import { BROADCAST_NOTIFICATION_PREFIX } from "@/lib/broadcasts/types";
+import type { BroadcastForUser } from "@/lib/broadcasts/types";
 import type { NotificationRecord } from "@/lib/notifications/types";
 
 type NotificationsResponse = {
@@ -7,6 +9,92 @@ type NotificationsResponse = {
   notifications?: NotificationRecord[];
   error?: string;
 };
+
+type BroadcastsResponse = {
+  ok: boolean;
+  broadcasts?: BroadcastForUser[];
+  error?: string;
+};
+
+/** True when an id belongs to a broadcast (custom message) notification. */
+export function isBroadcastNotificationId(id: string): boolean {
+  return id.startsWith(BROADCAST_NOTIFICATION_PREFIX);
+}
+
+/** Strips the broadcast prefix to recover the raw broadcast document id. */
+export function broadcastIdFromNotificationId(id: string): string {
+  return id.startsWith(BROADCAST_NOTIFICATION_PREFIX)
+    ? id.slice(BROADCAST_NOTIFICATION_PREFIX.length)
+    : id;
+}
+
+function broadcastToNotification(item: BroadcastForUser): NotificationRecord {
+  return {
+    id: `${BROADCAST_NOTIFICATION_PREFIX}${item.id}`,
+    audience: "business",
+    businessId: null,
+    customerId: null,
+    customerEmail: null,
+    requestId: "",
+    bookingSlug: null,
+    businessName: null,
+    customerName: null,
+    status: "pending",
+    type: "system_message",
+    title: item.title,
+    body: item.body,
+    read: item.read,
+    createdAt: item.createdAt,
+  };
+}
+
+/** Fetches custom-message broadcasts for the admin panel as notification records. */
+export async function fetchBroadcastNotifications(
+  idToken: string,
+): Promise<NotificationRecord[]> {
+  const response = await fetch("/api/broadcasts?platform=admin", {
+    headers: { authorization: `Bearer ${idToken}` },
+    cache: "no-store",
+  });
+  const body = (await response.json()) as BroadcastsResponse;
+  if (!response.ok || !body.ok || !body.broadcasts) {
+    throw new Error(body.error ?? "Could not load messages.");
+  }
+  return body.broadcasts.map(broadcastToNotification);
+}
+
+export async function markAllBroadcastsReadApi(idToken: string): Promise<void> {
+  const response = await fetch("/api/broadcasts?platform=admin", {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw new Error("Could not mark messages read.");
+  }
+}
+
+export async function dismissBroadcastApi(
+  idToken: string,
+  broadcastId: string,
+): Promise<void> {
+  const response = await fetch(`/api/broadcasts/${broadcastId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw new Error("Could not dismiss message.");
+  }
+}
+
+export async function dismissAllBroadcastsApi(idToken: string): Promise<void> {
+  const response = await fetch("/api/broadcasts?platform=admin", {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${idToken}` },
+  });
+  if (!response.ok) {
+    throw new Error("Could not clear messages.");
+  }
+}
 
 export async function fetchBusinessNotifications(
   idToken: string,

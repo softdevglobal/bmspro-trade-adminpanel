@@ -26,7 +26,9 @@ import type { EmailDetailRow } from "@/lib/email/layout";
 import { sendInspectionCustomerNotificationEmail } from "@/lib/email/templates/inspection-customer-notification";
 import {
   resolveBusinessOwnerUid,
+  sendBusinessAdminMobilePush,
   sendOwnerMobilePush,
+  sendStaffMobilePush,
 } from "@/lib/notifications/push";
 import { FieldValue } from "firebase-admin/firestore";
 import {
@@ -228,18 +230,15 @@ export async function notifyBusinessOfNewRequest(
       body,
     });
 
-    const ownerUid = await resolveBusinessOwnerUid(request.businessId);
-    if (ownerUid) {
-      await sendOwnerMobilePush({
-        ownerUid,
-        title,
-        body,
-        data: {
-          type: "request_created",
-          requestId: request.id,
-        },
-      });
-    }
+    await sendBusinessAdminMobilePush(request.businessId, {
+      title,
+      body,
+      data: {
+        type: "request_created",
+        requestId: request.id,
+        audience: "owner",
+      },
+    });
   } catch {
     /* notifications are best-effort */
   }

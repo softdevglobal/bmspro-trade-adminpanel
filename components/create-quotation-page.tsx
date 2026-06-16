@@ -587,8 +587,32 @@ export function CreateQuotationPage() {
         setAddress({ ...EMPTY_ADDRESS, ...quotation.address });
         setClientOpen(false);
         setServiceEditing(false);
-        setCustomServiceTitle(quotation.serviceTitle ?? "");
-        setCustomServiceDescription(quotation.serviceDescription ?? "");
+        const linkedRequest = requests.find(
+          (request) => request.id === quotation.inspectionRequestId,
+        );
+        if (
+          linkedRequest?.requestType === "existing_service" &&
+          linkedRequest.serviceId
+        ) {
+          setRequestType("existing_service");
+          setSelectedServiceId(linkedRequest.serviceId);
+          setCustomServiceTitle("");
+          setCustomServiceDescription("");
+        } else {
+          setRequestType("custom_quote");
+          setSelectedServiceId(null);
+          setCustomServiceTitle(
+            quotation.serviceTitle ??
+              linkedRequest?.customRequest?.title ??
+              linkedRequest?.serviceName ??
+              "",
+          );
+          setCustomServiceDescription(
+            quotation.serviceDescription ??
+              linkedRequest?.customRequest?.description ??
+              "",
+          );
+        }
         setLineItems(
           quotation.lineItems.map((item, index) =>
             savedLineItemFromQuotation(item, index),
@@ -641,7 +665,7 @@ export function CreateQuotationPage() {
         setDraftLoading(false);
       }
     })();
-  }, [user, draftQuotationId, timeZone]);
+  }, [user, draftQuotationId, timeZone, requests]);
 
   const customerOptions = useMemo(
     () => buildCustomerOptions(requests),
@@ -904,7 +928,16 @@ export function CreateQuotationPage() {
         };
         if (servicesRes.ok && servicesData.ok && servicesData.services) {
           setServices(servicesData.services);
-          if (servicesData.services.some((service) => service.isActive)) {
+          const params = new URLSearchParams(window.location.search);
+          const editingDraft =
+            params.get("quotationId")?.trim() ||
+            params.get("draftId")?.trim() ||
+            params.get("requestId")?.trim() ||
+            params.get("inspectionRequestId")?.trim();
+          if (
+            servicesData.services.some((service) => service.isActive) &&
+            !editingDraft
+          ) {
             setRequestType("existing_service");
           }
         }
@@ -1230,7 +1263,21 @@ export function CreateQuotationPage() {
       // Bound to an existing request → attach the quotation to it.
       // Otherwise create a standalone quotation (with its own visit record).
       const quotationBody = inspectionRequestId
-        ? { requestId: inspectionRequestId, send: sendToCustomer, ...sharedBody }
+        ? {
+            requestId: inspectionRequestId,
+            send: sendToCustomer,
+            requestType,
+            serviceId:
+              requestType === "existing_service" ? selectedServiceId : null,
+            customRequest:
+              requestType === "custom_quote"
+                ? {
+                    title: customServiceTitle.trim(),
+                    description: customServiceDescription.trim(),
+                  }
+                : null,
+            ...sharedBody,
+          }
         : {
             standalone: true,
             send: sendToCustomer,
