@@ -14,6 +14,8 @@ import type {
   InspectionRequestDetail,
   InspectionSlot,
 } from "@/lib/inspection/types";
+import { logAuditEvent } from "@/lib/audit/server";
+import type { AuditActor, AuditSource } from "@/lib/audit/types";
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
@@ -457,6 +459,13 @@ export async function startBusinessBookingJob(
   };
 }
 
+export type InvoicedBookingAudit = {
+  actor: AuditActor;
+  source: AuditSource;
+  invoiceCode?: string | null;
+  quotationCode?: string | null;
+};
+
 /**
  * Marks the booking for an request as completed when an invoice is
  * issued. If no booking exists yet, a completed booking is created so the job
@@ -477,6 +486,7 @@ export async function completeBookingForInvoicedQuotation(input: {
     balanceDueAud: number;
     status: string | null;
   };
+  audit?: InvoicedBookingAudit;
 }): Promise<{
   bookingId: string;
   bookingCode: string | null;
@@ -497,7 +507,8 @@ export async function completeBookingForInvoicedQuotation(input: {
     if (!existing.empty) {
       const doc = existing.docs[0]!;
       const current = mapBookingDoc(doc.id, doc.data() ?? {});
-      if (current.status !== "completed") {
+      const completedNow = current.status !== "completed";
+      if (completedNow) {
         await doc.ref.update({ status: "completed", updatedAt: now });
       }
       await Promise.all([
@@ -511,6 +522,30 @@ export async function completeBookingForInvoicedQuotation(input: {
           bookingCode: current.bookingCode,
         }),
       ]);
+      if (completedNow && input.audit) {
+        const bookingLabel = current.bookingCode ?? current.id;
+        const invoiceLabel = input.audit.invoiceCode?.trim();
+        await logAuditEvent({
+          businessId,
+          category: "invoice",
+          action: "invoice.booking_completed",
+          actor: input.audit.actor,
+          source: input.audit.source,
+          summary: invoiceLabel
+            ? `Booking ${bookingLabel} completed when invoice ${invoiceLabel} was issued`
+            : `Booking ${bookingLabel} completed when an invoice was issued`,
+          targetId: current.id,
+          targetLabel: invoiceLabel || current.bookingCode || null,
+          metadata: {
+            origin: "invoice",
+            invoiceCode: input.audit.invoiceCode ?? null,
+            bookingCode: current.bookingCode ?? null,
+            bookingId: current.id,
+            quotationCode: input.audit.quotationCode ?? null,
+            inspectionRequestId,
+          },
+        });
+      }
       return {
         bookingId: current.id,
         bookingCode: current.bookingCode,
@@ -603,6 +638,32 @@ export async function completeBookingForInvoicedQuotation(input: {
         bookingCode,
       }),
     ]);
+  }
+
+  if (input.audit) {
+    const invoiceLabel = input.audit.invoiceCode?.trim();
+    await logAuditEvent({
+      businessId,
+      category: "invoice",
+      action: "invoice.booking_created",
+      actor: input.audit.actor,
+      source: input.audit.source,
+      summary: invoiceLabel
+        ? `Booking ${bookingCode} created when invoice ${invoiceLabel} was issued`
+        : `Booking ${bookingCode} created when an invoice was issued`,
+      targetId: bookingRef.id,
+      targetLabel: invoiceLabel || bookingCode || null,
+      metadata: {
+        origin: "invoice",
+        completedFromInvoice: true,
+        invoiceCode: input.audit.invoiceCode ?? null,
+        bookingCode,
+        bookingId: bookingRef.id,
+        quotationCode: input.audit.quotationCode ?? null,
+        inspectionRequestId: inspectionRequestId || null,
+        quotationId: quotation.id,
+      },
+    });
   }
 
   return {

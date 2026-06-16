@@ -4,6 +4,8 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   AUDIT_COLLECTION,
   actorRoleFromClaim,
+  parseAuditCategory,
+  parseAuditSource,
   type AuditActorRole,
   type AuditCategory,
   type AuditEventInput,
@@ -76,19 +78,35 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function resolveStoredCategory(
+  raw: unknown,
+  action: string,
+): AuditCategory {
+  const parsed = parseAuditCategory(raw);
+  if (parsed) return parsed;
+  if (action.startsWith("invoice.")) {
+    return "invoice";
+  }
+  if (action === "inspection.convert_to_booking" || action.startsWith("booking.")) {
+    return "booking";
+  }
+  return "inspection";
+}
+
 function mapEntry(id: string, data: DocumentData): AuditLogEntry {
   const role = (data.actorRole ?? "system") as AuditActorRole;
+  const action = typeof data.action === "string" ? data.action : "";
   return {
     id,
     businessId: asString(data.businessId),
     businessName: asString(data.businessName),
-    category: (data.category ?? "inspection") as AuditCategory,
-    action: typeof data.action === "string" ? data.action : "",
+    category: resolveStoredCategory(data.category, action),
+    action,
     actorUid: asString(data.actorUid),
     actorRole: role,
     actorName: asString(data.actorName),
     actorEmail: asString(data.actorEmail),
-    source: (data.source ?? "system") as AuditSource,
+    source: parseAuditSource(data.source) ?? "system",
     summary: typeof data.summary === "string" ? data.summary : "",
     targetId: asString(data.targetId),
     targetLabel: asString(data.targetLabel),
@@ -135,7 +153,19 @@ export async function listAuditLogs(filters: {
   let entries = snapshot.docs.map((doc) => mapEntry(doc.id, doc.data() ?? {}));
 
   if (filters.category) {
-    entries = entries.filter((entry) => entry.category === filters.category);
+    const category = filters.category;
+    entries = entries.filter(
+      (entry) =>
+        entry.category === category ||
+        (category === "booking" &&
+          (entry.action === "inspection.convert_to_booking" ||
+            entry.action.startsWith("booking."))) ||
+        (category === "invoice" &&
+          (entry.action.startsWith("invoice.") ||
+            (entry.metadata?.origin === "invoice" &&
+              (entry.category === "booking" ||
+                entry.action.startsWith("booking."))))),
+    );
   }
   if (filters.source) {
     entries = entries.filter((entry) => entry.source === filters.source);

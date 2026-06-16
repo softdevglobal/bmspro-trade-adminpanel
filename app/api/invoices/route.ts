@@ -257,10 +257,18 @@ export async function POST(request: Request) {
           })(),
         });
       })()
-    : await createInvoiceFromQuotation(auth.businessId, auth.uid, {
-        quotationId,
-        ...sharedInput,
-      });
+    : await createInvoiceFromQuotation(
+        auth.businessId,
+        {
+          uid: auth.uid,
+          email: auth.email,
+          role: auth.role,
+        },
+        {
+          quotationId,
+          ...sharedInput,
+        },
+      );
 
   if (!result.ok) {
     return NextResponse.json(

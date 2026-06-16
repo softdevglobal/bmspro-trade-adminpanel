@@ -1,8 +1,8 @@
 /**
  * Super-admin audit log — shared types and labels.
  *
- * Every meaningful tenant action (inspections, quotations, bookings, staff,
- * customers, services, items) is recorded as one document in the `audit_logs`
+ * Every meaningful tenant action (inspections, quotations, invoices, bookings,
+ * staff, customers, services, items) is recorded as one document in the `audit_logs`
  * Firestore collection. The super admin reads them back through
  * `GET /api/admin/audit-logs` and the `/dashboard/audit-log` page.
  *
@@ -170,6 +170,53 @@ export function parseAuditSource(value: unknown): AuditSource | null {
   return isAuditSource(value) ? value : null;
 }
 
+/** Booking-related events that were stored under Inspection. */
+function summaryIndicatesInvoiceIssuance(summary: string): boolean {
+  const lower = summary.toLowerCase();
+  return (
+    (lower.includes("when invoice") && lower.includes("was issued")) ||
+    lower.includes("from invoice")
+  );
+}
+
+function isInvoiceOriginatedBookingEntry(entry: AuditLogEntry): boolean {
+  if (
+    entry.action === "invoice.booking_created" ||
+    entry.action === "invoice.booking_completed"
+  ) {
+    return true;
+  }
+  if (entry.metadata?.origin === "invoice") {
+    return (
+      entry.category === "booking" || entry.action.startsWith("booking.")
+    );
+  }
+  if (
+    entry.category === "booking" &&
+    (entry.action === "booking.created" ||
+      entry.action === "booking.completed") &&
+    summaryIndicatesInvoiceIssuance(entry.summary)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isBookingAuditEntry(entry: AuditLogEntry): boolean {
+  if (entry.category === "invoice") return false;
+  if (entry.action.startsWith("invoice.")) return false;
+  if (isInvoiceOriginatedBookingEntry(entry)) return false;
+  if (entry.category === "booking") return true;
+  if (entry.action === "inspection.convert_to_booking") return true;
+  return entry.action.startsWith("booking.");
+}
+
+export function isInvoiceAuditEntry(entry: AuditLogEntry): boolean {
+  if (entry.category === "invoice") return true;
+  if (entry.action.startsWith("invoice.")) return true;
+  return isInvoiceOriginatedBookingEntry(entry);
+}
+
 /** Legacy staff sessions were stored under Auth — show them under Staff instead. */
 export function normalizeAuditLogEntries(
   entries: AuditLogEntry[],
@@ -185,6 +232,20 @@ export function normalizeAuditLogEntries(
         category: "staff",
         action: entry.action === "auth.login" ? "staff.login" : "staff.logout",
       };
+    }
+    if (entry.action === "inspection.convert_to_booking") {
+      return { ...entry, category: "booking" };
+    }
+    if (isInvoiceOriginatedBookingEntry(entry)) {
+      const action =
+        entry.action === "booking.created"
+          ? "invoice.booking_created"
+          : entry.action === "booking.completed"
+            ? "invoice.booking_completed"
+            : entry.action.startsWith("invoice.")
+              ? entry.action
+              : "invoice.booking_completed";
+      return { ...entry, category: "invoice", action };
     }
     return entry;
   });
@@ -213,5 +274,28 @@ export function matchesAuditCategoryFilter(
   if (tenantOwnerView && category === "auth") {
     return isBusinessOwnerAuthEntry(entry);
   }
+  if (category === "booking") {
+    return isBookingAuditEntry(entry);
+  }
+  if (category === "invoice") {
+    return isInvoiceAuditEntry(entry);
+  }
+  if (
+    category === "inspection" &&
+    entry.action === "inspection.convert_to_booking"
+  ) {
+    return false;
+  }
   return entry.category === category;
+}
+
+/** Chip counts must use the same rules as the visible list filter. */
+export function countAuditEntriesForCategory(
+  entries: AuditLogEntry[],
+  category: AuditCategory,
+  tenantOwnerView: boolean,
+): number {
+  return entries.filter((entry) =>
+    matchesAuditCategoryFilter(entry, category, tenantOwnerView),
+  ).length;
 }

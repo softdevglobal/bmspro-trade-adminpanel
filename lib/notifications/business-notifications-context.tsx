@@ -2,10 +2,16 @@
 
 import { useAuth } from "@/lib/auth/auth-context";
 import {
+  broadcastIdFromNotificationId,
   connectBusinessNotificationStream,
   deleteAllBusinessNotificationsApi,
   deleteBusinessNotificationApi,
+  dismissAllBroadcastsApi,
+  dismissBroadcastApi,
+  fetchBroadcastNotifications,
   fetchBusinessNotifications,
+  isBroadcastNotificationId,
+  markAllBroadcastsReadApi,
   markAllBusinessNotificationsReadApi,
 } from "@/lib/notifications/api-client";
 import type { NotificationRecord } from "@/lib/notifications/types";
@@ -48,7 +54,8 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
   const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
   const [panelOpen, setPanelOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [inspectionNotes, setInspectionNotes] = useState<NotificationRecord[]>([]);
+  const [broadcastNotes, setBroadcastNotes] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const reloadRef = useRef<() => Promise<void>>(async () => {});
 
@@ -65,8 +72,12 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
     setLoading((current) => current || !hasLoadedRef.current);
     try {
       const token = await user.getIdToken();
-      const records = await fetchBusinessNotifications(token);
-      setNotifications(records);
+      const [records, broadcasts] = await Promise.all([
+        fetchBusinessNotifications(token),
+        fetchBroadcastNotifications(token).catch(() => []),
+      ]);
+      setInspectionNotes(records);
+      setBroadcastNotes(broadcasts);
       hasLoadedRef.current = true;
     } catch {
       /* keep previous list */
@@ -80,7 +91,8 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
   useEffect(() => {
     if (!enabled || !user || !pageVisible) {
       if (!enabled) {
-        setNotifications([]);
+        setInspectionNotes([]);
+        setBroadcastNotes([]);
         setLoading(false);
         hasLoadedRef.current = false;
       }
@@ -116,48 +128,81 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
     };
   }, [enabled, user, pageVisible, reload]);
 
+  const notifications = useMemo(
+    () =>
+      [...inspectionNotes, ...broadcastNotes].sort(
+        (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0),
+      ),
+    [inspectionNotes, broadcastNotes],
+  );
+
   const unread = notifications.filter((note) => !note.read).length;
 
   const markAllRead = useCallback(async () => {
     if (!user || unread === 0) return;
-    const previous = notifications;
-    setNotifications((current) =>
+    const previousInspection = inspectionNotes;
+    const previousBroadcast = broadcastNotes;
+    setInspectionNotes((current) =>
+      current.map((note) => ({ ...note, read: true })),
+    );
+    setBroadcastNotes((current) =>
       current.map((note) => ({ ...note, read: true })),
     );
     try {
       const token = await user.getIdToken();
-      await markAllBusinessNotificationsReadApi(token);
+      await Promise.all([
+        markAllBusinessNotificationsReadApi(token),
+        markAllBroadcastsReadApi(token).catch(() => {}),
+      ]);
     } catch {
-      setNotifications(previous);
+      setInspectionNotes(previousInspection);
+      setBroadcastNotes(previousBroadcast);
     }
-  }, [user, unread, notifications]);
+  }, [user, unread, inspectionNotes, broadcastNotes]);
 
   const clearOne = useCallback(
     async (id: string) => {
       if (!user) return;
-      const previous = notifications;
-      setNotifications((current) => current.filter((note) => note.id !== id));
+      const isBroadcast = isBroadcastNotificationId(id);
+      const previousInspection = inspectionNotes;
+      const previousBroadcast = broadcastNotes;
+      if (isBroadcast) {
+        setBroadcastNotes((current) => current.filter((note) => note.id !== id));
+      } else {
+        setInspectionNotes((current) => current.filter((note) => note.id !== id));
+      }
       try {
         const token = await user.getIdToken();
-        await deleteBusinessNotificationApi(token, id);
+        if (isBroadcast) {
+          await dismissBroadcastApi(token, broadcastIdFromNotificationId(id));
+        } else {
+          await deleteBusinessNotificationApi(token, id);
+        }
       } catch {
-        setNotifications(previous);
+        setInspectionNotes(previousInspection);
+        setBroadcastNotes(previousBroadcast);
       }
     },
-    [user, notifications],
+    [user, inspectionNotes, broadcastNotes],
   );
 
   const clearAll = useCallback(async () => {
     if (!user || notifications.length === 0) return;
-    const previous = notifications;
-    setNotifications([]);
+    const previousInspection = inspectionNotes;
+    const previousBroadcast = broadcastNotes;
+    setInspectionNotes([]);
+    setBroadcastNotes([]);
     try {
       const token = await user.getIdToken();
-      await deleteAllBusinessNotificationsApi(token);
+      await Promise.all([
+        deleteAllBusinessNotificationsApi(token),
+        dismissAllBroadcastsApi(token).catch(() => {}),
+      ]);
     } catch {
-      setNotifications(previous);
+      setInspectionNotes(previousInspection);
+      setBroadcastNotes(previousBroadcast);
     }
-  }, [user, notifications]);
+  }, [user, notifications.length, inspectionNotes, broadcastNotes]);
 
   const value = useMemo<BusinessNotificationsApi>(
     () => ({

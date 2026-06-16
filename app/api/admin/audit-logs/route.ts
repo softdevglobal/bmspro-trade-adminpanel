@@ -8,7 +8,7 @@
  *
  * Query parameters (all optional):
  *   businessId  — only events for one tenant
- *   category    — auth | inspection | quotation | booking | staff | customer | service | item
+ *   category    — auth | inspection | quotation | invoice | booking | staff | customer | service | item
  *   source      — admin_panel | customer_portal | booking_engine | mobile_app | system
  *   limit       — max rows (1–500, default 200)
  *

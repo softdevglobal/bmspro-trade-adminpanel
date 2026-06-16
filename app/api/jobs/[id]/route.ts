@@ -1,4 +1,5 @@
 import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
 import {
   assignBusinessBooking,
   completeBusinessBooking,
@@ -142,10 +143,19 @@ async function requireAssignedBookingOperator(
       };
     }
 
+    const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+    const userData = userSnap.exists ? userSnap.data() : null;
+
     return {
       ok: true as const,
       uid: decoded.uid,
       businessId,
+      role: actorRoleFromClaim(role),
+      name:
+        userData && typeof userData.fullName === "string"
+          ? userData.fullName
+          : decoded.email ?? null,
+      email: decoded.email ?? null,
     };
   } catch {
     return {
@@ -193,6 +203,23 @@ export async function PATCH(
         { status: result.status },
       );
     }
+
+    await logAuditEvent({
+      businessId: operatorAuth.businessId,
+      category: "booking",
+      action: "booking.visit_started",
+      actor: {
+        uid: operatorAuth.uid,
+        role: operatorAuth.role,
+        name: operatorAuth.name,
+        email: operatorAuth.email,
+      },
+      source: "mobile_app",
+      summary: `Visit started for job ${result.booking.bookingCode ?? id}`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+    });
+
     return NextResponse.json({ ok: true, booking: result.booking });
   }
 
@@ -216,6 +243,23 @@ export async function PATCH(
         { status: result.status },
       );
     }
+
+    await logAuditEvent({
+      businessId: operatorAuth.businessId,
+      category: "booking",
+      action: "booking.job_started",
+      actor: {
+        uid: operatorAuth.uid,
+        role: operatorAuth.role,
+        name: operatorAuth.name,
+        email: operatorAuth.email,
+      },
+      source: "mobile_app",
+      summary: `Job started for ${result.booking.bookingCode ?? id}`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+    });
+
     return NextResponse.json({ ok: true, booking: result.booking });
   }
 
@@ -239,6 +283,23 @@ export async function PATCH(
         { status: result.status },
       );
     }
+
+    await logAuditEvent({
+      businessId: operatorAuth.businessId,
+      category: "booking",
+      action: "booking.completed",
+      actor: {
+        uid: operatorAuth.uid,
+        role: operatorAuth.role,
+        name: operatorAuth.name,
+        email: operatorAuth.email,
+      },
+      source: "mobile_app",
+      summary: `Job ${result.booking.bookingCode ?? id} completed`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+    });
+
     return NextResponse.json({ ok: true, booking: result.booking });
   }
 

@@ -7,6 +7,7 @@ import {
   CATEGORY_LABELS,
   SOURCE_LABELS,
   type AuditCategory,
+  countAuditEntriesForCategory,
   isBusinessOwnerAuthEntry,
   matchesAuditCategoryFilter,
   normalizeAuditLogEntries,
@@ -191,18 +192,11 @@ export function AuditLogView({
 
   const stats = useMemo(() => {
     const byCategory = new Map<AuditCategory, number>();
-    for (const entry of processedLogs) {
-      const skipAuthChipCount =
-        isTenantOwner &&
-        entry.category === "auth" &&
-        !isBusinessOwnerAuthEntry(entry);
-
-      if (!skipAuthChipCount) {
-        byCategory.set(
-          entry.category,
-          (byCategory.get(entry.category) ?? 0) + 1,
-        );
-      }
+    for (const cat of AUDIT_CATEGORIES) {
+      byCategory.set(
+        cat,
+        countAuditEntriesForCategory(processedLogs, cat, isTenantOwner),
+      );
     }
     return {
       total: processedLogs.length,

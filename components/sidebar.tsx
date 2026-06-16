@@ -115,6 +115,12 @@ const NAV_ITEMS: NavItem[] = [
     superAdmin: true,
   },
   {
+    href: "/dashboard/custom-messages",
+    label: "Custom messages",
+    icon: "campaign",
+    superAdmin: true,
+  },
+  {
     href: "/dashboard/audit-log",
     label: "Audit logs",
     icon: "history",

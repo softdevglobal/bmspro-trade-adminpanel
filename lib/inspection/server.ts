@@ -24,6 +24,7 @@ import {
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
+import { sendStaffMobilePush } from "@/lib/notifications/push";
 import {
   createBookingFromInspection,
   mirrorBookingToQuotations,
@@ -333,14 +334,16 @@ export async function applyOwnerAction(
       action: "booking.created",
       actor: audit.actor,
       source: audit.source,
-      summary: `Job created from request ${created.request.requestCode ?? id}`,
-      targetId: created.request.id,
+      summary: `Job ${created.booking.bookingCode ?? created.booking.id} created from request ${created.request.requestCode ?? id}`,
+      targetId: created.booking.id,
       targetLabel:
+        created.booking.bookingCode ||
         created.request.serviceName ||
         created.request.customer.fullName ||
         null,
       metadata: {
         inspectionId: id,
+        bookingCode: created.booking.bookingCode ?? null,
         estimatedDurationMinutes: action.estimatedDurationMinutes,
       },
     });
@@ -407,6 +410,26 @@ export async function applyOwnerAction(
   const summary = await loadBusinessSummary(businessId);
   if (action.type === "assign") {
     await notifyCustomerOfAssignment(request, summary);
+    const assigned = request.assignedTo;
+    if (assigned?.type === "staff" && assigned.uid) {
+      const headline = request.serviceName ?? request.requestCode ?? "Inspection";
+      const slot = request.scheduledSlot;
+      const when = slot
+        ? `${slot.date}${request.scheduledStartTime ? ` · ${request.scheduledStartTime}` : ""}`
+        : null;
+      await sendStaffMobilePush({
+        uid: assigned.uid,
+        title: "Visit assigned to you",
+        body: when
+          ? `You are scheduled for ${headline} on ${when}.`
+          : `You have been assigned to ${headline}.`,
+        data: {
+          type: "staff_assignment",
+          requestId: request.id,
+          audience: "staff",
+        },
+      });
+    }
   } else {
     await notifyCustomerOfStatusChange(request, request.status, summary);
   }

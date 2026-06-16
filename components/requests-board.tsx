@@ -592,6 +592,16 @@ function RequestCard({
                   : `Assigned to ${request.assignedTo.name}`}
               </span>
             </span>
+          ) : request.status === "scheduled" ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-700"
+              aria-label="Needs inspector"
+            >
+              <span className="material-symbols-outlined text-[12px] leading-none">
+                person_add
+              </span>
+              Needs inspector
+            </span>
           ) : null}
           {hasLinkedBooking ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
