@@ -87,13 +87,8 @@ function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
 
 function computeBalanceDueAud(
   finalPriceAud: number,
-  depositRequest: QuotationDepositRequest | null,
 ): number {
-  if (!depositRequest || depositRequest.amountAud <= 0) {
-    return Math.max(0, Math.round(finalPriceAud * 100) / 100);
-  }
-  const depositPaid = Math.min(depositRequest.amountAud, finalPriceAud);
-  return Math.max(0, Math.round((finalPriceAud - depositPaid) * 100) / 100);
+  return Math.max(0, Math.round(finalPriceAud * 100) / 100);
 }
 
 /** Persisted when a quote is sent and no job booking exists yet. */
@@ -232,7 +227,7 @@ function mapQuotationDoc(
     typeof data.balanceDueAud === "number" &&
     Number.isFinite(data.balanceDueAud)
       ? Math.max(0, data.balanceDueAud)
-      : computeBalanceDueAud(finalPriceAud, depositRequest);
+      : computeBalanceDueAud(finalPriceAud);
 
   return {
     id,
@@ -578,7 +573,7 @@ export async function createQuotationForInspection(
       : computedFinal;
   const imageUrls = parseImageUrls(input.imageUrls);
   const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
-  const balanceDueAud = computeBalanceDueAud(finalPriceAud, depositRequest);
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud);
   const baseTerms =
     typeof input.termsAndConditions === "string" &&
     input.termsAndConditions.trim()
@@ -867,7 +862,7 @@ export async function updateDraftQuotation(
       : computedFinal;
   const imageUrls = parseImageUrls(input.imageUrls);
   const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
-  const balanceDueAud = computeBalanceDueAud(finalPriceAud, depositRequest);
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud);
   const termsAndConditions =
     typeof input.termsAndConditions === "string" &&
     input.termsAndConditions.trim()
@@ -1614,7 +1609,7 @@ export async function createStandaloneQuotation(
   const imageUrls = parseImageUrls(input.imageUrls);
 
   const depositRequest = parseDepositRequest(input.depositRequest) ?? null;
-  const balanceDueAud = computeBalanceDueAud(finalPriceAud, depositRequest);
+  const balanceDueAud = computeBalanceDueAud(finalPriceAud);
   const baseTerms =
     typeof input.termsAndConditions === "string" &&
     input.termsAndConditions.trim()

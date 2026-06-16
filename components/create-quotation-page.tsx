@@ -798,11 +798,7 @@ export function CreateQuotationPage() {
 
   const gstAmount = documentTotals.gstAud;
   const total = documentTotals.totalAud;
-  const depositPaidAud = depositRequest?.amountAud ?? 0;
-  const balanceDueAud = Math.max(
-    0,
-    Math.round((total - depositPaidAud) * 100) / 100,
-  );
+  const depositRequestAud = depositRequest?.amountAud ?? 0;
 
   useEffect(() => {
     if (!depositRequest || total <= 0) return;
@@ -2670,21 +2666,21 @@ export function CreateQuotationPage() {
                   <span>Total</span>
                   <span className="font-numeric">{formatAud(total)}</span>
                 </div>
-                {depositPaidAud > 0 ? (
+                {depositRequestAud > 0 ? (
                   <div className="flex justify-between text-on-surface-variant">
-                    <span>Paid (deposit)</span>
+                    <span>Deposit request</span>
                     <span className="font-numeric font-medium text-on-surface">
-                      {formatAud(depositPaidAud)}
+                      {formatAud(depositRequestAud)}
                     </span>
                   </div>
                 ) : null}
               </div>
               <div className="flex items-center justify-between bg-[#1a1f28] px-3 py-2.5">
                 <span className="font-body text-[12px] font-bold text-white">
-                  {depositPaidAud > 0 ? "Balance due" : "Total due"}
+                  {depositRequestAud > 0 ? "Balance due" : "Total due"}
                 </span>
                 <span className="font-numeric text-[15px] font-bold text-white">
-                  {formatAud(depositPaidAud > 0 ? balanceDueAud : total)}
+                  {formatAud(total)}
                 </span>
               </div>
               <div className="border-t border-outline-variant/30 px-3 py-2.5 text-center">
