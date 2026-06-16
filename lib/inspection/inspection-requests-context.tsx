@@ -1,15 +1,16 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
-import { fetchBusinessInspectionRequests } from "@/lib/inspection/api-client";
+import { subscribeBusinessInspectionRequests } from "@/lib/inspection/firestore-client";
 import type { InspectionRequestDetail } from "@/lib/inspection/types";
-import { usePollingFetch } from "@/lib/data/use-polling-fetch";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 
@@ -24,14 +25,29 @@ type InspectionRequestsValue = {
   error: string | null;
 };
 
+type InspectionRequestsSnapshot = {
+  businessId: string;
+  requests: InspectionRequestDetail[];
+};
+
+type InspectionRequestsError = {
+  businessId: string;
+  message: string;
+};
+
 const InspectionRequestsContext =
   createContext<InspectionRequestsValue | null>(null);
 
-/** Polls requests via API (no Firestore snapshot listener). */
+/** Streams dashboard request updates through one shared Firestore listener. */
 export function InspectionRequestsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
+  const [snapshot, setSnapshot] = useState<InspectionRequestsSnapshot | null>(
+    null,
+  );
+  const [snapshotError, setSnapshotError] =
+    useState<InspectionRequestsError | null>(null);
 
   const enabled =
     role === "business_owner" &&
@@ -40,23 +56,42 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
     needsInspectionFeed(pathname) &&
     pageVisible;
 
-  const { data, loading, error } = usePollingFetch({
-    enabled,
-    intervalMs: 90_000,
-    fetcher: async () => {
-      if (!user) return [];
-      const token = await user.getIdToken();
-      return fetchBusinessInspectionRequests(token);
-    },
-  });
+  useEffect(() => {
+    if (!enabled || !businessId) {
+      return;
+    }
+
+    const unsubscribe = subscribeBusinessInspectionRequests(
+      businessId,
+      (next) => {
+        setSnapshot({ businessId, requests: next });
+        setSnapshotError(null);
+      },
+      () => {
+        setSnapshotError({
+          businessId,
+          message: "Could not load requests.",
+        });
+      },
+    );
+
+    return unsubscribe;
+  }, [enabled, businessId]);
+
+  const activeSnapshot =
+    enabled && snapshot?.businessId === businessId ? snapshot : null;
+  const activeError =
+    enabled && snapshotError?.businessId === businessId
+      ? snapshotError.message
+      : null;
 
   const value = useMemo(
     () => ({
-      requests: data ?? [],
-      loading: enabled ? loading : false,
-      error,
+      requests: activeSnapshot?.requests ?? [],
+      loading: enabled && !activeSnapshot && !activeError,
+      error: activeError,
     }),
-    [data, loading, error, enabled],
+    [activeSnapshot, activeError, enabled],
   );
 
   return (

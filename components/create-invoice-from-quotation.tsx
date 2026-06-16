@@ -300,7 +300,8 @@ export function CreateInvoiceFromQuotation({
 
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstPercentage, setGstPercentage] = useState(10);
-  const [gstPricing] = useState<GstPricingMode>("exclusive");
+  const [gstPricing, setGstPricing] =
+    useState<GstPricingMode>("exclusive");
   const [businessAddress, setBusinessAddress] = useState<string | null>(null);
   const [businessEmail, setBusinessEmail] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
@@ -625,6 +626,23 @@ export function CreateInvoiceFromQuotation({
       };
     });
   }, [lineItems, gstEnabled, gstPercentage, gstPricing]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setLineItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          amountAud: computeSavedLineAmount(
+            item,
+            gstEnabled,
+            gstPercentage,
+            gstPricing,
+          ),
+        })),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [gstEnabled, gstPercentage, gstPricing]);
 
   const subtotalRaw = useMemo(
     () => documentLineItems.reduce((sum, item) => sum + item.amountAud, 0),
@@ -1616,7 +1634,14 @@ export function CreateInvoiceFromQuotation({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>Price / rate (ex. GST)</span>
+                        <span className={LABEL_CLASS}>
+                          Rate
+                          {gstEnabled
+                            ? gstPricing === "inclusive"
+                              ? " (inc. GST)"
+                              : " (ex. GST)"
+                            : ""}
+                        </span>
                         <input
                           type="number"
                           min="0"
@@ -1887,9 +1912,105 @@ export function CreateInvoiceFromQuotation({
                     {discountAud > 0 ? `−${formatAud(discountAud)}` : ""}
                   </span>
                 </button>
+                <div className="rounded-xl border border-outline-variant/40 bg-gradient-to-br from-surface-container-lowest to-surface-container-low/80 p-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setGstEnabled((value) => !value)}
+                    aria-pressed={gstEnabled}
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 transition-all duration-300 ease-out ${
+                      gstEnabled
+                        ? "bg-[#1a1f28] text-white shadow-md shadow-black/15"
+                        : "bg-white hover:bg-surface-container-low"
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-300 ${
+                          gstEnabled ? "bg-white/10" : "bg-primary/10"
+                        }`}
+                      >
+                        <span
+                          className={`material-symbols-outlined text-[18px] ${
+                            gstEnabled ? "text-white" : "text-primary"
+                          }`}
+                        >
+                          receipt_long
+                        </span>
+                      </span>
+                      <span className="text-left">
+                        <span className="block font-body text-[12px] font-bold">
+                          Apply GST ({gstPercentage}%)
+                        </span>
+                        <span
+                          className={`block font-body text-[10px] ${
+                            gstEnabled
+                              ? "text-white/65"
+                              : "text-on-surface-variant"
+                          }`}
+                        >
+                          {gstEnabled
+                            ? "GST is included in invoice totals"
+                            : "Tap to add GST to this invoice"}
+                        </span>
+                      </span>
+                    </span>
+                    <span
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300 ease-out ${
+                        gstEnabled
+                          ? "scale-100 border-white bg-white text-[#1a1f28]"
+                          : "scale-95 border-outline-variant/80 bg-transparent"
+                      }`}
+                    >
+                      {gstEnabled ? (
+                        <span className="material-symbols-outlined text-[15px] font-bold">
+                          check
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+
+                  {gstEnabled ? (
+                    <div className="mt-2.5 px-0.5">
+                      <span className={LABEL_CLASS}>Prices are</span>
+                      <div className="relative mt-1 grid grid-cols-2 rounded-full bg-[#1a1f28] p-1">
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute inset-y-1 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-[left] duration-300 ease-out"
+                          style={{
+                            width: "calc(50% - 4px)",
+                            left:
+                              gstPricing === "inclusive" ? "calc(50%)" : "4px",
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setGstPricing("exclusive")}
+                          className={`relative z-10 rounded-full px-2 py-2 font-body text-[11px] font-semibold transition-colors duration-300 ${
+                            gstPricing === "exclusive"
+                              ? "text-[#1a1f28]"
+                              : "text-white/75 hover:text-white"
+                          }`}
+                        >
+                          Exclusive
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGstPricing("inclusive")}
+                          className={`relative z-10 rounded-full px-2 py-2 font-body text-[11px] font-semibold transition-colors duration-300 ${
+                            gstPricing === "inclusive"
+                              ? "text-[#1a1f28]"
+                              : "text-white/75 hover:text-white"
+                          }`}
+                        >
+                          Inclusive
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
                 {gstAud > 0 ? (
                   <div className="flex justify-between text-on-surface-variant">
-                    <span>GST</span>
+                    <span>GST ({gstPercentage}%)</span>
                     <span className="font-numeric font-medium text-on-surface">
                       {formatAud(gstAud)}
                     </span>
