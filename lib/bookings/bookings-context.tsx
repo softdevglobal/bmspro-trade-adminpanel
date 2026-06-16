@@ -1,15 +1,16 @@
 "use client";
 
-import { fetchBusinessBookings } from "@/lib/bookings/api-client";
+import { subscribeBusinessBookings } from "@/lib/bookings/firestore-client";
 import type { BookingDetail } from "@/lib/bookings/types";
 import { useAuth } from "@/lib/auth/auth-context";
-import { usePollingFetch } from "@/lib/data/use-polling-fetch";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 
@@ -32,13 +33,25 @@ type BookingsValue = {
   error: string | null;
 };
 
+type BookingsSnapshot = {
+  businessId: string;
+  bookings: BookingDetail[];
+};
+
+type BookingsError = {
+  businessId: string;
+  message: string;
+};
+
 const BookingsContext = createContext<BookingsValue | null>(null);
 
-/** Polls bookings via API (no Firestore snapshot listener). */
+/** Streams dashboard booking updates through one shared Firestore listener. */
 export function BookingsProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { role, businessId, user } = useAuth();
   const pageVisible = usePageVisible();
+  const [snapshot, setSnapshot] = useState<BookingsSnapshot | null>(null);
+  const [snapshotError, setSnapshotError] = useState<BookingsError | null>(null);
 
   const enabled =
     role === "business_owner" &&
@@ -47,23 +60,42 @@ export function BookingsProvider({ children }: { children: ReactNode }) {
     needsBookingsFeed(pathname) &&
     pageVisible;
 
-  const { data, loading, error } = usePollingFetch({
-    enabled,
-    intervalMs: 90_000,
-    fetcher: async () => {
-      if (!user) return [];
-      const token = await user.getIdToken();
-      return fetchBusinessBookings(token);
-    },
-  });
+  useEffect(() => {
+    if (!enabled || !businessId) {
+      return;
+    }
+
+    const unsubscribe = subscribeBusinessBookings(
+      businessId,
+      (next) => {
+        setSnapshot({ businessId, bookings: next });
+        setSnapshotError(null);
+      },
+      () => {
+        setSnapshotError({
+          businessId,
+          message: "Could not load bookings.",
+        });
+      },
+    );
+
+    return unsubscribe;
+  }, [enabled, businessId]);
+
+  const activeSnapshot =
+    enabled && snapshot?.businessId === businessId ? snapshot : null;
+  const activeError =
+    enabled && snapshotError?.businessId === businessId
+      ? snapshotError.message
+      : null;
 
   const value = useMemo(
     () => ({
-      bookings: data ?? [],
-      loading: enabled ? loading : false,
-      error,
+      bookings: activeSnapshot?.bookings ?? [],
+      loading: enabled && !activeSnapshot && !activeError,
+      error: activeError,
     }),
-    [data, loading, error, enabled],
+    [activeSnapshot, activeError, enabled],
   );
 
   return (
