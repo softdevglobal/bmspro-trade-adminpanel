@@ -34,6 +34,7 @@ import {
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { platformTodayIso } from "@/lib/platform/timezone";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -245,6 +246,15 @@ function requestServiceTitle(request: InspectionRequestDetail): string {
     return request.serviceName ?? "Existing service";
   }
   return request.customRequest?.title ?? "Custom quotation request";
+}
+
+function formatCustomerContact(
+  phone: string | null | undefined,
+  email: string | null | undefined,
+): string {
+  return [formatAuPhoneDisplay(phone), email?.trim() ?? ""]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function requestHasActiveQuotation(request: InspectionRequestDetail): boolean {
@@ -1571,14 +1581,10 @@ export function CreateQuotationPage() {
                                 {requestServiceTitle(request)}
                               </span>
                               <span className="mt-0.5 block truncate font-body text-[12px] text-on-surface-variant">
-                                {request.customer.phone || request.customer.email
-                                  ? `${request.customer.phone || ""}${
-                                      request.customer.phone &&
-                                      request.customer.email
-                                        ? " · "
-                                        : ""
-                                    }${request.customer.email || ""}`
-                                  : formatAddress(request.address)}
+                                {formatCustomerContact(
+                                  request.customer.phone,
+                                  request.customer.email,
+                                ) || formatAddress(request.address)}
                               </span>
                             </span>
                           </button>
@@ -1627,7 +1633,9 @@ export function CreateQuotationPage() {
                       {customer.fullName.trim() || "—"}
                     </p>
                     {customer.phone ? (
-                      <p className="text-on-surface-variant">{customer.phone}</p>
+                      <p className="text-on-surface-variant">
+                        {formatAuPhoneDisplay(customer.phone)}
+                      </p>
                     ) : null}
                     {customer.email ? (
                       <p className="text-on-surface-variant">{customer.email}</p>

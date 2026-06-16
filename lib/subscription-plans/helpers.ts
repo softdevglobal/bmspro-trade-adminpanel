@@ -21,3 +21,21 @@ export function formatBillingNote(cycle: BillingCycle, validityDays: number): st
   const unit = cycle === "monthly" ? "Monthly" : "Weekly";
   return `${unit} • ${validityDays}-day renewal`;
 }
+
+const PLAN_DESCRIPTION_MAX_LENGTH = 500;
+
+export function validatePlanDescription(
+  description: unknown,
+): { ok: true; value: string } | { ok: false; error: string } {
+  const value = typeof description === "string" ? description.trim() : "";
+  if (!value) {
+    return { ok: false, error: "Plan description is required." };
+  }
+  if (value.length > PLAN_DESCRIPTION_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Plan description must be ${PLAN_DESCRIPTION_MAX_LENGTH} characters or less.`,
+    };
+  }
+  return { ok: true, value };
+}

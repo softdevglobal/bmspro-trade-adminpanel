@@ -25,3 +25,11 @@ export function formatAuPhoneDisplay(value: string | null | undefined): string {
   if (!local) return "";
   return `${AU_COUNTRY_CODE} ${local}`;
 }
+
+export function formatAuPhoneTelHref(
+  value: string | null | undefined,
+): string | null {
+  const local = toAuLocalPhoneDigits(value ?? "");
+  if (!local) return null;
+  return `tel:${AU_COUNTRY_CODE}${local}`;
+}
