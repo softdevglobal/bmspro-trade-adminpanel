@@ -775,12 +775,16 @@ function BookingPreviewContent({
   );
 }
 
-export function JobsBoard() {
+export function JobsBoard({
+  initialJobId = null,
+}: {
+  initialJobId?: string | null;
+}) {
   const { status: authStatus } = useAuth();
   const profile = useBusinessProfile();
   const { bookings, loading, error } = useBookings();
   const { staff } = useBusinessStaffSummary();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialJobId);
   const [filter, setFilter] = useState<JobsFilter>("active");
   const [localBookingState, setLocalBookingState] = useState<{
     source: BookingDetail[];
@@ -809,13 +813,17 @@ export function JobsBoard() {
       },
     );
   }, [displayBookings]);
-  const visibleBookings = groupedBookings[filter];
   const timeZone = profile?.timezone;
 
   const selected = useMemo(
-    () => visibleBookings.find((booking) => booking.id === selectedId) ?? null,
-    [visibleBookings, selectedId],
+    () => displayBookings.find((booking) => booking.id === selectedId) ?? null,
+    [displayBookings, selectedId],
   );
+  const activeFilter =
+    selectedId === initialJobId && selected?.status === "completed"
+      ? "completed"
+      : filter;
+  const visibleBookings = groupedBookings[activeFilter];
 
   function handleBookingUpdated(next: BookingDetail) {
     setLocalBookingState((current) => {
@@ -899,7 +907,7 @@ export function JobsBoard() {
         className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/60 bg-surface-container-low p-1"
       >
         {JOB_TABS.map((tab) => {
-          const selectedTab = filter === tab.id;
+          const selectedTab = activeFilter === tab.id;
           const count = groupedBookings[tab.id].length;
           return (
             <button
@@ -945,7 +953,7 @@ export function JobsBoard() {
       ) : (
         <section className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-5 py-8 text-center">
           <p className="font-display text-[17px] font-semibold text-on-surface">
-            No {filter} jobs
+            No {activeFilter} jobs
           </p>
           <p className="mt-1 font-body text-[13px] text-on-surface-variant">
             Jobs for this tab will appear here.
