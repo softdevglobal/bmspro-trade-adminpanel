@@ -674,17 +674,27 @@ export function CreateQuotationPage() {
   );
 
   const previewServiceTitle = useMemo(() => {
+    if (boundInspection) {
+      return requestServiceTitle(boundInspection);
+    }
     if (requestType === "existing_service") {
       return selectedService?.name ?? null;
     }
     const title = customServiceTitle.trim();
     return title.length >= 3 ? title : null;
-  }, [requestType, selectedService, customServiceTitle]);
+  }, [boundInspection, requestType, selectedService, customServiceTitle]);
 
   const previewServiceDescription = useMemo(() => {
+    if (boundInspection?.requestType === "custom_quote") {
+      return (
+        customServiceDescription.trim() ||
+        boundInspection.customRequest?.description?.trim() ||
+        null
+      );
+    }
     if (requestType !== "custom_quote") return null;
     return customServiceDescription.trim() || null;
-  }, [requestType, customServiceDescription]);
+  }, [boundInspection, requestType, customServiceDescription]);
 
   const catalogSuggestions = useMemo(() => {
     if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
@@ -1212,7 +1222,9 @@ export function CreateQuotationPage() {
         })),
         finalPriceAud: total,
         discountAud: discountAmount,
-        serviceDescription: previewServiceDescription,
+        ...(previewServiceDescription
+          ? { serviceDescription: previewServiceDescription }
+          : {}),
         termsAndConditions: termsAndConditions.trim() || null,
         notes: comment.trim() || null,
         validUntil: dueDate,
