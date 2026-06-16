@@ -76,6 +76,11 @@ export type QuotationDetail = {
 export type CreateQuotationInput = {
   inspectionRequestId: string;
   serviceDescription?: string | null;
+  /** Allows editing flows to (re)tag the backing request as a service or custom quote. */
+  requestType?: "existing_service" | "custom_quote";
+  serviceId?: string | null;
+  customRequest?: { title: string; description: string } | null;
+  serviceTitle?: string | null;
   lineItems: QuotationLineItem[];
   finalPriceAud?: number | null;
   notes?: string | null;

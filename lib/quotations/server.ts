@@ -881,30 +881,87 @@ export async function updateDraftQuotation(
     typeof input.validUntil === "string" && input.validUntil.trim()
       ? input.validUntil.trim()
       : null;
-  const serviceTitle =
-    typeof quotationData.serviceTitle === "string" &&
-    quotationData.serviceTitle.trim()
-      ? quotationData.serviceTitle.trim()
-      : requestHeadline(requestData);
   const serviceDescriptionInput = normalizeServiceDescription(
     input.serviceDescription,
   );
-  const serviceDescription =
-    serviceDescriptionInput !== undefined
-      ? serviceDescriptionInput
-      : typeof quotationData.serviceDescription === "string" &&
-          quotationData.serviceDescription.trim()
-        ? quotationData.serviceDescription.trim()
-        : requestJobDescription(requestData);
 
-  await requestSnap.ref.set(
-    {
-      customer,
-      address,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  // Editing flows can (re)classify a draft as a custom quote. Persist that
+  // tagging back to the request doc, otherwise the web app keeps reading the
+  // stale `requestType`/`customRequest` and shows it as a service request.
+  const effectiveRequestType: InspectionRequestType =
+    input.requestType === "existing_service" ||
+    input.requestType === "custom_quote"
+      ? input.requestType
+      : requestData.requestType === "existing_service"
+        ? "existing_service"
+        : "custom_quote";
+
+  const requestUpdate: Record<string, unknown> = {
+    customer,
+    address,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  let serviceTitle: string;
+  let serviceDescription: string | null;
+
+  if (effectiveRequestType === "custom_quote") {
+    const cr = input.customRequest;
+    const existingCustom =
+      requestData.customRequest && typeof requestData.customRequest === "object"
+        ? (requestData.customRequest as Record<string, unknown>)
+        : null;
+
+    const customTitle =
+      cr && typeof cr.title === "string" && cr.title.trim()
+        ? cr.title.trim()
+        : typeof input.serviceTitle === "string" && input.serviceTitle.trim()
+          ? input.serviceTitle.trim()
+          : typeof quotationData.serviceTitle === "string" &&
+              quotationData.serviceTitle.trim()
+            ? quotationData.serviceTitle.trim()
+            : existingCustom && typeof existingCustom.title === "string"
+              ? existingCustom.title.trim()
+              : requestHeadline(requestData);
+
+    const customDescription =
+      cr && typeof cr.description === "string"
+        ? cr.description.trim()
+        : serviceDescriptionInput !== undefined && serviceDescriptionInput !== null
+          ? serviceDescriptionInput
+          : typeof quotationData.serviceDescription === "string"
+            ? quotationData.serviceDescription.trim()
+            : existingCustom && typeof existingCustom.description === "string"
+              ? existingCustom.description.trim()
+              : "";
+
+    serviceTitle = customTitle;
+    serviceDescription = customDescription || null;
+
+    requestUpdate.requestType = "custom_quote";
+    requestUpdate.customRequest = {
+      title: customTitle,
+      description: customDescription,
+    };
+    requestUpdate.serviceName = null;
+    requestUpdate.serviceId = null;
+    requestUpdate.serviceDescription = serviceDescription;
+  } else {
+    serviceTitle =
+      typeof quotationData.serviceTitle === "string" &&
+      quotationData.serviceTitle.trim()
+        ? quotationData.serviceTitle.trim()
+        : requestHeadline(requestData);
+    serviceDescription =
+      serviceDescriptionInput !== undefined
+        ? serviceDescriptionInput
+        : typeof quotationData.serviceDescription === "string" &&
+            quotationData.serviceDescription.trim()
+          ? quotationData.serviceDescription.trim()
+          : requestJobDescription(requestData);
+  }
+
+  await requestSnap.ref.set(requestUpdate, { merge: true });
 
   await quotationRef.set(
     {

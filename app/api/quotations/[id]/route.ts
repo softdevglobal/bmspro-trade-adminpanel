@@ -145,6 +145,32 @@ export async function PATCH(
         : payload.serviceDescription === null
           ? { serviceDescription: null }
           : {}),
+      ...(payload.requestType === "existing_service" ||
+      payload.requestType === "custom_quote"
+        ? { requestType: payload.requestType }
+        : {}),
+      ...(typeof payload.serviceId === "string"
+        ? { serviceId: payload.serviceId }
+        : {}),
+      ...(payload.customRequest &&
+      typeof payload.customRequest === "object" &&
+      !Array.isArray(payload.customRequest)
+        ? {
+            customRequest: {
+              title:
+                typeof (payload.customRequest as { title?: unknown }).title ===
+                "string"
+                  ? (payload.customRequest as { title: string }).title
+                  : "",
+              description:
+                typeof (payload.customRequest as { description?: unknown })
+                  .description === "string"
+                  ? (payload.customRequest as { description: string })
+                      .description
+                  : "",
+            },
+          }
+        : {}),
       lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
       finalPriceAud:
         typeof payload.finalPriceAud === "number" &&
