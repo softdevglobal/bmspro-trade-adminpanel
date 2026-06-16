@@ -21,6 +21,11 @@ export type TeamAttendanceRecord = {
   breakPeriods: AttendanceBreakPeriod[];
 };
 
+export type AttendanceDateRange = {
+  startDate: string;
+  endDate: string;
+};
+
 function timestampMillis(value: unknown) {
   if (
     value &&
@@ -34,20 +39,12 @@ function timestampMillis(value: unknown) {
   return 0;
 }
 
-function timestampIso(value: unknown) {
-  const millis = timestampMillis(value);
-  return millis > 0 ? new Date(millis).toISOString() : null;
-}
-
 function sanitizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function parseDateParam(value: string | null) {
-  if (!value) {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  }
+function validateDateParam(value: string | null) {
+  if (!value) return null;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return null;
@@ -56,10 +53,25 @@ function parseDateParam(value: string | null) {
   return value;
 }
 
+function defaultDateParam() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function parseDateParam(value: string | null) {
+  return value ? validateDateParam(value) : defaultDateParam();
+}
+
 function getDayBounds(dateStr: string) {
   const [year, month, day] = dateStr.split("-").map(Number);
   const start = new Date(year, month - 1, day, 0, 0, 0, 0);
   const end = new Date(year, month - 1, day, 23, 59, 59, 999);
+  return { start, end };
+}
+
+function getRangeBounds(range: AttendanceDateRange) {
+  const { start } = getDayBounds(range.startDate);
+  const { end } = getDayBounds(range.endDate);
   return { start, end };
 }
 
@@ -168,7 +180,17 @@ export function filterAttendanceByDate(
   records: TeamAttendanceRecord[],
   dateStr: string,
 ) {
-  const { start, end } = getDayBounds(dateStr);
+  return filterAttendanceByDateRange(records, {
+    startDate: dateStr,
+    endDate: dateStr,
+  });
+}
+
+export function filterAttendanceByDateRange(
+  records: TeamAttendanceRecord[],
+  range: AttendanceDateRange,
+) {
+  const { start, end } = getRangeBounds(range);
   return records.filter((record) => {
     const checkIn = new Date(record.checkInTime);
     return checkIn >= start && checkIn <= end;
@@ -177,4 +199,24 @@ export function filterAttendanceByDate(
 
 export function parseAttendanceDateParam(value: string | null) {
   return parseDateParam(value);
+}
+
+export function parseAttendanceRangeParams(input: {
+  date: string | null;
+  start: string | null;
+  end: string | null;
+}): AttendanceDateRange | null {
+  if (input.start || input.end) {
+    const startDate = validateDateParam(input.start);
+    const endDate = validateDateParam(input.end);
+    if (!startDate || !endDate) return null;
+
+    const { start, end } = getRangeBounds({ startDate, endDate });
+    if (start > end) return null;
+
+    return { startDate, endDate };
+  }
+
+  const date = parseDateParam(input.date);
+  return date ? { startDate: date, endDate: date } : null;
 }
