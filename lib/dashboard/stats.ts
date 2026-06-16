@@ -122,6 +122,12 @@ export function computeDashboardOverview(input: {
     (request) => request.status === "pending" && !request.assignedTo,
   ).length;
 
+  // A job can be completed without invoicing. Surface finished jobs that still
+  // have no invoice so the owner doesn't miss billing the customer.
+  const awaitingInvoice = input.requests.filter(
+    (request) => request.status === "completed" && !request.invoice,
+  ).length;
+
   const unread = input.notifications.filter((note) => !note.read).length;
   const messageTotal = input.notifications.length;
   const staffCount = input.staffCount;
@@ -163,6 +169,17 @@ export function computeDashboardOverview(input: {
           : unassignedTotal > 0
             ? "Assign your team"
             : "Fully covered",
+    },
+    {
+      key: "awaiting_invoice",
+      label: "Awaiting invoice",
+      value: String(awaitingInvoice),
+      icon: "receipt_long",
+      accent: "amber",
+      trend:
+        awaitingInvoice > 0
+          ? `${awaitingInvoice} job${awaitingInvoice === 1 ? "" : "s"} to bill`
+          : "All invoiced",
     },
     {
       key: "messages",
@@ -258,6 +275,8 @@ export function computeDashboardOverview(input: {
     focusMessage = `${urgentPending} new request${urgentPending === 1 ? "" : "s"} need your review.`;
   } else if (unassignedTotal > 0) {
     focusMessage = `${unassignedTotal} job${unassignedTotal === 1 ? "" : "s"} still need someone assigned.`;
+  } else if (awaitingInvoice > 0) {
+    focusMessage = `${awaitingInvoice} completed job${awaitingInvoice === 1 ? "" : "s"} still need an invoice sent.`;
   } else if (ongoingCount > 0) {
     focusMessage = `${ongoingCount} job${ongoingCount === 1 ? " is" : "s are"} live on site right now.`;
   } else if (todayTotal > 0) {
