@@ -1,80 +1,23 @@
 "use client";
 
+import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { useAuth } from "@/lib/auth/auth-context";
+import { buildStaffLeaveBlockMap } from "@/lib/leave/client";
+import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
+import { useEffect, useMemo } from "react";
 
 export type BookingAssignChoice = "owner" | "staff";
-
-function StaffMemberPicker({
-  staff,
-  value,
-  disabled,
-  onChange,
-}: {
-  staff: StaffSummary[];
-  value: string;
-  disabled: boolean;
-  onChange: (staffId: string) => void;
-}) {
-  return (
-    <ul className="max-h-[min(16rem,42vh)] space-y-2 overflow-y-auto pr-0.5">
-      {staff.map((member) => {
-        const selected = value === member.id;
-        return (
-          <li key={member.id}>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onChange(member.id)}
-              className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                selected
-                  ? "border-primary bg-white ring-1 ring-primary/30"
-                  : "border-outline-variant/60 bg-white hover:border-primary/40 hover:bg-primary/[0.03]"
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={staffAvatarUrl(member)}
-                alt=""
-                className="h-11 w-11 shrink-0 rounded-full border-2 border-white bg-surface-container-low object-cover shadow-sm ring-1 ring-outline-variant/30"
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-body text-[13px] font-semibold text-on-surface">
-                  {member.fullName}
-                </span>
-                <span className="mt-0.5 block truncate font-body text-[11px] text-on-surface-variant">
-                  {member.staffType}
-                  {member.email ? ` · ${member.email}` : ""}
-                </span>
-              </span>
-              <span
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                  selected
-                    ? "border-primary bg-primary text-on-primary"
-                    : "border-stone-300 bg-white text-transparent"
-                }`}
-                aria-hidden
-              >
-                {selected ? (
-                  <span className="material-symbols-outlined text-[14px]">
-                    check
-                  </span>
-                ) : null}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
 
 export function BookingStaffAssignSection({
   staff,
   choice,
   staffId,
   disabled,
+  assignmentDate,
+  startTime,
+  endTime,
   onChoiceChange,
   onStaffIdChange,
 }: {
@@ -82,15 +25,34 @@ export function BookingStaffAssignSection({
   choice: BookingAssignChoice;
   staffId: string;
   disabled?: boolean;
+  assignmentDate?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
   onChoiceChange: (choice: BookingAssignChoice) => void;
   onStaffIdChange: (staffId: string) => void;
 }) {
   const { user } = useAuth();
+  const { leaveRequests } = useLeaveRequests();
   const ownerAvatar = staffAvatarUrl({
     id: user?.uid ?? "owner",
     fullName: user?.displayName ?? "Business owner",
     email: user?.email ?? "",
   });
+
+  const blockedLabels = useMemo(() => {
+    const approved = leaveRequests.filter((item) => item.status === "approved");
+    return buildStaffLeaveBlockMap(
+      approved,
+      staff.map((member) => member.id),
+      assignmentDate,
+      startTime,
+      endTime,
+    );
+  }, [leaveRequests, staff, assignmentDate, startTime, endTime]);
+
+  useEffect(() => {
+    if (staffId && blockedLabels[staffId]) onStaffIdChange("");
+  }, [staffId, blockedLabels, onStaffIdChange]);
 
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
@@ -98,7 +60,8 @@ export function BookingStaffAssignSection({
         Assign this job
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Choose who will run the job.
+        Choose who will run the job. Team members on approved leave cannot be
+        selected for that day.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -181,6 +144,7 @@ export function BookingStaffAssignSection({
                 staff={staff}
                 value={staffId}
                 disabled={Boolean(disabled)}
+                blockedLabels={blockedLabels}
                 onChange={onStaffIdChange}
               />
             </div>

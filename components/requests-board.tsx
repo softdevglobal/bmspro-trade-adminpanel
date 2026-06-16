@@ -8,6 +8,7 @@ import {
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
+import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
@@ -20,6 +21,8 @@ import {
   type BookingStatus,
 } from "@/lib/bookings/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
+import { buildStaffLeaveBlockMap } from "@/lib/leave/client";
+import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 import {
@@ -1552,6 +1555,11 @@ function DetailDrawerContent({
             assignTo={assignTo}
             staffId={staffId}
             disabled={submitting}
+            assignmentDate={request.scheduledSlot?.date ?? null}
+            startTime={
+              request.scheduledStartTime ?? bookingTimeDefaults.start
+            }
+            endTime={request.scheduledEndTime ?? bookingTimeDefaults.end}
             onAssignToChange={setAssignTo}
             onStaffIdChange={setStaffId}
             onCancel={() => setMode("review")}
@@ -3152,99 +3160,14 @@ function ProposeForm({
   );
 }
 
-function StaffQuotationAccessBadge({
-  cangetQuotation,
-}: {
-  cangetQuotation: boolean;
-}) {
-  return (
-    <span
-      className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-body text-[10px] font-semibold ${
-        cangetQuotation
-          ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200"
-          : "bg-amber-50 text-amber-900 ring-1 ring-amber-200"
-      }`}
-    >
-      <span className="material-symbols-outlined text-[12px]">
-        {cangetQuotation ? "request_quote" : "support_agent"}
-      </span>
-      {cangetQuotation ? "Can get quotation" : "Cannot get quotation"}
-    </span>
-  );
-}
-
-function StaffMemberPicker({
-  staff,
-  value,
-  disabled,
-  onChange,
-}: {
-  staff: StaffSummary[];
-  value: string;
-  disabled: boolean;
-  onChange: (staffId: string) => void;
-}) {
-  return (
-    <ul className="max-h-[min(16rem,42vh)] space-y-2 overflow-y-auto pr-0.5">
-      {staff.map((member) => {
-        const selected = value === member.id;
-        return (
-          <li key={member.id}>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onChange(member.id)}
-              className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                selected
-                  ? "border-primary bg-white ring-1 ring-primary/30"
-                  : "border-outline-variant/60 bg-white hover:border-primary/40 hover:bg-primary/[0.03]"
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={staffAvatarUrl(member)}
-                alt=""
-                className="h-11 w-11 shrink-0 rounded-full border-2 border-white bg-surface-container-low object-cover shadow-sm ring-1 ring-outline-variant/30"
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-body text-[13px] font-semibold text-on-surface">
-                  {member.fullName}
-                </span>
-                <span className="mt-0.5 block truncate font-body text-[11px] text-on-surface-variant">
-                  {member.staffType}
-                  {member.email ? ` · ${member.email}` : ""}
-                </span>
-                <StaffQuotationAccessBadge
-                  cangetQuotation={member.canget_qutaion}
-                />
-              </span>
-              <span
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                  selected
-                    ? "border-primary bg-primary text-on-primary"
-                    : "border-stone-300 bg-white text-transparent"
-                }`}
-                aria-hidden
-              >
-                {selected ? (
-                  <span className="material-symbols-outlined text-[14px]">
-                    check
-                  </span>
-                ) : null}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 function AssignForm({
   staff,
   assignTo,
   staffId,
   disabled,
+  assignmentDate,
+  startTime,
+  endTime,
   onAssignToChange,
   onStaffIdChange,
   onCancel,
@@ -3254,17 +3177,36 @@ function AssignForm({
   assignTo: "owner" | "staff" | null;
   staffId: string;
   disabled: boolean;
+  assignmentDate: string | null;
+  startTime: string;
+  endTime: string;
   onAssignToChange: (value: "owner" | "staff") => void;
   onStaffIdChange: (value: string) => void;
   onCancel: () => void;
   onSubmit: () => void;
 }) {
   const { user } = useAuth();
+  const { leaveRequests } = useLeaveRequests();
   const ownerAvatar = staffAvatarUrl({
     id: user?.uid ?? "owner",
     fullName: user?.displayName ?? "Business owner",
     email: user?.email ?? "",
   });
+
+  const blockedLabels = useMemo(() => {
+    const approved = leaveRequests.filter((item) => item.status === "approved");
+    return buildStaffLeaveBlockMap(
+      approved,
+      staff.map((member) => member.id),
+      assignmentDate,
+      startTime,
+      endTime,
+    );
+  }, [leaveRequests, staff, assignmentDate, startTime, endTime]);
+
+  useEffect(() => {
+    if (staffId && blockedLabels[staffId]) onStaffIdChange("");
+  }, [staffId, blockedLabels, onStaffIdChange]);
 
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
@@ -3355,6 +3297,8 @@ function AssignForm({
                 staff={staff}
                 value={staffId}
                 disabled={disabled}
+                blockedLabels={blockedLabels}
+                showQuotationAccess
                 onChange={onStaffIdChange}
               />
             </div>
