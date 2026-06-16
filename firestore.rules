@@ -399,6 +399,21 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Staff time-off / leave requests. Staff create their own (pending); owners
+    // and the requester read; approvals/rejections happen via the Admin SDK.
+    match /leaveRequests/{leaveId} {
+      allow read: if isSuperAdmin()
+        || (isSignedIn() && resource.data.requesterUid == request.auth.uid)
+        || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
+        || (isBusinessOwner()
+            && resource.data.businessId == request.auth.token.businessId)
+        || userOwnsBusiness(resource.data.businessId);
+      allow create: if isSignedIn()
+        && request.resource.data.requesterUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update, delete: if false;
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
       allow read, write: if isSuperAdmin();

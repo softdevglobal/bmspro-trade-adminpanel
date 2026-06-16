@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "services",
       "queryScope": "COLLECTION",
       "fields": [
