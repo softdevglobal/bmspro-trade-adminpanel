@@ -334,14 +334,16 @@ export async function applyOwnerAction(
       action: "booking.created",
       actor: audit.actor,
       source: audit.source,
-      summary: `Job created from request ${created.request.requestCode ?? id}`,
-      targetId: created.request.id,
+      summary: `Job ${created.booking.bookingCode ?? created.booking.id} created from request ${created.request.requestCode ?? id}`,
+      targetId: created.booking.id,
       targetLabel:
+        created.booking.bookingCode ||
         created.request.serviceName ||
         created.request.customer.fullName ||
         null,
       metadata: {
         inspectionId: id,
+        bookingCode: created.booking.bookingCode ?? null,
         estimatedDurationMinutes: action.estimatedDurationMinutes,
       },
     });

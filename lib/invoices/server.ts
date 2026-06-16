@@ -1,7 +1,12 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
-import { completeBookingForInvoicedQuotation } from "@/lib/bookings/server";
+import {
+  completeBookingForInvoicedQuotation,
+  type InvoicedBookingAudit,
+} from "@/lib/bookings/server";
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { parseBookingStatus } from "@/lib/bookings/types";
 import { getBusinessQuotationById } from "@/lib/quotations/server";
 import type {
@@ -21,6 +26,75 @@ import type {
 
 export const INVOICE_COLLECTION = "invoices";
 export const INVOICE_LIST_LIMIT = 80;
+
+export type InvoiceAuthor = {
+  uid: string;
+  email?: string | null;
+  role?: string | null;
+};
+
+async function resolveInvoiceAuthorActor(
+  author: InvoiceAuthor,
+): Promise<AuditActor> {
+  const userSnap = await adminDb.collection("users").doc(author.uid).get();
+  const userData = userSnap.exists ? userSnap.data() : null;
+  return {
+    uid: author.uid,
+    role: actorRoleFromClaim(author.role),
+    name:
+      userData && typeof userData.fullName === "string"
+        ? userData.fullName
+        : author.email ?? null,
+    email: author.email ?? null,
+  };
+}
+
+async function resolveInvoiceBookingAudit(
+  author: InvoiceAuthor,
+  invoiceCode: string | null,
+  quotationCode: string | null,
+): Promise<InvoicedBookingAudit> {
+  return {
+    actor: await resolveInvoiceAuthorActor(author),
+    source: "admin_panel",
+    invoiceCode,
+    quotationCode,
+  };
+}
+
+async function logInvoiceAuditEvent(
+  businessId: string,
+  author: InvoiceAuthor,
+  invoice: InvoiceDetail,
+  action: "invoice.created" | "invoice.sent",
+): Promise<void> {
+  const actor = await resolveInvoiceAuthorActor(author);
+  const customerName = invoice.customer.fullName?.trim() || "a customer";
+  const summary =
+    action === "invoice.sent"
+      ? `Invoice ${invoice.invoiceCode} sent to ${customerName}`
+      : `Invoice ${invoice.invoiceCode} created for ${customerName}`;
+
+  await logAuditEvent({
+    businessId,
+    category: "invoice",
+    action,
+    actor,
+    source: "admin_panel",
+    summary,
+    targetId: invoice.id,
+    targetLabel: invoice.invoiceCode || null,
+    metadata: {
+      invoiceCode: invoice.invoiceCode,
+      quotationCode: invoice.quotationCode,
+      quotationId: invoice.quotationId,
+      finalPriceAud: invoice.finalPriceAud,
+      status: invoice.status,
+      bookingId: invoice.bookingId,
+      bookingCode: invoice.bookingCode,
+    },
+  });
+}
 
 function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
   if (!raw || typeof raw !== "object") return null;
@@ -467,7 +541,7 @@ function buildInvoiceValues(input: CreateInvoiceInput):
 
 export async function createInvoiceFromQuotation(
   businessId: string,
-  uid: string,
+  author: InvoiceAuthor,
   input: CreateInvoiceInput,
 ): Promise<
   | { ok: true; invoice: InvoiceDetail }
@@ -585,6 +659,11 @@ export async function createInvoiceFromQuotation(
         balanceDueAud: existingInvoice.balanceDueAud,
         status: quotation.status,
       },
+      audit: await resolveInvoiceBookingAudit(
+        author,
+        existingInvoice.invoiceCode,
+        quotation.quotationCode,
+      ),
     });
 
     const resendPatch: Record<string, unknown> = {
@@ -615,6 +694,7 @@ export async function createInvoiceFromQuotation(
       persisted.pdfBytes,
     );
     await mirrorInvoiceToInspectionRequest(invoice);
+    await logInvoiceAuditEvent(businessId, author, invoice, "invoice.sent");
     return { ok: true, invoice };
   }
 
@@ -658,6 +738,11 @@ export async function createInvoiceFromQuotation(
       balanceDueAud: values.balanceDueAud,
       status: quotation.status,
     },
+    audit: await resolveInvoiceBookingAudit(
+      author,
+      invoiceCode,
+      quotation.quotationCode,
+    ),
   });
 
   await docRef.set({
@@ -685,7 +770,7 @@ export async function createInvoiceFromQuotation(
     bookingCode: booking?.bookingCode ?? null,
     bookingStatus: booking?.bookingStatus ?? null,
     bookingStatusAt: booking ? now : null,
-    createdBy: uid,
+    createdBy: author.uid,
     createdAt: now,
     updatedAt: now,
   });
@@ -695,12 +780,15 @@ export async function createInvoiceFromQuotation(
   const persisted = await persistInvoicePdf(invoice, businessId);
   invoice = persisted.invoice;
 
+  await logInvoiceAuditEvent(businessId, author, invoice, "invoice.created");
+
   if (input.send) {
     await sendInvoiceEmailForDetail(
       invoice,
       businessId,
       persisted.pdfBytes,
     );
+    await logInvoiceAuditEvent(businessId, author, invoice, "invoice.sent");
   }
 
   await mirrorInvoiceToInspectionRequest(invoice);
@@ -789,7 +877,7 @@ export async function createDirectInvoice(
       { merge: true },
     );
 
-  return createInvoiceFromQuotation(businessId, uid, {
+  return createInvoiceFromQuotation(businessId, { uid }, {
     quotationId: quotation.id,
     lineItems: input.lineItems,
     finalPriceAud: input.finalPriceAud,
