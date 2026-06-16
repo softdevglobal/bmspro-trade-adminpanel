@@ -32,6 +32,8 @@ const EMAIL_PRESENTATION: Record<
   quotation_sent: { eyebrow: "Quotation", tone: "brand" },
   quotation_accepted: { eyebrow: "Quotation accepted", tone: "success" },
   quotation_rejected: { eyebrow: "Quotation rejected", tone: "danger" },
+  // Custom messages are in-app/push only and never emailed to customers.
+  system_message: { eyebrow: "Announcement", tone: "brand" },
 };
 
 export type InspectionCustomerNotificationEmailInput = {

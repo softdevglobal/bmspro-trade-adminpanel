@@ -20,6 +20,7 @@ const PAGE_ICONS: Record<string, string> = {
   Settings: "settings",
   Tenants: "domain",
   Packages: "inventory_2",
+  "Custom messages": "campaign",
   "Audit logs": "history",
 };
 

@@ -31,7 +31,8 @@ export type NotificationType =
   | "invoice_sent"
   | "quotation_sent"
   | "quotation_accepted"
-  | "quotation_rejected";
+  | "quotation_rejected"
+  | "system_message";
 
 /** Client-facing notification (timestamps are epoch millis). */
 export type NotificationRecord = {
@@ -83,6 +84,7 @@ const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
   quotation_sent: "request_quote",
   quotation_accepted: "check_circle",
   quotation_rejected: "cancel",
+  system_message: "campaign",
 };
 
 const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
@@ -91,6 +93,7 @@ const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
   quotation_sent: "text-orange-400",
   quotation_accepted: "text-emerald-600",
   quotation_rejected: "text-rose-600",
+  system_message: "text-primary",
 };
 
 export function notificationCardIcon(note: Pick<NotificationRecord, "type" | "status">): string {
