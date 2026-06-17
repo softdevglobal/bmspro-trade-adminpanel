@@ -390,7 +390,6 @@ export function CreateQuotationPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [clientOpen, setClientOpen] = useState(false);
-  const [serviceEditing, setServiceEditing] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [requestPickerOpen, setRequestPickerOpen] = useState(false);
@@ -525,7 +524,6 @@ export function CreateQuotationPage() {
     setAddress({ ...EMPTY_ADDRESS, ...request.address });
     setCustomerSearch(request.customer.fullName ?? "");
     setClientOpen(false);
-    setServiceEditing(false);
     if (request.requestType === "existing_service" && request.serviceId) {
       setRequestType("existing_service");
       setSelectedServiceId(request.serviceId);
@@ -586,7 +584,6 @@ export function CreateQuotationPage() {
         });
         setAddress({ ...EMPTY_ADDRESS, ...quotation.address });
         setClientOpen(false);
-        setServiceEditing(false);
         const linkedRequest = requests.find(
           (request) => request.id === quotation.inspectionRequestId,
         );
@@ -698,27 +695,17 @@ export function CreateQuotationPage() {
   );
 
   const previewServiceTitle = useMemo(() => {
-    if (boundInspection) {
-      return requestServiceTitle(boundInspection);
-    }
     if (requestType === "existing_service") {
       return selectedService?.name ?? null;
     }
     const title = customServiceTitle.trim();
     return title.length >= 3 ? title : null;
-  }, [boundInspection, requestType, selectedService, customServiceTitle]);
+  }, [requestType, selectedService, customServiceTitle]);
 
   const previewServiceDescription = useMemo(() => {
-    if (boundInspection?.requestType === "custom_quote") {
-      return (
-        customServiceDescription.trim() ||
-        boundInspection.customRequest?.description?.trim() ||
-        null
-      );
-    }
     if (requestType !== "custom_quote") return null;
     return customServiceDescription.trim() || null;
-  }, [boundInspection, requestType, customServiceDescription]);
+  }, [requestType, customServiceDescription]);
 
   const catalogSuggestions = useMemo(() => {
     if (!itemDraft || !catalogSuggestField || catalog.length === 0) return [];
@@ -1008,6 +995,7 @@ export function CreateQuotationPage() {
     if (!itemDraft) return;
     const name = (itemDraft.name ?? "").trim();
     const code = (itemDraft.code ?? "").trim();
+    const description = (itemDraft.description ?? "").trim();
     const quantity = parseNum(itemDraft.quantity) || 1;
     const rate = parseNum(itemDraft.rate);
     const discountPercent = Math.min(100, parseNum(itemDraft.discountPercent));
@@ -1030,7 +1018,7 @@ export function CreateQuotationPage() {
       id: editingItemId ?? crypto.randomUUID(),
       code,
       name,
-      description: (itemDraft.description ?? "").trim(),
+      description,
       quantity,
       rate,
       discountPercent,
@@ -1062,7 +1050,7 @@ export function CreateQuotationPage() {
             name,
             priceAud: rate,
             code: code || null,
-            description: (itemDraft.description ?? "").trim() || null,
+            description: description || null,
           }),
         });
         await refreshCatalog(token);
@@ -1182,18 +1170,14 @@ export function CreateQuotationPage() {
       return "Enter a valid client mobile number.";
     }
     if (address.street.trim().length < 3) return "Enter a complete address.";
-    // Inspection-bound quotations inherit the service/job details from the
-    // existing visit, so only validate them for standalone quotations.
-    if (!inspectionRequestId) {
-      if (requestType === "existing_service") {
-        if (!selectedServiceId) return "Select a service from the list.";
-      } else {
-        if (customServiceTitle.trim().length < 3) {
-          return "Add a job title (at least 3 characters).";
-        }
-        if (customServiceDescription.trim().length < 10) {
-          return "Describe the work needed (at least 10 characters).";
-        }
+    if (requestType === "existing_service") {
+      if (!selectedServiceId) return "Select a service from the list.";
+    } else {
+      if (customServiceTitle.trim().length < 3) {
+        return "Add a job title (at least 3 characters).";
+      }
+      if (customServiceDescription.trim().length < 10) {
+        return "Describe the work needed (at least 10 characters).";
       }
     }
     if (lineItems.length === 0) return "Add at least one line item.";
@@ -1206,7 +1190,6 @@ export function CreateQuotationPage() {
     selectedServiceId,
     customServiceTitle,
     customServiceDescription,
-    inspectionRequestId,
   ]);
 
   async function save(sendToCustomer = false) {
@@ -1820,64 +1803,6 @@ export function CreateQuotationPage() {
               )}
 
               {/* Service */}
-              {boundInspection &&
-              !serviceEditing &&
-              ((requestType === "existing_service" && selectedService) ||
-                (requestType === "custom_quote" &&
-                  customServiceTitle.trim().length > 0)) ? (
-                <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <h2 className="font-body text-[15px] font-semibold text-on-surface">
-                      Service
-                    </h2>
-                    <button
-                      type="button"
-                      onClick={() => setServiceEditing(true)}
-                      className="shrink-0 font-body text-[12px] font-semibold text-primary hover:underline"
-                    >
-                      Change
-                    </button>
-                  </div>
-                  {requestType === "existing_service" && selectedService ? (
-                    <div className="mt-3 flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
-                        {selectedService.imageUrl ? (
-                          <img
-                            src={selectedService.imageUrl}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center">
-                            <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
-                              {iconForBusinessType(selectedService.businessType)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-body text-[14px] font-semibold text-on-surface">
-                          {selectedService.name}
-                        </p>
-                        <p className="font-body text-[12px] text-on-surface-variant">
-                          {selectedService.businessType}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                      <p className="font-body text-[14px] font-semibold text-on-surface">
-                        {customServiceTitle.trim()}
-                      </p>
-                      {customServiceDescription.trim() ? (
-                        <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                          {customServiceDescription.trim()}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
-                </section>
-              ) : (
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
                   Service
@@ -2019,7 +1944,6 @@ export function CreateQuotationPage() {
                   </div>
                 )}
               </section>
-              )}
 
               {/* Items */}
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">

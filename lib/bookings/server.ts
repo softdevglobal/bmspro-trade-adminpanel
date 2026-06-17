@@ -23,7 +23,7 @@ import {
   notifyCustomerOfBookingOnTheWay,
   notifyCustomerOfJobCompleted,
 } from "@/lib/notifications/server";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
 import type { BookingStatus } from "@/lib/bookings/types";
@@ -459,6 +459,52 @@ export async function startBusinessBookingJob(
   };
 }
 
+async function resolveBookingProgressBackfill(
+  current: BookingDetail,
+  inspectionRequestId?: string | null,
+): Promise<Record<string, unknown>> {
+  const updates: Record<string, unknown> = {};
+  let visitStartedAt = current.visitStartedAt;
+  let visitEndedAt = current.visitEndedAt;
+  let bookingStartedAt = current.bookingStartedAt;
+
+  const requestId = inspectionRequestId ?? current.inspectionRequestId;
+  if ((!visitStartedAt || !visitEndedAt) && requestId) {
+    const inspectionSnap = await adminDb
+      .collection(REQUESTS_COLLECTION)
+      .doc(requestId)
+      .get();
+    if (inspectionSnap.exists) {
+      const inspection = mapInspectionDoc(
+        inspectionSnap.id,
+        inspectionSnap.data() ?? {},
+      );
+      visitStartedAt = visitStartedAt ?? inspection.visitStartedAt;
+      visitEndedAt = visitEndedAt ?? inspection.visitEndedAt;
+    }
+  }
+
+  if (!visitStartedAt) {
+    updates.visitStartedAt = FieldValue.serverTimestamp();
+  } else if (!current.visitStartedAt) {
+    updates.visitStartedAt = Timestamp.fromMillis(visitStartedAt);
+  }
+
+  if (!visitEndedAt) {
+    updates.visitEndedAt = FieldValue.serverTimestamp();
+  } else if (!current.visitEndedAt) {
+    updates.visitEndedAt = Timestamp.fromMillis(visitEndedAt);
+  }
+
+  if (!bookingStartedAt) {
+    updates.bookingStartedAt = FieldValue.serverTimestamp();
+  } else if (!current.bookingStartedAt) {
+    updates.bookingStartedAt = Timestamp.fromMillis(bookingStartedAt);
+  }
+
+  return updates;
+}
+
 export type InvoicedBookingAudit = {
   actor: AuditActor;
   source: AuditSource;
@@ -509,7 +555,15 @@ export async function completeBookingForInvoicedQuotation(input: {
       const current = mapBookingDoc(doc.id, doc.data() ?? {});
       const completedNow = current.status !== "completed";
       if (completedNow) {
-        await doc.ref.update({ status: "completed", updatedAt: now });
+        const progressUpdates = await resolveBookingProgressBackfill(
+          current,
+          inspectionRequestId,
+        );
+        await doc.ref.update({
+          status: "completed",
+          updatedAt: now,
+          ...progressUpdates,
+        });
       }
       await Promise.all([
         mirrorBookingToQuotations(inspectionRequestId, {
@@ -562,6 +616,8 @@ export async function completeBookingForInvoicedQuotation(input: {
   let customRequest: { title: string; description: string } | null = null;
   let customerId: string | null = null;
   let inspectionRequestCode: string | null = null;
+  let inspectionVisitStartedAt: number | null = null;
+  let inspectionVisitEndedAt: number | null = null;
 
   if (inspectionRequestId) {
     const inspectionSnap = await adminDb
@@ -580,6 +636,8 @@ export async function completeBookingForInvoicedQuotation(input: {
       customRequest = inspection.customRequest;
       customerId = inspection.customerId;
       inspectionRequestCode = inspection.requestCode;
+      inspectionVisitStartedAt = inspection.visitStartedAt;
+      inspectionVisitEndedAt = inspection.visitEndedAt;
     }
   }
 
@@ -620,6 +678,15 @@ export async function completeBookingForInvoicedQuotation(input: {
       createdAt: null,
     },
     completedFromInvoice: true,
+    visitStartedAt:
+      inspectionVisitStartedAt != null
+        ? Timestamp.fromMillis(inspectionVisitStartedAt)
+        : now,
+    visitEndedAt:
+      inspectionVisitEndedAt != null
+        ? Timestamp.fromMillis(inspectionVisitEndedAt)
+        : now,
+    bookingStartedAt: now,
     createdAt: now,
     updatedAt: now,
   };
@@ -677,6 +744,10 @@ export async function completeBusinessBooking(
   bookingId: string,
   businessId: string,
   operatorUid: string,
+  options?: {
+    beforeImageUrls?: string[];
+    afterImageUrls?: string[];
+  },
 ): Promise<
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
@@ -716,8 +787,17 @@ export async function completeBusinessBooking(
     };
   }
 
+  const progressUpdates = await resolveBookingProgressBackfill(current);
+
   await ref.update({
     status: "completed",
+    ...progressUpdates,
+    ...(options?.beforeImageUrls?.length
+      ? { beforeImageUrls: options.beforeImageUrls.slice(0, 5) }
+      : {}),
+    ...(options?.afterImageUrls?.length
+      ? { afterImageUrls: options.afterImageUrls.slice(0, 5) }
+      : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
 
@@ -747,5 +827,72 @@ export async function completeBusinessBooking(
   return {
     ok: true,
     booking,
+  };
+}
+
+function normalizeCompletionPhotoUrls(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+    .map((url) => url.trim())
+    .slice(0, 5);
+}
+
+export async function updateBookingCompletionPhotos(
+  bookingId: string,
+  businessId: string,
+  operatorUid: string,
+  input: {
+    beforeImageUrls?: unknown;
+    afterImageUrls?: unknown;
+  },
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  if (current.status !== "ongoing" && current.status !== "completed") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Photos can only be added while the job is in progress or completed.",
+    };
+  }
+
+  const assignedUid = current.assignedTo?.uid;
+  if (!assignedUid || assignedUid !== operatorUid) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This job is not assigned to you.",
+    };
+  }
+
+  const update: Record<string, unknown> = {
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (input.beforeImageUrls !== undefined) {
+    update.beforeImageUrls = normalizeCompletionPhotoUrls(input.beforeImageUrls);
+  }
+  if (input.afterImageUrls !== undefined) {
+    update.afterImageUrls = normalizeCompletionPhotoUrls(input.afterImageUrls);
+  }
+
+  await ref.update(update);
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
   };
 }

@@ -8,7 +8,11 @@ import {
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { parseBookingStatus } from "@/lib/bookings/types";
-import { getBusinessQuotationById } from "@/lib/quotations/server";
+import {
+  getBusinessQuotationById,
+  parseLineItems,
+  serializeLineItemsForFirestore,
+} from "@/lib/quotations/server";
 import type {
   QuotationDepositRequest,
   QuotationLineItem,
@@ -495,10 +499,8 @@ function buildInvoiceValues(input: CreateInvoiceInput):
       termsAndConditions: string | null;
     }
   | { ok: false; status: number; error: string } {
-  const lineItems = input.lineItems.filter(
-    (item) => item.name.trim() && item.priceAud >= 0,
-  );
-  if (lineItems.length === 0) {
+  const lineItems = parseLineItems(input.lineItems);
+  if (!lineItems || lineItems.length === 0) {
     return {
       ok: false,
       status: 400,
@@ -616,7 +618,7 @@ export async function createInvoiceFromQuotation(
         serviceTitle,
         customer,
         address,
-        lineItems: values.lineItems,
+        lineItems: serializeLineItemsForFirestore(values.lineItems),
         subtotalAud: values.subtotalAud,
         discountAud: values.discountAud,
         gstAud: values.gstAud,
@@ -764,7 +766,7 @@ export async function createInvoiceFromQuotation(
     serviceTitle: quotation.serviceTitle,
     customer: quotation.customer,
     address: quotation.address,
-    lineItems: values.lineItems,
+    lineItems: serializeLineItemsForFirestore(values.lineItems),
     subtotalAud: values.subtotalAud,
     discountAud: values.discountAud,
     gstAud: values.gstAud,

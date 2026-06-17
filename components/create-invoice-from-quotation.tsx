@@ -946,6 +946,7 @@ export function CreateInvoiceFromQuotation({
     if (!itemDraft) return;
     const name = (itemDraft.name ?? "").trim();
     const code = (itemDraft.code ?? "").trim();
+    const description = (itemDraft.description ?? "").trim();
     const quantity = parseNum(itemDraft.quantity) || 1;
     const rate = parseNum(itemDraft.rate);
     const discountPercent = Math.min(100, parseNum(itemDraft.discountPercent));
@@ -968,7 +969,7 @@ export function CreateInvoiceFromQuotation({
       id: editingItemId ?? crypto.randomUUID(),
       code,
       name,
-      description: (itemDraft.description ?? "").trim(),
+      description,
       quantity,
       rate,
       discountPercent,
@@ -1000,7 +1001,7 @@ export function CreateInvoiceFromQuotation({
             name,
             priceAud: rate,
             code: code || null,
-            description: (itemDraft.description ?? "").trim() || null,
+            description: description || null,
           }),
         });
         await refreshCatalog(token);

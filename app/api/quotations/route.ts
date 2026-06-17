@@ -256,6 +256,33 @@ export async function POST(request: Request) {
     auth.uid,
     {
       inspectionRequestId,
+      requestType:
+        payload.requestType === "existing_service" ||
+        payload.requestType === "custom_quote"
+          ? payload.requestType
+          : undefined,
+      serviceId:
+        typeof payload.serviceId === "string" ? payload.serviceId : null,
+      customRequest:
+        payload.customRequest &&
+        typeof payload.customRequest === "object" &&
+        !Array.isArray(payload.customRequest)
+          ? {
+              title:
+                typeof (payload.customRequest as { title?: unknown }).title ===
+                "string"
+                  ? (payload.customRequest as { title: string }).title
+                  : "",
+              description:
+                typeof (payload.customRequest as { description?: unknown })
+                  .description === "string"
+                  ? (payload.customRequest as { description: string })
+                      .description
+                  : "",
+            }
+          : null,
+      serviceTitle:
+        typeof payload.serviceTitle === "string" ? payload.serviceTitle : null,
       ...(typeof payload.serviceDescription === "string"
         ? { serviceDescription: payload.serviceDescription }
         : payload.serviceDescription === null
