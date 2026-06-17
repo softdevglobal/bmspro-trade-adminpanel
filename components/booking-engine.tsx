@@ -112,6 +112,7 @@ export function BookingEngine({ business, services }: Props) {
             <ServiceBookingFlow
               slug={business.slug}
               businessName={business.businessName}
+              businessActive={business.isActive}
               services={services}
               timeZone={business.timezone}
               reducedMotion={!!reducedMotion}
@@ -747,6 +748,7 @@ function DayTimePicker({
 function ServiceBookingFlow({
   slug,
   businessName,
+  businessActive,
   services,
   timeZone,
   phoneHref,
@@ -755,6 +757,7 @@ function ServiceBookingFlow({
 }: {
   slug: string;
   businessName: string;
+  businessActive: boolean;
   services: BookingService[];
   timeZone: string;
   phoneHref: string | null;
@@ -854,6 +857,7 @@ function ServiceBookingFlow({
   );
 
   const canSubmit =
+    businessActive &&
     requestStepValid &&
     addressComplete &&
     slotsValid &&
@@ -1392,6 +1396,16 @@ function ServiceBookingFlow({
             </p>
           ) : null}
         </div>
+
+        {!businessActive ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-900"
+          >
+            This business is not accepting online bookings right now. Please
+            contact them directly.
+          </div>
+        ) : null}
 
         {submitError ? (
           <div

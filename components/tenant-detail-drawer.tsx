@@ -6,6 +6,7 @@ import {
   type TenantDetail,
 } from "@/lib/onboarding/tenant-display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
@@ -13,6 +14,7 @@ import { useEffect, useState } from "react";
 type Props = {
   tenant: TenantDetail | null;
   onClose: () => void;
+  onTenantUpdated?: (tenant: TenantDetail) => void;
 };
 
 const STATUS_LABEL: Record<TenantDetail["status"], string> = {
@@ -36,7 +38,11 @@ const panelTransition = {
   mass: 0.85,
 };
 
-export function TenantDetailDrawer({ tenant, onClose }: Props) {
+export function TenantDetailDrawer({
+  tenant,
+  onClose,
+  onTenantUpdated,
+}: Props) {
   const open = tenant !== null;
   useRegisterRightDrawer(open, "md");
 
@@ -58,7 +64,12 @@ export function TenantDetailDrawer({ tenant, onClose }: Props) {
   return (
     <AnimatePresence mode="wait">
       {tenant ? (
-        <DrawerPanel key={tenant.id} tenant={tenant} onClose={onClose} />
+        <DrawerPanel
+          key={tenant.id}
+          tenant={tenant}
+          onClose={onClose}
+          onTenantUpdated={onTenantUpdated}
+        />
       ) : null}
     </AnimatePresence>
   );
@@ -67,12 +78,65 @@ export function TenantDetailDrawer({ tenant, onClose }: Props) {
 function DrawerPanel({
   tenant,
   onClose,
+  onTenantUpdated,
 }: {
   tenant: TenantDetail;
   onClose: () => void;
+  onTenantUpdated?: (tenant: TenantDetail) => void;
 }) {
+  const { user } = useAuth();
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<
+    "suspend" | "activate" | null
+  >(null);
   const ownerName = tenant.owner?.fullName || "—";
   const ownerEmail = tenant.owner?.email || tenant.businessEmail || "—";
+  const isSuspended = tenant.status === "suspended" || !tenant.isActive;
+
+  async function updateTenantStatus(
+    nextStatus: "active" | "suspended",
+  ) {
+    if (!user) return;
+    setStatusUpdating(true);
+    setStatusError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/admin/tenants/${encodeURIComponent(tenant.id)}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status: nextStatus }),
+        },
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not update tenant status.");
+      }
+      const updated: TenantDetail = {
+        ...tenant,
+        status: nextStatus,
+        isActive: nextStatus === "active",
+      };
+      onTenantUpdated?.(updated);
+      setConfirmAction(null);
+    } catch (error) {
+      setStatusError(
+        error instanceof Error
+          ? error.message
+          : "Could not update tenant status.",
+      );
+    } finally {
+      setStatusUpdating(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[100]">
@@ -263,6 +327,76 @@ function DrawerPanel({
             />
           </DetailSection>
         </motion.div>
+
+        <motion.footer
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.16, duration: 0.28, ease: "easeOut" }}
+          className="shrink-0 border-t border-outline-variant bg-surface-container-lowest px-5 py-4"
+        >
+          {statusError ? (
+            <p className="mb-3 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2 font-body text-[12px] text-on-error-container">
+              {statusError}
+            </p>
+          ) : null}
+
+          {confirmAction ? (
+            <div className="space-y-3">
+              <p className="font-body text-[13px] text-on-surface">
+                {confirmAction === "suspend"
+                  ? "Suspend this tenant? Owners, staff, and public booking will be blocked on web and mobile until you reactivate the account."
+                  : "Reactivate this tenant? Owners and active staff will be able to sign in again, and public booking will reopen."}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={statusUpdating}
+                  onClick={() =>
+                    void updateTenantStatus(
+                      confirmAction === "suspend" ? "suspended" : "active",
+                    )
+                  }
+                  className={`flex-1 rounded-xl px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors disabled:opacity-60 ${
+                    confirmAction === "suspend"
+                      ? "bg-error hover:bg-error/90"
+                      : "bg-primary hover:bg-primary/90"
+                  }`}
+                >
+                  {statusUpdating
+                    ? "Updating…"
+                    : confirmAction === "suspend"
+                      ? "Yes, suspend tenant"
+                      : "Yes, activate tenant"}
+                </button>
+                <button
+                  type="button"
+                  disabled={statusUpdating}
+                  onClick={() => setConfirmAction(null)}
+                  className="rounded-xl border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                setConfirmAction(isSuspended ? "activate" : "suspend")
+              }
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-body text-[13px] font-semibold transition-colors ${
+                isSuspended
+                  ? "bg-primary text-on-primary hover:bg-primary/90"
+                  : "border border-error/30 bg-error-container/40 text-error hover:bg-error-container/70"
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {isSuspended ? "play_circle" : "block"}
+              </span>
+              {isSuspended ? "Activate tenant" : "Suspend tenant"}
+            </button>
+          )}
+        </motion.footer>
       </motion.aside>
     </div>
   );

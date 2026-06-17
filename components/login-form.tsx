@@ -18,6 +18,10 @@ function describeAuthError(error: unknown): string {
     return "This account is not authorized. Use an owner or admin login.";
   }
 
+  if (error instanceof Error && error.message === "BUSINESS_SUSPENDED") {
+    return "This business account has been suspended. Contact support for assistance.";
+  }
+
   const code = (error as FirebaseAuthError).code;
   switch (code) {
     case "auth/invalid-email":
