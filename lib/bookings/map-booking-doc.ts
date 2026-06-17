@@ -67,6 +67,14 @@ function parseStatus(raw: unknown): BookingStatus {
     : "scheduled";
 }
 
+function parseImageUrlList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+    .map((url) => url.trim())
+    .slice(0, 5);
+}
+
 export function mapBookingDoc(
   id: string,
   data: Record<string, unknown>,
@@ -140,6 +148,8 @@ export function mapBookingDoc(
     visitEndedAt: toMillis(data.visitEndedAt),
     bookingStartedAt: toMillis(data.bookingStartedAt),
     completedFromInvoice: data.completedFromInvoice === true,
+    beforeImageUrls: parseImageUrlList(data.beforeImageUrls),
+    afterImageUrls: parseImageUrlList(data.afterImageUrls),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };

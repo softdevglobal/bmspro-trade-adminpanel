@@ -57,11 +57,12 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = await uploadServiceImage(buffer, file.type || "image/jpeg", {
+    const result = await uploadServiceImage(buffer, file.type || "", {
       scope,
       uid: auth.uid,
       businessId:
         auth.role === "business_owner" ? auth.businessId : undefined,
+      filename: file.name || "service-image.jpg",
     });
 
     if (!result.ok) {

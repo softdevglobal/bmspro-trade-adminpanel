@@ -75,6 +75,10 @@ export type BookingDetail = {
   bookingStartedAt: number | null;
   /** Auto-completed booking created when a quotation is invoiced without a job visit. */
   completedFromInvoice: boolean;
+  /** Optional photos captured before work started. */
+  beforeImageUrls: string[];
+  /** Optional photos captured after work finished. */
+  afterImageUrls: string[];
   createdAt: number | null;
   updatedAt: number | null;
 };

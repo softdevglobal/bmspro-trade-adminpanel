@@ -1,0 +1,109 @@
+import { adminAuth } from "@/lib/firebase/admin";
+import { uploadJobCompletionImage } from "@/lib/onboarding/services/upload";
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+async function requireJobPhotoAuthor(request: Request) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const match = authHeader.match(/^Bearer (.+)$/);
+  if (!match) {
+    return {
+      ok: false as const,
+      status: 401,
+      error: "Missing authorization header.",
+    };
+  }
+
+  try {
+    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const businessId =
+      typeof decoded.businessId === "string" ? decoded.businessId : null;
+    const role = decoded.role;
+    if (
+      !businessId ||
+      (role !== "staff" && role !== "owner" && role !== "admin")
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "You do not have permission to upload job photos.",
+      };
+    }
+
+    return {
+      ok: true as const,
+      uid: decoded.uid,
+      businessId,
+    };
+  } catch {
+    return {
+      ok: false as const,
+      status: 401,
+      error: "Invalid or expired session.",
+    };
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const auth = await requireJobPhotoAuthor(request);
+    if (!auth.ok) {
+      return NextResponse.json(
+        { ok: false, error: auth.error },
+        { status: auth.status },
+      );
+    }
+
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Invalid upload request." },
+        { status: 400 },
+      );
+    }
+
+    const file = formData.get("file");
+    const bookingId = formData.get("bookingId");
+    const kindRaw = formData.get("kind");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { ok: false, error: "Please choose an image file." },
+        { status: 400 },
+      );
+    }
+
+    if (typeof bookingId !== "string" || !bookingId.trim()) {
+      return NextResponse.json(
+        { ok: false, error: "Missing job reference." },
+        { status: 400 },
+      );
+    }
+
+    const kind = kindRaw === "after" ? "after" : "before";
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const result = await uploadJobCompletionImage(buffer, file.type || "", {
+      businessId: auth.businessId,
+      uid: auth.uid,
+      bookingId: bookingId.trim(),
+      kind,
+      filename: file.name || "photo.jpg",
+    });
+
+    if (!result.ok) {
+      return NextResponse.json(result, { status: 400 });
+    }
+
+    return NextResponse.json({ ok: true, imageUrl: result.imageUrl });
+  } catch (error) {
+    console.error("POST /api/uploads/job-image failed:", error);
+    return NextResponse.json(
+      { ok: false, error: "Could not upload image." },
+      { status: 500 },
+    );
+  }
+}

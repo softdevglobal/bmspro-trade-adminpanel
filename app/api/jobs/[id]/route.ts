@@ -3,6 +3,7 @@ import { actorRoleFromClaim } from "@/lib/audit/types";
 import {
   assignBusinessBooking,
   completeBusinessBooking,
+  updateBookingCompletionPhotos,
   getBusinessBooking,
   startBusinessBookingJob,
   startBusinessBookingVisit,
@@ -276,6 +277,18 @@ export async function PATCH(
       id,
       operatorAuth.businessId,
       operatorAuth.uid,
+      {
+        beforeImageUrls: Array.isArray(payload.beforeImageUrls)
+          ? payload.beforeImageUrls.filter(
+              (url): url is string => typeof url === "string",
+            )
+          : undefined,
+        afterImageUrls: Array.isArray(payload.afterImageUrls)
+          ? payload.afterImageUrls.filter(
+              (url): url is string => typeof url === "string",
+            )
+          : undefined,
+      },
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -299,6 +312,38 @@ export async function PATCH(
       targetId: id,
       targetLabel: result.booking.bookingCode ?? null,
     });
+
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "update_completion_photos") {
+    const operatorAuth = await requireAssignedBookingOperator(request, id);
+    if (!operatorAuth.ok) {
+      return NextResponse.json(
+        { ok: false, error: operatorAuth.error },
+        { status: operatorAuth.status },
+      );
+    }
+
+    const result = await updateBookingCompletionPhotos(
+      id,
+      operatorAuth.businessId,
+      operatorAuth.uid,
+      {
+        ...(payload.beforeImageUrls !== undefined
+          ? { beforeImageUrls: payload.beforeImageUrls }
+          : {}),
+        ...(payload.afterImageUrls !== undefined
+          ? { afterImageUrls: payload.afterImageUrls }
+          : {}),
+      },
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
 
     return NextResponse.json({ ok: true, booking: result.booking });
   }

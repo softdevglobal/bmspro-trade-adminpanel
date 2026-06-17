@@ -345,7 +345,7 @@ function normalizeServiceDescription(
   return raw === null ? null : undefined;
 }
 
-function parseLineItems(raw: unknown): QuotationLineItem[] | null {
+export function parseLineItems(raw: unknown): QuotationLineItem[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const items: QuotationLineItem[] = [];
   for (const entry of raw) {
@@ -393,7 +393,7 @@ function serializeLineItemForFirestore(item: QuotationLineItem) {
   };
 }
 
-function serializeLineItemsForFirestore(items: QuotationLineItem[]) {
+export function serializeLineItemsForFirestore(items: QuotationLineItem[]) {
   return items.map(serializeLineItemForFirestore);
 }
 
@@ -587,10 +587,108 @@ export async function createQuotationForInspection(
   const serviceDescriptionInput = normalizeServiceDescription(
     input.serviceDescription,
   );
-  const serviceDescription =
-    serviceDescriptionInput !== undefined
-      ? serviceDescriptionInput
-      : requestJobDescription(requestData);
+
+  const effectiveRequestType: InspectionRequestType =
+    input.requestType === "existing_service" ||
+    input.requestType === "custom_quote"
+      ? input.requestType
+      : requestData.requestType === "existing_service"
+        ? "existing_service"
+        : "custom_quote";
+
+  const requestUpdate: Record<string, unknown> = {
+    customer,
+    address,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  let serviceTitle: string;
+  let serviceDescription: string | null;
+
+  if (effectiveRequestType === "custom_quote") {
+    const cr = input.customRequest;
+    const existingCustom =
+      requestData.customRequest && typeof requestData.customRequest === "object"
+        ? (requestData.customRequest as Record<string, unknown>)
+        : null;
+
+    const customTitle =
+      cr && typeof cr.title === "string" && cr.title.trim()
+        ? cr.title.trim()
+        : typeof input.serviceTitle === "string" && input.serviceTitle.trim()
+          ? input.serviceTitle.trim()
+          : existingCustom && typeof existingCustom.title === "string"
+            ? existingCustom.title.trim()
+            : requestHeadline(requestData);
+
+    const customDescription =
+      cr && typeof cr.description === "string"
+        ? cr.description.trim()
+        : serviceDescriptionInput !== undefined && serviceDescriptionInput !== null
+          ? serviceDescriptionInput
+          : existingCustom && typeof existingCustom.description === "string"
+            ? existingCustom.description.trim()
+            : requestJobDescription(requestData) ?? "";
+
+    if (customTitle.length < 3) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Add a job title (at least 3 characters).",
+      };
+    }
+    if (customDescription.length < 10) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Describe the work needed (at least 10 characters).",
+      };
+    }
+
+    serviceTitle = customTitle;
+    serviceDescription = customDescription || null;
+    requestUpdate.requestType = "custom_quote";
+    requestUpdate.customRequest = {
+      title: customTitle,
+      description: customDescription,
+    };
+    requestUpdate.serviceName = null;
+    requestUpdate.serviceId = null;
+    requestUpdate.serviceDescription = serviceDescription;
+  } else {
+    const sid =
+      typeof input.serviceId === "string" && input.serviceId.trim()
+        ? input.serviceId.trim()
+        : typeof requestData.serviceId === "string"
+          ? requestData.serviceId.trim()
+          : "";
+    if (!sid) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Select a service from the list.",
+      };
+    }
+    const service = await lookupBusinessService(businessId, sid);
+    if (!service) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Selected service is no longer available.",
+      };
+    }
+    serviceTitle = service.name;
+    serviceDescription =
+      serviceDescriptionInput !== undefined
+        ? serviceDescriptionInput
+        : requestJobDescription(requestData);
+    requestUpdate.requestType = "existing_service";
+    requestUpdate.serviceId = sid;
+    requestUpdate.serviceName = service.name;
+    requestUpdate.serviceBusinessType = service.businessType;
+    requestUpdate.customRequest = null;
+  }
+
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
   const quotationCode = buildQuotationCodeForInspection({
     id: inspectionId,
@@ -600,20 +698,13 @@ export async function createQuotationForInspection(
         : null,
   });
 
-  await requestSnap.ref.set(
-    {
-      customer,
-      address,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await requestSnap.ref.set(requestUpdate, { merge: true });
 
   await ref.set({
     quotationCode,
     businessId,
     inspectionRequestId: inspectionId,
-    serviceTitle: requestHeadline(requestData),
+    serviceTitle,
     serviceDescription,
     customer,
     address,
@@ -942,11 +1033,35 @@ export async function updateDraftQuotation(
     requestUpdate.serviceId = null;
     requestUpdate.serviceDescription = serviceDescription;
   } else {
-    serviceTitle =
-      typeof quotationData.serviceTitle === "string" &&
-      quotationData.serviceTitle.trim()
-        ? quotationData.serviceTitle.trim()
-        : requestHeadline(requestData);
+    const sid =
+      typeof input.serviceId === "string" && input.serviceId.trim()
+        ? input.serviceId.trim()
+        : typeof requestData.serviceId === "string"
+          ? requestData.serviceId.trim()
+          : "";
+    if (sid) {
+      const service = await lookupBusinessService(businessId, sid);
+      if (service) {
+        serviceTitle = service.name;
+        requestUpdate.requestType = "existing_service";
+        requestUpdate.serviceId = sid;
+        requestUpdate.serviceName = service.name;
+        requestUpdate.serviceBusinessType = service.businessType;
+        requestUpdate.customRequest = null;
+      } else {
+        serviceTitle =
+          typeof quotationData.serviceTitle === "string" &&
+          quotationData.serviceTitle.trim()
+            ? quotationData.serviceTitle.trim()
+            : requestHeadline(requestData);
+      }
+    } else {
+      serviceTitle =
+        typeof quotationData.serviceTitle === "string" &&
+        quotationData.serviceTitle.trim()
+          ? quotationData.serviceTitle.trim()
+          : requestHeadline(requestData);
+    }
     serviceDescription =
       serviceDescriptionInput !== undefined
         ? serviceDescriptionInput
