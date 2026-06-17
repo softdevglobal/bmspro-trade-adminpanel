@@ -2143,7 +2143,7 @@ export function CreateInvoiceFromQuotation({
                       <button
                         type="button"
                         onClick={() => setDepositModalOpen(true)}
-                        className="shrink-0 font-body text-[11px] font-semibold text-primary hover:underline"
+                        className="shrink-0 rounded-full border border-primary/25 px-3 py-1.5 font-body text-[13px] font-semibold text-primary hover:bg-primary/5"
                       >
                         Edit
                       </button>
