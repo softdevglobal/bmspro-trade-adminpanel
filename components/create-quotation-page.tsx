@@ -13,6 +13,11 @@ import {
 import { MonthCalendarField } from "@/components/month-calendar-field";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import {
+  buildCustomerOptions,
+  filterCustomerOptions,
+  type CustomerOption,
+} from "@/lib/inspection/customer-options";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   computeDocumentTotals,
@@ -55,15 +60,6 @@ type CatalogItem = {
   code: string | null;
   description: string | null;
   priceAud: number;
-};
-
-type CustomerOption = {
-  id: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  address: InspectionAddress | null;
-  lastActivity: number;
 };
 
 type SavedLineItem = {
@@ -193,52 +189,6 @@ function computeSavedLineAmount(
     gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
     gstPricing,
   }).amountAud;
-}
-
-function customerKey(request: InspectionRequestDetail): string {
-  const email = request.customer.email?.trim().toLowerCase();
-  if (email) return `email:${email}`;
-  const phone = request.customer.phone?.replace(/\D/g, "");
-  if (phone) return `phone:${phone}`;
-  return `name:${request.customer.fullName.trim().toLowerCase()}`;
-}
-
-function buildCustomerOptions(
-  requests: InspectionRequestDetail[],
-): CustomerOption[] {
-  const map = new Map<string, CustomerOption>();
-  for (const request of requests) {
-    const key = customerKey(request);
-    const activity = request.updatedAt ?? request.createdAt ?? 0;
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, {
-        id: key,
-        fullName: request.customer.fullName?.trim() || "Unknown",
-        email: request.customer.email?.trim() || "",
-        phone: request.customer.phone?.trim() || "",
-        address: request.address,
-        lastActivity: activity,
-      });
-      continue;
-    }
-    if (activity > existing.lastActivity) {
-      existing.lastActivity = activity;
-      existing.address = request.address;
-    }
-    if (!existing.fullName && request.customer.fullName) {
-      existing.fullName = request.customer.fullName.trim();
-    }
-    if (!existing.email && request.customer.email) {
-      existing.email = request.customer.email.trim();
-    }
-    if (!existing.phone && request.customer.phone) {
-      existing.phone = request.customer.phone.trim();
-    }
-  }
-  return Array.from(map.values()).sort(
-    (a, b) => b.lastActivity - a.lastActivity,
-  );
 }
 
 function requestServiceTitle(request: InspectionRequestDetail): string {
@@ -672,18 +622,10 @@ export function CreateQuotationPage() {
     [requests],
   );
 
-  const filteredCustomers = useMemo(() => {
-    const q = customerSearch.trim().toLowerCase();
-    if (!q) return customerOptions.slice(0, 8);
-    return customerOptions
-      .filter(
-        (c) =>
-          c.fullName.toLowerCase().includes(q) ||
-          c.email.toLowerCase().includes(q) ||
-          c.phone.includes(q),
-      )
-      .slice(0, 8);
-  }, [customerOptions, customerSearch]);
+  const filteredCustomers = useMemo(
+    () => filterCustomerOptions(customerOptions, customerSearch),
+    [customerOptions, customerSearch],
+  );
 
   const activeServices = useMemo(
     () => services.filter((service) => service.isActive),
