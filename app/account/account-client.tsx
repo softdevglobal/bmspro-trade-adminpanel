@@ -206,13 +206,39 @@ function DocumentPdfActions({
   title,
   kind,
   viewerTitle,
+  requestId,
 }: {
   pdfUrl: string;
   title: string;
   kind: "quotation" | "invoice";
   viewerTitle?: string;
+  requestId?: string;
 }) {
+  const { getIdToken } = useCustomerAuth();
   const [viewerOpen, setViewerOpen] = useState(false);
+
+  const loadPdfBytes = useCallback(async () => {
+    if (requestId) {
+      const token = await getIdToken();
+      const response = await fetch(
+        `/api/customer/documents/pdf?requestId=${encodeURIComponent(requestId)}&kind=${kind}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Could not load PDF.");
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    }
+
+    const response = await fetch(pdfUrl);
+    if (!response.ok) {
+      throw new Error("Could not load PDF.");
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }, [getIdToken, kind, pdfUrl, requestId]);
 
   return (
     <>
@@ -232,6 +258,7 @@ function DocumentPdfActions({
         pdfUrl={pdfUrl}
         title={viewerTitle ?? title}
         downloadFilename={documentPdfFilename(kind, title)}
+        loadPdfBytes={requestId ? loadPdfBytes : undefined}
       />
     </>
   );
@@ -240,12 +267,19 @@ function DocumentPdfActions({
 function QuotationPdfActions({
   pdfUrl,
   title,
+  requestId,
 }: {
   pdfUrl: string;
   title: string;
+  requestId: string;
 }) {
   return (
-    <DocumentPdfActions pdfUrl={pdfUrl} title={title} kind="quotation" />
+    <DocumentPdfActions
+      pdfUrl={pdfUrl}
+      title={title}
+      kind="quotation"
+      requestId={requestId}
+    />
   );
 }
 
@@ -1465,6 +1499,7 @@ function BookingCard({
                     pdfUrl={booking.invoice!.pdfUrl!}
                     title={headline}
                     kind="invoice"
+                    requestId={booking.id}
                     viewerTitle={
                       booking.invoice?.invoiceCode
                         ? `Invoice ${booking.invoice.invoiceCode}`
@@ -1573,6 +1608,7 @@ function BookingCard({
                   <QuotationPdfActions
                     pdfUrl={booking.quotation.pdfUrl}
                     title={headline}
+                    requestId={booking.id}
                   />
 
                   {booking.quotation.customerDecision === "accepted" ? (
