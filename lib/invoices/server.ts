@@ -145,6 +145,11 @@ function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail
           typeof item.rateAud === "number" && Number.isFinite(item.rateAud)
             ? item.rateAud
             : undefined,
+        discountPercent:
+          typeof item.discountPercent === "number" &&
+          Number.isFinite(item.discountPercent)
+            ? item.discountPercent
+            : undefined,
         gstPercent:
           typeof item.gstPercent === "number" && Number.isFinite(item.gstPercent)
             ? item.gstPercent

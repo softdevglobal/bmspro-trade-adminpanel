@@ -375,6 +375,7 @@ function parseLineItems(raw: unknown): QuotationLineItem[] | null {
       description: readOptionalString(item.description),
       quantity: readOptionalNumber(item.quantity),
       rateAud: readOptionalNumber(item.rateAud),
+      discountPercent: readOptionalNumber(item.discountPercent),
       gstPercent: readOptionalNumber(item.gstPercent),
     });
   }
@@ -389,6 +390,8 @@ function serializeLineItemForFirestore(item: QuotationLineItem) {
     description: item.description?.trim() || null,
     quantity: typeof item.quantity === "number" ? item.quantity : null,
     rateAud: typeof item.rateAud === "number" ? item.rateAud : null,
+    discountPercent:
+      typeof item.discountPercent === "number" ? item.discountPercent : null,
     gstPercent: typeof item.gstPercent === "number" ? item.gstPercent : null,
   };
 }

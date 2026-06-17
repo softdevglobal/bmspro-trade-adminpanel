@@ -237,10 +237,40 @@ function savedLineItemFromQuotation(
   index: number,
 ): SavedLineItem {
   const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
-  const rate =
+  let discountPercent =
+    typeof item.discountPercent === "number" && item.discountPercent > 0
+      ? Math.min(100, item.discountPercent)
+      : 0;
+  const unitRate =
     item.rateAud && item.rateAud > 0
       ? item.rateAud
       : Math.round((item.priceAud / quantity) * 100) / 100;
+
+  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
+    const gross = Math.round(unitRate * quantity * 100) / 100;
+    if (gross > item.priceAud + 0.01) {
+      const inferred = Math.min(
+        100,
+        Math.round((1 - item.priceAud / gross) * 10000) / 100,
+      );
+      if (inferred > 0.01) discountPercent = inferred;
+    }
+  }
+
+  let rate: number;
+  if (
+    discountPercent > 0 &&
+    typeof item.discountPercent === "number" &&
+    item.discountPercent > 0
+  ) {
+    rate =
+      Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100;
+  } else if (discountPercent > 0) {
+    rate = unitRate;
+  } else {
+    rate = unitRate;
+  }
+
   const gstPercent = item.gstPercent ?? 0;
   return {
     id: `${index}-${item.name}-${crypto.randomUUID()}`,
@@ -249,7 +279,7 @@ function savedLineItemFromQuotation(
     description: item.description ?? "",
     quantity,
     rate,
-    discountPercent: 0,
+    discountPercent,
     applyGst: gstPercent > 0,
     amountAud: item.priceAud,
   };
@@ -718,7 +748,7 @@ export function CreateQuotationPage() {
           gstEnabled,
           gstPercentage,
         );
-        const { amountAud, rateAudExGst } = computeQuotationLineAmounts({
+        const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
           quantity: item.quantity,
           rate: item.rate,
           discountPercent: item.discountPercent,
@@ -730,7 +760,8 @@ export function CreateQuotationPage() {
           name: item.name,
           description: item.description || null,
           quantity: item.quantity,
-          rateAud: rateAudExGst,
+          rateAud: listRateAudExGst,
+          discountPercent: item.discountPercent,
           gstPercent,
           amountAud,
         };
@@ -1182,15 +1213,31 @@ export function CreateQuotationPage() {
           phone: customer.phone,
         },
         address,
-        lineItems: lineItems.map((item) => ({
-          code: (item.code ?? "").trim() || null,
-          name: item.name,
-          description: item.description || null,
-          quantity: item.quantity,
-          rateAud: item.rate,
-          gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
-          priceAud: item.amountAud,
-        })),
+        lineItems: lineItems.map((item) => {
+          const gstPercent = lineGstPercent(
+            item.applyGst,
+            gstEnabled,
+            gstPercentage,
+          );
+          const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
+            quantity: item.quantity,
+            rate: item.rate,
+            discountPercent: item.discountPercent,
+            gstPercent,
+            gstPricing,
+          });
+          return {
+            code: (item.code ?? "").trim() || null,
+            name: item.name,
+            description: item.description || null,
+            quantity: item.quantity,
+            rateAud: listRateAudExGst,
+            discountPercent:
+              item.discountPercent > 0 ? item.discountPercent : null,
+            gstPercent,
+            priceAud: amountAud,
+          };
+        }),
         finalPriceAud: total,
         discountAud: discountAmount,
         ...(previewServiceDescription

@@ -4,9 +4,13 @@ import {
   computeDocumentTotals,
   formatQuoteDate,
   formatQuoteMoney,
+  formatLineDiscountLabel,
+  grossSubtotalAud,
+  resolveDocumentLineFromQuotationItem,
   resolveQuotationTerms,
   buildQuotationDocumentDeposit,
   formatDepositSummary,
+  totalLineDiscountAud,
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
@@ -251,15 +255,9 @@ function lineItemsFromQuotation(
   quotation: QuotationDetail,
   defaultGst: number,
 ): QuotationDocumentLineItem[] {
-  return quotation.lineItems.map((item) => ({
-    code: item.code ?? null,
-    name: item.name,
-    description: item.description ?? null,
-    quantity: item.quantity ?? 1,
-    rateAud: item.rateAud ?? item.priceAud,
-    gstPercent: item.gstPercent ?? defaultGst,
-    amountAud: item.priceAud,
-  }));
+  return quotation.lineItems.map((item) =>
+    resolveDocumentLineFromQuotationItem(item, defaultGst),
+  );
 }
 
 export function buildQuotationDocumentFromDetail(
@@ -657,12 +655,13 @@ export async function generateDocumentPdf(
 
   // ── Table layout ──
   const cols = {
-    code: { x: MARGIN, w: 54 },
-    desc: { x: MARGIN + 54, w: 198 },
-    qty: { x: MARGIN + 252, w: 44 },
-    rate: { x: MARGIN + 296, w: 58 },
-    gst: { x: MARGIN + 354, w: 36 },
-    amount: { x: MARGIN + 390, w: CONTENT_WIDTH - 390 },
+    code: { x: MARGIN, w: 50 },
+    desc: { x: MARGIN + 50, w: 162 },
+    qty: { x: MARGIN + 212, w: 40 },
+    rate: { x: MARGIN + 252, w: 52 },
+    disc: { x: MARGIN + 304, w: 52 },
+    gst: { x: MARGIN + 356, w: 32 },
+    amount: { x: MARGIN + 388, w: CONTENT_WIDTH - 388 },
   };
   const rowH = 22;
 
@@ -699,6 +698,11 @@ export async function generateDocumentPdf(
       color: MUTED,
     });
     drawTextRight("Rate", colRight(cols.rate), hy, {
+      size: 7.5,
+      bold: true,
+      color: MUTED,
+    });
+    drawTextRight("Disc.", colRight(cols.disc), hy, {
       size: 7.5,
       bold: true,
       color: MUTED,
@@ -769,6 +773,12 @@ export async function generateDocumentPdf(
     drawNumberRight(formatQuoteMoney(item.rateAud), colRight(cols.rate), ry, {
       size: 8.5,
     });
+    drawTextRight(
+      formatLineDiscountLabel(item),
+      colRight(cols.disc),
+      ry,
+      { size: 7 },
+    );
     drawNumberRight(
       item.gstPercent > 0 ? `${item.gstPercent}%` : "-",
       colRight(cols.gst),
@@ -804,8 +814,13 @@ export async function generateDocumentPdf(
   const panelX = PAGE_WIDTH - MARGIN - panelW;
   const sectionGap = 14;
 
+  const lineDiscountTotalAud = totalLineDiscountAud(data.lineItems);
+  const itemsGrossSubtotalAud = grossSubtotalAud(data.lineItems);
+  const hasLineDiscounts = lineDiscountTotalAud > 0.01;
+
   const computeTotalsPanelHeight = (): number => {
     let h = 18; // top inset
+    if (hasLineDiscounts) h += 36;
     h += 18; // subtotal
     if (data.discountAud > 0) h += 18;
     if (data.gstAud > 0) h += 18;
@@ -841,6 +856,13 @@ export async function generateDocumentPdf(
       ty -= 18;
     };
 
+    if (hasLineDiscounts) {
+      drawPanelRow("Items subtotal", formatQuoteMoney(itemsGrossSubtotalAud));
+      drawPanelRow(
+        "Line discounts",
+        `-${formatQuoteMoney(lineDiscountTotalAud)}`,
+      );
+    }
     drawPanelRow("Subtotal", formatQuoteMoney(data.subtotalAud));
     if (data.discountAud > 0) {
       drawPanelRow("Discount", `-${formatQuoteMoney(data.discountAud)}`);
