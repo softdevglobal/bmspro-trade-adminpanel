@@ -1,5 +1,6 @@
 import "server-only";
 
+import { customerOwnsNotificationRecord } from "@/lib/customer/ownership";
 import { normalizeEmail } from "@/lib/customer/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapNotificationDoc as mapNotificationRecord } from "@/lib/notifications/map-notification-doc";
@@ -991,6 +992,7 @@ export async function listBusinessNotifications(
 export async function listCustomerNotifications(
   customerId: string,
   customerEmail: string,
+  businessId?: string | null,
 ): Promise<NotificationRecord[]> {
   const normalizedEmail = customerEmail ? normalizeEmail(customerEmail) : "";
   const [byId, byEmail] = await Promise.all([
@@ -1016,16 +1018,24 @@ export async function listCustomerNotifications(
     }
   }
 
-  return sortNewestFirst(
+  const records = sortNewestFirst(
     Array.from(docs.entries()).map(([id, data]) =>
       mapNotificationRecord(id, "customer", data),
     ),
   );
+
+  if (!businessId) return records;
+  return records.filter((record) => record.businessId === businessId);
 }
 
 type OwnerGuard =
   | { audience: "business"; businessId: string }
-  | { audience: "customer"; customerId: string; customerEmail: string };
+  | {
+      audience: "customer";
+      customerId: string;
+      customerEmail: string;
+      businessId?: string | null;
+    };
 
 function ownsNotification(
   data: Record<string, unknown>,
@@ -1034,12 +1044,11 @@ function ownsNotification(
   if (guard.audience === "business") {
     return data.businessId === guard.businessId;
   }
-  const normalizedEmail = normalizeEmail(guard.customerEmail);
-  return (
-    data.customerId === guard.customerId ||
-    (typeof data.customerEmail === "string" &&
-      normalizeEmail(data.customerEmail) === normalizedEmail)
-  );
+  return customerOwnsNotificationRecord(data, {
+    customerId: guard.customerId,
+    customerEmail: guard.customerEmail,
+    businessId: guard.businessId,
+  });
 }
 
 /** Marks notifications as read for an audience. Returns false if not owned. */
@@ -1077,6 +1086,7 @@ async function collectUnreadNotificationIds(
   }
 
   const normalizedEmail = normalizeEmail(guard.customerEmail);
+  const businessId = guard.businessId?.trim() || null;
   const [byId, byEmail] = await Promise.all([
     adminDb
       .collection(collection)
@@ -1094,6 +1104,14 @@ async function collectUnreadNotificationIds(
 
   const seen = new Set<string>();
   for (const doc of byId.docs) {
+    const data = doc.data() ?? {};
+    if (
+      businessId &&
+      typeof data.businessId === "string" &&
+      data.businessId !== businessId
+    ) {
+      continue;
+    }
     if (!seen.has(doc.id)) {
       seen.add(doc.id);
       unreadIds.push(doc.id);
@@ -1101,6 +1119,14 @@ async function collectUnreadNotificationIds(
   }
   if (byEmail) {
     for (const doc of byEmail.docs) {
+      const data = doc.data() ?? {};
+      if (
+        businessId &&
+        typeof data.businessId === "string" &&
+        data.businessId !== businessId
+      ) {
+        continue;
+      }
       if (!seen.has(doc.id)) {
         seen.add(doc.id);
         unreadIds.push(doc.id);
@@ -1153,7 +1179,11 @@ async function collectOwnedNotificationIds(
   const records =
     guard.audience === "business"
       ? await listBusinessNotifications(guard.businessId)
-      : await listCustomerNotifications(guard.customerId, guard.customerEmail);
+      : await listCustomerNotifications(
+          guard.customerId,
+          guard.customerEmail,
+          guard.businessId,
+        );
   return records.map((record) => record.id);
 }
 

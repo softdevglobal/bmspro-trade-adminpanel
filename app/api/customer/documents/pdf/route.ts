@@ -5,7 +5,9 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const auth = await authenticateCustomerRequest(request);
+  const url = new URL(request.url);
+  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
@@ -13,7 +15,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const { searchParams } = new URL(request.url);
+  const { searchParams } = url;
   const requestId = searchParams.get("requestId")?.trim() ?? "";
   const kind = searchParams.get("kind")?.trim() ?? "";
 
@@ -34,6 +36,7 @@ export async function GET(request: Request) {
   const result = await getCustomerDocumentPdf(requestId, kind, {
     customerId: auth.customer.uid,
     customerEmail: auth.customer.email,
+    businessId: auth.customer.businessId,
   });
 
   if (!result.ok) {

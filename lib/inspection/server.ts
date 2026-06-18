@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  customerOwnsRequestRecord,
+  type CustomerOwnershipIdentity,
+} from "@/lib/customer/ownership";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import {
@@ -580,7 +584,7 @@ export async function applyAssignedEndVisit(
  */
 export async function customerAcceptProposedSlot(
   id: string,
-  identity: { customerId: string; customerEmail: string },
+  identity: CustomerOwnershipIdentity,
   slot: InspectionSlot,
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
@@ -593,13 +597,7 @@ export async function customerAcceptProposedSlot(
   const ref = snap.ref;
   const current = mapInspectionDoc(snap.id, snap.data() ?? {});
 
-  const ownsById =
-    !!current.customerId && current.customerId === identity.customerId;
-  const ownsByEmail =
-    !!identity.customerEmail &&
-    current.customer.email.toLowerCase() ===
-      identity.customerEmail.toLowerCase();
-  if (!ownsById && !ownsByEmail) {
+  if (!customerOwnsRequestRecord(current, identity)) {
     return { ok: false, status: 404, error: "Request not found." };
   }
 

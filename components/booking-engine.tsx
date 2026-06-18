@@ -16,7 +16,7 @@ import {
 } from "@/components/customer-account-nav";
 import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
 import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
-import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerAuth, useCustomerBookingSlug } from "@/lib/customer-auth/customer-auth-context";
 import {
   SlotDayPicker,
   todayIso,
@@ -56,6 +56,7 @@ function isServiceAddressComplete(address: ServiceAddress): boolean {
 
 export function BookingEngine({ business, services }: Props) {
   const reducedMotion = useReducedMotion();
+  useCustomerBookingSlug(business.slug);
 
   const location = useMemo(() => {
     if (business.state && business.postcode) {
@@ -792,8 +793,7 @@ function ServiceBookingFlow({
   const customerAuth = useCustomerAuth();
   const isAuthenticated = customerAuth.status === "authenticated";
   const profile = customerAuth.profile;
-  const customerEmailFromAuth =
-    profile?.email ?? customerAuth.user?.email ?? "";
+  const customerEmailFromAuth = profile?.email ?? "";
 
   useEffect(() => {
     if (!isAuthenticated) return;

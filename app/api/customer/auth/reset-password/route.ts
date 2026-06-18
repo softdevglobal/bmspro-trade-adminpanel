@@ -3,6 +3,10 @@ import {
   resolveAuditIdentityForUid,
 } from "@/lib/audit/action-logs";
 import { CUSTOMER_COLLECTION } from "@/lib/customer/types";
+import {
+  buildCustomerAuthEmail,
+  customerPasswordResetDocId,
+} from "@/lib/customer/scoped-auth";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
@@ -12,16 +16,19 @@ const MIN_PASSWORD_LENGTH = 6;
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, code, newPassword } = (await req.json()) as {
+    const { email, code, newPassword, bookingSlug } = (await req.json()) as {
       email?: string;
       code?: string;
       newPassword?: string;
+      bookingSlug?: string;
     };
 
     const trimmedEmail = email?.trim().toLowerCase();
     const trimmedCode = code?.trim();
+    const trimmedSlug =
+      typeof bookingSlug === "string" ? bookingSlug.trim() : "";
 
-    if (!trimmedEmail || !trimmedCode || !newPassword) {
+    if (!trimmedEmail || !trimmedCode || !newPassword || !trimmedSlug) {
       return NextResponse.json(
         { error: "Missing required fields." },
         { status: 400 },
@@ -37,7 +44,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const docRef = adminDb.collection(COLLECTION).doc(trimmedEmail);
+    const docRef = adminDb
+      .collection(COLLECTION)
+      .doc(customerPasswordResetDocId(trimmedSlug, trimmedEmail));
     const snap = await docRef.get();
 
     if (!snap.exists) {
@@ -82,13 +91,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const authEmail = await buildCustomerAuthEmail(trimmedSlug, trimmedEmail);
+
     let uid: string;
     try {
-      const userRecord = await adminAuth.getUserByEmail(trimmedEmail);
+      const userRecord = await adminAuth.getUserByEmail(authEmail);
       uid = userRecord.uid;
     } catch {
       return NextResponse.json(
-        { error: "No account found for this email." },
+        { error: "No account found for this email with this business." },
         { status: 400 },
       );
     }

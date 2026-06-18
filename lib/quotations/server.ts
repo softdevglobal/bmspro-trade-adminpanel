@@ -28,6 +28,10 @@ import {
   parseCreatedSource,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
+import {
+  customerOwnsRequestRecord,
+  type CustomerOwnershipIdentity,
+} from "@/lib/customer/ownership";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
@@ -2280,7 +2284,7 @@ async function applyQuotationCustomerDecision(
  */
 export async function customerDecideQuotation(
   requestId: string,
-  identity: { customerId: string; customerEmail: string },
+  identity: CustomerOwnershipIdentity,
   decision: "accepted" | "rejected",
 ): Promise<
   | { ok: true }
@@ -2296,13 +2300,7 @@ export async function customerDecideQuotation(
   const data = snap.data() ?? {};
   const request = mapInspectionDoc(snap.id, data);
 
-  const ownsById =
-    !!request.customerId && request.customerId === identity.customerId;
-  const ownsByEmail =
-    !!identity.customerEmail &&
-    request.customer.email.toLowerCase() ===
-      identity.customerEmail.toLowerCase();
-  if (!ownsById && !ownsByEmail) {
+  if (!customerOwnsRequestRecord(request, identity)) {
     return { ok: false, status: 404, error: "Request not found." };
   }
 

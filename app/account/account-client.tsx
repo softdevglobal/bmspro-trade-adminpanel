@@ -7,7 +7,8 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { CustomerTopNav } from "@/components/customer-account-nav";
 import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
-import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerAuth, useCustomerBookingSlug } from "@/lib/customer-auth/customer-auth-context";
+import { resolveCustomerDisplayEmail } from "@/lib/customer/scoped-auth";
 import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import {
   notificationCardIcon,
@@ -291,6 +292,8 @@ export function AccountClient({
   businessName: string;
   tab: CustomerAccountTab;
 }) {
+  useCustomerBookingSlug(slug);
+
   return (
     <CustomerBookingShell>
       <Suspense fallback={null}>
@@ -403,6 +406,7 @@ function AuthedAccount({
         {tab === "profile" ? <ProfileSection slug={slug} /> : null}
         {tab === "requests" ? (
           <BookingsList
+            slug={slug}
             scope="active"
             emptyHint="You have no active requests."
             focusRequestId={focusRequestId}
@@ -410,6 +414,7 @@ function AuthedAccount({
         ) : null}
         {tab === "jobs" ? (
           <BookingsList
+            slug={slug}
             scope="history"
             emptyHint="No past bookings yet."
             focusRequestId={focusRequestId}
@@ -498,7 +503,10 @@ function ProfileSection({ slug }: { slug: string }) {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const email = user?.email ?? profile?.email ?? "";
+  const displayEmail = resolveCustomerDisplayEmail(profile?.email, user?.email);
+  const emailMissing = displayEmail.length === 0;
+  const [emailDraft, setEmailDraft] = useState(displayEmail);
+
   const displayName = fullName.trim() || "Your profile";
   const initials = profileInitials(fullName);
   const memberSince = formatMemberSince(profile?.createdAt);
@@ -507,9 +515,9 @@ function ProfileSection({ slug }: { slug: string }) {
     let score = 0;
     if (fullName.trim().length >= 2) score += 1;
     if (phone.replace(/\D/g, "").length >= 6) score += 1;
-    if (email) score += 1;
+    if (displayEmail || emailDraft.trim()) score += 1;
     return Math.round((score / 3) * 100);
-  }, [fullName, phone, email]);
+  }, [fullName, phone, displayEmail, emailDraft]);
 
   const registeredName = profile?.registeredBusinessName;
   const registeredSlug = profile?.registeredBookingSlug ?? slug;
@@ -517,7 +525,8 @@ function ProfileSection({ slug }: { slug: string }) {
   useEffect(() => {
     setFullName(profile?.fullName ?? "");
     setPhone(profile?.phone ?? "");
-  }, [profile?.fullName, profile?.phone]);
+    setEmailDraft(resolveCustomerDisplayEmail(profile?.email, user?.email));
+  }, [profile?.fullName, profile?.phone, profile?.email, user?.email]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -528,6 +537,9 @@ function ProfileSection({ slug }: { slug: string }) {
       await saveProfile({
         fullName: fullName.trim(),
         phone: phone.replace(/\D/g, ""),
+        ...(emailMissing && emailDraft.trim()
+          ? { email: emailDraft.trim() }
+          : {}),
       });
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2400);
@@ -568,7 +580,7 @@ function ProfileSection({ slug }: { slug: string }) {
                 {displayName}
               </h1>
               <p className="mt-0.5 truncate font-body text-[13px] text-on-surface-variant sm:text-[14px]">
-                {email}
+                {displayEmail || "Add your email below"}
               </p>
               {memberSince ? (
                 <p className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/70 px-2.5 py-0.5 font-body text-[10px] font-semibold text-on-surface-variant">
@@ -620,7 +632,7 @@ function ProfileSection({ slug }: { slug: string }) {
                 {registeredName}
               </p>
               <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
-                Your account was created on this business booking page.
+                Your login and profile are saved for this business only.
               </p>
             </div>
           </div>
@@ -647,7 +659,7 @@ function ProfileSection({ slug }: { slug: string }) {
               Your details
             </h2>
             <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">
-              Used when you request visits — one account across all businesses.
+              Used when you request visits with this business.
             </p>
           </div>
         </div>
@@ -679,16 +691,28 @@ function ProfileSection({ slug }: { slug: string }) {
             <ProfileField label="Email" icon="mail">
               <input
                 type="email"
-                value={email}
-                readOnly
-                className={`${PROFILE_INPUT_CLASS} cursor-not-allowed bg-stone-50/90 text-on-surface-variant`}
+                value={emailMissing ? emailDraft : displayEmail}
+                readOnly={!emailMissing}
+                onChange={
+                  emailMissing
+                    ? (event) => setEmailDraft(event.target.value)
+                    : undefined
+                }
+                placeholder={emailMissing ? "e.g. alex@example.com" : undefined}
+                className={`${PROFILE_INPUT_CLASS} ${
+                  emailMissing
+                    ? ""
+                    : "cursor-not-allowed bg-stone-50/90 text-on-surface-variant"
+                }`}
               />
             </ProfileField>
             <p className="mt-1.5 inline-flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
               <span className="material-symbols-outlined text-[14px] text-primary">
-                verified_user
+                {emailMissing ? "info" : "verified_user"}
               </span>
-              Email is locked to your sign-in — contact support to change it.
+              {emailMissing
+                ? "Enter the email you used to create this account, then save."
+                : "Email is locked to your sign-in — contact support to change it."}
             </p>
           </div>
         </div>
@@ -732,7 +756,7 @@ function ProfileSection({ slug }: { slug: string }) {
   );
 }
 
-function useBookings(): {
+function useBookings(slug: string): {
   bookings: CustomerBooking[];
   loading: boolean;
   error: string | null;
@@ -750,9 +774,12 @@ function useBookings(): {
     try {
       const idToken = await getIdToken();
       if (!idToken) throw new Error("Not signed in");
-      const response = await fetch("/api/customer/jobs", {
-        headers: { authorization: `Bearer ${idToken}` },
-      });
+      const response = await fetch(
+        `/api/customer/jobs?bookingSlug=${encodeURIComponent(slug)}`,
+        {
+          headers: { authorization: `Bearer ${idToken}` },
+        },
+      );
       const payload = (await response.json()) as {
         ok?: boolean;
         jobs?: CustomerBooking[];
@@ -767,7 +794,7 @@ function useBookings(): {
     } finally {
       setLoading(false);
     }
-  }, [getIdToken, status]);
+  }, [getIdToken, slug, status]);
 
   useEffect(() => {
     void load();
@@ -777,15 +804,17 @@ function useBookings(): {
 }
 
 function BookingsList({
+  slug,
   scope,
   emptyHint,
   focusRequestId = null,
 }: {
+  slug: string;
   scope: "active" | "history";
   emptyHint: string;
   focusRequestId?: string | null;
 }) {
-  const { bookings, loading, error, reload } = useBookings();
+  const { bookings, loading, error, reload } = useBookings(slug);
 
   const filtered = useMemo(() => {
     if (scope === "active") {
@@ -1223,7 +1252,10 @@ function BookingCard({
     setAcceptError(null);
     try {
       const idToken = await getIdToken();
-      const response = await fetch(`/api/customer/jobs/${booking.id}`, {
+      const slugQuery = booking.bookingSlug
+        ? `?bookingSlug=${encodeURIComponent(booking.bookingSlug)}`
+        : "";
+      const response = await fetch(`/api/customer/jobs/${booking.id}${slugQuery}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1257,7 +1289,10 @@ function BookingCard({
     setDecisionError(null);
     try {
       const idToken = await getIdToken();
-      const response = await fetch(`/api/customer/jobs/${booking.id}`, {
+      const slugQuery = booking.bookingSlug
+        ? `?bookingSlug=${encodeURIComponent(booking.bookingSlug)}`
+        : "";
+      const response = await fetch(`/api/customer/jobs/${booking.id}${slugQuery}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

@@ -1,30 +1,17 @@
 import "server-only";
 
+import {
+  customerOwnsRequestRecord,
+  type CustomerOwnershipIdentity,
+} from "@/lib/customer/ownership";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 
-type CustomerIdentity = {
-  customerId: string;
-  customerEmail: string;
-};
-
-function customerOwnsRequest(
-  request: ReturnType<typeof mapInspectionDoc>,
-  identity: CustomerIdentity,
-) {
-  const ownsById =
-    !!request.customerId && request.customerId === identity.customerId;
-  const ownsByEmail =
-    !!identity.customerEmail &&
-    request.customer.email.toLowerCase() === identity.customerEmail.toLowerCase();
-  return ownsById || ownsByEmail;
-}
-
 export async function getCustomerDocumentPdf(
   requestId: string,
   kind: "quotation" | "invoice",
-  identity: CustomerIdentity,
+  identity: CustomerOwnershipIdentity,
 ): Promise<
   | { ok: true; bytes: Uint8Array; fileName: string }
   | { ok: false; status: number; error: string }
@@ -35,7 +22,7 @@ export async function getCustomerDocumentPdf(
   }
 
   const request = mapInspectionDoc(snap.id, snap.data() ?? {});
-  if (!customerOwnsRequest(request, identity)) {
+  if (!customerOwnsRequestRecord(request, identity)) {
     return { ok: false, status: 404, error: "Document not found." };
   }
 
