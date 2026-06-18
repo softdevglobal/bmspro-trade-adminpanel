@@ -346,7 +346,7 @@ async function applyLeaveReassignments(
   return { ok: true };
 }
 
-/** Staff cannot request leave on days they are already assigned to jobs or visits. */
+/** Staff may request leave even when assigned; admin must reassign before approving. */
 export async function createStaffLeaveRequest(
   staffUid: string,
   businessId: string,
@@ -404,13 +404,6 @@ export async function createStaffLeaveRequest(
   };
 
   const conflicts = await findLeaveAssignmentConflicts(draft);
-  if (conflicts.length > 0) {
-    return {
-      ok: false,
-      status: 409,
-      error: `You are assigned to ${conflicts.length} job${conflicts.length === 1 ? "" : "s"} or visit${conflicts.length === 1 ? "" : "s"} during these dates and cannot request leave. For emergencies, contact your admin.`,
-    };
-  }
 
   const ref = adminDb.collection(LEAVE_COLLECTION).doc();
   await ref.set({
