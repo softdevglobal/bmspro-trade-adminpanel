@@ -834,7 +834,7 @@ export async function createQuotationForInspection(
   }
 
   if (shouldSend) {
-    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
     try {
       const updatedSnap = await requestSnap.ref.get();
       const updatedRequest = mapInspectionDoc(
@@ -1204,7 +1204,7 @@ export async function updateDraftQuotation(
   }
 
   if (shouldSend) {
-    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
     try {
       const updatedSnap = await requestSnap.ref.get();
       const updatedRequest = mapInspectionDoc(
@@ -1986,7 +1986,7 @@ export async function createStandaloneQuotation(
   // 6. Email the customer their quotation PDF and surface it in the portal when explicitly sending.
   if (shouldSend) {
     try {
-      await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+      await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
     } catch (error) {
       console.error("standalone quotation email failed:", error);
     }
@@ -2490,6 +2490,7 @@ export async function businessRecordQuotationCustomerDecision(
 }
 
 async function sendQuotationCreatedEmail(
+  businessId: string,
   quotation: QuotationDetail,
   pdfBytes: Buffer | null,
   businessBranding: QuotationBusinessBranding,
@@ -2520,6 +2521,7 @@ async function sendQuotationCreatedEmail(
     businessName,
     bookingSlug,
     logoUrl,
+    businessId,
     pdfBytes,
     pdfFileName: `${quoteCode || "quotation"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });

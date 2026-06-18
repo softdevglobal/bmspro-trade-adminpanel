@@ -399,6 +399,12 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // SMS package catalog — public read for onboarding; writes via Admin SDK.
+    match /sms_packages/{packageId} {
+      allow read: if true;
+      allow create, update, delete: if false;
+    }
+
     // Staff time-off / leave requests. Staff create their own (pending); owners
     // and the requester read; approvals/rejections happen via the Admin SDK.
     match /leaveRequests/{leaveId} {

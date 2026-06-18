@@ -1,14 +1,12 @@
-/** Firestore collection for sellable subscription packages. */
-export const SUBSCRIPTION_PLANS_COLLECTION = "subscription_plans";
+/** Firestore collection for SMS add-on packages. */
+export const SMS_PACKAGES_COLLECTION = "sms_packages";
 
-export type BillingCycle = "weekly" | "monthly";
-
-export type SubscriptionPlan = {
+export type SmsPackage = {
   id: string;
   name: string;
   price: number;
   priceLabel: string;
-  staff: number;
+  messageQuota: number;
   features: string[];
   popular: boolean;
   color: string;
@@ -17,21 +15,17 @@ export type SubscriptionPlan = {
   active: boolean;
   hidden: boolean;
   stripePriceId: string | null;
-  trialDays: number;
   plan_key: string | null;
-  billingCycle: BillingCycle;
-  validityDays: number;
   description: string | null;
-  smsPackageId: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
 
-export type SubscriptionPlanInput = {
+export type SmsPackageInput = {
   name: string;
   price: number;
   priceLabel?: string;
-  staff: number;
+  messageQuota: number;
   features?: string[];
   popular?: boolean;
   color?: string;
@@ -40,9 +34,6 @@ export type SubscriptionPlanInput = {
   active?: boolean;
   hidden?: boolean;
   stripePriceId?: string | null;
-  trialDays?: number;
   plan_key?: string | null;
-  billingCycle?: BillingCycle;
   description?: string | null;
-  smsPackageId?: string | null;
 };

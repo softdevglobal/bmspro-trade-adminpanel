@@ -15,6 +15,10 @@ import {
   buildTenantSubscriptionFields,
   getSubscriptionPlanById,
 } from "@/lib/subscription-plans/server";
+import {
+  buildTenantSmsFields,
+  resolveSmsPackageForPlan,
+} from "@/lib/sms-packages/server";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import { sendOwnerWelcomeEmail } from "@/lib/email/templates";
 import {
@@ -189,6 +193,12 @@ async function createTenantWithOwnerAccount(
     });
 
     const subscriptionFields = buildTenantSubscriptionFields(selectedPlan);
+    const smsPackage = await resolveSmsPackageForPlan(selectedPlan);
+    const smsFields = smsPackage
+      ? buildTenantSmsFields(smsPackage, {
+          subscriptionValidityDays: selectedPlan.validityDays,
+        })
+      : {};
     const batch = adminDb.batch();
     batch.set(
       businessRef,
@@ -199,7 +209,7 @@ async function createTenantWithOwnerAccount(
         bookingSlug,
         createdByUid: options.createdByUid ?? null,
         createdByEmail: options.createdByEmail ?? null,
-        subscriptionFields: subscriptionFields.business,
+        subscriptionFields: { ...subscriptionFields.business, ...smsFields },
       })
     );
     batch.set(adminDb.collection("users").doc(uid), {
@@ -222,6 +232,7 @@ async function createTenantWithOwnerAccount(
       bookingSlug,
       planName: selectedPlan.name,
       logoUrl: value.logoUrl ?? null,
+      businessId: tenantId,
       temporaryPassword:
         options.source === "super_admin_create"
           ? options.password

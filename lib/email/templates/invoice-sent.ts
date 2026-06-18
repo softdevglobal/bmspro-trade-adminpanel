@@ -30,6 +30,7 @@ export type InvoiceSentEmailInput = {
   businessName?: string | null;
   bookingSlug?: string | null;
   logoUrl?: string | null;
+  businessId?: string | null;
   pdfBytes: Buffer;
   pdfFileName: string;
 };
@@ -148,6 +149,7 @@ export async function sendInvoiceSentEmail(
     const amountLabel = deposit?.paid ? "balance due" : "total due";
     await sendSms({
       to: input.customerPhone,
+      businessId: input.businessId,
       message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
     });
   }

@@ -43,6 +43,7 @@ export type InspectionCustomerNotificationEmailInput = {
   bookingSlug?: string | null;
   businessName?: string | null;
   logoUrl?: string | null;
+  businessId?: string | null;
   inspectionRequestId?: string | null;
   type: NotificationType;
   title: string;
@@ -142,6 +143,7 @@ export async function sendInspectionCustomerNotificationEmail(
     const smsBody = input.body?.replace(/\s+/g, " ").trim();
     await sendSms({
       to: input.customerPhone,
+      businessId: input.businessId,
       message: smsBody ? `${input.title}. ${smsBody}` : input.title,
     });
   }

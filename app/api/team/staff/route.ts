@@ -451,6 +451,7 @@ export async function POST(request: Request) {
         staffType: parsed.value.staffType,
         temporaryPassword: DEFAULT_STAFF_PASSWORD,
         logoUrl: business?.logoUrl ?? null,
+        businessId: auth.businessId,
       });
     } catch (emailError) {
       console.error("[staff] welcome email failed:", emailError);

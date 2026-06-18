@@ -115,6 +115,7 @@ async function createNotification(
       bookingSlug: input.bookingSlug,
       businessName: input.businessName,
       logoUrl: input.logoUrl,
+      businessId: input.businessId,
       inspectionRequestId: input.requestId,
       type: input.type,
       title: input.title,

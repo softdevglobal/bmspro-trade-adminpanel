@@ -27,6 +27,7 @@ export type OwnerWelcomeEmailInput = {
   temporaryPassword?: string | null;
   /** Optional business logo URL shown in the email body. */
   logoUrl?: string | null;
+  businessId?: string | null;
 };
 
 /**
@@ -85,6 +86,7 @@ export async function sendOwnerWelcomeEmail(
   if (input.phone) {
     await sendSms({
       to: input.phone,
+      businessId: input.businessId,
       message: input.temporaryPassword
         ? `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in with ${input.email} — check your email for your temporary password.`
         : `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in anytime with ${input.email}.`,

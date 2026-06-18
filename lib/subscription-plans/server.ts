@@ -45,10 +45,6 @@ function mapPlanDoc(id: string, data: DocumentData): SubscriptionPlan {
       typeof data.priceLabel === "string" && data.priceLabel.trim()
         ? data.priceLabel.trim()
         : formatPriceLabel(price, billingCycle),
-    branches:
-      typeof data.branches === "number" && Number.isFinite(data.branches)
-        ? data.branches
-        : 1,
     staff:
       typeof data.staff === "number" && Number.isFinite(data.staff) ? data.staff : 5,
     features: Array.isArray(data.features)
@@ -78,6 +74,10 @@ function mapPlanDoc(id: string, data: DocumentData): SubscriptionPlan {
       typeof data.description === "string" && data.description.trim()
         ? data.description.trim()
         : null,
+    smsPackageId:
+      typeof data.smsPackageId === "string" && data.smsPackageId.trim()
+        ? data.smsPackageId.trim()
+        : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
@@ -93,7 +93,6 @@ function normalisePlanInput(input: SubscriptionPlanInput): Record<string, unknow
     price,
     priceLabel:
       input.priceLabel?.trim() || formatPriceLabel(price, billingCycle),
-    branches: Number.isFinite(input.branches) ? input.branches : 1,
     staff: Number.isFinite(input.staff) ? input.staff : 5,
     features: Array.isArray(input.features)
       ? input.features.filter((f) => typeof f === "string" && f.trim())
@@ -113,6 +112,7 @@ function normalisePlanInput(input: SubscriptionPlanInput): Record<string, unknow
     billingCycle,
     validityDays,
     description: input.description?.trim() || null,
+    smsPackageId: input.smsPackageId?.trim() || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
 }
@@ -121,6 +121,9 @@ function normalisePlanInput(input: SubscriptionPlanInput): Record<string, unknow
 export async function ensureDefaultSubscriptionPlans(): Promise<void> {
   const snap = await adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).limit(1).get();
   if (!snap.empty) return;
+
+  const { ensureDefaultSmsPackages } = await import("@/lib/sms-packages/server");
+  await ensureDefaultSmsPackages();
 
   const batch = adminDb.batch();
   const now = FieldValue.serverTimestamp();
@@ -209,7 +212,6 @@ export async function updateSubscriptionPlan(
     name: input.name?.trim() || existing.name,
     price: input.price ?? existing.price,
     priceLabel: input.priceLabel ?? existing.priceLabel,
-    branches: input.branches ?? existing.branches,
     staff: input.staff ?? existing.staff,
     features: input.features ?? existing.features,
     popular: input.popular ?? existing.popular,
@@ -227,6 +229,10 @@ export async function updateSubscriptionPlan(
     billingCycle: input.billingCycle ?? existing.billingCycle,
     description:
       input.description !== undefined ? input.description : existing.description,
+    smsPackageId:
+      input.smsPackageId !== undefined
+        ? input.smsPackageId
+        : existing.smsPackageId,
   };
 
   const description = validatePlanDescription(merged.description);
@@ -260,6 +266,7 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
   const hasTrial = plan.trialDays > 0;
   const billingStatus = hasTrial ? "trialing" : "pending";
   const accountStatus = hasTrial ? "active_trial" : "pending_payment";
+  const periodMs = plan.validityDays * 24 * 60 * 60 * 1000;
 
   const businessPlan = {
     id: plan.id,
@@ -271,7 +278,6 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
     plan_key: plan.plan_key,
     billingCycle: plan.billingCycle,
     validityDays: plan.validityDays,
-    branches: plan.branches,
     staff: plan.staff,
   };
 
@@ -279,9 +285,7 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
     business: {
       planId: plan.id,
       plan: businessPlan,
-      branchLimit: plan.branches,
       staffLimit: plan.staff,
-      currentBranchCount: 1,
       currentStaffCount: 0,
       billing_status: billingStatus,
       accountStatus,
@@ -293,15 +297,15 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
             trial_end: trialEnd,
           }
         : {}),
+      subscriptionPeriodStart: now,
+      subscriptionPeriodEnd: now + periodMs,
     },
     ownerUser: {
       planId: plan.id,
       plan: plan.name,
       plan_key: plan.plan_key,
       price: plan.priceLabel,
-      branchLimit: plan.branches,
       staffLimit: plan.staff,
-      currentBranchCount: 1,
       currentStaffCount: 0,
       billing_status: billingStatus,
       accountStatus,
@@ -319,6 +323,53 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
 
 export function planBillingNote(plan: SubscriptionPlan): string {
   return formatBillingNote(plan.billingCycle, plan.validityDays);
+}
+
+/**
+ * Advances the subscription billing period without re-granting bundled SMS.
+ * Call from Stripe/webhook renewal handlers — SMS top-ups are purchased separately.
+ */
+export async function renewTenantSubscription(
+  businessId: string,
+): Promise<void> {
+  const trimmedId = businessId.trim();
+  if (!trimmedId) {
+    throw new Error("Business id is required.");
+  }
+
+  const ref = adminDb.collection("businesses").doc(trimmedId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new Error("Business not found.");
+  }
+
+  const data = snap.data() ?? {};
+  const planId =
+    typeof data.planId === "string" && data.planId.trim()
+      ? data.planId.trim()
+      : typeof (data.plan as { id?: string } | undefined)?.id === "string"
+        ? (data.plan as { id: string }).id
+        : null;
+
+  const plan = planId ? await getSubscriptionPlanById(planId) : null;
+  const validityDays =
+    plan?.validityDays ??
+    (typeof (data.plan as { validityDays?: number } | undefined)?.validityDays ===
+      "number"
+      ? (data.plan as { validityDays: number }).validityDays
+      : 28);
+
+  const now = Date.now();
+  const periodMs = validityDays * 24 * 60 * 60 * 1000;
+
+  await ref.update({
+    subscriptionPeriodStart: now,
+    subscriptionPeriodEnd: now + periodMs,
+    billing_status: "active",
+    accountStatus: "active",
+    smsBundleFirstPeriodOnly: false,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
 }
 
 /** Count businesses on each subscription plan (by planId or legacy plan.id). */

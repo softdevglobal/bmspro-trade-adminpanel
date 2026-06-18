@@ -1,11 +1,17 @@
 import "server-only";
 
+import { releaseSmsCredits, tryConsumeSmsCredits } from "@/lib/sms/usage";
+
 /**
  * textbee.dev SMS gateway client.
  *
  * Sends transactional SMS through a registered Android device. Best-effort:
  * never throws, so notification flows are not blocked when SMS delivery fails
  * or is not configured.
+ *
+ * When `businessId` is provided, tenant SMS quota is enforced:
+ * `smsMessagesUsed` increments on send and delivery is blocked once the limit
+ * is reached (`smsMessageLimit`).
  *
  * Required env (server-only):
  *  - TEXTBEE_API_KEY    — API key from the textbee.dev dashboard
@@ -92,11 +98,54 @@ export type SendSmsInput = {
   to: string | null | undefined;
   /** Message body. */
   message: string;
+  /** When set, enforces tenant SMS quota before sending. */
+  businessId?: string | null;
 };
+
+async function postSmsToGateway(
+  recipients: string[],
+  message: string,
+): Promise<boolean> {
+  const cfg = config();
+  if (!cfg.apiKey || !cfg.deviceId || recipients.length === 0) {
+    return false;
+  }
+
+  const url = `${cfg.apiBase}/gateway/devices/${encodeURIComponent(
+    cfg.deviceId,
+  )}/send-sms`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": cfg.apiKey,
+    },
+    body: JSON.stringify({
+      recipients,
+      message,
+      ...(cfg.simSubscriptionId
+        ? { simSubscriptionId: Number(cfg.simSubscriptionId) }
+        : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("[sms] send FAILED", {
+      count: recipients.length,
+      status: response.status,
+      detail: detail.slice(0, 300),
+    });
+    return false;
+  }
+
+  return true;
+}
 
 /**
  * Sends a single SMS. Best-effort — returns false (never throws) when not
- * configured, the number is invalid, or delivery fails.
+ * configured, the number is invalid, quota is exceeded, or delivery fails.
  */
 export async function sendSms(input: SendSmsInput): Promise<boolean> {
   const cfg = config();
@@ -121,39 +170,23 @@ export async function sendSms(input: SendSmsInput): Promise<boolean> {
     return false;
   }
 
-  const url = `${cfg.apiBase}/gateway/devices/${encodeURIComponent(
-    cfg.deviceId,
-  )}/send-sms`;
+  const businessId = input.businessId?.trim() || null;
+  if (businessId) {
+    const reserved = await tryConsumeSmsCredits(businessId, 1);
+    if (!reserved) return false;
+  }
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": cfg.apiKey,
-      },
-      body: JSON.stringify({
-        recipients: [recipient],
-        message,
-        ...(cfg.simSubscriptionId
-          ? { simSubscriptionId: Number(cfg.simSubscriptionId) }
-          : {}),
-      }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.error("[sms] send FAILED", {
-        to: recipient,
-        status: response.status,
-        detail: detail.slice(0, 300),
-      });
+    const sent = await postSmsToGateway([recipient], message);
+    if (!sent) {
+      if (businessId) await releaseSmsCredits(businessId, 1);
       return false;
     }
 
-    console.log("[sms] sent OK", { to: recipient });
+    console.log("[sms] sent OK", { to: recipient, businessId });
     return true;
   } catch (error) {
+    if (businessId) await releaseSmsCredits(businessId, 1);
     console.error("[sms] send FAILED", { to: recipient, error });
     return false;
   }
@@ -166,6 +199,7 @@ export async function sendSms(input: SendSmsInput): Promise<boolean> {
 export async function sendBulkSms(
   recipients: Array<string | null | undefined>,
   message: string,
+  businessId?: string | null,
 ): Promise<number> {
   const cfg = config();
   if (!cfg.apiKey || !cfg.deviceId) {
@@ -184,37 +218,26 @@ export async function sendBulkSms(
   );
   if (normalized.length === 0) return 0;
 
-  const url = `${cfg.apiBase}/gateway/devices/${encodeURIComponent(
-    cfg.deviceId,
-  )}/send-sms`;
+  const tenantId = businessId?.trim() || null;
+  if (tenantId) {
+    const reserved = await tryConsumeSmsCredits(tenantId, normalized.length);
+    if (!reserved) return 0;
+  }
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": cfg.apiKey,
-      },
-      body: JSON.stringify({
-        recipients: normalized,
-        message: text,
-        ...(cfg.simSubscriptionId
-          ? { simSubscriptionId: Number(cfg.simSubscriptionId) }
-          : {}),
-      }),
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.error("[sms] bulk send FAILED", {
-        count: normalized.length,
-        status: response.status,
-        detail: detail.slice(0, 300),
-      });
+    const sent = await postSmsToGateway(normalized, text);
+    if (!sent) {
+      if (tenantId) await releaseSmsCredits(tenantId, normalized.length);
       return 0;
     }
-    console.log("[sms] bulk sent OK", { count: normalized.length });
+
+    console.log("[sms] bulk sent OK", {
+      count: normalized.length,
+      businessId: tenantId,
+    });
     return normalized.length;
   } catch (error) {
+    if (tenantId) await releaseSmsCredits(tenantId, normalized.length);
     console.error("[sms] bulk send FAILED", { error });
     return 0;
   }

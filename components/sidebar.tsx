@@ -6,6 +6,7 @@ import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { countPendingInspectionRequests } from "@/lib/inspection/request-counts";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
+import { useSmsBalance } from "@/lib/sms/sms-balance-context";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -103,6 +104,12 @@ const NAV_ITEMS: NavItem[] = [
     businessOwner: true,
   },
   {
+    href: "/dashboard/sms",
+    label: "SMS Credits",
+    icon: "sms",
+    businessOwner: true,
+  },
+  {
     href: "/dashboard/tenants",
     label: "Tenants",
     icon: "domain",
@@ -112,6 +119,12 @@ const NAV_ITEMS: NavItem[] = [
     href: "/dashboard/packages",
     label: "Packages",
     icon: "inventory_2",
+    superAdmin: true,
+  },
+  {
+    href: "/dashboard/sms-packages",
+    label: "SMS Packages",
+    icon: "sms",
     superAdmin: true,
   },
   {
@@ -151,6 +164,8 @@ export function Sidebar({
     [requests],
   );
   const { pendingCount: pendingLeaveCount } = useLeaveRequests();
+  const { balance: smsBalance, remaining: smsRemaining, isLow: smsIsLow } =
+    useSmsBalance();
   const brandName = business?.businessName?.trim() || "BMS Pro Trade";
   const brandLogo =
     role === "business_owner" ? (business?.logoUrl ?? null) : null;
@@ -310,14 +325,38 @@ export function Sidebar({
                   ? pendingLeaveCount
                   : 0;
             const showPendingBadge = badgeCount > 0;
+            const isSmsNav = item.href === "/dashboard/sms";
+            const showSmsLowWarning =
+              isSmsNav && role === "business_owner" && smsIsLow;
+            const showSmsCount =
+              showSmsLowWarning &&
+              smsBalance &&
+              !smsBalance.isUnlimited &&
+              smsRemaining !== null;
+            const smsCountLabel =
+              showSmsCount && smsRemaining !== null
+                ? String(smsRemaining)
+                : null;
+            const showSmsLowDot = showSmsLowWarning;
 
             const inner = (
               <>
                 <span className="relative shrink-0">
                   <span className={navIconClass(isActive)}>{item.icon}</span>
+                  {showSmsLowDot ? (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-on-background"
+                      aria-hidden
+                    />
+                  ) : null}
                   {showPendingBadge && !showLabels ? (
                     <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 font-body text-[9px] font-bold text-white ring-2 ring-on-background">
                       {badgeCount > 9 ? "9+" : badgeCount}
+                    </span>
+                  ) : null}
+                  {showSmsCount && !showLabels && smsCountLabel ? (
+                    <span className="absolute -bottom-1.5 -right-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 font-body text-[9px] font-bold text-on-primary ring-2 ring-on-background">
+                      {smsCountLabel}
                     </span>
                   ) : null}
                 </span>
@@ -337,6 +376,11 @@ export function Sidebar({
                     {badgeCount > 99 ? "99+" : badgeCount}
                   </span>
                 ) : null}
+                {showSmsCount && showLabels && smsCountLabel ? (
+                  <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 font-body text-[10px] font-bold tabular-nums text-on-primary">
+                    {smsCountLabel}
+                  </span>
+                ) : null}
                 {hasChildren && showLabels ? (
                   <span
                     className={`material-symbols-outlined ml-auto shrink-0 text-[22px] leading-none transition-transform duration-300 ease-in-out ${
@@ -353,6 +397,10 @@ export function Sidebar({
                       : item.label}
                     {showPendingBadge
                       ? `, ${badgeCount} pending${badgeCount === 1 ? "" : ""}`
+                      : ""}
+                    {showSmsLowDot ? ", low SMS balance" : ""}
+                    {showSmsCount && smsCountLabel
+                      ? `, ${smsCountLabel} SMS remaining`
                       : ""}
                   </span>
                 )}

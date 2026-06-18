@@ -1,0 +1,22 @@
+import { BusinessOwnerGuard } from "@/components/business-owner-guard";
+import { DashboardShell } from "@/components/dashboard-shell";
+import { OwnerSmsBoard } from "@/components/owner-sms-board";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "SMS Credits - BMS Pro Trade",
+};
+
+export default function OwnerSmsPage() {
+  return (
+    <DashboardShell
+      title="SMS Credits"
+      subtitle="View your remaining SMS balance and buy top-up packages."
+      icon="sms"
+    >
+      <BusinessOwnerGuard>
+        <OwnerSmsBoard />
+      </BusinessOwnerGuard>
+    </DashboardShell>
+  );
+}

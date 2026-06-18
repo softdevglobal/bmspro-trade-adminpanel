@@ -40,6 +40,7 @@ export type QuotationSentEmailInput = {
   businessName?: string | null;
   bookingSlug?: string | null;
   logoUrl?: string | null;
+  businessId?: string | null;
   pdfBytes: Buffer;
   pdfFileName: string;
 };
@@ -166,6 +167,7 @@ export async function sendQuotationSentEmail(
     const total = formatEmailAud(input.totalAud);
     await sendSms({
       to: input.customerPhone,
+      businessId: input.businessId,
       message: `${businessLabel}: Your quotation ${input.quoteNo.trim() || ""} for ${serviceTitle} is ready (${total}). We've emailed you the PDF.`,
     });
   }

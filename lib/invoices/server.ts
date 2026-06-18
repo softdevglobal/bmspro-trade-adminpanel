@@ -940,6 +940,7 @@ async function sendInvoiceEmailForDetail(
     businessName: profile?.businessName ?? null,
     bookingSlug: profile?.bookingSlug ?? null,
     logoUrl: profile?.logoUrl ?? null,
+    businessId,
     pdfBytes: bytes,
     pdfFileName: `${invoiceCode}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });

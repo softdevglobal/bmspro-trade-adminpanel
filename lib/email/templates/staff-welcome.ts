@@ -24,6 +24,7 @@ export type StaffWelcomeEmailInput = {
   staffType: string;
   temporaryPassword: string;
   logoUrl?: string | null;
+  businessId?: string | null;
 };
 
 /**
@@ -77,6 +78,7 @@ export async function sendStaffWelcomeEmail(
   if (input.phone) {
     await sendSms({
       to: input.phone,
+      businessId: input.businessId,
       message: `${input.businessName} added you to their team on BMS Pro Trade as ${input.staffType}. Check your email (${input.email}) for your login details.`,
     });
   }

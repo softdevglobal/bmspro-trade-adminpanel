@@ -1,31 +1,30 @@
 import { requireSuperAdmin } from "@/lib/onboarding/server";
+import { validateSmsPackageDescription } from "@/lib/sms-packages/helpers";
 import {
-  createSubscriptionPlan,
-  deleteSubscriptionPlan,
-  countTenantsByPlan,
-  listSubscriptionPlans,
-  updateSubscriptionPlan,
-} from "@/lib/subscription-plans/server";
-import { enrichPlansWithBundledSms } from "@/lib/sms-packages/server";
-import type { SubscriptionPlanInput } from "@/lib/subscription-plans/types";
-import { validatePlanDescription } from "@/lib/subscription-plans/helpers";
+  createSmsPackage,
+  deleteSmsPackage,
+  countTenantsBySmsPackage,
+  listSmsPackages,
+  updateSmsPackage,
+} from "@/lib/sms-packages/server";
+import type { SmsPackageInput } from "@/lib/sms-packages/types";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-function parsePlanBody(
+function parseSmsPackageBody(
   body: unknown,
-): { ok: true; input: SubscriptionPlanInput } | { ok: false; error: string } {
+): { ok: true; input: SmsPackageInput } | { ok: false; error: string } {
   if (!body || typeof body !== "object") {
     return { ok: false, error: "Invalid request body." };
   }
   const raw = body as Record<string, unknown>;
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
   if (!name) {
-    return { ok: false, error: "Plan name is required." };
+    return { ok: false, error: "SMS package name is required." };
   }
 
-  const description = validatePlanDescription(raw.description);
+  const description = validateSmsPackageDescription(raw.description);
   if (!description.ok) {
     return description;
   }
@@ -38,10 +37,10 @@ function parsePlanBody(
         typeof raw.price === "number" && Number.isFinite(raw.price) ? raw.price : 0,
       priceLabel:
         typeof raw.priceLabel === "string" ? raw.priceLabel : undefined,
-      staff:
-        typeof raw.staff === "number" && Number.isFinite(raw.staff)
-          ? raw.staff
-          : 5,
+      messageQuota:
+        typeof raw.messageQuota === "number" && Number.isFinite(raw.messageQuota)
+          ? raw.messageQuota
+          : 100,
       features: Array.isArray(raw.features)
         ? raw.features.filter((f): f is string => typeof f === "string")
         : [],
@@ -53,22 +52,13 @@ function parsePlanBody(
       hidden: raw.hidden === true,
       stripePriceId:
         typeof raw.stripePriceId === "string" ? raw.stripePriceId : null,
-      trialDays:
-        typeof raw.trialDays === "number" && Number.isFinite(raw.trialDays)
-          ? raw.trialDays
-          : 0,
       plan_key: typeof raw.plan_key === "string" ? raw.plan_key : null,
-      billingCycle: raw.billingCycle === "monthly" ? "monthly" : "weekly",
       description: description.value,
-      smsPackageId:
-        typeof raw.smsPackageId === "string" && raw.smsPackageId.trim()
-          ? raw.smsPackageId.trim()
-          : null,
     },
   };
 }
 
-/** Super admin — list all subscription plans (including inactive/hidden). */
+/** Super admin — list all SMS packages (including inactive/hidden). */
 export async function GET(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (!auth.ok) {
@@ -78,16 +68,15 @@ export async function GET(request: Request) {
     );
   }
 
-  const plans = await listSubscriptionPlans({
+  const packages = await listSmsPackages({
     includeInactive: true,
     includeHidden: true,
   });
-  const plansWithSms = await enrichPlansWithBundledSms(plans);
-  const tenantCounts = await countTenantsByPlan();
-  return NextResponse.json({ ok: true, plans: plansWithSms, tenantCounts });
+  const tenantCounts = await countTenantsBySmsPackage();
+  return NextResponse.json({ ok: true, packages, tenantCounts });
 }
 
-/** Super admin — create a subscription plan. */
+/** Super admin — create an SMS package. */
 export async function POST(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (!auth.ok) {
@@ -107,7 +96,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = parsePlanBody(body);
+  const parsed = parseSmsPackageBody(body);
   if (!parsed.ok) {
     return NextResponse.json(
       { ok: false, error: parsed.error },
@@ -116,21 +105,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const plan = await createSubscriptionPlan(parsed.input);
-    return NextResponse.json({ ok: true, plan }, { status: 201 });
+    const pkg = await createSmsPackage(parsed.input);
+    return NextResponse.json({ ok: true, package: pkg }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Could not create plan.",
+          error instanceof Error ? error.message : "Could not create SMS package.",
       },
       { status: 400 },
     );
   }
 }
 
-/** Super admin — update a subscription plan. */
+/** Super admin — update an SMS package. */
 export async function PUT(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (!auth.ok) {
@@ -158,15 +147,15 @@ export async function PUT(request: Request) {
   }
 
   const raw = body as Record<string, unknown>;
-  const planId = typeof raw.id === "string" ? raw.id.trim() : "";
-  if (!planId) {
+  const packageId = typeof raw.id === "string" ? raw.id.trim() : "";
+  if (!packageId) {
     return NextResponse.json(
-      { ok: false, error: "Plan id is required." },
+      { ok: false, error: "SMS package id is required." },
       { status: 400 },
     );
   }
 
-  const parsed = parsePlanBody(body);
+  const parsed = parseSmsPackageBody(body);
   if (!parsed.ok) {
     return NextResponse.json(
       { ok: false, error: parsed.error },
@@ -174,18 +163,18 @@ export async function PUT(request: Request) {
     );
   }
 
-  const plan = await updateSubscriptionPlan(planId, parsed.input);
-  if (!plan) {
+  const pkg = await updateSmsPackage(packageId, parsed.input);
+  if (!pkg) {
     return NextResponse.json(
-      { ok: false, error: "Plan not found." },
+      { ok: false, error: "SMS package not found." },
       { status: 404 },
     );
   }
 
-  return NextResponse.json({ ok: true, plan });
+  return NextResponse.json({ ok: true, package: pkg });
 }
 
-/** Super admin — delete a subscription plan. */
+/** Super admin — delete an SMS package. */
 export async function DELETE(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (!auth.ok) {
@@ -196,18 +185,18 @@ export async function DELETE(request: Request) {
   }
 
   const url = new URL(request.url);
-  const planId = url.searchParams.get("id")?.trim() ?? "";
-  if (!planId) {
+  const packageId = url.searchParams.get("id")?.trim() ?? "";
+  if (!packageId) {
     return NextResponse.json(
-      { ok: false, error: "Plan id is required." },
+      { ok: false, error: "SMS package id is required." },
       { status: 400 },
     );
   }
 
-  const deleted = await deleteSubscriptionPlan(planId);
+  const deleted = await deleteSmsPackage(packageId);
   if (!deleted) {
     return NextResponse.json(
-      { ok: false, error: "Plan not found." },
+      { ok: false, error: "SMS package not found." },
       { status: 404 },
     );
   }
