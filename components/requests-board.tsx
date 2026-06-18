@@ -8,6 +8,7 @@ import {
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
+import { JobInstructionsDisplay } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
@@ -2099,9 +2100,15 @@ function BookingDetailsSection({
           </div>
         ) : null}
 
+        <JobInstructionsDisplay
+          description={booking.jobInstructionsDescription}
+          tasks={booking.jobInstructionsTasks}
+          compact
+        />
+
         {booking.ownerNote ? (
           <p className="mt-3 border-t border-outline-variant/40 pt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
-            <span className="font-semibold text-on-surface">Note: </span>
+            <span className="font-semibold text-on-surface">Customer note: </span>
             {booking.ownerNote}
           </p>
         ) : null}

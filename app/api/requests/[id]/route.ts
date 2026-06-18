@@ -1,4 +1,8 @@
 import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
+import {
+  parseJobInstructionDescription,
+  parseJobInstructionTasks,
+} from "@/lib/bookings/job-instructions";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   applyOwnerAction,
@@ -420,6 +424,10 @@ export async function PATCH(
       : PLATFORM_TIME_ZONE;
 
   const note = typeof payload.note === "string" ? payload.note.trim() : undefined;
+  const instructionDescription = parseJobInstructionDescription(
+    payload.instructionDescription,
+  );
+  const instructionTasks = parseJobInstructionTasks(payload.instructionTasks);
 
   if (action === "accept") {
     const slot = parseSlot(payload.slot, timeZone);
@@ -706,6 +714,9 @@ export async function PATCH(
         endTime: window.endTime,
         estimatedDurationMinutes: duration.minutes,
         note,
+        instructionDescription,
+        instructionTasks:
+          instructionTasks.length > 0 ? instructionTasks : undefined,
         assignedTo,
       },
       ownerAudit,

@@ -69,6 +69,9 @@ export type BookingDetail = {
   estimatedDurationMinutes: number | null;
   assignedTo: InspectionAssignment | null;
   ownerNote: string | null;
+  /** Internal briefing for staff/admin — not shown to customers. */
+  jobInstructionsDescription: string | null;
+  jobInstructionsTasks: string[];
   quotation: InspectionQuotationSummary | null;
   visitStartedAt: number | null;
   visitEndedAt: number | null;

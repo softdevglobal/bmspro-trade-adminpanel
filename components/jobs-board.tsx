@@ -17,6 +17,7 @@ import {
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
@@ -178,6 +179,7 @@ function BookingCard({
               {booking.assignedTo.name}
             </span>
           ) : null}
+          <JobInstructionsGlance booking={booking} />
         </div>
       ) : null}
     </button>
@@ -645,6 +647,11 @@ function BookingPreviewContent({
           </section>
         ) : null}
 
+        <JobInstructionsDisplay
+          description={booking.jobInstructionsDescription}
+          tasks={booking.jobInstructionsTasks}
+        />
+
         {canAssign ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
             <div className="flex items-start justify-between gap-3">
@@ -753,7 +760,7 @@ function BookingPreviewContent({
         {booking.ownerNote ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-              Owner note
+              Note for customer
             </p>
             <p className="mt-1 font-body text-body-md text-on-surface">
               {booking.ownerNote}
