@@ -32,6 +32,9 @@ export type NotificationType =
   | "quotation_sent"
   | "quotation_accepted"
   | "quotation_rejected"
+  | "leave_requested"
+  | "leave_assignment_conflict"
+  | "staff_off_day"
   | "system_message";
 
 /** Client-facing notification (timestamps are epoch millis). */
@@ -84,6 +87,9 @@ const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
   quotation_sent: "request_quote",
   quotation_accepted: "check_circle",
   quotation_rejected: "cancel",
+  leave_requested: "event_busy",
+  leave_assignment_conflict: "warning",
+  staff_off_day: "event_busy",
   system_message: "campaign",
 };
 
@@ -93,6 +99,9 @@ const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
   quotation_sent: "text-orange-400",
   quotation_accepted: "text-emerald-600",
   quotation_rejected: "text-rose-600",
+  leave_requested: "text-amber-600",
+  leave_assignment_conflict: "text-orange-600",
+  staff_off_day: "text-violet-600",
   system_message: "text-primary",
 };
 

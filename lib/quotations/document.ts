@@ -1,4 +1,5 @@
 import { formatAddress, type InspectionAddress } from "@/lib/inspection/types";
+import type { QuotationLineItem } from "@/lib/quotations/types";
 
 /** Line item fields used by the PDF layout and the create-page preview. */
 export type QuotationDocumentLineItem = {
@@ -7,6 +8,7 @@ export type QuotationDocumentLineItem = {
   description?: string | null;
   quantity: number;
   rateAud: number;
+  discountPercent: number;
   gstPercent: number;
   /** Line amount excluding GST (after quantity × rate and line discount). */
   amountAud: number;
@@ -166,6 +168,38 @@ export function formatQuoteMoney(value: number): string {
   })}`;
 }
 
+/** Dollar value of a line-level discount (ex-GST). */
+export function lineItemDiscountAud(item: QuotationDocumentLineItem): number {
+  if (item.discountPercent <= 0) return 0;
+  const gross = Math.round(item.rateAud * item.quantity * 100) / 100;
+  return Math.max(0, Math.round((gross - item.amountAud) * 100) / 100);
+}
+
+export function totalLineDiscountAud(
+  lineItems: QuotationDocumentLineItem[],
+): number {
+  return Math.round(
+    lineItems.reduce((sum, item) => sum + lineItemDiscountAud(item), 0) * 100,
+  ) / 100;
+}
+
+export function grossSubtotalAud(
+  lineItems: QuotationDocumentLineItem[],
+): number {
+  return Math.round(
+    lineItems.reduce(
+      (sum, item) => sum + item.rateAud * item.quantity,
+      0,
+    ) * 100,
+  ) / 100;
+}
+
+export function formatLineDiscountLabel(item: QuotationDocumentLineItem): string {
+  const amount = lineItemDiscountAud(item);
+  if (item.discountPercent <= 0 || amount <= 0) return "—";
+  return `${item.discountPercent}% (−${formatQuoteMoney(amount)})`;
+}
+
 export function formatQuoteDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;
@@ -181,7 +215,7 @@ export function computeQuotationLineAmounts(input: {
   discountPercent: number;
   gstPercent: number;
   gstPricing: GstPricingMode;
-}): { amountAud: number; rateAudExGst: number } {
+}): { amountAud: number; rateAudExGst: number; listRateAudExGst: number } {
   const gross =
     Math.round(
       input.quantity *
@@ -195,7 +229,13 @@ export function computeQuotationLineAmounts(input: {
       input.quantity > 0
         ? Math.round((gross / input.quantity) * 100) / 100
         : input.rate;
-    return { amountAud: gross, rateAudExGst };
+    const listRateAudExGst =
+      input.discountPercent > 0 && input.quantity > 0
+        ? Math.round(
+            (rateAudExGst / (1 - input.discountPercent / 100)) * 100,
+          ) / 100
+        : rateAudExGst;
+    return { amountAud: gross, rateAudExGst, listRateAudExGst };
   }
 
   const amountAud =
@@ -204,7 +244,61 @@ export function computeQuotationLineAmounts(input: {
     input.quantity > 0
       ? Math.round((amountAud / input.quantity) * 100) / 100
       : input.rate;
-  return { amountAud, rateAudExGst };
+  const listRateAudExGst =
+    input.discountPercent > 0 && input.quantity > 0
+      ? Math.round((rateAudExGst / (1 - input.discountPercent / 100)) * 100) /
+        100
+      : rateAudExGst;
+  return { amountAud, rateAudExGst, listRateAudExGst };
+}
+
+/** Maps a stored quotation/invoice line to the shared document preview model. */
+export function resolveDocumentLineFromQuotationItem(
+  item: QuotationLineItem,
+  defaultGst: number,
+): QuotationDocumentLineItem {
+  const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
+  let discountPercent =
+    typeof item.discountPercent === "number" &&
+    Number.isFinite(item.discountPercent) &&
+    item.discountPercent > 0
+      ? Math.min(100, item.discountPercent)
+      : 0;
+
+  const unitRate =
+    typeof item.rateAud === "number" && item.rateAud > 0
+      ? item.rateAud
+      : Math.round((item.priceAud / quantity) * 100) / 100;
+
+  let listRateAud = unitRate;
+
+  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
+    const gross = Math.round(unitRate * quantity * 100) / 100;
+    if (gross > item.priceAud + 0.01) {
+      const inferred = Math.min(
+        100,
+        Math.round((1 - item.priceAud / gross) * 10000) / 100,
+      );
+      if (inferred > 0.01) {
+        discountPercent = inferred;
+        listRateAud = unitRate;
+      }
+    }
+  } else if (discountPercent > 0) {
+    listRateAud =
+      Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100;
+  }
+
+  return {
+    code: item.code ?? null,
+    name: item.name,
+    description: item.description ?? null,
+    quantity,
+    rateAud: listRateAud,
+    discountPercent,
+    gstPercent: item.gstPercent ?? defaultGst,
+    amountAud: item.priceAud,
+  };
 }
 
 export function resolveQuotationTerms(input: {

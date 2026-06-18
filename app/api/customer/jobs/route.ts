@@ -246,13 +246,17 @@ async function loadBusinessSummaries(
 }
 
 export async function GET(request: Request) {
-  const auth = await authenticateCustomerRequest(request);
+  const url = new URL(request.url);
+  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
       { status: auth.status },
     );
   }
+
+  const businessId = auth.customer.businessId;
 
   const byCustomerId = await adminDb
     .collection(REQUESTS_COLLECTION)
@@ -271,7 +275,10 @@ export async function GET(request: Request) {
     docs.set(doc.id, doc.data());
   }
   for (const doc of byEmail.docs) {
-    if (!docs.has(doc.id)) docs.set(doc.id, doc.data());
+    if (docs.has(doc.id)) continue;
+    const data = doc.data();
+    if (businessId && data.businessId !== businessId) continue;
+    docs.set(doc.id, data);
   }
 
   const requests = await enrichRequestsWithJobAssignees(
@@ -285,6 +292,7 @@ export async function GET(request: Request) {
   );
 
   const enriched: CustomerBooking[] = requests
+    .filter((req) => !businessId || req.businessId === businessId)
     .map((req) => {
       const summary = businessLookup.get(req.businessId);
       return {

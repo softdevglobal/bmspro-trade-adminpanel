@@ -39,6 +39,8 @@ export type CreateBookingInput = {
   endTime: string;
   estimatedDurationMinutes: number;
   note?: string;
+  instructionDescription?: string;
+  instructionTasks?: string[];
   assignedTo?: InspectionAssignment | null;
 };
 
@@ -157,6 +159,11 @@ export async function createBookingFromInspection(
     estimatedDurationMinutes: input.estimatedDurationMinutes,
     assignedTo: input.assignedTo ?? null,
     ownerNote: typeof input.note === "string" ? input.note : null,
+    jobInstructionsDescription:
+      typeof input.instructionDescription === "string"
+        ? input.instructionDescription
+        : null,
+    jobInstructionsTasks: input.instructionTasks ?? [],
     quotation: current.quotation,
     createdAt: now,
     updatedAt: now,

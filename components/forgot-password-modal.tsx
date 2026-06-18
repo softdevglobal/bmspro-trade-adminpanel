@@ -166,6 +166,7 @@ export function ForgotPasswordModal({
           email: email.trim(),
           code: digits.join(""),
           newPassword,
+          ...sendExtraBody,
         }),
       });
       const json = await res.json();

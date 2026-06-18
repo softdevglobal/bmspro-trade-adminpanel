@@ -266,6 +266,18 @@ function LeaveRequestPreviewContent({
           </section>
         ) : null}
 
+        {item.status === "pending" ? (
+          <section className="mb-6 rounded-xl border border-amber-500/25 bg-amber-50/80 px-4 py-3">
+            <p className="font-body text-[13px] text-amber-900">
+              <span className="material-symbols-outlined mr-1 align-middle text-[16px]">
+                warning
+              </span>
+              If this person is assigned to jobs or visits on these days, you
+              must reassign that work before approving leave.
+            </p>
+          </section>
+        ) : null}
+
         {item.status === "approved" ? (
           <section className="rounded-xl border border-tertiary/20 bg-tertiary-container/30 px-4 py-3">
             <p className="font-body text-[13px] text-on-tertiary-container">

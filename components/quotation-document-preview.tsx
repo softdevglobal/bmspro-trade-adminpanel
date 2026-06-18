@@ -4,6 +4,9 @@ import {
   formatQuoteMoney,
   formatQuoteDate,
   formatDepositSummary,
+  formatLineDiscountLabel,
+  grossSubtotalAud,
+  totalLineDiscountAud,
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
@@ -30,6 +33,10 @@ export function QuotationDocumentPreview({
   const numberLabel = isInvoice ? "Invoice No" : "Quote No";
   const dateLabel = isInvoice ? "Due date" : "Valid until";
   const displayCustomerPhone = formatAuPhoneDisplay(document.customer.phone);
+  const lineDiscountTotalAud = totalLineDiscountAud(lineItems);
+  const itemsGrossSubtotalAud = grossSubtotalAud(lineItems);
+  const hasLineDiscounts = lineDiscountTotalAud > 0.01;
+  const hasDocumentDiscount = document.discountAud > 0.01;
   const depositBalanceDueAud =
     document.deposit && isInvoice && !document.deposit.paid
       ? document.totalAud
@@ -179,7 +186,7 @@ export function QuotationDocumentPreview({
 
         {/* Line items table */}
         <div className="mt-5 overflow-x-auto">
-          <table className="w-full min-w-[540px] border-collapse text-[11px]">
+          <table className="w-full min-w-[640px] border-collapse text-[11px]">
             <thead>
               <tr className="border border-[#c5cfe0] border-t-2 border-t-[#0b33a0]/15 bg-white/80 text-left text-[10px] font-bold uppercase tracking-wide text-[#6b7280] backdrop-blur-[1px]">
                 <th className="border-r border-[#c5cfe0] px-2 py-2.5">
@@ -195,6 +202,9 @@ export function QuotationDocumentPreview({
                   Rate
                 </th>
                 <th className="border-r border-[#c5cfe0] px-2 py-2.5 text-right">
+                  Disc.
+                </th>
+                <th className="border-r border-[#c5cfe0] px-2 py-2.5 text-right">
                   GST
                 </th>
                 <th className="px-2 py-2.5 text-right">Amount</th>
@@ -204,7 +214,7 @@ export function QuotationDocumentPreview({
               {lineItems.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="border border-[#d4d8e0] bg-white/60 px-3 py-8 text-center text-[#6b7280]"
                   >
                     Add line items on the Create tab to preview them here.
@@ -241,6 +251,9 @@ export function QuotationDocumentPreview({
                       {formatQuoteMoney(item.rateAud)}
                     </td>
                     <td className="border-r border-[#d4d8e0] px-2 py-2.5 text-right font-numeric">
+                      {formatLineDiscountLabel(item)}
+                    </td>
+                    <td className="border-r border-[#d4d8e0] px-2 py-2.5 text-right font-numeric">
                       {item.gstPercent > 0 ? `${item.gstPercent}%` : "—"}
                     </td>
                     <td className="px-2 py-2.5 text-right font-numeric font-bold">
@@ -255,11 +268,29 @@ export function QuotationDocumentPreview({
 
         {/* Subtotal */}
         {lineItems.length > 0 ? (
-          <div className="mt-1 flex justify-end gap-10 border-t-2 border-[#d4d8e0] pt-2 pr-1 text-[12px] font-bold">
-            <span>Subtotal</span>
-            <span className="font-numeric">
-              {formatQuoteMoney(document.subtotalAud)}
-            </span>
+          <div className="mt-1 space-y-1 text-right text-[12px]">
+            {hasLineDiscounts ? (
+              <>
+                <div className="flex justify-end gap-10 pr-1 text-[#6b7280]">
+                  <span>Items subtotal</span>
+                  <span className="font-numeric font-medium">
+                    {formatQuoteMoney(itemsGrossSubtotalAud)}
+                  </span>
+                </div>
+                <div className="flex justify-end gap-10 pr-1 text-[#6b7280]">
+                  <span>Line discounts</span>
+                  <span className="font-numeric font-medium">
+                    −{formatQuoteMoney(lineDiscountTotalAud)}
+                  </span>
+                </div>
+              </>
+            ) : null}
+            <div className="flex justify-end gap-10 border-t-2 border-[#d4d8e0] pt-2 pr-1 font-bold">
+              <span>Subtotal</span>
+              <span className="font-numeric">
+                {formatQuoteMoney(document.subtotalAud)}
+              </span>
+            </div>
           </div>
         ) : null}
 
@@ -283,13 +314,29 @@ export function QuotationDocumentPreview({
             className={`w-full max-w-[240px] shrink-0 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px] ${document.termsAndConditions?.trim() ? "sm:ml-2" : "mt-8 ml-auto"}`}
           >
           <div className="space-y-2 px-4 py-3 text-[12px]">
+            {hasLineDiscounts ? (
+              <>
+                <div className="flex justify-between gap-4 text-[#6b7280]">
+                  <span>Items subtotal</span>
+                  <span className="font-numeric font-medium text-[#1e2430]">
+                    {formatQuoteMoney(itemsGrossSubtotalAud)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4 text-[#6b7280]">
+                  <span>Line discounts</span>
+                  <span className="font-numeric font-medium text-[#1e2430]">
+                    −{formatQuoteMoney(lineDiscountTotalAud)}
+                  </span>
+                </div>
+              </>
+            ) : null}
             <div className="flex justify-between gap-4 text-[#6b7280]">
               <span>Subtotal</span>
               <span className="font-numeric font-medium text-[#1e2430]">
                 {formatQuoteMoney(document.subtotalAud)}
               </span>
             </div>
-            {document.discountAud > 0 ? (
+            {hasDocumentDiscount ? (
               <div className="flex justify-between gap-4 text-[#6b7280]">
                 <span>Discount</span>
                 <span className="font-numeric font-medium text-[#1e2430]">

@@ -1,5 +1,23 @@
 export type LeaveStatus = "pending" | "approved" | "rejected";
 
+export type LeaveReassignment = {
+  kind: "job" | "request";
+  id: string;
+  assignTo: "owner" | "staff";
+  staffId?: string;
+};
+
+export type LeaveAssignmentConflict = {
+  kind: "job" | "request";
+  id: string;
+  label: string;
+  code: string | null;
+  scheduledDate: string;
+  scheduledStartTime: string | null;
+  scheduledEndTime: string | null;
+  customerName: string | null;
+};
+
 export type LeaveRequestRecord = {
   id: string;
   businessId: string | null;

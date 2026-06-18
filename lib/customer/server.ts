@@ -4,6 +4,10 @@ import { logAuditEvent } from "@/lib/audit/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
+  buildCustomerAuthEmail,
+  isScopedCustomerAuthEmail,
+} from "@/lib/customer/scoped-auth";
+import {
   CUSTOMER_COLLECTION,
   normalizeEmail,
   normalizePhone,
@@ -15,12 +19,24 @@ import { FieldValue } from "firebase-admin/firestore";
 
 export type AuthedCustomer = {
   uid: string;
+  /** Customer-facing email (not the scoped Firebase Auth email). */
   email: string;
+  businessId: string | null;
+  bookingSlug: string | null;
 };
+
+async function loadCustomerProfileDoc(
+  uid: string,
+): Promise<CustomerProfile | null> {
+  const snap = await adminDb.collection(CUSTOMER_COLLECTION).doc(uid).get();
+  if (!snap.exists) return null;
+  return mapCustomerDoc(snap.id, snap.data() ?? {});
+}
 
 /** Validates a Bearer ID token from a customer client and returns uid/email. */
 export async function authenticateCustomerRequest(
   request: Request,
+  options: { bookingSlug?: string } = {},
 ): Promise<
   | { ok: true; customer: AuthedCustomer }
   | { ok: false; status: number; error: string }
@@ -33,14 +49,43 @@ export async function authenticateCustomerRequest(
   try {
     const decoded = await adminAuth.verifyIdToken(match[1]);
     const uid = decoded.uid;
-    const email =
+    const profile = await loadCustomerProfileDoc(uid);
+    const tokenEmail =
       typeof decoded.email === "string" && decoded.email
         ? decoded.email
         : null;
-    if (!email) {
-      return { ok: false, status: 401, error: "Account email is missing." };
+    const displayEmail = profile?.email
+      ? normalizeEmail(profile.email)
+      : tokenEmail && !isScopedCustomerAuthEmail(tokenEmail)
+        ? normalizeEmail(tokenEmail)
+        : "";
+
+    const bookingSlug =
+      options.bookingSlug?.trim() ||
+      request.headers.get("x-booking-slug")?.trim() ||
+      undefined;
+    if (
+      bookingSlug &&
+      profile?.registeredBookingSlug &&
+      profile.registeredBookingSlug.toLowerCase() !==
+        bookingSlug.toLowerCase()
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Sign in with your account for this business.",
+      };
     }
-    return { ok: true, customer: { uid, email: normalizeEmail(email) } };
+
+    return {
+      ok: true,
+      customer: {
+        uid,
+        email: displayEmail,
+        businessId: profile?.registeredBusinessId ?? null,
+        bookingSlug: profile?.registeredBookingSlug ?? null,
+      },
+    };
   } catch {
     return { ok: false, status: 401, error: "Session expired. Sign in again." };
   }
@@ -146,7 +191,10 @@ export async function getOrCreateCustomerProfile(
   const snap = await ref.get();
   if (snap.exists) {
     const data = snap.data() ?? {};
-    if (typeof data.email !== "string" || data.email !== customer.email) {
+    if (
+      customer.email &&
+      (typeof data.email !== "string" || data.email !== customer.email)
+    ) {
       await ref.update({
         email: customer.email,
         updatedAt: FieldValue.serverTimestamp(),
@@ -232,18 +280,36 @@ export async function ensureCustomerAccount(input: {
   const fullName = input.fullName.trim();
   const phone = normalizePhone(input.phone);
 
+  let bookingSlug = input.bookingSlug?.trim() ?? "";
+  if (!bookingSlug) {
+    const businessSnap = await adminDb
+      .collection("businesses")
+      .doc(input.businessId)
+      .get();
+    const businessData = businessSnap.data() ?? {};
+    bookingSlug =
+      typeof businessData.bookingSlug === "string"
+        ? businessData.bookingSlug.trim()
+        : "";
+  }
+  if (!bookingSlug) {
+    throw new Error("bookingSlug is required to provision a customer account.");
+  }
+
+  const authEmail = await buildCustomerAuthEmail(bookingSlug, email);
+
   let uid: string;
   let created = false;
 
   try {
-    const existing = await adminAuth.getUserByEmail(email);
+    const existing = await adminAuth.getUserByEmail(authEmail);
     uid = existing.uid;
   } catch (error: unknown) {
     const code = (error as { code?: string }).code;
     if (code !== "auth/user-not-found") throw error;
 
     const authUser = await adminAuth.createUser({
-      email,
+      email: authEmail,
       password: DEFAULT_CUSTOMER_PASSWORD,
       displayName: fullName || undefined,
       emailVerified: false,
@@ -326,23 +392,31 @@ export async function updateCustomerProfile(
   const shouldSendWelcome =
     existing.welcomeEmailSent !== true && input.fullName.trim().length >= 2;
 
+  const profileEmail =
+    input.email?.trim() ||
+    (customer.email ? customer.email : "") ||
+    (typeof existing.email === "string" ? existing.email : "");
+
   const now = FieldValue.serverTimestamp();
   if (!snap.exists) {
     await ref.set({
       uid: customer.uid,
-      email: customer.email,
+      email: profileEmail ? normalizeEmail(profileEmail) : "",
       fullName: input.fullName,
       phone: input.phone,
       createdAt: now,
       updatedAt: now,
     });
   } else {
-    await ref.update({
-      email: customer.email,
+    const update: Record<string, unknown> = {
       fullName: input.fullName,
       phone: input.phone,
       updatedAt: now,
-    });
+    };
+    if (profileEmail) {
+      update.email = normalizeEmail(profileEmail);
+    }
+    await ref.update(update);
   }
 
   await attachRegistrationBusinessIfEmpty(customer.uid, input.bookingSlug);
@@ -358,7 +432,7 @@ export async function updateCustomerProfile(
         ? await resolveBusinessByBookingSlug(welcomeSlug)
         : null;
       await sendCustomerWelcomeEmail({
-        email: customer.email,
+        email: profileEmail ? normalizeEmail(profileEmail) : customer.email,
         phone: profile.phone ?? input.phone ?? null,
         fullName: profile.fullName,
         businessName: profile.registeredBusinessName,

@@ -22,7 +22,9 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateCustomerRequest(request);
+  const url = new URL(request.url);
+  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
@@ -55,7 +57,11 @@ export async function PATCH(
     }
     const result = await customerDecideQuotation(
       id,
-      { customerId: auth.customer.uid, customerEmail: auth.customer.email },
+      {
+        customerId: auth.customer.uid,
+        customerEmail: auth.customer.email,
+        businessId: auth.customer.businessId,
+      },
       decision,
     );
     if (!result.ok) {
@@ -84,7 +90,11 @@ export async function PATCH(
 
   const result = await customerAcceptProposedSlot(
     id,
-    { customerId: auth.customer.uid, customerEmail: auth.customer.email },
+    {
+      customerId: auth.customer.uid,
+      customerEmail: auth.customer.email,
+      businessId: auth.customer.businessId,
+    },
     slot,
   );
 

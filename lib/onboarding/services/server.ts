@@ -31,6 +31,7 @@ import {
   type ServiceTemplateInput,
   type UpdateBusinessServiceInput,
 } from "@/lib/onboarding/services/types";
+import { assertBusinessActive } from "@/lib/onboarding/business-status";
 import { requireSuperAdmin } from "@/lib/onboarding/server";
 import { FieldValue, type DocumentSnapshot } from "firebase-admin/firestore";
 import { randomUUID } from "crypto";
@@ -98,6 +99,11 @@ export async function requireBusinessOwner(
     (role !== "owner" && role !== "admin")
   ) {
     return { ok: false, status: 403, error: "Business owner access required." };
+  }
+
+  const accessDenied = await assertBusinessActive(businessId);
+  if (accessDenied) {
+    return accessDenied;
   }
 
   return {

@@ -1,3 +1,4 @@
+import { parseJobInstructionsFromDoc } from "@/lib/bookings/job-instructions";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   BOOKING_STATUSES,
@@ -83,6 +84,7 @@ export function mapBookingDoc(
     ? data.requestType
     : "existing_service";
 
+  const jobInstructions = parseJobInstructionsFromDoc(data);
   const customRequestRaw = data.customRequest as Record<string, unknown> | null;
   const customRequest =
     customRequestRaw && typeof customRequestRaw === "object"
@@ -143,6 +145,8 @@ export function mapBookingDoc(
         : null,
     assignedTo: parseAssignment(data.assignedTo),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
+    jobInstructionsDescription: jobInstructions.jobInstructionsDescription,
+    jobInstructionsTasks: jobInstructions.jobInstructionsTasks,
     quotation: parseInspectionQuotation(data.quotation),
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),

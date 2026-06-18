@@ -17,9 +17,10 @@ import {
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
-import { buildStaffLeaveBlockMap } from "@/lib/leave/client";
+import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import {
   formatAuPhoneDisplay,
@@ -178,6 +179,7 @@ function BookingCard({
               {booking.assignedTo.name}
             </span>
           ) : null}
+          <JobInstructionsGlance booking={booking} />
         </div>
       ) : null}
     </button>
@@ -246,6 +248,7 @@ function BookingAssignForm({
   assignmentDate,
   startTime,
   endTime,
+  timeZone,
   onAssignToChange,
   onStaffIdChange,
   onCancel,
@@ -258,6 +261,7 @@ function BookingAssignForm({
   assignmentDate: string | null;
   startTime: string | null;
   endTime: string | null;
+  timeZone?: string | null;
   onAssignToChange: (value: "owner" | "staff") => void;
   onStaffIdChange: (value: string) => void;
   onCancel: () => void;
@@ -272,15 +276,15 @@ function BookingAssignForm({
   });
 
   const blockedLabels = useMemo(() => {
-    const approved = leaveRequests.filter((item) => item.status === "approved");
-    return buildStaffLeaveBlockMap(
-      approved,
-      staff.map((member) => member.id),
+    return buildStaffAssignmentBlockMap(
+      staff,
+      leaveRequests,
       assignmentDate,
       startTime,
       endTime,
+      timeZone,
     );
-  }, [leaveRequests, staff, assignmentDate, startTime, endTime]);
+  }, [leaveRequests, staff, assignmentDate, startTime, endTime, timeZone]);
 
   useEffect(() => {
     if (staffId && blockedLabels[staffId]) onStaffIdChange("");
@@ -534,6 +538,7 @@ function BookingPreviewContent({
             assignmentDate={booking.scheduledSlot?.date ?? null}
             startTime={booking.scheduledStartTime}
             endTime={booking.scheduledEndTime}
+            timeZone={timeZone}
             onAssignToChange={setAssignTo}
             onStaffIdChange={setStaffId}
             onCancel={() => {
@@ -641,6 +646,11 @@ function BookingPreviewContent({
             </div>
           </section>
         ) : null}
+
+        <JobInstructionsDisplay
+          description={booking.jobInstructionsDescription}
+          tasks={booking.jobInstructionsTasks}
+        />
 
         {canAssign ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
@@ -809,7 +819,7 @@ function BookingPreviewContent({
         {booking.ownerNote ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-              Owner note
+              Note for customer
             </p>
             <p className="mt-1 font-body text-body-md text-on-surface">
               {booking.ownerNote}
