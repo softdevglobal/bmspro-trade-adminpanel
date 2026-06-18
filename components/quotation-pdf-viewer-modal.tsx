@@ -58,7 +58,7 @@ export function QuotationPdfViewerModal({
     void fetchPdfData()
       .then((bytes) => {
         if (cancelled) return;
-        setPdfData(bytes);
+        setPdfData(bytes.slice());
       })
       .catch(() => {
         if (cancelled) return;
@@ -82,8 +82,8 @@ export function QuotationPdfViewerModal({
   async function downloadPdf() {
     setDownloading(true);
     try {
-      const bytes = pdfData ?? (await fetchPdfData());
-      const blob = new Blob([Uint8Array.from(bytes)], { type: "application/pdf" });
+      const bytes = (pdfData ?? (await fetchPdfData())).slice();
+      const blob = new Blob([bytes], { type: "application/pdf" });
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
@@ -97,15 +97,16 @@ export function QuotationPdfViewerModal({
     }
   }
 
-  function openInNewTab() {
-    if (!pdfData) {
+  async function openInNewTab() {
+    try {
+      const bytes = (pdfData ?? (await fetchPdfData())).slice();
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
       window.open(pdfUrl, "_blank", "noopener,noreferrer");
-      return;
     }
-    const blob = new Blob([Uint8Array.from(pdfData)], { type: "application/pdf" });
-    const objectUrl = URL.createObjectURL(blob);
-    window.open(objectUrl, "_blank", "noopener,noreferrer");
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   }
 
   if (!open || !mounted) return null;
@@ -137,7 +138,7 @@ export function QuotationPdfViewerModal({
           </h2>
           <button
             type="button"
-            onClick={openInNewTab}
+            onClick={() => void openInNewTab()}
             className="inline-flex items-center gap-1 rounded-lg border border-outline-variant bg-surface-container-lowest px-2.5 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:bg-surface-container sm:px-3"
           >
             <span className="material-symbols-outlined text-[18px]">open_in_new</span>
@@ -180,7 +181,7 @@ export function QuotationPdfViewerModal({
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   type="button"
-                  onClick={openInNewTab}
+                  onClick={() => void openInNewTab()}
                   className="rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary"
                 >
                   Open PDF

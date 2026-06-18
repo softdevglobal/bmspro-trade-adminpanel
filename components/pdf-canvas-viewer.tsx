@@ -35,7 +35,8 @@ export function PdfCanvasViewer({ data, onReady, onError }: PdfCanvasViewerProps
       try {
         await configurePdfWorker();
         const pdfjs = await import("pdfjs-dist");
-        const pdf = await pdfjs.getDocument({ data }).promise;
+        // PDF.js transfers the buffer to its worker — pass a copy so callers keep theirs.
+        const pdf = await pdfjs.getDocument({ data: data.slice() }).promise;
         if (cancelled) return;
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
