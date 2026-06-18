@@ -244,6 +244,144 @@ export async function notifyBusinessOfNewRequest(
   }
 }
 
+function formatLeaveDateRange(leave: {
+  fromDate: string | null;
+  toDate: string | null;
+}): string {
+  const from = leave.fromDate;
+  const to = leave.toDate ?? leave.fromDate;
+  if (!from) return "selected dates";
+  if (!to || to === from) return from;
+  return `${from} – ${to}`;
+}
+
+/** Notify business admins when a staff member submits a leave request. */
+export async function notifyBusinessOfStaffLeaveRequest(
+  leave: {
+    id: string;
+    businessId: string | null;
+    requesterName: string;
+    fromDate: string | null;
+    toDate: string | null;
+  },
+  conflicts: { label: string; scheduledDate: string }[],
+): Promise<void> {
+  if (!leave.businessId) return;
+
+  const dates = formatLeaveDateRange(leave);
+  const hasConflicts = conflicts.length > 0;
+  const title = hasConflicts ? "Leave conflicts with schedule" : "New leave request";
+  const body = hasConflicts
+    ? `${leave.requesterName} requested leave (${dates}) but is assigned to ${conflicts.length} job${conflicts.length === 1 ? "" : "s"} or visit${conflicts.length === 1 ? "" : "s"}. Reassign work before approving.`
+    : `${leave.requesterName} requested leave for ${dates}. Review it in Team → Leave requests.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: leave.businessId,
+      customerId: null,
+      requestId: leave.id,
+      status: "pending",
+      type: hasConflicts ? "leave_assignment_conflict" : "leave_requested",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(leave.businessId, {
+      title,
+      body,
+      data: {
+        type: hasConflicts ? "leave_assignment_conflict" : "leave_requested",
+        requestId: leave.id,
+        leaveId: leave.id,
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
+/** Warn admins when assigning staff who has leave on the scheduled day. */
+export async function notifyBusinessOfStaffOnLeaveAssignment(
+  businessId: string,
+  staffName: string,
+  scheduledDate: string,
+  leaveStatus: "approved" | "pending",
+  targetKind: "job" | "request",
+  targetId: string,
+): Promise<void> {
+  const statusLabel =
+    leaveStatus === "approved" ? "approved leave" : "a pending leave request";
+  const title = "Staff member is on leave";
+  const body = `${staffName} has ${statusLabel} on ${scheduledDate} and cannot be assigned to this ${targetKind === "job" ? "job" : "visit"}. Choose another team member or adjust the schedule.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId,
+      customerId: null,
+      requestId: targetId,
+      status: "pending",
+      type: "leave_assignment_conflict",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(businessId, {
+      title,
+      body,
+      data: {
+        type: "leave_assignment_conflict",
+        requestId: targetId,
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
+/** Warn admins when assigning staff on one of their regular off days. */
+export async function notifyBusinessOfStaffOffDayAssignment(
+  businessId: string,
+  staffName: string,
+  scheduledDate: string,
+  targetKind: "job" | "request",
+  targetId: string,
+): Promise<void> {
+  const title = "Staff member is on an off day";
+  const body = `${staffName} is not scheduled to work on ${scheduledDate} and cannot be assigned to this ${targetKind === "job" ? "job" : "visit"}. Choose another team member or update their availability.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId,
+      customerId: null,
+      requestId: targetId,
+      status: "pending",
+      type: "staff_off_day",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(businessId, {
+      title,
+      body,
+      data: {
+        type: "staff_off_day",
+        requestId: targetId,
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
 type CustomerNotifyContext = {
   bookingSlug?: string | null;
   businessName?: string | null;

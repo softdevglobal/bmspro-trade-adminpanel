@@ -1,15 +1,7 @@
+import { parseClockMinutes } from "@/lib/leave/clock";
 import type { LeaveRequestRecord } from "@/lib/leave/types";
 
-export function parseClockMinutes(
-  raw: string | null | undefined,
-): number | null {
-  if (!raw) return null;
-  const parts = raw.split(":");
-  const h = Number.parseInt(parts[0] ?? "", 10);
-  const m = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
-  if (Number.isNaN(h)) return null;
-  return h * 60 + (Number.isNaN(m) ? 0 : m);
-}
+export { parseClockMinutes };
 
 /** Mirrors server leaveBlocksDay — client-side preview before submit. */
 export function leaveBlocksDay(
@@ -18,7 +10,7 @@ export function leaveBlocksDay(
   windowStartMinutes?: number,
   windowEndMinutes?: number,
 ): boolean {
-  if (leave.status !== "approved") return false;
+  if (leave.status !== "approved" && leave.status !== "pending") return false;
   const from = leave.fromDate;
   const to = leave.toDate ?? leave.fromDate;
   if (!from || !to) return false;
@@ -36,7 +28,7 @@ export function leaveBlocksDay(
 }
 
 export function findLeaveBlockingStaff(
-  approvedLeaves: LeaveRequestRecord[],
+  leaves: LeaveRequestRecord[],
   staffUid: string,
   ymd: string | null | undefined,
   startTime?: string | null,
@@ -45,7 +37,7 @@ export function findLeaveBlockingStaff(
   if (!staffUid || !ymd) return null;
   const startMin = parseClockMinutes(startTime ?? null);
   const endMin = parseClockMinutes(endTime ?? null);
-  for (const leave of approvedLeaves) {
+  for (const leave of leaves) {
     if (leave.requesterUid !== staffUid) continue;
     if (
       leaveBlocksDay(
@@ -62,21 +54,27 @@ export function findLeaveBlockingStaff(
 }
 
 export function staffLeaveBlockLabel(leave: LeaveRequestRecord): string {
+  if (leave.status === "pending") {
+    return leave.isFullDay ? "Leave pending" : "Leave pending (partial)";
+  }
   return leave.isFullDay ? "On leave" : "On leave (partial day)";
 }
 
 export function buildStaffLeaveBlockMap(
-  approvedLeaves: LeaveRequestRecord[],
+  leaves: LeaveRequestRecord[],
   staffIds: string[],
   ymd: string | null | undefined,
   startTime?: string | null,
   endTime?: string | null,
 ): Record<string, string> {
+  const active = leaves.filter(
+    (item) => item.status === "approved" || item.status === "pending",
+  );
   const map: Record<string, string> = {};
   if (!ymd) return map;
   for (const id of staffIds) {
     const blocking = findLeaveBlockingStaff(
-      approvedLeaves,
+      active,
       id,
       ymd,
       startTime,

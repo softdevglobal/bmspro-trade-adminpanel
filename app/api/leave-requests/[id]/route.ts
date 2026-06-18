@@ -1,10 +1,17 @@
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import {
+  decideLeaveRequest,
+  findLeaveAssignmentConflicts,
+  mapLeaveDoc,
+} from "@/lib/leave/server";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
-import { adminAuth } from "@/lib/firebase/admin";
-import { decideLeaveRequest } from "@/lib/leave/server";
+import type { LeaveReassignment } from "@/lib/leave/types";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+const LEAVE_COLLECTION = "leaveRequests";
 
 async function requireBusinessOwner(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -44,6 +51,62 @@ async function requireBusinessOwner(request: Request) {
   }
 }
 
+function parseReassignments(raw: unknown): LeaveReassignment[] {
+  if (!Array.isArray(raw)) return [];
+  const result: LeaveReassignment[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as Record<string, unknown>;
+    const kind = item.kind === "job" || item.kind === "request" ? item.kind : null;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const assignTo =
+      item.assignTo === "owner" || item.assignTo === "staff"
+        ? item.assignTo
+        : null;
+    if (!kind || !id || !assignTo) continue;
+    result.push({
+      kind,
+      id,
+      assignTo,
+      staffId:
+        typeof item.staffId === "string" ? item.staffId.trim() : undefined,
+    });
+  }
+  return result;
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireBusinessOwner(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  const { id } = await context.params;
+  const snap = await adminDb.collection(LEAVE_COLLECTION).doc(id).get();
+  if (!snap.exists) {
+    return NextResponse.json(
+      { ok: false, error: "Leave request not found." },
+      { status: 404 },
+    );
+  }
+  const leave = mapLeaveDoc(snap.id, snap.data() ?? {});
+  if (leave.businessId !== auth.businessId) {
+    return NextResponse.json(
+      { ok: false, error: "Leave request not found." },
+      { status: 404 },
+    );
+  }
+
+  const conflicts = await findLeaveAssignmentConflicts(leave);
+  return NextResponse.json({ ok: true, conflicts });
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -77,11 +140,14 @@ export async function PATCH(
 
   const { id } = await context.params;
   const reason = typeof payload.reason === "string" ? payload.reason : "";
+  const reassignments = parseReassignments(payload.reassignments);
 
   const result = await decideLeaveRequest(id, auth.businessId, {
     action,
     reason,
     reviewerUid: auth.uid,
+    reviewerEmail: auth.email ?? undefined,
+    reassignments,
   });
   if (!result.ok) {
     return NextResponse.json(

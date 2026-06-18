@@ -1,9 +1,11 @@
 "use client";
 
+import { LeaveApprovalDialog } from "@/components/leave-approval-dialog";
 import { LeaveRequestsDetailDrawer } from "@/components/leave-requests-detail-drawer";
 import { useAuth } from "@/lib/auth/auth-context";
 import type { LeaveRequestRecord, LeaveStatus } from "@/lib/leave/types";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
+import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Filter = "pending" | "approved" | "rejected" | "all";
@@ -45,6 +47,7 @@ function statusLabel(status: LeaveStatus) {
 
 export function LeaveRequestsBoard() {
   const { user } = useAuth();
+  const { staff } = useBusinessStaffSummary();
   const [items, setItems] = useState<LeaveRequestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -310,50 +313,24 @@ export function LeaveRequestsBoard() {
       />
 
       {approveTarget ? (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-outline-variant/60 bg-surface-container-lowest p-5 shadow-xl">
-            <div className="flex items-start gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-tertiary-container/70 text-on-tertiary-container">
-                <span className="material-symbols-outlined text-[22px]">
-                  check_circle
-                </span>
-              </span>
-              <div className="min-w-0">
-                <h4 className="font-display text-title-lg font-semibold text-on-surface">
-                  Approve this leave?
-                </h4>
-                <p className="mt-1 font-body text-body-md text-on-surface-variant">
-                  {approveTarget.requesterName} will be blocked from new job and
-                  request assignments on the approved days.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setApproveTarget(null)}
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-outline-variant px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={busyId === approveTarget.id}
-                onClick={async () => {
-                  const target = approveTarget;
-                  setApproveTarget(null);
-                  await decide(target.id, "approve");
-                }}
-                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-tertiary px-4 font-body text-[13px] font-semibold text-on-tertiary transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  check_circle
-                </span>
-                Approve leave
-              </button>
-            </div>
-          </div>
-        </div>
+        <LeaveApprovalDialog
+          item={approveTarget}
+          staff={staff}
+          busy={busyId === approveTarget.id}
+          getToken={async () => {
+            if (!user) throw new Error("Not signed in.");
+            return user.getIdToken();
+          }}
+          onClose={() => setApproveTarget(null)}
+          onApproved={(updated) => {
+            setItems((current) =>
+              current.map((item) => (item.id === updated.id ? updated : item)),
+            );
+            setApproveTarget(null);
+            setSelectedId(null);
+          }}
+          onError={(message) => setError(message)}
+        />
       ) : null}
 
       {rejectTarget ? (

@@ -8,12 +8,20 @@ import {
   startBusinessBookingVisit,
 } from "@/lib/bookings/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { findApprovedLeaveBlocking } from "@/lib/leave/server";
+import {
+  findApprovedLeaveBlocking,
+  findLeaveBlockingAssignment,
+} from "@/lib/leave/server";
 import type { InspectionAssignment } from "@/lib/inspection/types";
 import {
   extractBearerToken,
   requireBusinessOwnerFromToken,
 } from "@/lib/notifications/auth-token";
+import {
+  notifyBusinessOfStaffOffDayAssignment,
+  notifyBusinessOfStaffOnLeaveAssignment,
+} from "@/lib/notifications/server";
+import { staffIsOffOnDate } from "@/lib/team/staff-off-day-server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -372,18 +380,75 @@ export async function PATCH(
       const booking = await getBusinessBooking(auth.businessId, id);
       const scheduledDate = booking?.scheduledSlot?.date ?? null;
       if (scheduledDate) {
+        const startMin = clockToMinutes(booking?.scheduledStartTime) ?? undefined;
+        const endMin = clockToMinutes(booking?.scheduledEndTime) ?? undefined;
         const blocking = await findApprovedLeaveBlocking(
           auth.businessId,
           assignment.uid,
           scheduledDate,
-          clockToMinutes(booking?.scheduledStartTime) ?? undefined,
-          clockToMinutes(booking?.scheduledEndTime) ?? undefined,
+          startMin,
+          endMin,
         );
         if (blocking) {
+          void notifyBusinessOfStaffOnLeaveAssignment(
+            auth.businessId,
+            assignment.name,
+            scheduledDate,
+            "approved",
+            "job",
+            id,
+          );
           return NextResponse.json(
             {
               ok: false,
               error: `${assignment.name} has approved time off on ${scheduledDate} and cannot be assigned that day.`,
+            },
+            { status: 409 },
+          );
+        }
+
+        const pending = await findLeaveBlockingAssignment(
+          auth.businessId,
+          assignment.uid,
+          scheduledDate,
+          startMin,
+          endMin,
+        );
+        if (pending?.status === "pending") {
+          void notifyBusinessOfStaffOnLeaveAssignment(
+            auth.businessId,
+            assignment.name,
+            scheduledDate,
+            "pending",
+            "job",
+            id,
+          );
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `${assignment.name} has a pending leave request on ${scheduledDate} and cannot be assigned that day.`,
+            },
+            { status: 409 },
+          );
+        }
+
+        const offDay = await staffIsOffOnDate(
+          assignment.uid,
+          scheduledDate,
+          auth.businessId,
+        );
+        if (offDay) {
+          void notifyBusinessOfStaffOffDayAssignment(
+            auth.businessId,
+            assignment.name,
+            scheduledDate,
+            "job",
+            id,
+          );
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `${assignment.name} is not scheduled to work on ${scheduledDate} and cannot be assigned that day.`,
             },
             { status: 409 },
           );
