@@ -1,8 +1,9 @@
 "use client";
 
 import { StaffMemberPicker } from "@/components/staff-member-picker";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useAuth } from "@/lib/auth/auth-context";
-import { buildStaffLeaveBlockMap } from "@/lib/leave/client";
+import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
@@ -32,6 +33,7 @@ export function BookingStaffAssignSection({
   onStaffIdChange: (staffId: string) => void;
 }) {
   const { user } = useAuth();
+  const business = useBusinessProfile();
   const { leaveRequests } = useLeaveRequests();
   const ownerAvatar = staffAvatarUrl({
     id: user?.uid ?? "owner",
@@ -40,15 +42,15 @@ export function BookingStaffAssignSection({
   });
 
   const blockedLabels = useMemo(() => {
-    const approved = leaveRequests.filter((item) => item.status === "approved");
-    return buildStaffLeaveBlockMap(
-      approved,
-      staff.map((member) => member.id),
+    return buildStaffAssignmentBlockMap(
+      staff,
+      leaveRequests,
       assignmentDate,
       startTime,
       endTime,
+      business?.timezone,
     );
-  }, [leaveRequests, staff, assignmentDate, startTime, endTime]);
+  }, [leaveRequests, staff, assignmentDate, startTime, endTime, business?.timezone]);
 
   useEffect(() => {
     if (staffId && blockedLabels[staffId]) onStaffIdChange("");
@@ -60,8 +62,8 @@ export function BookingStaffAssignSection({
         Assign this job
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Choose who will run the job. Team members on approved leave cannot be
-        selected for that day.
+        Choose who will run the job. Team members on leave or on a weekly off
+        day cannot be selected for that date.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">

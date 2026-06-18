@@ -6,9 +6,11 @@ export type StaffSummary = {
   email: string;
   staffType: string;
   canget_qutaion: boolean;
+  /** Weekday ids (e.g. `sunday`) when this staff member is not working. */
+  offDays: string[];
 };
 
-const CACHE_PREFIX = "bms.staff.summary.";
+const CACHE_PREFIX = "bms.staff.summary.v2.";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 
 export const STAFF_CHANGED_EVENT = "bms:staff-changed";

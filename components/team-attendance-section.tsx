@@ -6,13 +6,25 @@ import {
   type AttendanceDetailRecord,
 } from "@/components/team-attendance-detail-drawer";
 import { formatWorkingDuration } from "@/lib/team/attendance";
+import {
+  attendanceStatusLabel,
+  buildAttendanceExportRows,
+  buildAttendanceSheetDays,
+  exportAttendanceCsv,
+  exportAttendancePdf,
+  mergeStaffFilterOptions,
+  type AttendanceSheetDay,
+  type StaffFilterOption,
+} from "@/lib/team/attendance-sheet";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
+import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type AttendanceRecord = AttendanceDetailRecord;
 type AttendancePeriod = "day" | "week" | "biweekly" | "month";
-type AttendanceView = "all" | "staff";
+type AttendanceView = "sheet" | "all" | "staff";
 
 type AttendanceRange = {
   start: Date;
@@ -39,8 +51,9 @@ const PERIOD_OPTIONS: { value: AttendancePeriod; label: string }[] = [
 ];
 
 const VIEW_OPTIONS: { value: AttendanceView; label: string }[] = [
+  { value: "sheet", label: "Detail sheet" },
   { value: "all", label: "All records" },
-  { value: "staff", label: "Staff-wise" },
+  { value: "staff", label: "Staff totals" },
 ];
 
 function formatDateKey(date: Date) {
@@ -256,10 +269,15 @@ function isSameCalendarDay(a: Date, b: Date) {
 
 export function TeamAttendanceSection() {
   const { user } = useAuth();
+  const business = useBusinessProfile();
+  const { staff: rosterStaff } = useBusinessStaffSummary();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [selectedPeriod, setSelectedPeriod] =
-    useState<AttendancePeriod>("day");
-  const [selectedView, setSelectedView] = useState<AttendanceView>("all");
+    useState<AttendancePeriod>("week");
+  const [selectedView, setSelectedView] = useState<AttendanceView>("sheet");
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
+  const [staffFilterOpen, setStaffFilterOpen] = useState(false);
+  const [exporting, setExporting] = useState<"pdf" | "excel" | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -321,19 +339,52 @@ export function TeamAttendanceSection() {
     return () => window.clearTimeout(timer);
   }, [loadAttendance]);
 
+  const filteredAttendance = useMemo(() => {
+    if (selectedStaffIds.length === 0) return attendance;
+    const allowed = new Set(selectedStaffIds);
+    return attendance.filter((record) =>
+      allowed.has(record.staffId || record.staffName),
+    );
+  }, [attendance, selectedStaffIds]);
+
   const activeCount = useMemo(
-    () => attendance.filter((record) => record.status === "checked_in").length,
-    [attendance],
+    () =>
+      filteredAttendance.filter((record) => record.status === "checked_in")
+        .length,
+    [filteredAttendance],
   );
 
-  const completedCount = attendance.length - activeCount;
+  const completedCount = filteredAttendance.length - activeCount;
   const totalWorkedSeconds = useMemo(
-    () => attendance.reduce((sum, record) => sum + record.workingSeconds, 0),
-    [attendance],
+    () =>
+      filteredAttendance.reduce((sum, record) => sum + record.workingSeconds, 0),
+    [filteredAttendance],
   );
   const staffSummaries = useMemo(
-    () => buildStaffSummaries(attendance),
-    [attendance],
+    () => buildStaffSummaries(filteredAttendance),
+    [filteredAttendance],
+  );
+  const staffFilterOptions = useMemo(
+    () =>
+      mergeStaffFilterOptions(
+        rosterStaff.map((member) => ({
+          id: member.id,
+          fullName: member.fullName,
+          staffType: member.staffType,
+        })),
+        attendance,
+      ),
+    [attendance, rosterStaff],
+  );
+  const sheetDays = useMemo(
+    () =>
+      buildAttendanceSheetDays(
+        filteredAttendance,
+        selectedRange.start,
+        selectedRange.end,
+        selectedStaffIds,
+      ),
+    [filteredAttendance, selectedRange.end, selectedRange.start, selectedStaffIds],
   );
   const selectedIso = formatDateKey(selectedDate);
   const minDate = useMemo(() => attendanceMinDate(), []);
@@ -360,6 +411,73 @@ export function TeamAttendanceSection() {
   const drawerDateLabel = selectedRecord
     ? formatHeadingDate(new Date(selectedRecord.checkInTime))
     : selectedPeriodLabel;
+  const staffFilterLabel =
+    selectedStaffIds.length === 0
+      ? "All staff"
+      : selectedStaffIds.length === 1
+        ? (staffFilterOptions.find((member) => member.id === selectedStaffIds[0])
+            ?.fullName ?? "1 staff")
+        : `${selectedStaffIds.length} staff selected`;
+
+  function toggleStaffFilter(staffId: string) {
+    setSelectedRecord(null);
+    setSelectedStaffIds((current) =>
+      current.includes(staffId)
+        ? current.filter((id) => id !== staffId)
+        : [...current, staffId],
+    );
+  }
+
+  function clearStaffFilter() {
+    setSelectedRecord(null);
+    setSelectedStaffIds([]);
+  }
+
+  function selectAllStaffFilter() {
+    setSelectedRecord(null);
+    setSelectedStaffIds(staffFilterOptions.map((member) => member.id));
+  }
+
+  const exportMeta = useMemo(
+    () => ({
+      businessName: business?.businessName?.trim() || "Business",
+      periodLabel: selectedPeriodLabel,
+      staffLabel: staffFilterLabel,
+      generatedAt: new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(new Date()),
+    }),
+    [business?.businessName, selectedPeriodLabel, staffFilterLabel],
+  );
+
+  const exportFilenameBase = useMemo(() => {
+    const slug = `${rangeStartIso}_to_${rangeEndIso}`.replaceAll("-", "");
+    return `attendance-${slug}`;
+  }, [rangeEndIso, rangeStartIso]);
+
+  async function handleExportPdf() {
+    setExporting("pdf");
+    try {
+      const rows = buildAttendanceExportRows(sheetDays);
+      await exportAttendancePdf(rows, exportMeta, `${exportFilenameBase}.pdf`);
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  function handleExportExcel() {
+    setExporting("excel");
+    try {
+      const rows = buildAttendanceExportRows(sheetDays);
+      exportAttendanceCsv(rows, exportMeta, `${exportFilenameBase}.csv`);
+    } finally {
+      setExporting(null);
+    }
+  }
 
   return (
     <>
@@ -370,12 +488,35 @@ export function TeamAttendanceSection() {
               Staff attendance
             </h3>
             <p className="font-body text-body-md text-on-surface-variant">
-              View attendance for all records or staff-wise totals by day, week,
-              biweekly, or month.
+              Filter by staff, review day-by-day clock in/out details, and
+              export timesheets as PDF or Excel.
             </p>
           </div>
 
-          <button
+          <div className="flex flex-wrap items-center gap-2 self-start">
+            <button
+              type="button"
+              onClick={() => void handleExportPdf()}
+              disabled={exporting !== null}
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-3 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                picture_as_pdf
+              </span>
+              {exporting === "pdf" ? "Exporting…" : "PDF"}
+            </button>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={exporting !== null}
+              className="flex h-10 items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-3 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                table
+              </span>
+              {exporting === "excel" ? "Exporting…" : "Excel"}
+            </button>
+            <button
             type="button"
             onClick={() => void loadAttendance()}
             disabled={isLoading}
@@ -390,6 +531,7 @@ export function TeamAttendanceSection() {
             </span>
             Refresh
           </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,300px)_minmax(0,1fr)]">
@@ -470,7 +612,7 @@ export function TeamAttendanceSection() {
 
           <div className="flex min-w-0 flex-col gap-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Records" value={String(attendance.length)} />
+              <StatCard label="Records" value={String(filteredAttendance.length)} />
               <StatCard label="Staff" value={String(staffSummaries.length)} />
               <StatCard label="Active" value={String(activeCount)} />
               <StatCard
@@ -478,6 +620,17 @@ export function TeamAttendanceSection() {
                 value={formatWorkingDuration(totalWorkedSeconds)}
               />
             </div>
+
+            <StaffFilterPanel
+              open={staffFilterOpen}
+              options={staffFilterOptions}
+              selectedIds={selectedStaffIds}
+              summaryLabel={staffFilterLabel}
+              onToggleOpen={() => setStaffFilterOpen((current) => !current)}
+              onToggleStaff={toggleStaffFilter}
+              onClear={clearStaffFilter}
+              onSelectAll={selectAllStaffFilter}
+            />
 
             <div className="flex flex-col gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low p-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="px-2 font-body text-[12px] font-semibold text-on-surface-variant">
@@ -526,7 +679,7 @@ export function TeamAttendanceSection() {
                   Loading attendance...
                 </div>
               </div>
-            ) : attendance.length === 0 ? (
+            ) : filteredAttendance.length === 0 ? (
               <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-dashed border-outline-variant bg-surface-container-low px-6 py-10 text-center">
                 <span className="material-symbols-outlined mb-2 text-[34px] text-outline">
                   schedule
@@ -535,14 +688,22 @@ export function TeamAttendanceSection() {
                   No attendance records for this period
                 </p>
                 <p className="mt-1 font-body text-[13px] text-on-surface-variant">
-                  Staff clock-ins will appear here once your team starts work.
+                  {selectedStaffIds.length > 0
+                    ? "Try clearing the staff filter or choosing a different date range."
+                    : "Staff clock-ins will appear here once your team starts work."}
                 </p>
               </div>
+            ) : selectedView === "sheet" ? (
+              <AttendanceDetailSheet
+                days={sheetDays}
+                selectedRecordId={selectedRecord?.id ?? null}
+                onSelect={setSelectedRecord}
+              />
             ) : selectedView === "staff" ? (
               <StaffSummaryTable summaries={staffSummaries} />
             ) : (
               <AttendanceRecordsTable
-                attendance={attendance}
+                attendance={filteredAttendance}
                 selectedRecordId={selectedRecord?.id ?? null}
                 onSelect={setSelectedRecord}
               />
@@ -557,6 +718,225 @@ export function TeamAttendanceSection() {
         onClose={() => setSelectedRecord(null)}
       />
     </>
+  );
+}
+
+function StaffFilterPanel({
+  open,
+  options,
+  selectedIds,
+  summaryLabel,
+  onToggleOpen,
+  onToggleStaff,
+  onClear,
+  onSelectAll,
+}: {
+  open: boolean;
+  options: StaffFilterOption[];
+  selectedIds: string[];
+  summaryLabel: string;
+  onToggleOpen: () => void;
+  onToggleStaff: (staffId: string) => void;
+  onClear: () => void;
+  onSelectAll: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+            Staff filter
+          </p>
+          <p className="mt-0.5 font-body text-[13px] font-semibold text-on-surface">
+            {summaryLabel}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedIds.length > 0 ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="rounded-lg px-3 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+            >
+              Clear
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onToggleOpen}
+            className="inline-flex items-center gap-1 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 font-body text-[12px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high"
+          >
+            {open ? "Hide staff" : "Choose staff"}
+            <span className="material-symbols-outlined text-[16px]">
+              {open ? "expand_less" : "expand_more"}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {open ? (
+        <div className="mt-3 border-t border-outline-variant/40 pt-3">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onSelectAll}
+              className="rounded-lg bg-primary/10 px-3 py-1.5 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary/15"
+            >
+              Select all
+            </button>
+            <p className="font-body text-[12px] text-on-surface-variant">
+              Pick one or more staff to narrow the detail sheet and exports.
+            </p>
+          </div>
+          <div className="grid max-h-56 gap-2 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
+            {options.map((member) => {
+              const selected = selectedIds.includes(member.id);
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => onToggleStaff(member.id)}
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                    selected
+                      ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                      : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/30 hover:bg-surface-container-high"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={staffAvatarUrl({
+                      id: member.id,
+                      fullName: member.fullName,
+                    })}
+                    alt=""
+                    className="h-9 w-9 shrink-0 rounded-full border border-outline-variant/60 bg-white object-cover"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-body text-[13px] font-semibold text-on-surface">
+                      {member.fullName}
+                    </span>
+                    <span className="block truncate font-body text-[11px] text-on-surface-variant">
+                      {member.staffType}
+                    </span>
+                  </span>
+                  <span
+                    className={`material-symbols-outlined text-[18px] ${
+                      selected ? "text-primary" : "text-outline"
+                    }`}
+                  >
+                    {selected ? "check_circle" : "circle"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AttendanceDetailSheet({
+  days,
+  selectedRecordId,
+  onSelect,
+}: {
+  days: AttendanceSheetDay[];
+  selectedRecordId: string | null;
+  onSelect: (record: AttendanceRecord) => void;
+}) {
+  const daysWithRecords = days.filter((day) => day.records.length > 0);
+
+  if (daysWithRecords.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low px-6 py-10 text-center">
+        <p className="font-body text-[14px] font-semibold text-on-surface">
+          No shifts in this period
+        </p>
+        <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+          Day-by-day clock in and clock out details will appear here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {daysWithRecords.map((day) => {
+        const dayWorkedSeconds = day.records.reduce(
+          (sum, record) => sum + record.workingSeconds,
+          0,
+        );
+        return (
+          <section
+            key={day.dateKey}
+            className="overflow-hidden rounded-xl border border-outline-variant/60"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant/60 bg-surface-container-low px-4 py-3">
+              <div>
+                <p className="font-body text-[14px] font-semibold text-on-surface">
+                  {day.label}
+                </p>
+                <p className="font-body text-[12px] text-on-surface-variant">
+                  {day.records.length} shift{day.records.length === 1 ? "" : "s"}{" "}
+                  · {formatWorkingDuration(dayWorkedSeconds)} worked
+                </p>
+              </div>
+            </div>
+
+            <div className="hidden grid-cols-[1.3fr_0.85fr_0.85fr_0.75fr_0.75fr_0.65fr] gap-3 border-b border-outline-variant/60 bg-surface-container-lowest px-4 py-2.5 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant md:grid">
+              <span>Staff</span>
+              <span>Clock in</span>
+              <span>Clock out</span>
+              <span>Worked</span>
+              <span>Break</span>
+              <span>Status</span>
+            </div>
+
+            <div className="divide-y divide-outline-variant/60">
+              {day.records.map((record) => {
+                const isSelected = selectedRecordId === record.id;
+                return (
+                  <button
+                    key={record.id}
+                    type="button"
+                    onClick={() => onSelect(record)}
+                    className={`grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition-colors md:grid-cols-[1.3fr_0.85fr_0.85fr_0.75fr_0.75fr_0.65fr] md:items-center ${
+                      isSelected
+                        ? "bg-primary/5"
+                        : "hover:bg-surface-container-low/80"
+                    }`}
+                  >
+                    <StaffIdentity record={record} />
+                    <AttendanceCell
+                      label="Clock in"
+                      value={formatTime(record.checkInTime)}
+                    />
+                    <AttendanceCell
+                      label="Clock out"
+                      value={formatTime(record.checkOutTime)}
+                    />
+                    <AttendanceCell
+                      label="Worked"
+                      value={formatWorkingDuration(record.workingSeconds)}
+                    />
+                    <AttendanceCell
+                      label="Break"
+                      value={
+                        record.totalBreakSeconds > 0
+                          ? formatWorkingDuration(record.totalBreakSeconds)
+                          : "—"
+                      }
+                    />
+                    <StatusBadge status={record.status} showChevron />
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -714,12 +1094,6 @@ function StaffIdentity({ record }: { record: AttendanceRecord }) {
       </div>
     </div>
   );
-}
-
-function attendanceStatusLabel(status: string) {
-  if (status === "checked_in") return "Active";
-  if (status === "auto_checked_out") return "Auto out";
-  return "Done";
 }
 
 function StatusBadge({

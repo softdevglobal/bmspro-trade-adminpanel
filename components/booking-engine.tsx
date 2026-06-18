@@ -16,7 +16,7 @@ import {
 } from "@/components/customer-account-nav";
 import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
 import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
-import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerAuth, useCustomerBookingSlug } from "@/lib/customer-auth/customer-auth-context";
 import {
   SlotDayPicker,
   todayIso,
@@ -56,6 +56,7 @@ function isServiceAddressComplete(address: ServiceAddress): boolean {
 
 export function BookingEngine({ business, services }: Props) {
   const reducedMotion = useReducedMotion();
+  useCustomerBookingSlug(business.slug);
 
   const location = useMemo(() => {
     if (business.state && business.postcode) {
@@ -112,6 +113,7 @@ export function BookingEngine({ business, services }: Props) {
             <ServiceBookingFlow
               slug={business.slug}
               businessName={business.businessName}
+              businessActive={business.isActive}
               services={services}
               timeZone={business.timezone}
               reducedMotion={!!reducedMotion}
@@ -747,6 +749,7 @@ function DayTimePicker({
 function ServiceBookingFlow({
   slug,
   businessName,
+  businessActive,
   services,
   timeZone,
   phoneHref,
@@ -755,6 +758,7 @@ function ServiceBookingFlow({
 }: {
   slug: string;
   businessName: string;
+  businessActive: boolean;
   services: BookingService[];
   timeZone: string;
   phoneHref: string | null;
@@ -789,8 +793,7 @@ function ServiceBookingFlow({
   const customerAuth = useCustomerAuth();
   const isAuthenticated = customerAuth.status === "authenticated";
   const profile = customerAuth.profile;
-  const customerEmailFromAuth =
-    profile?.email ?? customerAuth.user?.email ?? "";
+  const customerEmailFromAuth = profile?.email ?? "";
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -854,6 +857,7 @@ function ServiceBookingFlow({
   );
 
   const canSubmit =
+    businessActive &&
     requestStepValid &&
     addressComplete &&
     slotsValid &&
@@ -1392,6 +1396,16 @@ function ServiceBookingFlow({
             </p>
           ) : null}
         </div>
+
+        {!businessActive ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-900"
+          >
+            This business is not accepting online bookings right now. Please
+            contact them directly.
+          </div>
+        ) : null}
 
         {submitError ? (
           <div

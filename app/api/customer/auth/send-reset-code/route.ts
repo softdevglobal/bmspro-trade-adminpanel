@@ -1,5 +1,9 @@
 import { sendCustomerPasswordResetCodeEmail } from "@/lib/email/templates";
 import { CUSTOMER_COLLECTION } from "@/lib/customer/types";
+import {
+  buildCustomerAuthEmail,
+  customerPasswordResetDocId,
+} from "@/lib/customer/scoped-auth";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -12,7 +16,6 @@ function generateCode(): string {
 }
 
 async function resolveBusinessBranding(
-  customerData: Record<string, unknown>,
   bookingSlug: string,
 ): Promise<{ businessName: string | null; logoUrl: string | null }> {
   if (bookingSlug) {
@@ -31,26 +34,7 @@ async function resolveBusinessBranding(
     }
   }
 
-  const registeredBusinessId =
-    typeof customerData.registeredBusinessId === "string"
-      ? customerData.registeredBusinessId
-      : null;
-  const registeredBusinessName =
-    typeof customerData.registeredBusinessName === "string"
-      ? customerData.registeredBusinessName
-      : null;
-
-  if (registeredBusinessId) {
-    const profile = await getBusinessProfile(registeredBusinessId);
-    if (profile) {
-      return {
-        businessName: profile.businessName ?? registeredBusinessName,
-        logoUrl: profile.logoUrl,
-      };
-    }
-  }
-
-  return { businessName: registeredBusinessName, logoUrl: null };
+  return { businessName: null, logoUrl: null };
 }
 
 export async function POST(req: NextRequest) {
@@ -70,9 +54,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!bookingSlug) {
+      return NextResponse.json(
+        { error: "Business booking link is required." },
+        { status: 400 },
+      );
+    }
+
+    const authEmail = await buildCustomerAuthEmail(bookingSlug, trimmed);
+
     let authUid: string;
     try {
-      const authUser = await adminAuth.getUserByEmail(trimmed);
+      const authUser = await adminAuth.getUserByEmail(authEmail);
       authUid = authUser.uid;
     } catch {
       return NextResponse.json({ ok: true });
@@ -89,12 +82,11 @@ export async function POST(req: NextRequest) {
     const customerData = customerSnap.data() ?? {};
     const phone =
       typeof customerData.phone === "string" ? customerData.phone : null;
-    const { businessName, logoUrl } = await resolveBusinessBranding(
-      customerData,
-      bookingSlug,
-    );
+    const { businessName, logoUrl } = await resolveBusinessBranding(bookingSlug);
 
-    const docRef = adminDb.collection(COLLECTION).doc(trimmed);
+    const docRef = adminDb
+      .collection(COLLECTION)
+      .doc(customerPasswordResetDocId(bookingSlug, trimmed));
     const existing = await docRef.get();
     if (existing.exists) {
       const data = existing.data();
@@ -120,6 +112,9 @@ export async function POST(req: NextRequest) {
       createdAt: FieldValue.serverTimestamp(),
       attempts: 0,
       used: false,
+      bookingSlug,
+      displayEmail: trimmed,
+      authEmail,
     });
 
     await sendCustomerPasswordResetCodeEmail({

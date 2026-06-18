@@ -8,6 +8,7 @@ import {
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
+import { JobInstructionsDisplay } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
@@ -21,7 +22,7 @@ import {
   type BookingStatus,
 } from "@/lib/bookings/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
-import { buildStaffLeaveBlockMap } from "@/lib/leave/client";
+import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
@@ -367,6 +368,7 @@ export function RequestsBoard() {
       <RequestDetailDrawer
         request={selected}
         staff={staff}
+        onReloadStaff={reloadStaff}
         initialMode={drawerOpenMode}
         onInitialModeConsumed={() => setDrawerOpenMode(null)}
         onClose={() => {
@@ -685,6 +687,7 @@ function SlotPill({
 function RequestDetailDrawer({
   request,
   staff,
+  onReloadStaff,
   initialMode,
   onInitialModeConsumed,
   onClose,
@@ -692,6 +695,7 @@ function RequestDetailDrawer({
 }: {
   request: InspectionRequestDetail | null;
   staff: StaffSummary[];
+  onReloadStaff: () => Promise<void>;
   initialMode: DrawerMode | null;
   onInitialModeConsumed: () => void;
   onClose: () => void;
@@ -726,6 +730,7 @@ function RequestDetailDrawer({
               key={request.id}
               request={request}
               staff={staff}
+              onReloadStaff={onReloadStaff}
               initialMode={initialMode}
               onInitialModeConsumed={onInitialModeConsumed}
               onClose={onClose}
@@ -1077,6 +1082,7 @@ function CompactRequestSummary({
 function DetailDrawerContent({
   request,
   staff,
+  onReloadStaff,
   initialMode,
   onInitialModeConsumed,
   onClose,
@@ -1084,6 +1090,7 @@ function DetailDrawerContent({
 }: {
   request: InspectionRequestDetail;
   staff: StaffSummary[];
+  onReloadStaff: () => Promise<void>;
   initialMode: DrawerMode | null;
   onInitialModeConsumed: () => void;
   onClose: () => void;
@@ -1287,6 +1294,9 @@ function DetailDrawerContent({
       setActionError("Cancelled quotations cannot be converted into jobs.");
       setMode("review");
       return;
+    }
+    if (nextMode === "assign") {
+      void onReloadStaff();
     }
     if (nextMode === "set_time") {
       if (request.scheduledStartTime) setAcceptStartTime(request.scheduledStartTime);
@@ -1570,6 +1580,7 @@ function DetailDrawerContent({
               request.scheduledStartTime ?? bookingTimeDefaults.start
             }
             endTime={request.scheduledEndTime ?? bookingTimeDefaults.end}
+            timeZone={timeZone}
             onAssignToChange={setAssignTo}
             onStaffIdChange={setStaffId}
             onCancel={() => setMode("review")}
@@ -2089,9 +2100,15 @@ function BookingDetailsSection({
           </div>
         ) : null}
 
+        <JobInstructionsDisplay
+          description={booking.jobInstructionsDescription}
+          tasks={booking.jobInstructionsTasks}
+          compact
+        />
+
         {booking.ownerNote ? (
           <p className="mt-3 border-t border-outline-variant/40 pt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
-            <span className="font-semibold text-on-surface">Note: </span>
+            <span className="font-semibold text-on-surface">Customer note: </span>
             {booking.ownerNote}
           </p>
         ) : null}
@@ -3178,6 +3195,7 @@ function AssignForm({
   assignmentDate,
   startTime,
   endTime,
+  timeZone,
   onAssignToChange,
   onStaffIdChange,
   onCancel,
@@ -3190,6 +3208,7 @@ function AssignForm({
   assignmentDate: string | null;
   startTime: string;
   endTime: string;
+  timeZone?: string | null;
   onAssignToChange: (value: "owner" | "staff") => void;
   onStaffIdChange: (value: string) => void;
   onCancel: () => void;
@@ -3204,15 +3223,15 @@ function AssignForm({
   });
 
   const blockedLabels = useMemo(() => {
-    const approved = leaveRequests.filter((item) => item.status === "approved");
-    return buildStaffLeaveBlockMap(
-      approved,
-      staff.map((member) => member.id),
+    return buildStaffAssignmentBlockMap(
+      staff,
+      leaveRequests,
       assignmentDate,
       startTime,
       endTime,
+      timeZone,
     );
-  }, [leaveRequests, staff, assignmentDate, startTime, endTime]);
+  }, [leaveRequests, staff, assignmentDate, startTime, endTime, timeZone]);
 
   useEffect(() => {
     if (staffId && blockedLabels[staffId]) onStaffIdChange("");

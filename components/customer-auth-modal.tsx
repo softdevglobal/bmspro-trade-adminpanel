@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 
 const FIREBASE_ERROR_MAP: Record<string, string> = {
   "auth/email-already-in-use":
-    "An account with this email already exists. Sign in instead.",
+    "You already have an account with this business. Sign in instead.",
   "auth/invalid-email": "Enter a valid email address.",
   "auth/invalid-credential": "Email or password is incorrect.",
   "auth/wrong-password": "Email or password is incorrect.",

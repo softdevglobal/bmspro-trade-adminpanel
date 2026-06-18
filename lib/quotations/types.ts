@@ -14,6 +14,8 @@ export type QuotationLineItem = {
   description?: string | null;
   quantity?: number | null;
   rateAud?: number | null;
+  /** Line-level discount (0–100). Omitted on older records. */
+  discountPercent?: number | null;
   gstPercent?: number | null;
 };
 

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { customerOwnsNotificationRecord } from "@/lib/customer/ownership";
 import { normalizeEmail } from "@/lib/customer/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapNotificationDoc as mapNotificationRecord } from "@/lib/notifications/map-notification-doc";
@@ -236,6 +237,144 @@ export async function notifyBusinessOfNewRequest(
       data: {
         type: "request_created",
         requestId: request.id,
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
+function formatLeaveDateRange(leave: {
+  fromDate: string | null;
+  toDate: string | null;
+}): string {
+  const from = leave.fromDate;
+  const to = leave.toDate ?? leave.fromDate;
+  if (!from) return "selected dates";
+  if (!to || to === from) return from;
+  return `${from} – ${to}`;
+}
+
+/** Notify business admins when a staff member submits a leave request. */
+export async function notifyBusinessOfStaffLeaveRequest(
+  leave: {
+    id: string;
+    businessId: string | null;
+    requesterName: string;
+    fromDate: string | null;
+    toDate: string | null;
+  },
+  conflicts: { label: string; scheduledDate: string }[],
+): Promise<void> {
+  if (!leave.businessId) return;
+
+  const dates = formatLeaveDateRange(leave);
+  const hasConflicts = conflicts.length > 0;
+  const title = hasConflicts ? "Leave conflicts with schedule" : "New leave request";
+  const body = hasConflicts
+    ? `${leave.requesterName} requested leave (${dates}) but is assigned to ${conflicts.length} job${conflicts.length === 1 ? "" : "s"} or visit${conflicts.length === 1 ? "" : "s"}. Reassign work before approving.`
+    : `${leave.requesterName} requested leave for ${dates}. Review it in Team → Leave requests.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: leave.businessId,
+      customerId: null,
+      requestId: leave.id,
+      status: "pending",
+      type: hasConflicts ? "leave_assignment_conflict" : "leave_requested",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(leave.businessId, {
+      title,
+      body,
+      data: {
+        type: hasConflicts ? "leave_assignment_conflict" : "leave_requested",
+        requestId: leave.id,
+        leaveId: leave.id,
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
+/** Warn admins when assigning staff who has leave on the scheduled day. */
+export async function notifyBusinessOfStaffOnLeaveAssignment(
+  businessId: string,
+  staffName: string,
+  scheduledDate: string,
+  leaveStatus: "approved" | "pending",
+  targetKind: "job" | "request",
+  targetId: string,
+): Promise<void> {
+  const statusLabel =
+    leaveStatus === "approved" ? "approved leave" : "a pending leave request";
+  const title = "Staff member is on leave";
+  const body = `${staffName} has ${statusLabel} on ${scheduledDate} and cannot be assigned to this ${targetKind === "job" ? "job" : "visit"}. Choose another team member or adjust the schedule.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId,
+      customerId: null,
+      requestId: targetId,
+      status: "pending",
+      type: "leave_assignment_conflict",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(businessId, {
+      title,
+      body,
+      data: {
+        type: "leave_assignment_conflict",
+        requestId: targetId,
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
+/** Warn admins when assigning staff on one of their regular off days. */
+export async function notifyBusinessOfStaffOffDayAssignment(
+  businessId: string,
+  staffName: string,
+  scheduledDate: string,
+  targetKind: "job" | "request",
+  targetId: string,
+): Promise<void> {
+  const title = "Staff member is on an off day";
+  const body = `${staffName} is not scheduled to work on ${scheduledDate} and cannot be assigned to this ${targetKind === "job" ? "job" : "visit"}. Choose another team member or update their availability.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId,
+      customerId: null,
+      requestId: targetId,
+      status: "pending",
+      type: "staff_off_day",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(businessId, {
+      title,
+      body,
+      data: {
+        type: "staff_off_day",
+        requestId: targetId,
         audience: "owner",
       },
     });
@@ -853,6 +992,7 @@ export async function listBusinessNotifications(
 export async function listCustomerNotifications(
   customerId: string,
   customerEmail: string,
+  businessId?: string | null,
 ): Promise<NotificationRecord[]> {
   const normalizedEmail = customerEmail ? normalizeEmail(customerEmail) : "";
   const [byId, byEmail] = await Promise.all([
@@ -878,16 +1018,24 @@ export async function listCustomerNotifications(
     }
   }
 
-  return sortNewestFirst(
+  const records = sortNewestFirst(
     Array.from(docs.entries()).map(([id, data]) =>
       mapNotificationRecord(id, "customer", data),
     ),
   );
+
+  if (!businessId) return records;
+  return records.filter((record) => record.businessId === businessId);
 }
 
 type OwnerGuard =
   | { audience: "business"; businessId: string }
-  | { audience: "customer"; customerId: string; customerEmail: string };
+  | {
+      audience: "customer";
+      customerId: string;
+      customerEmail: string;
+      businessId?: string | null;
+    };
 
 function ownsNotification(
   data: Record<string, unknown>,
@@ -896,12 +1044,11 @@ function ownsNotification(
   if (guard.audience === "business") {
     return data.businessId === guard.businessId;
   }
-  const normalizedEmail = normalizeEmail(guard.customerEmail);
-  return (
-    data.customerId === guard.customerId ||
-    (typeof data.customerEmail === "string" &&
-      normalizeEmail(data.customerEmail) === normalizedEmail)
-  );
+  return customerOwnsNotificationRecord(data, {
+    customerId: guard.customerId,
+    customerEmail: guard.customerEmail,
+    businessId: guard.businessId,
+  });
 }
 
 /** Marks notifications as read for an audience. Returns false if not owned. */
@@ -939,6 +1086,7 @@ async function collectUnreadNotificationIds(
   }
 
   const normalizedEmail = normalizeEmail(guard.customerEmail);
+  const businessId = guard.businessId?.trim() || null;
   const [byId, byEmail] = await Promise.all([
     adminDb
       .collection(collection)
@@ -956,6 +1104,14 @@ async function collectUnreadNotificationIds(
 
   const seen = new Set<string>();
   for (const doc of byId.docs) {
+    const data = doc.data() ?? {};
+    if (
+      businessId &&
+      typeof data.businessId === "string" &&
+      data.businessId !== businessId
+    ) {
+      continue;
+    }
     if (!seen.has(doc.id)) {
       seen.add(doc.id);
       unreadIds.push(doc.id);
@@ -963,6 +1119,14 @@ async function collectUnreadNotificationIds(
   }
   if (byEmail) {
     for (const doc of byEmail.docs) {
+      const data = doc.data() ?? {};
+      if (
+        businessId &&
+        typeof data.businessId === "string" &&
+        data.businessId !== businessId
+      ) {
+        continue;
+      }
       if (!seen.has(doc.id)) {
         seen.add(doc.id);
         unreadIds.push(doc.id);
@@ -1015,7 +1179,11 @@ async function collectOwnedNotificationIds(
   const records =
     guard.audience === "business"
       ? await listBusinessNotifications(guard.businessId)
-      : await listCustomerNotifications(guard.customerId, guard.customerEmail);
+      : await listCustomerNotifications(
+          guard.customerId,
+          guard.customerEmail,
+          guard.businessId,
+        );
   return records.map((record) => record.id);
 }
 

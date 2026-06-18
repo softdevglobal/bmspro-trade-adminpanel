@@ -1,7 +1,10 @@
 /**
  * Shared types for customer (booking-side) accounts.
  *
- * Firestore `customers/{uid}` registration fields (set once on signup):
+ * Each business has its own customer login for the same display email.
+ * Firebase Auth uses a scoped internal email; `email` here is the real address.
+ *
+ * Firestore `customers/{uid}` registration fields (set on signup for that business):
  * - registeredBusinessId
  * - registeredBookingSlug
  * - registeredBusinessName
@@ -26,6 +29,8 @@ export type CustomerProfileInput = {
   phone: string;
   /** Booking slug from `/booknow/[slug]` — saved on first signup only. */
   bookingSlug?: string;
+  /** Customer-facing email (stored separately from scoped Firebase Auth email). */
+  email?: string;
 };
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -58,6 +63,14 @@ export function validateCustomerProfileInput(
   const bookingSlugRaw =
     typeof item.bookingSlug === "string" ? item.bookingSlug.trim() : "";
   const bookingSlug = bookingSlugRaw.length > 0 ? bookingSlugRaw : undefined;
+  const emailRaw = typeof item.email === "string" ? item.email.trim() : "";
+  let email: string | undefined;
+  if (emailRaw.length > 0) {
+    if (!isValidEmail(emailRaw)) {
+      return { ok: false, error: "Enter a valid email address." };
+    }
+    email = normalizeEmail(emailRaw);
+  }
 
   if (fullName.length < 2) {
     return { ok: false, error: "Enter your full name." };
@@ -65,5 +78,5 @@ export function validateCustomerProfileInput(
   if (phone.length < 6) {
     return { ok: false, error: "Enter a valid mobile number." };
   }
-  return { ok: true, value: { fullName, phone, bookingSlug } };
+  return { ok: true, value: { fullName, phone, bookingSlug, email } };
 }

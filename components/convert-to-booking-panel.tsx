@@ -8,6 +8,10 @@ import {
   BookingStaffAssignSection,
   type BookingAssignChoice,
 } from "@/components/booking-staff-assign-section";
+import {
+  JobInstructionsFields,
+  normalizeInstructionTasksForSubmit,
+} from "@/components/job-instructions-fields";
 import { JobEstimateSelect } from "@/components/job-estimate-select";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -186,6 +190,8 @@ export function ConvertToBookingPanel({
     estimateMinutesFromTimeRange(initialStartTime, initialEndTime),
   );
   const [note, setNote] = useState("");
+  const [instructionDescription, setInstructionDescription] = useState("");
+  const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -198,6 +204,8 @@ export function ConvertToBookingPanel({
       estimateMinutesFromTimeRange(initialStartTime, initialEndTime),
     );
     setNote("");
+    setInstructionDescription("");
+    setInstructionTasks([]);
     setAssignChoice("owner");
     setStaffId("");
     setError(null);
@@ -260,6 +268,8 @@ export function ConvertToBookingPanel({
             endTime,
             estimatedDurationMinutes: estimatedMinutes,
             note: note.trim() || undefined,
+            instructionDescription: instructionDescription.trim() || undefined,
+            instructionTasks: normalizeInstructionTasksForSubmit(instructionTasks),
             assignTo: assignChoice,
             ...(assignChoice === "staff" ? { staffId } : {}),
           }),
@@ -344,6 +354,16 @@ export function ConvertToBookingPanel({
             if (next !== "staff") setStaffId("");
           }}
           onStaffIdChange={setStaffId}
+        />
+      </div>
+
+      <div className="mt-4">
+        <JobInstructionsFields
+          description={instructionDescription}
+          tasks={instructionTasks}
+          disabled={submitting}
+          onDescriptionChange={setInstructionDescription}
+          onTasksChange={setInstructionTasks}
         />
       </div>
 

@@ -11,7 +11,9 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateCustomerRequest(request);
+  const url = new URL(request.url);
+  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
@@ -20,6 +22,7 @@ export async function PATCH(
     audience: "customer",
     customerId: auth.customer.uid,
     customerEmail: auth.customer.email,
+    businessId: auth.customer.businessId,
   });
   if (!ok) {
     return NextResponse.json({ ok: false, error: "Notification not found." }, { status: 404 });
@@ -32,7 +35,9 @@ export async function DELETE(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await authenticateCustomerRequest(request);
+  const url = new URL(request.url);
+  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
@@ -41,6 +46,7 @@ export async function DELETE(
     audience: "customer",
     customerId: auth.customer.uid,
     customerEmail: auth.customer.email,
+    businessId: auth.customer.businessId,
   });
   if (!ok) {
     return NextResponse.json({ ok: false, error: "Notification not found." }, { status: 404 });

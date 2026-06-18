@@ -37,6 +37,7 @@ export function useBusinessStaffSummary(): {
             cached.map((member) => ({
               ...member,
               canget_qutaion: member.canget_qutaion === true,
+              offDays: member.offDays ?? [],
             })),
           );
           return;
@@ -58,6 +59,7 @@ export function useBusinessStaffSummary(): {
             staffType?: string;
             status?: string;
             canget_qutaion?: boolean;
+            offDays?: string[];
           }[];
         };
         if (!response.ok || !payload.ok) return;
@@ -69,6 +71,7 @@ export function useBusinessStaffSummary(): {
             email: member.email,
             staffType: member.staffType?.trim() || "Team member",
             canget_qutaion: member.canget_qutaion === true,
+            offDays: Array.isArray(member.offDays) ? member.offDays : [],
           }));
         setStaff(next);
         writeStaffSummaryCache(businessId, next);

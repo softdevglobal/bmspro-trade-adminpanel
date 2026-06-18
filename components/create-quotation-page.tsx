@@ -13,6 +13,11 @@ import {
 import { MonthCalendarField } from "@/components/month-calendar-field";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import {
+  buildCustomerOptions,
+  filterCustomerOptions,
+  type CustomerOption,
+} from "@/lib/inspection/customer-options";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   computeDocumentTotals,
@@ -55,15 +60,6 @@ type CatalogItem = {
   code: string | null;
   description: string | null;
   priceAud: number;
-};
-
-type CustomerOption = {
-  id: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  address: InspectionAddress | null;
-  lastActivity: number;
 };
 
 type SavedLineItem = {
@@ -195,52 +191,6 @@ function computeSavedLineAmount(
   }).amountAud;
 }
 
-function customerKey(request: InspectionRequestDetail): string {
-  const email = request.customer.email?.trim().toLowerCase();
-  if (email) return `email:${email}`;
-  const phone = request.customer.phone?.replace(/\D/g, "");
-  if (phone) return `phone:${phone}`;
-  return `name:${request.customer.fullName.trim().toLowerCase()}`;
-}
-
-function buildCustomerOptions(
-  requests: InspectionRequestDetail[],
-): CustomerOption[] {
-  const map = new Map<string, CustomerOption>();
-  for (const request of requests) {
-    const key = customerKey(request);
-    const activity = request.updatedAt ?? request.createdAt ?? 0;
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, {
-        id: key,
-        fullName: request.customer.fullName?.trim() || "Unknown",
-        email: request.customer.email?.trim() || "",
-        phone: request.customer.phone?.trim() || "",
-        address: request.address,
-        lastActivity: activity,
-      });
-      continue;
-    }
-    if (activity > existing.lastActivity) {
-      existing.lastActivity = activity;
-      existing.address = request.address;
-    }
-    if (!existing.fullName && request.customer.fullName) {
-      existing.fullName = request.customer.fullName.trim();
-    }
-    if (!existing.email && request.customer.email) {
-      existing.email = request.customer.email.trim();
-    }
-    if (!existing.phone && request.customer.phone) {
-      existing.phone = request.customer.phone.trim();
-    }
-  }
-  return Array.from(map.values()).sort(
-    (a, b) => b.lastActivity - a.lastActivity,
-  );
-}
-
 function requestServiceTitle(request: InspectionRequestDetail): string {
   if (request.requestType === "existing_service") {
     return request.serviceName ?? "Existing service";
@@ -287,10 +237,40 @@ function savedLineItemFromQuotation(
   index: number,
 ): SavedLineItem {
   const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
-  const rate =
+  let discountPercent =
+    typeof item.discountPercent === "number" && item.discountPercent > 0
+      ? Math.min(100, item.discountPercent)
+      : 0;
+  const unitRate =
     item.rateAud && item.rateAud > 0
       ? item.rateAud
       : Math.round((item.priceAud / quantity) * 100) / 100;
+
+  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
+    const gross = Math.round(unitRate * quantity * 100) / 100;
+    if (gross > item.priceAud + 0.01) {
+      const inferred = Math.min(
+        100,
+        Math.round((1 - item.priceAud / gross) * 10000) / 100,
+      );
+      if (inferred > 0.01) discountPercent = inferred;
+    }
+  }
+
+  let rate: number;
+  if (
+    discountPercent > 0 &&
+    typeof item.discountPercent === "number" &&
+    item.discountPercent > 0
+  ) {
+    rate =
+      Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100;
+  } else if (discountPercent > 0) {
+    rate = unitRate;
+  } else {
+    rate = unitRate;
+  }
+
   const gstPercent = item.gstPercent ?? 0;
   return {
     id: `${index}-${item.name}-${crypto.randomUUID()}`,
@@ -299,7 +279,7 @@ function savedLineItemFromQuotation(
     description: item.description ?? "",
     quantity,
     rate,
-    discountPercent: 0,
+    discountPercent,
     applyGst: gstPercent > 0,
     amountAud: item.priceAud,
   };
@@ -669,18 +649,10 @@ export function CreateQuotationPage() {
     [requests],
   );
 
-  const filteredCustomers = useMemo(() => {
-    const q = customerSearch.trim().toLowerCase();
-    if (!q) return customerOptions.slice(0, 8);
-    return customerOptions
-      .filter(
-        (c) =>
-          c.fullName.toLowerCase().includes(q) ||
-          c.email.toLowerCase().includes(q) ||
-          c.phone.includes(q),
-      )
-      .slice(0, 8);
-  }, [customerOptions, customerSearch]);
+  const filteredCustomers = useMemo(
+    () => filterCustomerOptions(customerOptions, customerSearch),
+    [customerOptions, customerSearch],
+  );
 
   const activeServices = useMemo(
     () => services.filter((service) => service.isActive),
@@ -763,7 +735,7 @@ export function CreateQuotationPage() {
           gstEnabled,
           gstPercentage,
         );
-        const { amountAud, rateAudExGst } = computeQuotationLineAmounts({
+        const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
           quantity: item.quantity,
           rate: item.rate,
           discountPercent: item.discountPercent,
@@ -775,7 +747,8 @@ export function CreateQuotationPage() {
           name: item.name,
           description: item.description || null,
           quantity: item.quantity,
-          rateAud: rateAudExGst,
+          rateAud: listRateAudExGst,
+          discountPercent: item.discountPercent,
           gstPercent,
           amountAud,
         };
@@ -1223,15 +1196,31 @@ export function CreateQuotationPage() {
           phone: customer.phone,
         },
         address,
-        lineItems: lineItems.map((item) => ({
-          code: (item.code ?? "").trim() || null,
-          name: item.name,
-          description: item.description || null,
-          quantity: item.quantity,
-          rateAud: item.rate,
-          gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
-          priceAud: item.amountAud,
-        })),
+        lineItems: lineItems.map((item) => {
+          const gstPercent = lineGstPercent(
+            item.applyGst,
+            gstEnabled,
+            gstPercentage,
+          );
+          const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
+            quantity: item.quantity,
+            rate: item.rate,
+            discountPercent: item.discountPercent,
+            gstPercent,
+            gstPricing,
+          });
+          return {
+            code: (item.code ?? "").trim() || null,
+            name: item.name,
+            description: item.description || null,
+            quantity: item.quantity,
+            rateAud: listRateAudExGst,
+            discountPercent:
+              item.discountPercent > 0 ? item.discountPercent : null,
+            gstPercent,
+            priceAud: amountAud,
+          };
+        }),
         finalPriceAud: total,
         discountAud: discountAmount,
         ...(previewServiceDescription

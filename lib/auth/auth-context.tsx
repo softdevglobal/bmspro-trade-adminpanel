@@ -80,6 +80,24 @@ async function resolveAuthRole(
   return { role: null, businessId: null };
 }
 
+async function verifyBusinessActive(businessId: string): Promise<boolean> {
+  const snap = await getDoc(doc(db, "businesses", businessId));
+  if (!snap.exists()) return false;
+  const data = snap.data();
+  if (data?.isActive === false) return false;
+  if (data?.status === "suspended") return false;
+  return true;
+}
+
+async function ensureBusinessOwnerCanAccess(
+  resolved: { role: AuthRole; businessId: string | null },
+): Promise<boolean> {
+  if (resolved.role !== "business_owner" || !resolved.businessId) {
+    return true;
+  }
+  return verifyBusinessActive(resolved.businessId);
+}
+
 const AUTH_CACHE_KEY = "bms.auth.session";
 
 type AuthSessionCache = {
@@ -206,6 +224,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setStatus("unauthenticated");
             return;
           }
+          if (!(await ensureBusinessOwnerCanAccess(resolved))) {
+            clearAuthCache();
+            await signOut(auth);
+            await waitForAuthSignedOut();
+            setUser(null);
+            setRole(null);
+            setBusinessId(null);
+            setStatus("unauthenticated");
+            return;
+          }
           writeAuthCache(
             firebaseUser.uid,
             resolved.role,
@@ -263,6 +291,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           throw new Error("STAFF_WEB_LOGIN_DISABLED");
         }
         throw new Error("UNAUTHORIZED");
+      }
+      if (!(await ensureBusinessOwnerCanAccess(resolved))) {
+        await signOut(auth);
+        await waitForAuthSignedOut();
+        setUser(null);
+        setRole(null);
+        setBusinessId(null);
+        setStatus("unauthenticated");
+        throw new Error("BUSINESS_SUSPENDED");
       }
 
       writeAuthCache(

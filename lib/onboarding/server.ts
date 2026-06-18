@@ -1,4 +1,5 @@
 import "server-only";
+import { assertBusinessActive } from "@/lib/onboarding/business-status";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   isReservedSlug,
@@ -538,6 +539,11 @@ export async function requireBusinessMember(req: Request): Promise<
         status: 403,
         error: "Business member access required.",
       };
+    }
+
+    const accessDenied = await assertBusinessActive(businessId);
+    if (accessDenied) {
+      return accessDenied;
     }
 
     return {

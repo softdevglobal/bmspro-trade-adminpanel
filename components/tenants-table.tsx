@@ -313,6 +313,14 @@ export function TenantsTable() {
       <TenantDetailDrawer
         tenant={selectedTenant}
         onClose={() => setSelectedTenant(null)}
+        onTenantUpdated={(updated) => {
+          setTenants((current) =>
+            current.map((tenant) =>
+              tenant.id === updated.id ? updated : tenant,
+            ),
+          );
+          setSelectedTenant(updated);
+        }}
       />
 
       <TenantOnboardModal

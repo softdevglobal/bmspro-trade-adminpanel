@@ -47,7 +47,7 @@ export function CustomerNotificationsProvider({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const { status, user, getIdToken } = useCustomerAuth();
+  const { status, user, getIdToken, activeBookingSlug } = useCustomerAuth();
   const pageVisible = usePageVisible();
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,14 +67,17 @@ export function CustomerNotificationsProvider({
     try {
       const token = await getIdToken();
       if (!token) throw new Error("Not signed in.");
-      const records = await fetchCustomerNotifications(token);
+      const records = await fetchCustomerNotifications(
+        token,
+        activeBookingSlug,
+      );
       setNotifications(records);
     } catch {
       setError("Could not load notifications.");
     } finally {
       setLoading(false);
     }
-  }, [enabled, getIdToken, notifications.length]);
+  }, [activeBookingSlug, enabled, getIdToken, notifications.length]);
 
   reloadRef.current = reload;
 
