@@ -21,7 +21,7 @@ import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
 import {
   formatBundledSmsInclusionLabel,
   formatMessageQuotaLabel,
-  SMS_BUNDLE_FIRST_PERIOD_NOTE,
+  SMS_BUNDLE_RENEWS_NOTE,
 } from "@/lib/sms-packages/helpers";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import type { SmsPackage } from "@/lib/sms-packages/types";
@@ -113,7 +113,7 @@ function PlanShowcaseCard({
           {plan.bundledSmsPackage ? (
             <div className="mt-3 rounded-lg border border-teal-200/80 bg-teal-50 px-3 py-2">
               <p className="font-body text-[10px] font-bold uppercase tracking-wide text-teal-800">
-                SMS included (1st period)
+                SMS included
               </p>
               <p className="mt-1 font-body text-[12px] text-on-surface-variant">
                 {formatBundledSmsInclusionLabel(
@@ -122,7 +122,7 @@ function PlanShowcaseCard({
                 )}
               </p>
               <p className="mt-1 font-body text-[11px] text-teal-800/80">
-                {SMS_BUNDLE_FIRST_PERIOD_NOTE}
+                {SMS_BUNDLE_RENEWS_NOTE}
               </p>
             </div>
           ) : null}

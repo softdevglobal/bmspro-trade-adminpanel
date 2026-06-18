@@ -30,11 +30,7 @@ import {
   planThemeSurface,
 } from "@/lib/subscription-plans/theme";
 import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
-import {
-  formatBundledSmsInclusionLabel,
-  formatMessageQuotaLabel,
-  SMS_BUNDLE_FIRST_PERIOD_NOTE,
-} from "@/lib/sms-packages/helpers";
+import { formatMessageQuotaLabel } from "@/lib/sms-packages/helpers";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -1097,7 +1093,7 @@ export const BusinessOnboardingForm = forwardRef<
               compact={compact}
               externalFooter={externalFooter}
               title={compact && externalFooter ? "Plan details" : "Choose your plan"}
-              subtitle="Select a subscription plan. Bundled SMS is included for the first billing period only — renewals do not include SMS."
+              subtitle="Select a subscription plan for this trade business."
             />
 
             {plansLoading ? (
@@ -1172,7 +1168,7 @@ export const BusinessOnboardingForm = forwardRef<
                               </span>
                               <span className="font-semibold">{sms.name}</span>
                               <span className="text-white/75">
-                                · {formatMessageQuotaLabel(sms.messageQuota)} · 1st period
+                                · {formatMessageQuotaLabel(sms.messageQuota)}
                               </span>
                             </span>
                           ) : null}
@@ -1191,7 +1187,7 @@ export const BusinessOnboardingForm = forwardRef<
                           </div>
                           {sms ? (
                             <p className="mt-2 font-body text-[11px] font-semibold text-teal-700">
-                              Includes {sms.name} — {SMS_BUNDLE_FIRST_PERIOD_NOTE.toLowerCase()}
+                              Includes {sms.name}
                             </p>
                           ) : null}
                           <div className="mt-2">
@@ -1208,10 +1204,11 @@ export const BusinessOnboardingForm = forwardRef<
                                   sms
                                 </span>
                                 <span>
-                                  {formatBundledSmsInclusionLabel(
-                                    sms.name,
-                                    sms.messageQuota,
-                                  )}
+                                  <span className="font-semibold text-on-surface">
+                                    {sms.name}
+                                  </span>
+                                  {" — "}
+                                  {formatMessageQuotaLabel(sms.messageQuota)} included
                                 </span>
                               </li>
                             ) : null}

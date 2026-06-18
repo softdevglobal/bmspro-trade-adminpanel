@@ -227,7 +227,7 @@ export async function deleteSmsPackage(packageId: string): Promise<boolean> {
   return true;
 }
 
-/** SMS package fields written onto businesses at tenant creation (first period only). */
+/** SMS package fields written onto businesses at tenant creation. */
 export function buildTenantSmsFields(
   pkg: SmsPackage,
   options?: { subscriptionValidityDays?: number },
@@ -242,19 +242,75 @@ export function buildTenantSmsFields(
 
   return {
     smsPackageId: pkg.id,
-    smsPackage: {
-      id: pkg.id,
-      name: pkg.name,
-      price: pkg.price,
-      priceLabel: pkg.priceLabel,
-      messageQuota: pkg.messageQuota,
-      plan_key: pkg.plan_key,
-    },
+    smsPackage: snapshotSmsPackage(pkg),
     smsMessageLimit: pkg.messageQuota,
     smsMessagesUsed: 0,
-    smsBundleFirstPeriodOnly: true,
+    smsBundleQuota: pkg.messageQuota,
+    smsBundleRenewsWithPlan: true,
     smsBundleGrantedAt: now,
     smsBundlePeriodEnd: now + validityDays * 24 * 60 * 60 * 1000,
+  };
+}
+
+function snapshotSmsPackage(pkg: SmsPackage): Record<string, unknown> {
+  return {
+    id: pkg.id,
+    name: pkg.name,
+    price: pkg.price,
+    priceLabel: pkg.priceLabel,
+    messageQuota: pkg.messageQuota,
+    plan_key: pkg.plan_key,
+  };
+}
+
+function resolveStoredBundleQuota(data: Record<string, unknown>): number {
+  if (
+    typeof data.smsBundleQuota === "number" &&
+    Number.isFinite(data.smsBundleQuota)
+  ) {
+    return data.smsBundleQuota;
+  }
+  const smsPackage = data.smsPackage as { messageQuota?: number } | null | undefined;
+  if (
+    typeof smsPackage?.messageQuota === "number" &&
+    Number.isFinite(smsPackage.messageQuota)
+  ) {
+    return smsPackage.messageQuota;
+  }
+  return 0;
+}
+
+/**
+ * Re-grants the plan's bundled SMS on subscription renewal.
+ * Purchased top-ups above the previous bundle allowance are preserved.
+ */
+export function buildTenantSmsRenewalFields(
+  pkg: SmsPackage,
+  businessData: Record<string, unknown>,
+): Record<string, unknown> {
+  const now = Date.now();
+  const previousBundle = resolveStoredBundleQuota(businessData);
+  const currentLimit =
+    typeof businessData.smsMessageLimit === "number" &&
+    Number.isFinite(businessData.smsMessageLimit)
+      ? businessData.smsMessageLimit
+      : previousBundle;
+  const purchasedExtra =
+    previousBundle < 0 || pkg.messageQuota < 0
+      ? 0
+      : Math.max(0, currentLimit - previousBundle);
+  const newBundleQuota = pkg.messageQuota;
+  const newLimit =
+    newBundleQuota < 0 ? -1 : Math.max(0, newBundleQuota) + purchasedExtra;
+
+  return {
+    smsPackageId: pkg.id,
+    smsPackage: snapshotSmsPackage(pkg),
+    smsMessageLimit: newLimit,
+    smsMessagesUsed: 0,
+    smsBundleQuota: newBundleQuota,
+    smsBundleRenewsWithPlan: true,
+    smsBundleRenewedAt: now,
   };
 }
 

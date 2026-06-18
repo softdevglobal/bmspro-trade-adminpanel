@@ -11,7 +11,7 @@ export default function OwnerSmsPage() {
   return (
     <DashboardShell
       title="SMS Credits"
-      subtitle="View your remaining SMS balance and buy top-up packages."
+      subtitle="View your remaining SMS balance and top up when you need more messages."
       icon="sms"
     >
       <BusinessOwnerGuard>

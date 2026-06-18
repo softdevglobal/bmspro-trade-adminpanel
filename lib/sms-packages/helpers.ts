@@ -12,13 +12,13 @@ export function formatSmsPriceLabel(price: number): string {
   return `AU$${price}`;
 }
 
-/** Shown on plan cards — bundled SMS does not repeat on subscription renewal. */
-export const SMS_BUNDLE_FIRST_PERIOD_NOTE =
-  "First billing period only — not included on renewal";
+/** Shown on plan cards — bundled SMS repeats each subscription period. */
+export const SMS_BUNDLE_RENEWS_NOTE =
+  "Renews with each subscription billing period";
 
 export function formatBundledSmsInclusionLabel(
   name: string,
   messageQuota: number,
 ): string {
-  return `${name} — ${formatMessageQuotaLabel(messageQuota)} (first billing period)`;
+  return `${name} — ${formatMessageQuotaLabel(messageQuota)} included`;
 }

@@ -1,6 +1,10 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import {
+  buildTenantSmsRenewalFields,
+  resolveSmsPackageForPlan,
+} from "@/lib/sms-packages/server";
 import { DEFAULT_SUBSCRIPTION_PLAN_SEEDS } from "@/lib/subscription-plans/defaults";
 import {
   formatBillingNote,
@@ -326,8 +330,8 @@ export function planBillingNote(plan: SubscriptionPlan): string {
 }
 
 /**
- * Advances the subscription billing period without re-granting bundled SMS.
- * Call from Stripe/webhook renewal handlers — SMS top-ups are purchased separately.
+ * Advances the subscription billing period and re-grants bundled SMS from the plan.
+ * Call from Stripe/webhook renewal handlers.
  */
 export async function renewTenantSubscription(
   businessId: string,
@@ -361,13 +365,17 @@ export async function renewTenantSubscription(
 
   const now = Date.now();
   const periodMs = validityDays * 24 * 60 * 60 * 1000;
+  const smsPackage = plan ? await resolveSmsPackageForPlan(plan) : null;
+  const smsRenewalFields = smsPackage
+    ? buildTenantSmsRenewalFields(smsPackage, data)
+    : {};
 
   await ref.update({
     subscriptionPeriodStart: now,
     subscriptionPeriodEnd: now + periodMs,
     billing_status: "active",
     accountStatus: "active",
-    smsBundleFirstPeriodOnly: false,
+    ...smsRenewalFields,
     updatedAt: FieldValue.serverTimestamp(),
   });
 }

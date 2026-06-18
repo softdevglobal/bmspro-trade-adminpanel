@@ -85,66 +85,57 @@ function SmsTopUpCard({
   const gradient = planThemeGradient(pkg.color);
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-stone-200 shadow-sm">
-      <div className={`relative bg-gradient-to-br ${gradient} px-5 py-6 text-white`}>
-        {pkg.popular ? (
-          <span className="absolute right-4 top-4 rounded-full bg-white/25 px-2.5 py-0.5 font-body text-[10px] font-bold uppercase tracking-wide">
-            Most Popular
-          </span>
-        ) : null}
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 shadow-inner">
-          <span className="material-symbols-outlined text-[28px]">
-            {pkg.icon || "sms"}
-          </span>
+    <article className="flex flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+      <div className={`bg-gradient-to-br ${gradient} px-3 py-3 text-white`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/20">
+              <span className="material-symbols-outlined text-[20px]">
+                {pkg.icon || "sms"}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <h3 className="truncate font-display text-[14px] font-bold leading-tight">
+                {pkg.name}
+              </h3>
+              <p className="mt-0.5 font-body text-[11px] text-white/85">
+                +{formatMessageQuotaLabel(pkg.messageQuota)}
+              </p>
+            </div>
+          </div>
+          {pkg.popular ? (
+            <span className="shrink-0 rounded-full bg-white/25 px-2 py-0.5 font-body text-[9px] font-bold uppercase tracking-wide">
+              Popular
+            </span>
+          ) : null}
         </div>
-        <h3 className="mt-5 font-display text-[18px] font-bold leading-tight">
-          {pkg.name}
-        </h3>
-        <p className="mt-2 font-display text-[26px] font-bold tracking-tight">
+        <p className="mt-2 font-display text-[20px] font-bold leading-none">
           {pkg.priceLabel || formatSmsPriceLabel(pkg.price)}
         </p>
-        <p className="mt-4 font-body text-[12px] text-white/90">
-          +{formatMessageQuotaLabel(pkg.messageQuota)}
-        </p>
       </div>
-      <div className={`${planThemeSurface(pkg.color)} px-5 py-4`}>
+      <div className={`flex flex-1 flex-col ${planThemeSurface(pkg.color)} px-3 py-3`}>
         {pkg.description ? (
-          <p className="font-body text-[13px] leading-relaxed text-on-surface-variant">
+          <p className="line-clamp-2 font-body text-[11px] leading-snug text-on-surface-variant">
             {pkg.description}
           </p>
-        ) : null}
-        {pkg.features.length > 0 ? (
-          <ul className="mt-3 space-y-2">
-            {pkg.features.slice(0, 3).map((feature) => (
-              <li
-                key={feature}
-                className="flex items-start gap-2 font-body text-[12px] text-on-surface-variant"
-              >
-                <span className="material-symbols-outlined mt-0.5 text-[16px] text-primary">
-                  check_circle
-                </span>
-                <span>{feature}</span>
-              </li>
-            ))}
-          </ul>
         ) : null}
         <button
           type="button"
           disabled={purchasing}
           onClick={onPurchase}
-          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#1a1d24] px-4 py-2.5 font-body text-[13px] font-semibold text-white transition-colors hover:bg-[#2a2f3a] disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#1a1d24] px-3 py-2 font-body text-[12px] font-semibold text-white transition-colors hover:bg-[#2a2f3a] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {purchasing ? (
             <>
-              <span className="material-symbols-outlined animate-spin text-[18px]">
+              <span className="material-symbols-outlined animate-spin text-[16px]">
                 progress_activity
               </span>
-              Processing…
+              Topping up…
             </>
           ) : (
             <>
-              <span className="material-symbols-outlined text-[18px]">add_shopping_cart</span>
-              Buy package
+              <span className="material-symbols-outlined text-[16px]">add_circle</span>
+              Top up package
             </>
           )}
         </button>
@@ -203,7 +194,7 @@ export function OwnerSmsBoard() {
   async function handlePurchase(pkg: SmsPackage) {
     if (!user) return;
     const confirmed = window.confirm(
-      `Buy ${pkg.name} and add ${formatMessageQuotaLabel(pkg.messageQuota)} to your account for ${pkg.priceLabel || formatSmsPriceLabel(pkg.price)}?`,
+      `Top up with ${pkg.name} and add ${formatMessageQuotaLabel(pkg.messageQuota)} for ${pkg.priceLabel || formatSmsPriceLabel(pkg.price)}?`,
     );
     if (!confirmed) return;
 
@@ -226,12 +217,12 @@ export function OwnerSmsBoard() {
         error?: string;
       }>(res);
       if (!res.ok || !data.ok || !data.balance) {
-        setError(data.error ?? "Could not purchase SMS package.");
+        setError(data.error ?? "Could not top up SMS credits.");
         return;
       }
       setBalance(data.balance);
       setSuccessMessage(
-        `${pkg.name} purchased. You now have ${
+        `${pkg.name} top-up complete. You now have ${
           data.balance.isUnlimited
             ? "unlimited"
             : String(data.balance.remaining ?? 0)
@@ -239,7 +230,7 @@ export function OwnerSmsBoard() {
       );
       await refresh();
     } catch {
-      setError("Could not purchase SMS package.");
+      setError("Could not top up SMS credits.");
     } finally {
       setPurchasingId(null);
     }
@@ -271,16 +262,16 @@ export function OwnerSmsBoard() {
       {balance ? <BalanceHero balance={balance} /> : null}
 
       <section>
-        <div className="mb-4">
-          <h2 className="font-display text-[18px] font-semibold text-on-surface">
-            Buy SMS packages
+        <div className="mb-3">
+          <h2 className="font-display text-[16px] font-semibold text-on-surface">
+            Top up SMS
           </h2>
-          <p className="mt-1 font-body text-[13px] text-on-surface-variant">
-            Top up your SMS credits. Purchased messages are added to your
-            remaining balance.
+          <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+            Add more messages to your balance. Top-ups stay on your account across
+            subscription renewals.
           </p>
         </div>
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {packages.map((pkg) => (
             <SmsTopUpCard
               key={pkg.id}
