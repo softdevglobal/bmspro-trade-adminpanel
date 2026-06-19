@@ -29,7 +29,7 @@ export function QuotationDocumentPreview({
   const { business, lineItems } = document;
   const serviceDescription = document.serviceDescription?.trim() ?? "";
   const isInvoice = kind === "invoice";
-  const docLabel = isInvoice ? "Invoice" : "Quote";
+  const docLabel = isInvoice ? "Tax Invoice" : "Quote";
   const numberLabel = isInvoice ? "Invoice No" : "Quote No";
   const dateLabel = isInvoice ? "Due date" : "Valid until";
   const displayCustomerPhone = formatAuPhoneDisplay(document.customer.phone);
