@@ -95,10 +95,12 @@ export function parseCreatedSource(
   return isCreatedSource(raw) ? raw : null;
 }
 
-/** Each preferred or proposed slot — date plus a coarse time range. */
+/** Each preferred or proposed slot — date plus session and optional hour window. */
 export type InspectionSlot = {
   date: string; // YYYY-MM-DD
   timeRange: InspectionTimeRange;
+  startTime?: string | null;
+  endTime?: string | null;
 };
 
 export type InspectionAddress = {
@@ -344,7 +346,14 @@ function parseSlot(raw: unknown, timeZone?: string | null): InspectionSlot | nul
   const timeRange = item.timeRange;
   if (!isFutureOrTodayDate(date, timeZone)) return null;
   if (!isTimeRange(timeRange)) return null;
-  return { date, timeRange };
+  const startTime = isClockTime(item.startTime) ? item.startTime : null;
+  const endTime = isClockTime(item.endTime) ? item.endTime : null;
+  return {
+    date,
+    timeRange,
+    ...(startTime ? { startTime } : {}),
+    ...(endTime ? { endTime } : {}),
+  };
 }
 
 function dedupeSlots(slots: InspectionSlot[]): InspectionSlot[] {

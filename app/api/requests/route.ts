@@ -1,4 +1,5 @@
 import { logAuditEvent } from "@/lib/audit/server";
+import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
@@ -146,9 +147,13 @@ export async function POST(request: Request) {
   }
 
   const createdSource = resolveOwnerCreatedSource(request);
+  const calendarSchedule = parseCalendarScheduleInput(
+    (body as Record<string, unknown>).calendarSchedule,
+  );
   const result = await createInspectionRequest(auth.businessId, parsed.value, {
     customerId,
     createdSource,
+    scheduleOnCreate: calendarSchedule ?? undefined,
   });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });

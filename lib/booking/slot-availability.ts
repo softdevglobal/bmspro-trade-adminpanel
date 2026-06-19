@@ -1,5 +1,6 @@
 import "server-only";
 
+import { computeCapacityUnavailableSessions } from "@/lib/calendar/slot-occupancy";
 import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
@@ -177,7 +178,7 @@ function memberAvailableForSlot(
 }
 
 /** Slots where every assignable team member is busy, on leave, or off. */
-export async function computeUnavailableSlots(
+async function computeTeamUnavailableSlots(
   businessId: string,
   fromDate: string,
   toDate: string,
@@ -229,6 +230,28 @@ export async function computeUnavailableSlots(
   return unavailable;
 }
 
+function mergeUnavailableSlots(slots: UnavailableSlot[]): UnavailableSlot[] {
+  const merged = new Map<string, UnavailableSlot>();
+  for (const slot of slots) {
+    merged.set(`${slot.date}-${slot.timeRange}`, slot);
+  }
+  return Array.from(merged.values());
+}
+
+/** Team, leave, and hourly-capacity constraints for customer morning/afternoon picks. */
+export async function computeUnavailableSlots(
+  businessId: string,
+  fromDate: string,
+  toDate: string,
+  timeZone: string,
+): Promise<UnavailableSlot[]> {
+  const [teamUnavailable, capacityUnavailable] = await Promise.all([
+    computeTeamUnavailableSlots(businessId, fromDate, toDate, timeZone),
+    computeCapacityUnavailableSessions(businessId, fromDate, toDate),
+  ]);
+  return mergeUnavailableSlots([...teamUnavailable, ...capacityUnavailable]);
+}
+
 function formatUnavailableSlotMessage(
   slot: InspectionSlot,
   timeZone: string,
@@ -239,7 +262,7 @@ function formatUnavailableSlotMessage(
     timeZone,
   );
   const timeLabel = TIME_RANGE_SHORT_LABELS[slot.timeRange].toLowerCase();
-  return `${dateLabel} (${timeLabel}) is not available — all team members are busy or away. Please choose another date or time.`;
+  return `${dateLabel} (${timeLabel}) is not available. Please choose another date or time.`;
 }
 
 /** Rejects customer preferred slots when no one can be assigned. */

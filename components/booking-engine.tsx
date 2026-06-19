@@ -24,6 +24,7 @@ import {
   SLOT_DAYS_PER_PAGE,
   SLOT_MAX_DAY_PAGES,
   buildBlockedComboSet,
+  isDayFullyBlocked,
   slotComboKey,
   todayIso,
 } from "@/components/booking-slot-date-picker";
@@ -762,7 +763,10 @@ function sortPreferredSlots(slots: PreferredSlot[]): PreferredSlot[] {
 }
 
 const BLOCKED_DAY_HINT =
-  "All team members are busy or away on this day — choose another date";
+  "Both morning and afternoon are unavailable on this day — choose another date";
+
+const BLOCKED_SESSION_HINT =
+  "This session is fully booked or unavailable — choose another time";
 
 function addDaysIso(iso: string, days: number): string {
   const [year, month, day] = iso.split("-").map(Number);
@@ -791,28 +795,37 @@ function DayTimePicker({
   timeRange,
   onTimeChange,
   blockedCombos,
+  availabilityReady = true,
 }: {
   date: string;
   timeRange: SlotTimeRange;
   onTimeChange: (timeRange: SlotTimeRange) => void;
   blockedCombos?: Set<string>;
+  availabilityReady?: boolean;
 }) {
+  useEffect(() => {
+    if (!availabilityReady || !date || !blockedCombos) return;
+    if (!blockedCombos.has(slotComboKey(date, timeRange))) return;
+    const fallback = firstAvailableTimeRange(date, blockedCombos);
+    if (fallback) onTimeChange(fallback);
+  }, [availabilityReady, date, timeRange, blockedCombos, onTimeChange]);
+
   return (
     <div className="mt-2 grid grid-cols-2 gap-2">
       {TIME_RANGE_OPTIONS.map((option) => {
-        const checked = timeRange === option.id;
         const comboBlocked = Boolean(
-          date && blockedCombos?.has(slotComboKey(date, option.id)),
+          availabilityReady &&
+            date &&
+            blockedCombos?.has(slotComboKey(date, option.id)),
         );
+        const checked = !comboBlocked && timeRange === option.id;
         return (
           <button
             type="button"
             key={option.id}
-            disabled={comboBlocked}
+            disabled={!availabilityReady || comboBlocked}
             title={
-              comboBlocked
-                ? "All team members are busy or away during this time"
-                : undefined
+              comboBlocked ? BLOCKED_SESSION_HINT : undefined
             }
             onClick={() => {
               if (!comboBlocked) onTimeChange(option.id);
@@ -829,7 +842,9 @@ function DayTimePicker({
               className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
                 checked
                   ? "bg-primary text-on-primary shadow-sm"
-                  : "bg-stone-100 text-stone-600"
+                  : comboBlocked
+                    ? "bg-stone-100 text-stone-400"
+                    : "bg-stone-100 text-stone-600"
               }`}
             >
               <span className="material-symbols-outlined material-symbols-filled text-[20px]">
@@ -839,13 +854,23 @@ function DayTimePicker({
             <span>
               <span
                 className={`block font-body text-[14px] font-bold ${
-                  checked ? "text-primary" : "text-on-surface"
+                  checked
+                    ? "text-primary"
+                    : comboBlocked
+                      ? "text-stone-400"
+                      : "text-on-surface"
                 }`}
               >
                 {option.label}
               </span>
-              <span className="font-body text-[11px] text-on-surface-variant">
-                {option.hint}
+              <span
+                className={`font-body text-[11px] ${
+                  comboBlocked
+                    ? "font-semibold text-stone-400"
+                    : "text-on-surface-variant"
+                }`}
+              >
+                {comboBlocked ? "Unavailable" : option.hint}
               </span>
             </span>
             {checked ? (
@@ -909,7 +934,10 @@ function ServiceBookingFlow({
     { date: string; timeRange: InspectionTimeRange }[]
   >([]);
   const [availabilityLoading, setAvailabilityLoading] = useState(true);
-  const [slotAvailabilityError, setSlotAvailabilityError] = useState<
+  const [availabilityLoadError, setAvailabilityLoadError] = useState<
+    string | null
+  >(null);
+  const [slotSelectionNotice, setSlotSelectionNotice] = useState<
     string | null
   >(null);
 
@@ -943,6 +971,7 @@ function ServiceBookingFlow({
     () => buildBlockedComboSet(unavailableSlots),
     [unavailableSlots],
   );
+  const availabilityReady = !availabilityLoading && !availabilityLoadError;
   const selectedService =
     services.find((service) => service.id === selectedServiceId) ?? null;
 
@@ -955,8 +984,10 @@ function ServiceBookingFlow({
         customDescription.trim().length >= 10;
 
   const slotsValid =
+    availabilityReady &&
     preferredSlots.length > 0 &&
     preferredSlots.every((slot) => slot.date.trim().length > 0) &&
+    preferredSlots.every((slot) => !isDayFullyBlocked(slot.date, blockedCombos)) &&
     new Set(preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`))
       .size === preferredSlots.length &&
     preferredSlots.every(
@@ -966,7 +997,8 @@ function ServiceBookingFlow({
   useEffect(() => {
     let cancelled = false;
     setAvailabilityLoading(true);
-    setSlotAvailabilityError(null);
+    setAvailabilityLoadError(null);
+    setSlotSelectionNotice(null);
 
     void (async () => {
       try {
@@ -992,7 +1024,7 @@ function ServiceBookingFlow({
         setUnavailableSlots(payload.unavailable);
       } catch (error) {
         if (cancelled) return;
-        setSlotAvailabilityError(
+        setAvailabilityLoadError(
           error instanceof Error
             ? error.message
             : "Could not load available time slots.",
@@ -1009,11 +1041,15 @@ function ServiceBookingFlow({
   }, [slug, minDate, maxBookableDate]);
 
   useEffect(() => {
-    if (availabilityLoading || blockedCombos.size === 0) return;
+    if (!availabilityReady) return;
     setPreferredSlots((prev) => {
       let changed = false;
       const next = prev.flatMap((slot) => {
         if (!slot.date) return [slot];
+        if (isDayFullyBlocked(slot.date, blockedCombos)) {
+          changed = true;
+          return [];
+        }
         if (!blockedCombos.has(slotComboKey(slot.date, slot.timeRange))) {
           return [slot];
         }
@@ -1027,7 +1063,7 @@ function ServiceBookingFlow({
       });
       return changed ? next : prev;
     });
-  }, [availabilityLoading, blockedCombos]);
+  }, [availabilityReady, blockedCombos]);
 
   const customerValid =
     customer.fullName.trim().length >= 2 &&
@@ -1092,8 +1128,8 @@ function ServiceBookingFlow({
     ) {
       const date = preferredSlots[index]!.date;
       if (blockedCombos.has(slotComboKey(date, value))) {
-        setSlotAvailabilityError(
-          "That time is not available — all team members are busy or away. Please choose another time.",
+        setSlotSelectionNotice(
+          "That time is not available. Please choose another session.",
         );
         return;
       }
@@ -1102,7 +1138,7 @@ function ServiceBookingFlow({
       prev.map((slot, idx) => (idx === index ? { ...slot, [key]: value } : slot)),
     );
     setSubmitError(null);
-    setSlotAvailabilityError(null);
+    setSlotSelectionNotice(null);
   }
 
   const selectedPreferredDates = useMemo(
@@ -1111,23 +1147,36 @@ function ServiceBookingFlow({
   );
 
   function togglePreferredDay(iso: string) {
+    if (!availabilityReady) return;
+
+    let blockedDay = false;
     setPreferredSlots((prev) => {
       const exists = prev.some((slot) => slot.date === iso);
       if (exists) {
         return prev.filter((slot) => slot.date !== iso);
       }
       if (prev.length >= 3) return prev;
+      if (isDayFullyBlocked(iso, blockedCombos)) {
+        blockedDay = true;
+        return prev;
+      }
       const timeRange = firstAvailableTimeRange(iso, blockedCombos);
       if (!timeRange) {
-        setSlotAvailabilityError(
-          "That day is not available — all team members are busy or away. Please choose another date.",
-        );
+        blockedDay = true;
         return prev;
       }
       return sortPreferredSlots([...prev, { date: iso, timeRange }]);
     });
+
+    if (blockedDay) {
+      setSlotSelectionNotice(
+        "That day is not available. Please choose another date.",
+      );
+      return;
+    }
+
     setSubmitError(null);
-    setSlotAvailabilityError(null);
+    setSlotSelectionNotice(null);
   }
 
   async function uploadBookingImage(event: ChangeEvent<HTMLInputElement>) {
@@ -1517,7 +1566,7 @@ function ServiceBookingFlow({
               dayPage={workingDayPage}
               onDayPageChange={setWorkingDayPage}
               onToggle={togglePreferredDay}
-              disabled={availabilityLoading}
+              disabled={!availabilityReady}
               label="Pick up to 3 days"
               dayStripLayout="fit"
               blockedCombos={blockedCombos}
@@ -1529,16 +1578,20 @@ function ServiceBookingFlow({
                 <span className="material-symbols-outlined animate-spin text-[16px] text-primary">
                   progress_activity
                 </span>
-                Checking team availability…
+                Checking availability…
               </p>
-            ) : slotAvailabilityError ? (
+            ) : availabilityLoadError ? (
+              <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-800">
+                {availabilityLoadError}
+              </p>
+            ) : slotSelectionNotice ? (
               <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] text-amber-900">
-                {slotAvailabilityError}
+                {slotSelectionNotice}
               </p>
             ) : selectedPreferredDates.length > 0 ? (
               <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                Tap a selected day again to remove it. Unavailable times are
-                greyed out when all team members are busy or away.
+                Tap a selected day again to remove it. Unavailable sessions are
+                greyed out when fully booked or when no one is available.
               </p>
             ) : (
               <p className="mt-3 rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
@@ -1578,6 +1631,7 @@ function ServiceBookingFlow({
                         date={slot.date}
                         timeRange={slot.timeRange}
                         blockedCombos={blockedCombos}
+                        availabilityReady={availabilityReady}
                         onTimeChange={(timeRange) =>
                           updateSlot(slotIndex, "timeRange", timeRange)
                         }

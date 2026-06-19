@@ -11,6 +11,8 @@ type Props = {
   onCancel: () => void;
   onConfirm: () => void;
   isLoading?: boolean;
+  /** Use when this dialog opens above another modal. */
+  stacked?: boolean;
 };
 
 /** Styled yes/no confirmation dialog for destructive actions. */
@@ -23,6 +25,7 @@ export function DeleteConfirmModal({
   onCancel,
   onConfirm,
   isLoading = false,
+  stacked = false,
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -42,7 +45,11 @@ export function DeleteConfirmModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+    <div
+      className={`fixed inset-0 flex items-center justify-center p-4 ${
+        stacked ? "z-[120]" : "z-[110]"
+      }`}
+    >
       <button
         type="button"
         aria-label="Close dialog"

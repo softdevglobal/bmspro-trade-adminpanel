@@ -2,9 +2,10 @@
 
 import {
   formatAddress,
+  formatClockTime,
   TIME_RANGE_SHORT_LABELS,
   formatVisitWindow,
-  type InspectionSlot,
+  isClockTime,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import { useBookings } from "@/lib/bookings/use-bookings";
@@ -13,8 +14,6 @@ import {
   bookingTitle,
   buildMonthGridCalendarEvents,
   calendarCardView,
-  CALENDAR_DAY_TIME_RANGES,
-  calendarEventTimeRange,
   CALENDAR_SOURCE_CARD_CLASS,
   requestTitle,
   CALENDAR_SOURCE_LABELS,
@@ -30,12 +29,29 @@ import {
   type CalendarFilters,
   type CalendarStatusFilterKey,
 } from "@/lib/calendar/events";
+import {
+  CALENDAR_SESSION_META,
+  calendarEventPlacementsForDay,
+  calendarEventHourSlots,
+  calendarSlotSelection,
+  generateCalendarHourSlots,
+  type CalendarHourSlotPlacement,
+  type CalendarSlotSelection,
+  type CalendarTimeSlot,
+} from "@/lib/calendar/time-slots";
+import { usePersonalCalendarEvents } from "@/lib/calendar/use-personal-events";
+import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types";
 import { useCalendarFilterOptions } from "@/lib/calendar/use-calendar-filter-options";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
+import { AddPersonalEventModal } from "@/components/add-personal-event-modal";
+import {
+  CalendarSlotAddMenu,
+  type CalendarAddEventKind,
+} from "@/components/calendar-slot-add-menu";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -135,13 +151,75 @@ function formatWeekRange(anchor: Date): string {
   return `${startFmt.format(start)} – ${endFmt.format(end)}`;
 }
 
-const CALENDAR_SLOT_META: Record<
-  InspectionTimeRange,
-  { icon: string; hint: string }
-> = {
-  morning: { icon: "wb_twilight", hint: "8am – 12pm" },
-  afternoon: { icon: "wb_sunny", hint: "12pm – 5pm" },
-};
+const CALENDAR_HOUR_SLOTS = generateCalendarHourSlots();
+
+const CALENDAR_SESSIONS: {
+  session: InspectionTimeRange;
+  slots: CalendarTimeSlot[];
+}[] = [
+  {
+    session: "morning",
+    slots: CALENDAR_HOUR_SLOTS.filter((slot) => slot.session === "morning"),
+  },
+  {
+    session: "afternoon",
+    slots: CALENDAR_HOUR_SLOTS.filter((slot) => slot.session === "afternoon"),
+  },
+];
+
+function CalendarHourSlotRow({
+  slot,
+  isoDate,
+  placements,
+  canAddEvents,
+  onAddEvent,
+  onOpenLink,
+  onEditPersonalEvent,
+}: {
+  slot: CalendarTimeSlot;
+  isoDate: string;
+  placements: CalendarHourSlotPlacement[];
+  canAddEvents: boolean;
+  onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
+  onOpenLink?: () => void;
+  onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
+}) {
+  const selection = calendarSlotSelection(isoDate, slot);
+  const startLabel = formatClockTime(slot.startTime);
+  const endLabel = formatClockTime(slot.endTime);
+  const timeLabel =
+    startLabel && endLabel ? `${startLabel} – ${endLabel}` : slot.startTime;
+
+  return (
+    <div className="rounded-lg border border-outline-variant/50 bg-surface-container-lowest/80">
+      <div className="flex items-center justify-between gap-3 border-b border-outline-variant/40 px-3 py-2">
+        <p className="font-numeric text-[13px] font-bold text-on-surface">
+          {timeLabel}
+        </p>
+        {canAddEvents ? (
+          <CalendarSlotAddMenu slot={selection} onSelect={onAddEvent} />
+        ) : null}
+      </div>
+      <div className="p-3">
+        {placements.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            <CalendarDayEventCards
+              placements={placements}
+              onOpenLink={onOpenLink}
+              canManageEvents={canAddEvents}
+              onEditPersonalEvent={onEditPersonalEvent}
+              compact
+            />
+          </div>
+        ) : (
+          <p className="font-body text-[12px] text-on-surface-variant">
+            Available
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function CalendarDayTimeSlots({
   isoDate,
@@ -149,85 +227,64 @@ function CalendarDayTimeSlots({
   canAddEvents,
   onAddEvent,
   onOpenLink,
+  onEditPersonalEvent,
 }: {
   isoDate: string;
   events: CalendarEvent[];
   canAddEvents: boolean;
-  onAddEvent: (slot: InspectionSlot) => void;
+  onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
+  onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
 }) {
-  const eventsByRange = useMemo(() => {
-    const map: Partial<Record<InspectionTimeRange, CalendarEvent[]>> = {};
-    for (const event of events) {
-      const range = calendarEventTimeRange(event);
-      if (!range) continue;
-      if (!map[range]) map[range] = [];
-      map[range]!.push(event);
-    }
-    return map;
-  }, [events]);
+  const placementsByHour = useMemo(
+    () => calendarEventPlacementsForDay(events),
+    [events],
+  );
 
   const unslottedEvents = useMemo(
-    () => events.filter((event) => calendarEventTimeRange(event) == null),
+    () => events.filter((event) => calendarEventHourSlots(event).length === 0),
     [events],
   );
 
   return (
-    <div className="flex flex-col gap-4">
-      {CALENDAR_DAY_TIME_RANGES.map((timeRange) => {
-        const slotEvents = eventsByRange[timeRange] ?? [];
-        const meta = CALENDAR_SLOT_META[timeRange];
+    <div className="flex flex-col gap-5">
+      {CALENDAR_SESSIONS.map(({ session, slots }) => {
+        const meta = CALENDAR_SESSION_META[session];
 
         return (
           <section
-            key={timeRange}
+            key={session}
             className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest"
           >
-            <div className="flex items-center justify-between gap-3 border-b border-outline-variant/60 px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <span className="material-symbols-outlined material-symbols-filled text-[18px]">
-                    {meta.icon}
-                  </span>
+            <div className="flex items-center gap-2.5 border-b border-outline-variant/60 px-4 py-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                  {meta.icon}
                 </span>
-                <div className="min-w-0">
-                  <p className="font-body text-[13px] font-bold text-on-surface">
-                    {TIME_RANGE_SHORT_LABELS[timeRange]}
-                  </p>
-                  <p className="font-body text-[11px] text-on-surface-variant">
-                    {meta.hint}
-                  </p>
-                </div>
+              </span>
+              <div className="min-w-0">
+                <p className="font-body text-[13px] font-bold text-on-surface">
+                  {meta.label}
+                </p>
+                <p className="font-body text-[11px] text-on-surface-variant">
+                  {meta.hint} · 1 hour slots
+                </p>
               </div>
-              {canAddEvents ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onAddEvent({ date: isoDate, timeRange })
-                  }
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-2.5 py-1.5 font-body text-[11px] font-semibold text-primary transition-colors hover:border-primary hover:bg-primary/10"
-                >
-                  <span className="material-symbols-outlined text-[14px]">
-                    add
-                  </span>
-                  Add event
-                </button>
-              ) : null}
             </div>
 
-            <div className="p-4">
-              {slotEvents.length > 0 ? (
-                <div className="flex flex-col gap-4">
-                  <CalendarDayEventCards
-                    events={slotEvents}
-                    onOpenLink={onOpenLink}
-                  />
-                </div>
-              ) : (
-                <p className="font-body text-[13px] text-on-surface-variant">
-                  No visits or jobs in this window.
-                </p>
-              )}
+            <div className="flex flex-col gap-2 p-3 sm:p-4">
+              {slots.map((slot) => (
+                <CalendarHourSlotRow
+                  key={`${isoDate}-${slot.startTime}`}
+                  slot={slot}
+                  isoDate={isoDate}
+                  placements={placementsByHour[slot.startTime] ?? []}
+                  canAddEvents={canAddEvents}
+                  onAddEvent={onAddEvent}
+                  onOpenLink={onOpenLink}
+                  onEditPersonalEvent={onEditPersonalEvent}
+                />
+              ))}
             </div>
           </section>
         );
@@ -242,6 +299,8 @@ function CalendarDayTimeSlots({
             <CalendarDayEventCards
               events={unslottedEvents}
               onOpenLink={onOpenLink}
+              canManageEvents={canAddEvents}
+              onEditPersonalEvent={onEditPersonalEvent}
             />
           </div>
         </section>
@@ -277,12 +336,25 @@ function CalendarDetailRow({
 
 function CalendarDayEventCards({
   events,
+  placements,
   onOpenLink,
+  compact = false,
+  canManageEvents = false,
+  onEditPersonalEvent,
 }: {
-  events: CalendarEvent[];
+  events?: CalendarEvent[];
+  placements?: CalendarHourSlotPlacement[];
   onOpenLink?: () => void;
+  compact?: boolean;
+  canManageEvents?: boolean;
+  onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
 }) {
-  if (events.length === 0) {
+  const rows: CalendarHourSlotPlacement[] =
+    placements ??
+    events?.map((event) => ({ event, continued: false })) ??
+    [];
+
+  if (rows.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-outline-variant px-4 py-10 text-center">
         <span className="material-symbols-outlined text-[36px] text-outline-variant">
@@ -297,58 +369,154 @@ function CalendarDayEventCards({
 
   return (
     <>
-      {events.map((event) => {
+      {rows.map(({ event, continued }) => {
+        if (event.personalEvent) {
+          const personal = event.personalEvent;
+          const timeLabel = eventTimeLabel(event, null, event.date);
+
+          return (
+            <article
+              key={`${event.key}-${continued ? "continued" : "start"}`}
+              className={`${CALENDAR_SOURCE_CARD_CLASS.personal}${compact ? " !p-3" : ""}${continued ? " border-l-4 border-l-violet-500/50" : ""}`}
+            >
+              <div className={`flex flex-col ${compact ? "gap-2" : "gap-3"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-wrap gap-2">
+                    {continued ? (
+                      <span className="inline-flex w-fit items-center rounded-full border border-outline-variant bg-surface-container px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
+                        Continued
+                      </span>
+                    ) : null}
+                    <span className="inline-flex w-fit items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-violet-800">
+                      Personal
+                    </span>
+                  </div>
+                  <p
+                    className={`shrink-0 text-right font-numeric font-bold leading-snug text-on-surface ${
+                      compact ? "text-[12px]" : "text-[14px]"
+                    }`}
+                  >
+                    {timeLabel}
+                  </p>
+                </div>
+                {!continued ? (
+                  <h4
+                    className={`font-display font-bold leading-snug text-on-surface ${
+                      compact ? "text-[15px]" : "text-lg"
+                    }`}
+                  >
+                    {personal.title}
+                  </h4>
+                ) : (
+                  <p className="font-body text-[13px] font-semibold text-on-surface">
+                    {personal.title}
+                  </p>
+                )}
+                {personal.notes ? (
+                  <p className="font-body text-[12px] text-on-surface-variant">
+                    {personal.notes}
+                  </p>
+                ) : null}
+                {canManageEvents && !continued && onEditPersonalEvent ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onEditPersonalEvent(personal)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-outline-variant/60 bg-white px-2.5 py-1.5 font-body text-[12px] font-semibold text-on-surface transition-colors hover:border-primary/40 hover:text-primary"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        edit
+                      </span>
+                      Edit
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          );
+        }
+
         const card = calendarCardView(event);
         if (!card) return null;
 
-        const timeLabel = eventTimeLabel(card, event.date);
+        const timeLabel = eventTimeLabel(event, card, event.date);
         const assignee = card.assignedTo;
         const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
         const sourceTone =
           event.source === "jobs"
             ? "bg-primary/10 text-primary border border-primary/25"
-            : "bg-green-50 text-green-700 border border-green-200";
+            : event.source === "personal"
+              ? "bg-violet-50 text-violet-800 border border-violet-200"
+              : "bg-green-50 text-green-700 border border-green-200";
 
         return (
           <article
-            key={event.key}
-            className={CALENDAR_SOURCE_CARD_CLASS[event.source]}
+            key={`${event.key}-${continued ? "continued" : "start"}`}
+            className={`${CALENDAR_SOURCE_CARD_CLASS[event.source]}${compact ? " !p-3" : ""}${continued ? " border-l-4 border-l-primary/50" : ""}`}
           >
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2">
-                <span
-                  className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
+            <div className={`flex flex-col ${compact ? "gap-2" : "gap-3"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap gap-2">
+                  {continued ? (
+                    <span className="inline-flex w-fit items-center rounded-full border border-outline-variant bg-surface-container px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
+                      Continued
+                    </span>
+                  ) : null}
+                  <span
+                    className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${sourceTone}`}
+                  >
+                    {sourceLabel}
+                  </span>
+                  <span
+                    className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${card.statusToneClass}`}
+                  >
+                    {card.statusLabel}
+                  </span>
+                </div>
+                <p
+                  className={`shrink-0 text-right font-numeric font-bold leading-snug text-on-surface ${
+                    compact ? "text-[12px]" : "text-[14px]"
+                  }`}
                 >
-                  {sourceLabel}
-                </span>
-                <span
-                  className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${card.statusToneClass}`}
-                >
-                  {card.statusLabel}
-                </span>
+                  {timeLabel}
+                </p>
               </div>
 
-              <p className="font-numeric text-[15px] font-bold text-on-surface">
-                {timeLabel}
-              </p>
+              {!continued ? (
+                <h4
+                  className={`font-display font-bold leading-snug text-on-surface ${
+                    compact ? "text-[15px]" : "text-lg"
+                  }`}
+                >
+                  {card.title}
+                </h4>
+              ) : (
+                <p className="font-body text-[13px] font-semibold text-on-surface">
+                  {card.title}
+                </p>
+              )}
 
-              <h4 className="font-display text-lg font-bold leading-snug text-on-surface">
-                {card.title}
-              </h4>
+              {!compact ? (
+                <>
+                  <CalendarDetailRow label="Address">
+                    {formatAddress(card.address)}
+                  </CalendarDetailRow>
 
-              <CalendarDetailRow label="Address">
-                {formatAddress(card.address)}
-              </CalendarDetailRow>
+                  <CalendarDetailRow label="Reference" mono>
+                    {card.reference}
+                  </CalendarDetailRow>
 
-              <CalendarDetailRow label="Reference" mono>
-                {card.reference}
-              </CalendarDetailRow>
+                  <CalendarDetailRow label="Customer">
+                    {card.customerName}
+                  </CalendarDetailRow>
+                </>
+              ) : (
+                <p className="font-body text-[12px] text-on-surface-variant">
+                  {card.customerName}
+                </p>
+              )}
 
-              <CalendarDetailRow label="Customer">
-                {card.customerName}
-              </CalendarDetailRow>
-
-              {assignee ? (
+              {!compact && assignee ? (
                 <CalendarDetailRow label="Assigned to">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2">
@@ -377,7 +545,9 @@ function CalendarDayEventCards({
 
               <Link
                 href={card.openHref}
-                className="inline-flex w-fit font-body text-[14px] font-semibold text-primary hover:underline"
+                className={`inline-flex w-fit font-body font-semibold text-primary hover:underline ${
+                  compact ? "text-[13px]" : "text-[14px]"
+                }`}
                 onClick={onOpenLink}
               >
                 Open
@@ -391,18 +561,41 @@ function CalendarDayEventCards({
 }
 
 function calendarEventTitle(event: CalendarEvent): string {
+  if (event.personalEvent) return event.personalEvent.title;
   if (event.booking) return bookingTitle(event.booking);
   if (event.request) return requestTitle(event.request);
   return "—";
 }
 
-function eventTimeLabel(card: CalendarCardView, date: string): string {
-  if (card.scheduledSlot?.date === date) {
-    const window = formatVisitWindow(
-      card.scheduledStartTime,
-      card.scheduledEndTime,
+function eventTimeLabel(
+  event: CalendarEvent,
+  card: CalendarCardView | null,
+  date: string,
+): string {
+  if (event.personalEvent) {
+    return (
+      formatVisitWindow(
+        event.personalEvent.startTime,
+        event.personalEvent.endTime,
+      ) ?? "Time TBC"
     );
-    if (window) return window;
+  }
+
+  if (!card) return "Time TBC";
+
+  const window = formatVisitWindow(
+    card.scheduledStartTime,
+    card.scheduledEndTime,
+  );
+  if (window && card.scheduledSlot?.date === date) {
+    return window;
+  }
+
+  if (card.scheduledSlot?.date === date) {
+    if (isClockTime(card.scheduledStartTime)) {
+      const start = formatClockTime(card.scheduledStartTime);
+      if (start) return start;
+    }
     return TIME_RANGE_SHORT_LABELS[card.scheduledSlot.timeRange];
   }
 
@@ -427,6 +620,10 @@ export function CalendarBoard() {
     loading: bookingsLoading,
     error: bookingsError,
   } = useBookings();
+  const {
+    events: personalEvents,
+    reload: reloadPersonalEvents,
+  } = usePersonalCalendarEvents();
   const { staff, loading: staffLoading } = useBusinessStaffSummary();
   const today = useMemo(() => normalizeDate(new Date()), []);
   const todayIso = useMemo(() => toIsoDateLocal(today), [today]);
@@ -439,8 +636,16 @@ export function CalendarBoard() {
   useRegisterRightDrawer(filterDrawerOpen, "md");
   const [selectedIsoDate, setSelectedIsoDate] = useState<string | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [addModalInitialSlot, setAddModalInitialSlot] =
-    useState<InspectionSlot | null>(null);
+  const [addModalVariant, setAddModalVariant] = useState<"inspection" | "job">(
+    "inspection",
+  );
+  const [addModalInitialWindow, setAddModalInitialWindow] =
+    useState<CalendarSlotSelection | null>(null);
+  const [personalEventModalOpen, setPersonalEventModalOpen] = useState(false);
+  const [personalEventSlot, setPersonalEventSlot] =
+    useState<CalendarSlotSelection | null>(null);
+  const [editingPersonalEvent, setEditingPersonalEvent] =
+    useState<PersonalCalendarEvent | null>(null);
   const [filters, setFilters] = useState<CalendarFilters>(() =>
     emptyCalendarFilters(null),
   );
@@ -464,8 +669,14 @@ export function CalendarBoard() {
   }, [user?.uid]);
 
   const monthGridEvents = useMemo(
-    () => buildMonthGridCalendarEvents(requests, filters, bookings),
-    [requests, filters, bookings],
+    () =>
+      buildMonthGridCalendarEvents(
+        requests,
+        filters,
+        bookings,
+        personalEvents,
+      ),
+    [requests, filters, bookings, personalEvents],
   );
 
   const monthEventsByDate = useMemo(
@@ -569,14 +780,38 @@ export function CalendarBoard() {
     setBookingDrawerOpen(false);
   }
 
-  function openAddEvent(slot: InspectionSlot) {
-    setAddModalInitialSlot(slot);
+  function openAddEvent(
+    kind: CalendarAddEventKind,
+    selection: CalendarSlotSelection,
+  ) {
+    if (kind === "personal") {
+      setEditingPersonalEvent(null);
+      setPersonalEventSlot(selection);
+      setPersonalEventModalOpen(true);
+      return;
+    }
+
+    setAddModalVariant(kind === "job" ? "job" : "inspection");
+    setAddModalInitialWindow(selection);
     setAddModalOpen(true);
   }
 
   function closeAddModal() {
     setAddModalOpen(false);
-    setAddModalInitialSlot(null);
+    setAddModalInitialWindow(null);
+    setAddModalVariant("inspection");
+  }
+
+  function closePersonalEventModal() {
+    setPersonalEventModalOpen(false);
+    setPersonalEventSlot(null);
+    setEditingPersonalEvent(null);
+  }
+
+  function openEditPersonalEvent(event: PersonalCalendarEvent) {
+    setEditingPersonalEvent(event);
+    setPersonalEventSlot(null);
+    setPersonalEventModalOpen(true);
   }
 
   function toggleAssignedToMe(checked: boolean) {
@@ -784,6 +1019,7 @@ export function CalendarBoard() {
               { color: "bg-primary", label: "Jobs" },
               { color: "bg-sky-500", label: "Completed" },
               { color: "bg-green-500", label: "Requests" },
+              { color: "bg-violet-500", label: "Personal" },
             ].map((item) => (
               <div
                 key={item.label}
@@ -1019,7 +1255,7 @@ export function CalendarBoard() {
               <p className="font-body text-[13px] font-semibold text-on-surface-variant">
                 {focusDayEvents.length > 0
                   ? `${focusDayEvents.length} ${focusDayEvents.length === 1 ? "item" : "items"} scheduled`
-                  : "No visits or jobs on this day"}
+                  : "Hourly schedule · 8am to 5pm"}
               </p>
               {isSameDay(focusDate, today) ? (
                 <span className="rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
@@ -1027,9 +1263,13 @@ export function CalendarBoard() {
                 </span>
               ) : null}
             </div>
-            <div className="flex flex-col gap-4">
-              <CalendarDayEventCards events={focusDayEvents} />
-            </div>
+            <CalendarDayTimeSlots
+              isoDate={focusIso}
+              events={focusDayEvents}
+              canAddEvents={canAddEvents}
+              onAddEvent={openAddEvent}
+              onEditPersonalEvent={openEditPersonalEvent}
+            />
           </div>
         ) : null}
       </section>
@@ -1084,6 +1324,7 @@ export function CalendarBoard() {
                 canAddEvents={canAddEvents}
                 onAddEvent={openAddEvent}
                 onOpenLink={closeBookingDrawer}
+                onEditPersonalEvent={openEditPersonalEvent}
               />
             </div>
           </div>
@@ -1093,9 +1334,20 @@ export function CalendarBoard() {
       <AddInspectionModal
         open={addModalOpen}
         onClose={closeAddModal}
-        initialPreferredSlot={addModalInitialSlot}
+        variant={addModalVariant}
+        initialCalendarWindow={addModalInitialWindow}
         onCreated={() => {
           closeAddModal();
+        }}
+      />
+
+      <AddPersonalEventModal
+        open={personalEventModalOpen}
+        onClose={closePersonalEventModal}
+        initialSlot={personalEventSlot}
+        editEvent={editingPersonalEvent}
+        onSaved={() => {
+          void reloadPersonalEvents();
         }}
       />
 
