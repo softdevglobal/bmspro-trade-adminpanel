@@ -1,7 +1,3 @@
-import {
-  logQuotationCreated,
-  logQuotationSent,
-} from "@/lib/audit/action-logs";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   createQuotationForInspection,
@@ -211,10 +207,6 @@ export async function POST(request: Request) {
         { status: result.status },
       );
     }
-    await logQuotationCreated(auth, result.quotation, "standalone");
-    if (send) {
-      await logQuotationSent(auth, result.quotation, "standalone");
-    }
     return NextResponse.json(
       { ok: true, quotation: result.quotation },
       { status: 201 },
@@ -357,11 +349,6 @@ export async function POST(request: Request) {
       { ok: false, error: result.error },
       { status: result.status },
     );
-  }
-
-  await logQuotationCreated(auth, result.quotation, "from_inspection");
-  if (send) {
-    await logQuotationSent(auth, result.quotation, "from_inspection");
   }
 
   return NextResponse.json({ ok: true, quotation: result.quotation });

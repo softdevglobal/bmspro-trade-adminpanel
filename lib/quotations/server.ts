@@ -1,5 +1,6 @@
 import "server-only";
 
+import { logQuotationAuditForActor } from "@/lib/audit/action-logs";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseBookingStatus } from "@/lib/bookings/types";
 import type {
@@ -855,6 +856,22 @@ export async function createQuotationForInspection(
     }
   }
 
+  await logQuotationAuditForActor(
+    businessId,
+    createdBy,
+    {
+      id: quotation.id,
+      quotationCode: quotation.quotationCode,
+      finalPriceAud: quotation.finalPriceAud,
+      customer: quotation.customer,
+    },
+    {
+      logCreated: true,
+      logSent: shouldSend,
+      origin: "from_inspection",
+    },
+  );
+
   return { ok: true, quotation };
 }
 
@@ -1227,6 +1244,25 @@ export async function updateDraftQuotation(
 
   saved = await quotationRef.get();
   quotation = mapQuotationDoc(quotationRef.id, saved.data() ?? {});
+
+  if (shouldSend) {
+    await logQuotationAuditForActor(
+      businessId,
+      updatedBy,
+      {
+        id: quotation.id,
+        quotationCode: quotation.quotationCode,
+        finalPriceAud: quotation.finalPriceAud,
+        customer: quotation.customer,
+      },
+      {
+        logCreated: false,
+        logSent: true,
+        origin: "from_inspection",
+      },
+    );
+  }
+
   return { ok: true, quotation };
 }
 
@@ -2009,6 +2045,22 @@ export async function createStandaloneQuotation(
       console.error("standalone quotation sent notification failed:", error);
     }
   }
+
+  await logQuotationAuditForActor(
+    businessId,
+    createdBy,
+    {
+      id: quotation.id,
+      quotationCode: quotation.quotationCode,
+      finalPriceAud: quotation.finalPriceAud,
+      customer: quotation.customer,
+    },
+    {
+      logCreated: true,
+      logSent: shouldSend,
+      origin: "standalone",
+    },
+  );
 
   return { ok: true, quotation };
 }

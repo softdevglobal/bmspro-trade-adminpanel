@@ -90,6 +90,37 @@ export async function logQuotationSent(
   });
 }
 
+/** Writes quotation created/sent audit events from a user id (best-effort). */
+export async function logQuotationAuditForActor(
+  businessId: string,
+  actorUid: string,
+  quotation: QuotationSummary,
+  options: {
+    logCreated: boolean;
+    logSent: boolean;
+    origin: "standalone" | "from_inspection";
+  },
+): Promise<void> {
+  try {
+    const identity = await resolveAuditIdentityForUid(actorUid);
+    const auth: BusinessAuthor = {
+      uid: actorUid,
+      email: identity.email,
+      name: identity.name,
+      role: identity.role,
+      businessId,
+    };
+    if (options.logCreated) {
+      await logQuotationCreated(auth, quotation, options.origin);
+    }
+    if (options.logSent) {
+      await logQuotationSent(auth, quotation, options.origin);
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Records an "invoice.created" audit event (best-effort). */
 export async function logInvoiceCreated(
   auth: BusinessAuthor,
