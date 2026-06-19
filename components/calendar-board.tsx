@@ -4,6 +4,8 @@ import {
   formatAddress,
   TIME_RANGE_SHORT_LABELS,
   formatVisitWindow,
+  type InspectionSlot,
+  type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
@@ -11,6 +13,8 @@ import {
   bookingTitle,
   buildMonthGridCalendarEvents,
   calendarCardView,
+  CALENDAR_DAY_TIME_RANGES,
+  calendarEventTimeRange,
   CALENDAR_SOURCE_CARD_CLASS,
   requestTitle,
   CALENDAR_SOURCE_LABELS,
@@ -31,6 +35,7 @@ import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
+import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -128,6 +133,121 @@ function formatWeekRange(anchor: Date): string {
     year: "numeric",
   });
   return `${startFmt.format(start)} – ${endFmt.format(end)}`;
+}
+
+const CALENDAR_SLOT_META: Record<
+  InspectionTimeRange,
+  { icon: string; hint: string }
+> = {
+  morning: { icon: "wb_twilight", hint: "8am – 12pm" },
+  afternoon: { icon: "wb_sunny", hint: "12pm – 5pm" },
+};
+
+function CalendarDayTimeSlots({
+  isoDate,
+  events,
+  canAddEvents,
+  onAddEvent,
+  onOpenLink,
+}: {
+  isoDate: string;
+  events: CalendarEvent[];
+  canAddEvents: boolean;
+  onAddEvent: (slot: InspectionSlot) => void;
+  onOpenLink?: () => void;
+}) {
+  const eventsByRange = useMemo(() => {
+    const map: Partial<Record<InspectionTimeRange, CalendarEvent[]>> = {};
+    for (const event of events) {
+      const range = calendarEventTimeRange(event);
+      if (!range) continue;
+      if (!map[range]) map[range] = [];
+      map[range]!.push(event);
+    }
+    return map;
+  }, [events]);
+
+  const unslottedEvents = useMemo(
+    () => events.filter((event) => calendarEventTimeRange(event) == null),
+    [events],
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      {CALENDAR_DAY_TIME_RANGES.map((timeRange) => {
+        const slotEvents = eventsByRange[timeRange] ?? [];
+        const meta = CALENDAR_SLOT_META[timeRange];
+
+        return (
+          <section
+            key={timeRange}
+            className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-outline-variant/60 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+                    {meta.icon}
+                  </span>
+                </span>
+                <div className="min-w-0">
+                  <p className="font-body text-[13px] font-bold text-on-surface">
+                    {TIME_RANGE_SHORT_LABELS[timeRange]}
+                  </p>
+                  <p className="font-body text-[11px] text-on-surface-variant">
+                    {meta.hint}
+                  </p>
+                </div>
+              </div>
+              {canAddEvents ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onAddEvent({ date: isoDate, timeRange })
+                  }
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-2.5 py-1.5 font-body text-[11px] font-semibold text-primary transition-colors hover:border-primary hover:bg-primary/10"
+                >
+                  <span className="material-symbols-outlined text-[14px]">
+                    add
+                  </span>
+                  Add event
+                </button>
+              ) : null}
+            </div>
+
+            <div className="p-4">
+              {slotEvents.length > 0 ? (
+                <div className="flex flex-col gap-4">
+                  <CalendarDayEventCards
+                    events={slotEvents}
+                    onOpenLink={onOpenLink}
+                  />
+                </div>
+              ) : (
+                <p className="font-body text-[13px] text-on-surface-variant">
+                  No visits or jobs in this window.
+                </p>
+              )}
+            </div>
+          </section>
+        );
+      })}
+
+      {unslottedEvents.length > 0 ? (
+        <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+            Other scheduled items
+          </p>
+          <div className="mt-3 flex flex-col gap-4">
+            <CalendarDayEventCards
+              events={unslottedEvents}
+              onOpenLink={onOpenLink}
+            />
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
 }
 
 function CalendarDetailRow({
@@ -296,7 +416,7 @@ function eventTimeLabel(card: CalendarCardView, date: string): string {
 }
 
 export function CalendarBoard() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const {
     requests,
     loading: requestsLoading,
@@ -318,9 +438,14 @@ export function CalendarBoard() {
   useRegisterRightDrawer(bookingDrawerOpen, "md");
   useRegisterRightDrawer(filterDrawerOpen, "md");
   const [selectedIsoDate, setSelectedIsoDate] = useState<string | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addModalInitialSlot, setAddModalInitialSlot] =
+    useState<InspectionSlot | null>(null);
   const [filters, setFilters] = useState<CalendarFilters>(() =>
     emptyCalendarFilters(null),
   );
+
+  const canAddEvents = role === "business_owner";
 
   const {
     services: serviceOptions,
@@ -442,6 +567,16 @@ export function CalendarBoard() {
 
   function closeBookingDrawer() {
     setBookingDrawerOpen(false);
+  }
+
+  function openAddEvent(slot: InspectionSlot) {
+    setAddModalInitialSlot(slot);
+    setAddModalOpen(true);
+  }
+
+  function closeAddModal() {
+    setAddModalOpen(false);
+    setAddModalInitialSlot(null);
   }
 
   function toggleAssignedToMe(checked: boolean) {
@@ -943,14 +1078,26 @@ export function CalendarBoard() {
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="flex flex-col gap-4 p-5">
-              <CalendarDayEventCards
+              <CalendarDayTimeSlots
+                isoDate={selectedIsoDate ?? ""}
                 events={selectedDayEvents}
+                canAddEvents={canAddEvents}
+                onAddEvent={openAddEvent}
                 onOpenLink={closeBookingDrawer}
               />
             </div>
           </div>
         </aside>
       </div>
+
+      <AddInspectionModal
+        open={addModalOpen}
+        onClose={closeAddModal}
+        initialPreferredSlot={addModalInitialSlot}
+        onCreated={() => {
+          closeAddModal();
+        }}
+      />
 
       {/* Filter drawer */}
       <div

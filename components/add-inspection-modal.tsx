@@ -32,6 +32,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onCreated?: (requestId: string) => void;
+  /** Pre-select a date/time when opening from the calendar day drawer. */
+  initialPreferredSlot?: InspectionSlot | null;
 };
 
 type ServiceAddress = {
@@ -552,7 +554,7 @@ function InspectionPreview({
   );
 }
 
-function createInitialForm() {
+function createInitialForm(preferredSlot?: InspectionSlot | null) {
   return {
     requestType: "custom_quote" as InspectionRequestType,
     selectedServiceId: null as string | null,
@@ -561,12 +563,20 @@ function createInitialForm() {
     customerNotes: "",
     budgetAud: "",
     address: { ...EMPTY_ADDRESS },
-    preferredSlots: [] as InspectionSlot[],
+    preferredSlots:
+      preferredSlot?.date?.trim()
+        ? [{ date: preferredSlot.date, timeRange: preferredSlot.timeRange }]
+        : ([] as InspectionSlot[]),
     customer: { fullName: "", email: "", phone: "" },
   };
 }
 
-export function AddInspectionModal({ open, onClose, onCreated }: Props) {
+export function AddInspectionModal({
+  open,
+  onClose,
+  onCreated,
+  initialPreferredSlot = null,
+}: Props) {
   const { user } = useAuth();
   const profile = useBusinessProfile();
   const [step, setStep] = useState(1);
@@ -594,19 +604,28 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
   const timeZone = profile?.timezone;
   const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
 
-  const reset = useCallback(() => {
-    setStep(1);
-    setForm(createInitialForm());
-    setTouched({});
-    setError(null);
-    setSubmitting(false);
-    setSuccess(false);
-  }, []);
+  const reset = useCallback(
+    (preferredSlot?: InspectionSlot | null) => {
+      setStep(1);
+      setForm(createInitialForm(preferredSlot ?? null));
+      setTouched({});
+      setError(null);
+      setSubmitting(false);
+      setSuccess(false);
+      setWorkingDayPage(0);
+    },
+    [],
+  );
 
   const handleClose = useCallback(() => {
     reset();
     onClose();
   }, [onClose, reset]);
+
+  useEffect(() => {
+    if (!open) return;
+    reset(initialPreferredSlot);
+  }, [open, initialPreferredSlot, reset]);
 
   useEffect(() => {
     if (!open) return;

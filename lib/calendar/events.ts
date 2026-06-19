@@ -6,8 +6,10 @@ import {
 } from "@/lib/reference-codes";
 import {
   STATUS_LABELS,
+  TIME_RANGES,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
+  type InspectionTimeRange,
 } from "@/lib/inspection/types";
 
 export type CalendarSource = "requests" | "jobs";
@@ -420,6 +422,37 @@ export function groupEventsByDate(
   }
   return grouped;
 }
+
+/** Morning / afternoon window for a calendar event on its display date. */
+export function calendarEventTimeRange(
+  event: CalendarEvent,
+): InspectionTimeRange | null {
+  const slot = event.booking?.scheduledSlot ?? event.request?.scheduledSlot;
+  if (!slot || slot.date !== event.date) return null;
+  return slot.timeRange;
+}
+
+export function groupEventsByDateAndTimeRange(
+  events: CalendarEvent[],
+): Record<string, Partial<Record<InspectionTimeRange, CalendarEvent[]>>> {
+  const grouped: Record<
+    string,
+    Partial<Record<InspectionTimeRange, CalendarEvent[]>>
+  > = {};
+
+  for (const event of events) {
+    const range = calendarEventTimeRange(event);
+    if (!range) continue;
+    if (!grouped[event.date]) grouped[event.date] = {};
+    const bucket = grouped[event.date]![range] ?? [];
+    bucket.push(event);
+    grouped[event.date]![range] = bucket;
+  }
+
+  return grouped;
+}
+
+export const CALENDAR_DAY_TIME_RANGES = TIME_RANGES;
 
 /** Summary stats across jobs and requests together. */
 export function computeCombinedCalendarStats(
