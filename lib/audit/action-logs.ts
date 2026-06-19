@@ -2,6 +2,10 @@ import "server-only";
 
 import { logAuditEvent } from "@/lib/audit/server";
 import {
+  customerNotificationToAuditEntry,
+  type CustomerNotificationAuditInput,
+} from "@/lib/audit/customer-notification-entries";
+import {
   actorRoleFromClaim,
   type AuditActorRole,
   type AuditSource,
@@ -225,6 +229,148 @@ export async function resolveAuditIdentityForUid(uid: string): Promise<{
   }
 
   return { uid, email: null, name: null, role: "system", businessId: null };
+}
+
+type CustomNotificationActor = {
+  uid: string;
+  email: string | null;
+  name: string | null;
+};
+
+function platformSummary(platforms: { admin: boolean; mobile: boolean }): string {
+  const parts: string[] = [];
+  if (platforms.admin) parts.push("admin panel");
+  if (platforms.mobile) parts.push("mobile app");
+  return parts.length ? parts.join(" + ") : "no platform";
+}
+
+function audienceSummary(audience: "owners" | "all"): string {
+  return audience === "all" ? "owners and staff" : "owners only";
+}
+
+/** Records a super-admin custom notification (broadcast) send. */
+export async function logCustomNotificationSent(params: {
+  actor: CustomNotificationActor;
+  broadcastId: string;
+  title: string;
+  audience: "owners" | "all";
+  platforms: { admin: boolean; mobile: boolean };
+  mobilePushCount: number;
+}): Promise<void> {
+  const who = params.actor.name?.trim() || params.actor.email?.trim() || "Super admin";
+  await logAuditEvent({
+    businessId: null,
+    category: "custom_notification",
+    action: "custom_notification.sent",
+    actor: {
+      uid: params.actor.uid,
+      role: "super_admin",
+      name: params.actor.name,
+      email: params.actor.email,
+    },
+    source: "admin_panel",
+    summary: `${who} sent custom notification "${params.title}" to ${audienceSummary(params.audience)} via ${platformSummary(params.platforms)}`,
+    targetId: params.broadcastId,
+    targetLabel: params.title,
+    metadata: {
+      audience: params.audience,
+      platforms: params.platforms,
+      mobilePushCount: params.mobilePushCount,
+      collection: "admin_broadcasts",
+    },
+  });
+}
+
+/** Records recall or re-activation of a custom notification. */
+export async function logCustomNotificationActiveChanged(params: {
+  actor: CustomNotificationActor;
+  broadcastId: string;
+  title: string;
+  active: boolean;
+}): Promise<void> {
+  const who = params.actor.name?.trim() || params.actor.email?.trim() || "Super admin";
+  await logAuditEvent({
+    businessId: null,
+    category: "custom_notification",
+    action: params.active
+      ? "custom_notification.reactivated"
+      : "custom_notification.recalled",
+    actor: {
+      uid: params.actor.uid,
+      role: "super_admin",
+      name: params.actor.name,
+      email: params.actor.email,
+    },
+    source: "admin_panel",
+    summary: params.active
+      ? `${who} re-activated custom notification "${params.title}"`
+      : `${who} recalled custom notification "${params.title}"`,
+    targetId: params.broadcastId,
+    targetLabel: params.title,
+    metadata: { active: params.active, collection: "admin_broadcasts" },
+  });
+}
+
+/** Records permanent deletion of a custom notification. */
+export async function logCustomNotificationDeleted(params: {
+  actor: CustomNotificationActor;
+  broadcastId: string;
+  title: string;
+}): Promise<void> {
+  const who = params.actor.name?.trim() || params.actor.email?.trim() || "Super admin";
+  await logAuditEvent({
+    businessId: null,
+    category: "custom_notification",
+    action: "custom_notification.deleted",
+    actor: {
+      uid: params.actor.uid,
+      role: "super_admin",
+      name: params.actor.name,
+      email: params.actor.email,
+    },
+    source: "admin_panel",
+    summary: `${who} deleted custom notification "${params.title}"`,
+    targetId: params.broadcastId,
+    targetLabel: params.title,
+    metadata: { collection: "admin_broadcasts" },
+  });
+}
+
+/** Records a document written to the `customer_notifications` collection. */
+export async function logCustomerNotificationCreated(
+  params: CustomerNotificationAuditInput & {
+    auditSource?: AuditSource;
+    auditActor?: {
+      uid?: string | null;
+      role?: AuditActorRole;
+      name?: string | null;
+      email?: string | null;
+    };
+  },
+): Promise<void> {
+  const entry = customerNotificationToAuditEntry({
+    ...params,
+    createdAt: params.createdAt ?? Date.now(),
+  });
+  await logAuditEvent({
+    businessId: entry.businessId,
+    category: entry.category,
+    action: entry.action,
+    actor: {
+      uid: entry.actorUid,
+      role: entry.actorRole,
+      name: entry.actorName,
+      email: entry.actorEmail,
+    },
+    source: entry.source,
+    summary: entry.summary,
+    targetId: entry.targetId,
+    targetLabel: entry.targetLabel,
+    metadata: {
+      ...entry.metadata,
+      synthesizedFromCollection: false,
+    },
+  });
 }
 
 export { actorRoleFromClaim };

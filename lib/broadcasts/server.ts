@@ -59,6 +59,15 @@ export async function listAllBroadcasts(): Promise<BroadcastRecord[]> {
   );
 }
 
+/** Loads one broadcast by id (for audit summaries and admin detail). */
+export async function getBroadcastById(
+  id: string,
+): Promise<BroadcastRecord | null> {
+  const snap = await adminDb.collection(BROADCAST_COLLECTION).doc(id).get();
+  if (!snap.exists) return null;
+  return mapBroadcastDoc(snap.id, snap.data() ?? {});
+}
+
 type CreateBroadcastInput = {
   title: string;
   body: string;

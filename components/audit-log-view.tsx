@@ -122,6 +122,7 @@ export function AuditLogView({
         params.set("bookingSlug", bookingSlug.trim());
       }
       if (source !== "all") params.set("source", source);
+      if (category !== "all") params.set("category", category);
       params.set("limit", "300");
 
       const res = await fetch(`/api/audit-logs?${params.toString()}`, {
@@ -149,7 +150,7 @@ export function AuditLogView({
     } finally {
       setIsLoading(false);
     }
-  }, [businessId, source, isPlatform, isCustomer, bookingSlug, user]);
+  }, [businessId, source, category, isPlatform, isCustomer, bookingSlug, user]);
 
   useEffect(() => {
     void loadTenants();
@@ -229,6 +230,7 @@ export function AuditLogView({
   const categoryOptions = useMemo(() => {
     const categories = AUDIT_CATEGORIES.filter((cat) => {
       if (cat === "staff") return isTenantOwner;
+      if (cat === "custom_notification") return isPlatform;
       if (isCustomer) {
         return (
           cat === "auth" ||
@@ -249,7 +251,7 @@ export function AuditLogView({
         count: stats.byCategory.get(cat) ?? 0,
       })),
     ];
-  }, [isTenantOwner, isCustomer, stats]);
+  }, [isTenantOwner, isCustomer, isPlatform, stats]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -260,7 +262,7 @@ export function AuditLogView({
             setCategory(value as AuditCategory | "all")
           }
           ariaLabel="Filter by category"
-          className="sm:w-48"
+          className="sm:w-55"
         >
           {categoryOptions.map((option) => (
             <option key={option.value} value={option.value}>

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { logCustomerNotificationCreated } from "@/lib/audit/action-logs";
 import { normalizeEmail } from "@/lib/customer/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapNotificationDoc as mapNotificationRecord } from "@/lib/notifications/map-notification-doc";
@@ -130,6 +131,22 @@ async function createNotification(
     notifyBusinessNotificationsChanged(input.businessId);
   } else if (input.audience === "customer" && input.customerId) {
     notifyCustomerNotificationsChanged(input.customerId);
+  }
+
+  if (input.audience === "customer") {
+    await logCustomerNotificationCreated({
+      notificationId: ref.id,
+      businessId: input.businessId,
+      customerId: input.customerId,
+      customerEmail: customerEmail,
+      customerName: input.customerName,
+      businessName: input.businessName,
+      requestId: input.requestId,
+      type: input.type,
+      title: input.title,
+      status: input.status,
+      portalOnly: input.portalOnly,
+    });
   }
 
   return ref.id;

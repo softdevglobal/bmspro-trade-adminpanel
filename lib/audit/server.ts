@@ -1,5 +1,6 @@
 import "server-only";
 
+import { listCustomerNotificationAuditEntries } from "@/lib/audit/customer-notification-entries";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   AUDIT_COLLECTION,
@@ -181,8 +182,59 @@ export async function listAuditLogs(filters: {
     );
   }
 
+  entries = await mergeCustomerNotificationAuditEntries(entries, filters);
+
   entries.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   return entries.slice(0, limit);
+}
+
+async function mergeCustomerNotificationAuditEntries(
+  entries: AuditLogEntry[],
+  filters: {
+    businessId?: string | null;
+    category?: AuditCategory | null;
+    source?: AuditSource | null;
+    participantUid?: string | null;
+    limit?: number;
+  },
+): Promise<AuditLogEntry[]> {
+  if (
+    filters.category &&
+    filters.category !== "customer_notification"
+  ) {
+    return entries;
+  }
+
+  const fromCollection = await listCustomerNotificationAuditEntries({
+    businessId: filters.businessId,
+    participantUid: filters.participantUid,
+  });
+
+  const loggedNotificationIds = new Set(
+    entries
+      .filter(
+        (entry) =>
+          entry.category === "customer_notification" && entry.targetId,
+      )
+      .map((entry) => entry.targetId as string),
+  );
+
+  const merged = [...entries];
+  for (const entry of fromCollection) {
+    if (entry.targetId && loggedNotificationIds.has(entry.targetId)) {
+      continue;
+    }
+    if (filters.source && entry.source !== filters.source) {
+      continue;
+    }
+    merged.push(entry);
+  }
+
+  if (filters.category === "customer_notification") {
+    return merged.filter((entry) => entry.category === "customer_notification");
+  }
+
+  return merged;
 }
 
 export { actorRoleFromClaim };

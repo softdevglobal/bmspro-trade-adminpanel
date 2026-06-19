@@ -1,5 +1,14 @@
 import { requireSuperAdmin } from "@/lib/onboarding/server";
-import { deleteBroadcast, setBroadcastActive } from "@/lib/broadcasts/server";
+import {
+  logCustomNotificationActiveChanged,
+  logCustomNotificationDeleted,
+  resolveAuditIdentityForUid,
+} from "@/lib/audit/action-logs";
+import {
+  deleteBroadcast,
+  getBroadcastById,
+  setBroadcastActive,
+} from "@/lib/broadcasts/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -26,10 +35,28 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: "`active` must be a boolean." }, { status: 400 });
   }
 
+  const existing = await getBroadcastById(id);
+  if (!existing) {
+    return NextResponse.json({ ok: false, error: "Message not found." }, { status: 404 });
+  }
+
   const ok = await setBroadcastActive(id, payload.active);
   if (!ok) {
     return NextResponse.json({ ok: false, error: "Message not found." }, { status: 404 });
   }
+
+  const identity = await resolveAuditIdentityForUid(auth.uid);
+  await logCustomNotificationActiveChanged({
+    actor: {
+      uid: auth.uid,
+      email: identity.email ?? auth.email ?? null,
+      name: identity.name,
+    },
+    broadcastId: id,
+    title: existing.title,
+    active: payload.active,
+  });
+
   return NextResponse.json({ ok: true });
 }
 
@@ -42,9 +69,27 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   }
   const { id } = await context.params;
+
+  const existing = await getBroadcastById(id);
+  if (!existing) {
+    return NextResponse.json({ ok: false, error: "Message not found." }, { status: 404 });
+  }
+
   const ok = await deleteBroadcast(id);
   if (!ok) {
     return NextResponse.json({ ok: false, error: "Message not found." }, { status: 404 });
   }
+
+  const identity = await resolveAuditIdentityForUid(auth.uid);
+  await logCustomNotificationDeleted({
+    actor: {
+      uid: auth.uid,
+      email: identity.email ?? auth.email ?? null,
+      name: identity.name,
+    },
+    broadcastId: id,
+    title: existing.title,
+  });
+
   return NextResponse.json({ ok: true });
 }

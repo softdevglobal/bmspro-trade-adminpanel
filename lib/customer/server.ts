@@ -212,7 +212,7 @@ export type EnsuredCustomerAccount = {
 };
 
 /**
- * Ensures a customer account exists for the given email — creating a Firebase
+ * Ensures a customer account exists for the given email - creating a Firebase
  * Auth user with the default password and a `customers/{uid}` profile when one
  * doesn't already exist. Used when a business owner adds an inspection on a
  * customer's behalf. Best-effort welcome email with credentials on creation.
@@ -256,7 +256,7 @@ export async function ensureCustomerAccount(input: {
   const snap = await ref.get();
   const now = FieldValue.serverTimestamp();
 
-  // New to the customers collection — even if a login already existed.
+  // New to the customers collection - even if a login already existed.
   const isNewCustomer = !snap.exists;
 
   if (isNewCustomer) {
