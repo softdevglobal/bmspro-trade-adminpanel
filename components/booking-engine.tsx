@@ -21,10 +21,18 @@ import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes"
 import { useCustomerAuth, useCustomerBookingSlug } from "@/lib/customer-auth/customer-auth-context";
 import {
   SlotDayPicker,
+  SLOT_DAYS_PER_PAGE,
+  SLOT_MAX_DAY_PAGES,
+  buildBlockedComboSet,
+  slotComboKey,
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { AuPhoneInput } from "@/components/au-phone-input";
-import { formatAddress } from "@/lib/inspection/types";
+import {
+  TIME_RANGES,
+  formatAddress,
+  type InspectionTimeRange,
+} from "@/lib/inspection/types";
 import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   isValidAuLocalPhone,
@@ -753,26 +761,68 @@ function sortPreferredSlots(slots: PreferredSlot[]): PreferredSlot[] {
   return [...slots].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+const BLOCKED_DAY_HINT =
+  "All team members are busy or away on this day — choose another date";
+
+function addDaysIso(iso: string, days: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(year!, month! - 1, day!, 12, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  const nextYear = date.getFullYear();
+  const nextMonth = String(date.getMonth() + 1).padStart(2, "0");
+  const nextDay = String(date.getDate()).padStart(2, "0");
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function firstAvailableTimeRange(
+  date: string,
+  blockedCombos: Set<string>,
+): SlotTimeRange | null {
+  for (const range of TIME_RANGES) {
+    if (!blockedCombos.has(slotComboKey(date, range))) {
+      return range;
+    }
+  }
+  return null;
+}
+
 function DayTimePicker({
+  date,
   timeRange,
   onTimeChange,
+  blockedCombos,
 }: {
+  date: string;
   timeRange: SlotTimeRange;
   onTimeChange: (timeRange: SlotTimeRange) => void;
+  blockedCombos?: Set<string>;
 }) {
   return (
     <div className="mt-2 grid grid-cols-2 gap-2">
       {TIME_RANGE_OPTIONS.map((option) => {
         const checked = timeRange === option.id;
+        const comboBlocked = Boolean(
+          date && blockedCombos?.has(slotComboKey(date, option.id)),
+        );
         return (
           <button
             type="button"
             key={option.id}
-            onClick={() => onTimeChange(option.id)}
-            className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
-              checked
-                ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+            disabled={comboBlocked}
+            title={
+              comboBlocked
+                ? "All team members are busy or away during this time"
+                : undefined
+            }
+            onClick={() => {
+              if (!comboBlocked) onTimeChange(option.id);
+            }}
+            className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-45 ${
+              comboBlocked
+                ? "border-stone-100 bg-stone-50"
+                : checked
+                  ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                  : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
             }`}
           >
             <span
@@ -855,6 +905,13 @@ function ServiceBookingFlow({
     null,
   );
   const [workingDayPage, setWorkingDayPage] = useState(0);
+  const [unavailableSlots, setUnavailableSlots] = useState<
+    { date: string; timeRange: InspectionTimeRange }[]
+  >([]);
+  const [availabilityLoading, setAvailabilityLoading] = useState(true);
+  const [slotAvailabilityError, setSlotAvailabilityError] = useState<
+    string | null
+  >(null);
 
   const customerAuth = useCustomerAuth();
   const isAuthenticated = customerAuth.status === "authenticated";
@@ -878,6 +935,14 @@ function ServiceBookingFlow({
   const profileLocked = isAuthenticated;
 
   const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
+  const maxBookableDate = useMemo(
+    () => addDaysIso(minDate, SLOT_MAX_DAY_PAGES * SLOT_DAYS_PER_PAGE - 1),
+    [minDate],
+  );
+  const blockedCombos = useMemo(
+    () => buildBlockedComboSet(unavailableSlots),
+    [unavailableSlots],
+  );
   const selectedService =
     services.find((service) => service.id === selectedServiceId) ?? null;
 
@@ -893,7 +958,76 @@ function ServiceBookingFlow({
     preferredSlots.length > 0 &&
     preferredSlots.every((slot) => slot.date.trim().length > 0) &&
     new Set(preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`))
-      .size === preferredSlots.length;
+      .size === preferredSlots.length &&
+    preferredSlots.every(
+      (slot) => !blockedCombos.has(slotComboKey(slot.date, slot.timeRange)),
+    );
+
+  useEffect(() => {
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    setSlotAvailabilityError(null);
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          slug,
+          from: minDate,
+          to: maxBookableDate,
+        });
+        const response = await fetch(
+          `/api/booking/slot-availability?${params.toString()}`,
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          unavailable?: { date: string; timeRange: InspectionTimeRange }[];
+        };
+        if (cancelled) return;
+        if (!response.ok || !payload.ok || !payload.unavailable) {
+          throw new Error(
+            payload.error ?? "Could not load available time slots.",
+          );
+        }
+        setUnavailableSlots(payload.unavailable);
+      } catch (error) {
+        if (cancelled) return;
+        setSlotAvailabilityError(
+          error instanceof Error
+            ? error.message
+            : "Could not load available time slots.",
+        );
+        setUnavailableSlots([]);
+      } finally {
+        if (!cancelled) setAvailabilityLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, minDate, maxBookableDate]);
+
+  useEffect(() => {
+    if (availabilityLoading || blockedCombos.size === 0) return;
+    setPreferredSlots((prev) => {
+      let changed = false;
+      const next = prev.flatMap((slot) => {
+        if (!slot.date) return [slot];
+        if (!blockedCombos.has(slotComboKey(slot.date, slot.timeRange))) {
+          return [slot];
+        }
+        const fallback = firstAvailableTimeRange(slot.date, blockedCombos);
+        if (!fallback) {
+          changed = true;
+          return [];
+        }
+        if (fallback !== slot.timeRange) changed = true;
+        return [{ ...slot, timeRange: fallback }];
+      });
+      return changed ? next : prev;
+    });
+  }, [availabilityLoading, blockedCombos]);
 
   const customerValid =
     customer.fullName.trim().length >= 2 &&
@@ -929,7 +1063,8 @@ function ServiceBookingFlow({
     slotsValid &&
     customerValid &&
     !submitting &&
-    !submittedRequestId;
+    !submittedRequestId &&
+    !availabilityLoading;
 
   function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
@@ -950,10 +1085,24 @@ function ServiceBookingFlow({
     key: K,
     value: PreferredSlot[K],
   ) {
+    if (
+      key === "timeRange" &&
+      typeof value === "string" &&
+      preferredSlots[index]?.date
+    ) {
+      const date = preferredSlots[index]!.date;
+      if (blockedCombos.has(slotComboKey(date, value))) {
+        setSlotAvailabilityError(
+          "That time is not available — all team members are busy or away. Please choose another time.",
+        );
+        return;
+      }
+    }
     setPreferredSlots((prev) =>
       prev.map((slot, idx) => (idx === index ? { ...slot, [key]: value } : slot)),
     );
     setSubmitError(null);
+    setSlotAvailabilityError(null);
   }
 
   const selectedPreferredDates = useMemo(
@@ -968,12 +1117,17 @@ function ServiceBookingFlow({
         return prev.filter((slot) => slot.date !== iso);
       }
       if (prev.length >= 3) return prev;
-      return sortPreferredSlots([
-        ...prev,
-        { date: iso, timeRange: "morning" },
-      ]);
+      const timeRange = firstAvailableTimeRange(iso, blockedCombos);
+      if (!timeRange) {
+        setSlotAvailabilityError(
+          "That day is not available — all team members are busy or away. Please choose another date.",
+        );
+        return prev;
+      }
+      return sortPreferredSlots([...prev, { date: iso, timeRange }]);
     });
     setSubmitError(null);
+    setSlotAvailabilityError(null);
   }
 
   async function uploadBookingImage(event: ChangeEvent<HTMLInputElement>) {
@@ -1363,13 +1517,28 @@ function ServiceBookingFlow({
               dayPage={workingDayPage}
               onDayPageChange={setWorkingDayPage}
               onToggle={togglePreferredDay}
+              disabled={availabilityLoading}
               label="Pick up to 3 days"
               dayStripLayout="fit"
+              blockedCombos={blockedCombos}
+              blockedDayHint={BLOCKED_DAY_HINT}
               timeZone={timeZone}
             />
-            {selectedPreferredDates.length > 0 ? (
+            {availabilityLoading ? (
+              <p className="mt-3 inline-flex items-center gap-2 font-body text-[12px] text-on-surface-variant">
+                <span className="material-symbols-outlined animate-spin text-[16px] text-primary">
+                  progress_activity
+                </span>
+                Checking team availability…
+              </p>
+            ) : slotAvailabilityError ? (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] text-amber-900">
+                {slotAvailabilityError}
+              </p>
+            ) : selectedPreferredDates.length > 0 ? (
               <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                Tap a selected day again to remove it.
+                Tap a selected day again to remove it. Unavailable times are
+                greyed out when all team members are busy or away.
               </p>
             ) : (
               <p className="mt-3 rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
@@ -1406,7 +1575,9 @@ function ServiceBookingFlow({
                         {formatPrettyDate(slot.date, timeZone)}
                       </p>
                       <DayTimePicker
+                        date={slot.date}
                         timeRange={slot.timeRange}
+                        blockedCombos={blockedCombos}
                         onTimeChange={(timeRange) =>
                           updateSlot(slotIndex, "timeRange", timeRange)
                         }

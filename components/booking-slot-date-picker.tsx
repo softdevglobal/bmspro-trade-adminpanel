@@ -209,6 +209,7 @@ export function BookingMonthCalendar({
   onSelect,
   onToggle,
   blockedCombos,
+  blockedDayHint = "Customer already offered both morning and afternoon on this day",
   className = "",
   timeZone,
 }: {
@@ -221,6 +222,7 @@ export function BookingMonthCalendar({
   onToggle?: (iso: string) => void;
   /** Date+time combos that cannot be chosen (e.g. customer's original picks). */
   blockedCombos?: Set<string>;
+  blockedDayHint?: string;
   className?: string;
   timeZone?: string | null;
 }) {
@@ -339,6 +341,13 @@ export function BookingMonthCalendar({
               key={cell.iso}
               type="button"
               disabled={disabled || atMax}
+              title={
+                comboBlocked
+                  ? blockedDayHint
+                  : past
+                    ? "Choose the inspection day or later"
+                    : undefined
+              }
               onClick={() => {
                 if (mode === "multiple") {
                   onToggle?.(cell.iso);
@@ -379,6 +388,7 @@ export function SlotDayPicker({
   disabled = false,
   label = "Pick a day",
   blockedCombos,
+  blockedDayHint = "Customer already offered both morning and afternoon on this day",
   /** Customer booking: horizontal scroll strip. Admin propose dates: fit row, no scroll. */
   dayStripLayout = "scroll",
   timeZone,
@@ -395,6 +405,7 @@ export function SlotDayPicker({
   disabled?: boolean;
   label?: string;
   blockedCombos?: Set<string>;
+  blockedDayHint?: string;
   dayStripLayout?: SlotDayStripLayout;
   timeZone?: string | null;
 }) {
@@ -480,7 +491,7 @@ export function SlotDayPicker({
           atMax
             ? "You can pick up to 3 days — tap a selected day to remove it"
             : dayBlocked
-              ? "Customer already offered both morning and afternoon on this day"
+              ? blockedDayHint
               : tooEarly
                 ? "Choose the inspection day or later"
                 : undefined
@@ -620,6 +631,7 @@ export function SlotDayPicker({
           maxSelections={maxSelections}
           minDate={minDate}
           blockedCombos={blockedCombos}
+          blockedDayHint={blockedDayHint}
           timeZone={timeZone}
           onSelect={(iso) => {
             onSelect?.(iso);
