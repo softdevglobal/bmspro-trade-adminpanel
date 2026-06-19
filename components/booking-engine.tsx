@@ -1,9 +1,11 @@
 "use client";
 
+import type { ChangeEvent } from "react";
+
 import type { BookingBusiness, BookingService } from "@/app/booknow/[slug]/page";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CUSTOMER_FIXED_NAV_BAR_CLASS,
   CUSTOMER_FIXED_NAV_INNER_CLASS,
@@ -534,17 +536,29 @@ function normalizeBudgetInput(value: string): string {
   return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
 }
 
+const MAX_BOOKING_IMAGES = 5;
+
 function BookingRequestExtras({
   notes,
   budget,
+  imageUrls,
+  uploadingImage,
   onNotesChange,
   onBudgetChange,
+  onUploadImage,
+  onRemoveImage,
 }: {
   notes: string;
   budget: string;
+  imageUrls: string[];
+  uploadingImage: boolean;
   onNotesChange: (value: string) => void;
   onBudgetChange: (value: string) => void;
+  onUploadImage: (event: ChangeEvent<HTMLInputElement>) => void;
+  onRemoveImage: (index: number) => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <div className="mt-4 rounded-xl border border-stone-200/90 bg-white p-3 shadow-sm sm:p-4">
       <p className={BOOKING_LABEL_CLASS}>Additional details</p>
@@ -565,6 +579,56 @@ function BookingRequestExtras({
             maxLength={2000}
           />
         </label>
+
+        <div className="block">
+          <span className={BOOKING_LABEL_CLASS}>Photos</span>
+          <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
+            Add photos of the area or issue (optional, up to {MAX_BOOKING_IMAGES}{" "}
+            images).
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={(event) => onUploadImage(event)}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage || imageUrls.length >= MAX_BOOKING_IMAGES}
+            className="mt-2 inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-[#faf8f5] px-3 py-2 font-body text-[13px] font-semibold text-primary transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              add_a_photo
+            </span>
+            {uploadingImage ? "Uploading…" : "Add photo"}
+          </button>
+          {imageUrls.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {imageUrls.map((url, index) => (
+                <li key={url} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt=""
+                    className="h-16 w-16 rounded-lg border border-stone-200 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onRemoveImage(index)}
+                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-on-surface text-surface shadow-sm"
+                    aria-label="Remove photo"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">
+                      close
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
 
         <label className="block">
           <span className={BOOKING_LABEL_CLASS}>Your budget</span>
@@ -775,6 +839,8 @@ function ServiceBookingFlow({
   const [customDescription, setCustomDescription] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
   const [budgetAud, setBudgetAud] = useState("");
+  const [customerImageUrls, setCustomerImageUrls] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
   const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([]);
   const [customer, setCustomer] = useState({
@@ -910,6 +976,50 @@ function ServiceBookingFlow({
     setSubmitError(null);
   }
 
+  async function uploadBookingImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (customerImageUrls.length >= MAX_BOOKING_IMAGES) return;
+
+    setUploadingImage(true);
+    setSubmitError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("slug", slug);
+
+      const headers: Record<string, string> = {};
+      const idToken = await customerAuth.getIdToken();
+      if (idToken) {
+        headers.authorization = `Bearer ${idToken}`;
+      }
+
+      const response = await fetch("/api/uploads/booking-image", {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        imageUrl?: string;
+      };
+      if (!response.ok || !data.ok || !data.imageUrl) {
+        throw new Error(data.error ?? "Could not upload photo.");
+      }
+      setCustomerImageUrls((prev) =>
+        [...prev, data.imageUrl!].slice(0, MAX_BOOKING_IMAGES),
+      );
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : "Could not upload photo.",
+      );
+    } finally {
+      setUploadingImage(false);
+      event.target.value = "";
+    }
+  }
+
   async function submitInspectionRequest() {
     setSubmitting(true);
     setSubmitError(null);
@@ -946,6 +1056,7 @@ function ServiceBookingFlow({
           preferredSlots,
           customerNotes: customerNotes.trim() || null,
           budgetAud: budgetAud.trim() || null,
+          customerImageUrls,
         }),
       });
 
@@ -1140,12 +1251,21 @@ function ServiceBookingFlow({
           <BookingRequestExtras
             notes={customerNotes}
             budget={budgetAud}
+            imageUrls={customerImageUrls}
+            uploadingImage={uploadingImage}
             onNotesChange={(value) => {
               setCustomerNotes(value);
               setSubmitError(null);
             }}
             onBudgetChange={(value) => {
               setBudgetAud(value);
+              setSubmitError(null);
+            }}
+            onUploadImage={(event) => void uploadBookingImage(event)}
+            onRemoveImage={(index) => {
+              setCustomerImageUrls((prev) =>
+                prev.filter((_, idx) => idx !== index),
+              );
               setSubmitError(null);
             }}
           />

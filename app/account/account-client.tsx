@@ -1743,6 +1743,30 @@ function BookingCard({
             </BookingDetailRow>
           ) : null}
 
+          {booking.customerImageUrls.length > 0 ? (
+            <BookingDetailRow icon="photo_library" label="Your photos">
+              <ul className="mt-1 flex flex-wrap gap-2">
+                {booking.customerImageUrls.map((url) => (
+                  <li key={url}>
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-outline-variant/50"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt=""
+                        className="h-16 w-16 object-cover"
+                      />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </BookingDetailRow>
+          ) : null}
+
           {formatBudgetAud(booking.budgetAud) ? (
             <BookingDetailRow
               icon="payments"

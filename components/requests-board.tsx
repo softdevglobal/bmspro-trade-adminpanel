@@ -2290,7 +2290,8 @@ function CustomerExtrasSection({
   request: InspectionRequestDetail;
 }) {
   const budgetLabel = formatBudgetAud(request.budgetAud);
-  if (!request.customerNotes && !budgetLabel) return null;
+  const hasImages = request.customerImageUrls.length > 0;
+  if (!request.customerNotes && !budgetLabel && !hasImages) return null;
 
   return (
     <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
@@ -2310,6 +2311,31 @@ function CustomerExtrasSection({
         >
           {budgetLabel}
         </p>
+      ) : null}
+      {hasImages ? (
+        <ul
+          className={`flex flex-wrap gap-2 ${
+            request.customerNotes || budgetLabel ? "mt-3" : "mt-1.5"
+          }`}
+        >
+          {request.customerImageUrls.map((url) => (
+            <li key={url}>
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block overflow-hidden rounded-lg border border-outline-variant/50"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt="Customer photo"
+                  className="h-20 w-20 object-cover transition-opacity hover:opacity-90"
+                />
+              </a>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   );

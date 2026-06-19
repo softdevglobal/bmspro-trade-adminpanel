@@ -171,6 +171,7 @@ export async function createInspectionRequest(
     ownerNote: null,
     customerNotes: input.customerNotes,
     budgetAud: input.budgetAud,
+    customerImageUrls: input.customerImageUrls,
     createdAt: now,
     updatedAt: now,
   });
