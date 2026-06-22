@@ -32,6 +32,8 @@ type NavItem = {
     href: string;
     label: string;
     icon: string;
+    /** Only highlight when the path matches exactly (for overlapping prefixes). */
+    exact?: boolean;
   }>;
 };
 
@@ -105,9 +107,27 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/sms",
-    label: "SMS Credits",
+    label: "SMS",
     icon: "sms",
     businessOwner: true,
+    children: [
+      {
+        href: "/dashboard/sms",
+        label: "Credits",
+        icon: "account_balance_wallet",
+        exact: true,
+      },
+      {
+        href: "/dashboard/sms/logs",
+        label: "SMS logs",
+        icon: "history",
+      },
+      {
+        href: "/dashboard/sms/custom-messages",
+        label: "Custom messages",
+        icon: "campaign",
+      },
+    ],
   },
   {
     href: "/dashboard/tenants",
@@ -189,6 +209,11 @@ export function Sidebar({
     if (pathname.startsWith("/dashboard/team")) {
       setOpenNavGroups((current) =>
         current.Team ? current : { ...current, Team: true },
+      );
+    }
+    if (pathname.startsWith("/dashboard/sms")) {
+      setOpenNavGroups((current) =>
+        current.SMS ? current : { ...current, SMS: true },
       );
     }
   }, [pathname]);
@@ -423,7 +448,9 @@ export function Sidebar({
 
             if (hasChildren) {
               const childLinks = childItems.map((child) => {
-                const childActive = isNavItemActive(pathname, child.href);
+                const childActive = child.exact
+                  ? pathname === child.href
+                  : isNavItemActive(pathname, child.href);
                 return (
                   <Link
                     key={child.href}
@@ -495,10 +522,9 @@ export function Sidebar({
                           {item.label}
                         </p>
                         {childItems.map((child) => {
-                          const childActive = isNavItemActive(
-                            pathname,
-                            child.href,
-                          );
+                          const childActive = child.exact
+                            ? pathname === child.href
+                            : isNavItemActive(pathname, child.href);
                           return (
                             <Link
                               key={child.href}
