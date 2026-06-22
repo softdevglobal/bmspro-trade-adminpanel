@@ -269,6 +269,7 @@ export function AuditLogView({
           }
           ariaLabel="Filter by category"
           className="sm:w-55"
+          
         >
           {categoryOptions.map((option) => (
             <option key={option.value} value={option.value}>
