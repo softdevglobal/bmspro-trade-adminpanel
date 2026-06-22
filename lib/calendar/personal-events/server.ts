@@ -1,6 +1,7 @@
 import "server-only";
 
 import { validateCalendarVisitWindow } from "@/lib/calendar/visit-window";
+import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   PERSONAL_EVENTS_COLLECTION,
@@ -70,6 +71,14 @@ export async function createPersonalCalendarEvent(
     return { ok: false, error: windowError };
   }
 
+  if (await isBusinessClosedOnDate(businessId, input.date)) {
+    return {
+      ok: false,
+      error:
+        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+    };
+  }
+
   const ref = adminDb.collection(PERSONAL_EVENTS_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
 
@@ -125,6 +134,18 @@ export async function updatePersonalCalendarEvent(
   );
   if (windowError) {
     return { ok: false, status: 400, error: windowError };
+  }
+
+  if (
+    input.date !== existing.date &&
+    (await isBusinessClosedOnDate(businessId, input.date))
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+    };
   }
 
   const ref = adminDb.collection(PERSONAL_EVENTS_COLLECTION).doc(eventId);

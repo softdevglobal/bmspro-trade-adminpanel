@@ -159,7 +159,7 @@ function DrawerPanel({
         animate={{ x: 0 }}
         exit={{ x: "100%" }}
         transition={panelTransition}
-        className="absolute inset-y-0 right-0 flex w-[calc(100%-1.25rem)] max-w-md flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-outline-variant bg-background shadow-2xl will-change-transform sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l"
+        className="absolute inset-y-0 right-0 flex w-[calc(100%-1.25rem)] max-w-[512px] flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-outline-variant bg-background shadow-2xl will-change-transform sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l"
       >
         <motion.header
           initial={{ opacity: 0, y: 12 }}
