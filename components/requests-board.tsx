@@ -89,7 +89,11 @@ function CreatedSourcePill({
         ? "smartphone"
         : source === "quotation_direct"
           ? "request_quote"
-          : "dashboard";
+          : source === "job_direct"
+            ? "handyman"
+            : source === "invoice_direct"
+              ? "receipt_long"
+              : "dashboard";
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
       <span className="material-symbols-outlined text-[12px] leading-none text-primary">

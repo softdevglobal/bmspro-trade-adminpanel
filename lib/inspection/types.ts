@@ -64,6 +64,7 @@ export const INSPECTION_CREATED_SOURCES = [
   "owner_mobile",
   "quotation_direct",
   "invoice_direct",
+  "job_direct",
 ] as const;
 export type InspectionRequestCreatedSource =
   (typeof INSPECTION_CREATED_SOURCES)[number];
@@ -77,6 +78,7 @@ export const CREATED_SOURCE_LABELS: Record<
   owner_mobile: "Mobile app",
   quotation_direct: "Quotation",
   invoice_direct: "Invoice",
+  job_direct: "Direct job",
 };
 
 export function isCreatedSource(

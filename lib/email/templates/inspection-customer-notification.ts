@@ -35,6 +35,7 @@ const EMAIL_PRESENTATION: Record<
   leave_requested: { eyebrow: "Leave request", tone: "warning" },
   leave_assignment_conflict: { eyebrow: "Schedule conflict", tone: "warning" },
   staff_off_day: { eyebrow: "Staff off day", tone: "warning" },
+  schedule_reminder: { eyebrow: "Schedule reminder", tone: "brand" },
   // Custom messages are in-app/push only and never emailed to customers.
   system_message: { eyebrow: "Announcement", tone: "brand" },
 };
