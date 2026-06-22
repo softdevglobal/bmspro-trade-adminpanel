@@ -334,7 +334,7 @@ export async function generateDocumentPdf(
   data: QuotationDocumentData,
   kind: DocumentPdfKind = "quote",
 ): Promise<Buffer> {
-  const docTitle = kind === "invoice" ? "Invoice" : "Quote";
+  const docTitle = kind === "invoice" ? "Tax Invoice" : "Quote";
   const watermark = kind === "invoice" ? "INVOICE" : "QUOTE";
   const refLabel = kind === "invoice" ? "Invoice No:" : "Quote No:";
   const dueLabel = kind === "invoice" ? "Due date:" : "Valid until:";

@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessSlotCapacitySettings } from "@/components/business-slot-capacity-settings";
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { BusinessGstSettings } from "@/components/business-gst-settings";
 import { BusinessProfileSettings } from "@/components/business-profile-settings";
@@ -27,6 +28,8 @@ type ProfileMeta = {
   timezone: string | null;
   plan: BusinessProfilePlan | null;
   logoUrl: string | null;
+  slotCapacityJobs: number | null;
+  slotCapacityInspectionRequests: number | null;
 };
 
 export function BusinessSettingsPanel() {
@@ -39,6 +42,8 @@ export function BusinessSettingsPanel() {
     timezone: null,
     plan: null,
     logoUrl: null,
+    slotCapacityJobs: null,
+    slotCapacityInspectionRequests: null,
   });
   const [form, setForm] = useState<ProfileFormState>({
     businessName: "",
@@ -77,6 +82,8 @@ export function BusinessSettingsPanel() {
             timezone?: string | null;
             plan?: BusinessProfilePlan | null;
             logoUrl?: string | null;
+            slotCapacityJobs?: number | null;
+            slotCapacityInspectionRequests?: number | null;
           };
         };
         if (!response.ok || !payload.ok || !payload.profile || !active) return;
@@ -95,6 +102,12 @@ export function BusinessSettingsPanel() {
           timezone: p.timezone ?? null,
           plan: p.plan ?? null,
           logoUrl: p.logoUrl ?? null,
+          slotCapacityJobs:
+            typeof p.slotCapacityJobs === "number" ? p.slotCapacityJobs : null,
+          slotCapacityInspectionRequests:
+            typeof p.slotCapacityInspectionRequests === "number"
+              ? p.slotCapacityInspectionRequests
+              : null,
         });
       } catch {
         /* keep defaults */
@@ -132,6 +145,13 @@ export function BusinessSettingsPanel() {
     setMeta((current) => ({ ...current, timezone }));
   }
 
+  function handleSlotCapacitySaved(capacity: {
+    slotCapacityJobs: number;
+    slotCapacityInspectionRequests: number;
+  }) {
+    setMeta((current) => ({ ...current, ...capacity }));
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
@@ -150,6 +170,13 @@ export function BusinessSettingsPanel() {
         timezone={meta.timezone}
         loading={metaLoading}
         onSaved={handleTimezoneSaved}
+      />
+
+      <BusinessSlotCapacitySettings
+        slotCapacityJobs={meta.slotCapacityJobs}
+        slotCapacityInspectionRequests={meta.slotCapacityInspectionRequests}
+        loading={metaLoading}
+        onSaved={handleSlotCapacitySaved}
       />
 
       <BusinessGstSettings />

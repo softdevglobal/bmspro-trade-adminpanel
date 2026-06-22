@@ -1,6 +1,13 @@
 "use client";
 
+import { AdminDaySchedulePicker } from "@/components/admin-day-schedule-picker";
 import { AuPhoneInput } from "@/components/au-phone-input";
+import {
+  calendarVisitTimeRange,
+  defaultCalendarVisitEnd,
+  validateCalendarVisitWindow,
+} from "@/components/calendar-visit-time-range";
+import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -32,6 +39,12 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onCreated?: (requestId: string) => void;
+  /** Pre-select date and time range when opening from the calendar. */
+  initialCalendarWindow?: CalendarSlotSelection | null;
+  /** @deprecated Use initialCalendarWindow */
+  initialPreferredSlot?: InspectionSlot | null;
+  /** Calendar add menu: inspection request vs direct job intake. */
+  variant?: "inspection" | "job";
 };
 
 type ServiceAddress = {
@@ -53,8 +66,7 @@ const STEPS = [
   },
   {
     title: "Preferred dates & times",
-    subtitle:
-      "Pick up to 3 days first, then morning or afternoon for each.",
+    subtitle: "Pick up to 3 days, then choose hourly time slots for each.",
   },
   {
     title: "Contact details",
@@ -80,16 +92,6 @@ const INPUT_CLASS =
 
 const LABEL_CLASS =
   "font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant";
-
-const TIME_OPTIONS: {
-  id: InspectionTimeRange;
-  label: string;
-  hint: string;
-  icon: string;
-}[] = [
-  { id: "morning", label: "Morning", hint: "8am – 12pm", icon: "wb_twilight" },
-  { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
-];
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -126,6 +128,11 @@ type InspectionFormState = {
   budgetAud: string;
   address: ServiceAddress;
   preferredSlots: InspectionSlot[];
+  calendarWindow: {
+    date: string;
+    startTime: string;
+    endTime: string;
+  } | null;
   customer: { fullName: string; email: string; phone: string };
 };
 
@@ -190,19 +197,33 @@ function computeFieldErrors(form: InspectionFormState): FieldErrors {
     errors.postcode = "Use a 4-digit Australian postcode.";
   }
 
-  if (form.preferredSlots.length === 0) {
+  if (form.calendarWindow) {
+    const windowError = validateCalendarVisitWindow(
+      form.calendarWindow.startTime,
+      form.calendarWindow.endTime,
+    );
+    if (windowError) errors.preferredSlots = windowError;
+  } else if (form.preferredSlots.length === 0) {
     errors.preferredSlots = "Pick at least one preferred date.";
   } else {
-    const missingIndex = form.preferredSlots.findIndex((slot) => !slot.date);
-    if (missingIndex >= 0) {
-      errors.preferredSlots = `Choose a date for option ${missingIndex + 1}.`;
-    } else {
-      const keys = form.preferredSlots.map(
-        (slot) => `${slot.date}-${slot.timeRange}`,
-      );
-      if (new Set(keys).size !== keys.length) {
-        errors.preferredSlots =
-          "Each date and time window must be unique.";
+    for (const slot of form.preferredSlots) {
+      const start = slot.startTime ?? "08:00";
+      const end = slot.endTime ?? defaultCalendarVisitEnd(start);
+      const windowError = validateCalendarVisitWindow(start, end);
+      if (windowError) {
+        errors.preferredSlots = windowError;
+        break;
+      }
+    }
+    if (!errors.preferredSlots) {
+      const missingIndex = form.preferredSlots.findIndex((slot) => !slot.date);
+      if (missingIndex >= 0) {
+        errors.preferredSlots = `Choose a date for option ${missingIndex + 1}.`;
+      } else if (
+        new Set(form.preferredSlots.map((slot) => slot.date)).size !==
+        form.preferredSlots.length
+      ) {
+        errors.preferredSlots = "Each date must be unique.";
       }
     }
   }
@@ -368,13 +389,18 @@ function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
 
 function PreferredDayTimeRow({
   slot,
-  onTimeChange,
+  kind,
+  onWindowChange,
   timeZone,
 }: {
   slot: InspectionSlot;
-  onTimeChange: (range: InspectionTimeRange) => void;
+  kind: "inspection" | "job";
+  onWindowChange: (startTime: string, endTime: string) => void;
   timeZone?: string | null;
 }) {
+  const startTime = slot.startTime ?? "08:00";
+  const endTime = slot.endTime ?? defaultCalendarVisitEnd(startTime);
+
   return (
     <li className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
       <p className="inline-flex items-center gap-2 font-body text-[12px] font-bold uppercase tracking-wider text-on-surface">
@@ -384,53 +410,16 @@ function PreferredDayTimeRow({
         {formatSlotDate(slot.date, timeZone)}
       </p>
       <div className="mt-3">
-        <span className={LABEL_CLASS}>Pick a time window</span>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {TIME_OPTIONS.map((option) => {
-            const checked = slot.timeRange === option.id;
-            return (
-              <button
-                type="button"
-                key={option.id}
-                onClick={() => onTimeChange(option.id)}
-                className={`relative flex min-h-[4.5rem] flex-col justify-between rounded-2xl border px-3 py-2.5 text-left transition-all ${
-                  checked
-                    ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                    : "border-outline-variant/60 bg-white hover:border-primary/40"
-                }`}
-              >
-                <span
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
-                    checked
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "bg-surface-container text-on-surface-variant"
-                  }`}
-                >
-                  <span className="material-symbols-outlined material-symbols-filled text-[18px]">
-                    {option.icon}
-                  </span>
-                </span>
-                <span>
-                  <span
-                    className={`block font-body text-[14px] font-bold ${
-                      checked ? "text-primary" : "text-on-surface"
-                    }`}
-                  >
-                    {option.label}
-                  </span>
-                  <span className="font-body text-[11px] text-on-surface-variant">
-                    {option.hint}
-                  </span>
-                </span>
-                {checked ? (
-                  <span className="absolute right-2 top-2 material-symbols-outlined material-symbols-filled text-[18px] text-primary">
-                    check_circle
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+        <AdminDaySchedulePicker
+          date={slot.date}
+          kind={kind}
+          startTime={startTime}
+          endTime={endTime}
+          onStartTimeChange={(nextStart) =>
+            onWindowChange(nextStart, defaultCalendarVisitEnd(nextStart))
+          }
+          onEndTimeChange={(nextEnd) => onWindowChange(startTime, nextEnd)}
+        />
       </div>
     </li>
   );
@@ -552,21 +541,59 @@ function InspectionPreview({
   );
 }
 
-function createInitialForm() {
+function createInitialForm(
+  calendarWindow?: CalendarSlotSelection | null,
+  variant: "inspection" | "job" = "inspection",
+) {
+  const window = calendarWindow?.date?.trim()
+    ? {
+        date: calendarWindow.date,
+        startTime: calendarWindow.startTime,
+        endTime: calendarWindow.endTime,
+      }
+    : null;
+
   return {
-    requestType: "custom_quote" as InspectionRequestType,
+    requestType: (variant === "job"
+      ? "existing_service"
+      : "custom_quote") as InspectionRequestType,
     selectedServiceId: null as string | null,
     customTitle: "",
     customDescription: "",
     customerNotes: "",
     budgetAud: "",
     address: { ...EMPTY_ADDRESS },
-    preferredSlots: [] as InspectionSlot[],
+    preferredSlots: window
+      ? [
+          {
+            date: window.date,
+            timeRange: calendarVisitTimeRange(window.startTime),
+          },
+        ]
+      : ([] as InspectionSlot[]),
+    calendarWindow: window,
     customer: { fullName: "", email: "", phone: "" },
   };
 }
 
-export function AddInspectionModal({ open, onClose, onCreated }: Props) {
+export function AddInspectionModal({
+  open,
+  onClose,
+  onCreated,
+  initialCalendarWindow = null,
+  initialPreferredSlot = null,
+  variant = "inspection",
+}: Props) {
+  const resolvedCalendarWindow =
+    initialCalendarWindow ??
+    (initialPreferredSlot?.date
+      ? {
+          date: initialPreferredSlot.date,
+          startTime: "08:00",
+          endTime: "09:00",
+          timeRange: initialPreferredSlot.timeRange,
+        }
+      : null);
   const { user } = useAuth();
   const profile = useBusinessProfile();
   const [step, setStep] = useState(1);
@@ -594,19 +621,31 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
   const timeZone = profile?.timezone;
   const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
 
-  const reset = useCallback(() => {
-    setStep(1);
-    setForm(createInitialForm());
-    setTouched({});
-    setError(null);
-    setSubmitting(false);
-    setSuccess(false);
-  }, []);
+  const reset = useCallback(
+    (
+      calendarWindow?: CalendarSlotSelection | null,
+      modalVariant: typeof variant = variant,
+    ) => {
+      setStep(1);
+      setForm(createInitialForm(calendarWindow ?? null, modalVariant));
+      setTouched({});
+      setError(null);
+      setSubmitting(false);
+      setSuccess(false);
+      setWorkingDayPage(0);
+    },
+    [variant],
+  );
 
   const handleClose = useCallback(() => {
     reset();
     onClose();
   }, [onClose, reset]);
+
+  useEffect(() => {
+    if (!open) return;
+    reset(resolvedCalendarWindow, variant);
+  }, [open, resolvedCalendarWindow, variant, reset]);
 
   useEffect(() => {
     if (!open) return;
@@ -668,12 +707,39 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
 
   const step2Valid = isAddressComplete(form.address);
 
-  const step3Valid =
-    form.preferredSlots.length > 0 &&
-    form.preferredSlots.every((slot) => slot.date.trim().length > 0) &&
-    new Set(
-      form.preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`),
-    ).size === form.preferredSlots.length;
+  const step3Valid = form.calendarWindow
+    ? validateCalendarVisitWindow(
+        form.calendarWindow.startTime,
+        form.calendarWindow.endTime,
+      ) === null
+    : form.preferredSlots.length > 0 &&
+      form.preferredSlots.every((slot) => {
+        if (!slot.date.trim()) return false;
+        const start = slot.startTime ?? "08:00";
+        const end = slot.endTime ?? defaultCalendarVisitEnd(start);
+        return validateCalendarVisitWindow(start, end) === null;
+      }) &&
+      new Set(form.preferredSlots.map((slot) => slot.date)).size ===
+        form.preferredSlots.length;
+
+  function updateCalendarWindow(
+    patch: Partial<NonNullable<InspectionFormState["calendarWindow"]>>,
+  ) {
+    setForm((prev) => {
+      if (!prev.calendarWindow) return prev;
+      const nextWindow = { ...prev.calendarWindow, ...patch };
+      return {
+        ...prev,
+        calendarWindow: nextWindow,
+        preferredSlots: [
+          {
+            date: nextWindow.date,
+            timeRange: calendarVisitTimeRange(nextWindow.startTime),
+          },
+        ],
+      };
+    });
+  }
 
   const step4Valid =
     form.customer.fullName.trim().length >= 2 &&
@@ -770,18 +836,34 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
         ...prev,
         preferredSlots: sortPreferredSlots([
           ...prev.preferredSlots,
-          { date: iso, timeRange: "morning" as InspectionTimeRange },
+          {
+            date: iso,
+            timeRange: calendarVisitTimeRange("08:00"),
+            startTime: "08:00",
+            endTime: "09:00",
+          },
         ]),
       };
     });
     setError(null);
   }
 
-  function updateSlotTime(index: number, timeRange: InspectionTimeRange) {
+  function updateSlotWindow(
+    index: number,
+    startTime: string,
+    endTime: string,
+  ) {
     setForm((prev) => ({
       ...prev,
       preferredSlots: prev.preferredSlots.map((slot, idx) =>
-        idx === index ? { ...slot, timeRange } : slot,
+        idx === index
+          ? {
+              ...slot,
+              startTime,
+              endTime,
+              timeRange: calendarVisitTimeRange(startTime),
+            }
+          : slot,
       ),
     }));
     setError(null);
@@ -856,7 +938,26 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
             phone: form.customer.phone,
           },
           address: form.address,
-          preferredSlots: form.preferredSlots,
+          preferredSlots: form.calendarWindow
+            ? [
+                {
+                  date: form.calendarWindow.date,
+                  timeRange: calendarVisitTimeRange(form.calendarWindow.startTime),
+                  startTime: form.calendarWindow.startTime,
+                  endTime: form.calendarWindow.endTime,
+                },
+              ]
+            : form.preferredSlots.map((slot) => ({
+                date: slot.date,
+                timeRange: slot.timeRange,
+                startTime: slot.startTime ?? "08:00",
+                endTime:
+                  slot.endTime ??
+                  defaultCalendarVisitEnd(slot.startTime ?? "08:00"),
+              })),
+          ...(form.calendarWindow
+            ? { calendarSchedule: form.calendarWindow }
+            : {}),
           customerNotes: form.customerNotes.trim() || null,
           budgetAud: form.budgetAud.trim() || null,
         }),
@@ -915,7 +1016,7 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
               id="add-inspection-title"
               className="font-display text-headline-sm font-semibold text-on-surface"
             >
-              Add inspection
+              {variant === "job" ? "Add job" : "Add inspection"}
             </h2>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
               {current.subtitle}
@@ -1320,7 +1421,11 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                   <StepHeader
                     step={3}
                     title={current.title}
-                    hint={`${selectedPreferredDates.length} of 3 days`}
+                    hint={
+                      form.calendarWindow
+                        ? "Calendar schedule"
+                        : `${selectedPreferredDates.length} of 3 days`
+                    }
                   />
                   {fieldErrorMessage("preferredSlots") ? (
                     <FieldFeedback
@@ -1329,58 +1434,91 @@ export function AddInspectionModal({ open, onClose, onCreated }: Props) {
                     />
                   ) : null}
 
-                  <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
-                    <SlotDayPicker
-                      mode="multiple"
-                      selectedIsos={selectedPreferredDates}
-                      maxSelections={3}
-                      minDate={minDate}
-                      dayPage={workingDayPage}
-                      onDayPageChange={setWorkingDayPage}
-                      onToggle={(iso) => {
-                        touchField("preferredSlots");
-                        togglePreferredDay(iso);
-                      }}
-                      label="Pick up to 3 days"
-                      dayStripLayout="fit"
-                      timeZone={timeZone}
-                    />
-                    {selectedPreferredDates.length > 0 ? (
-                      <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                        Tap a selected day again to remove it.
-                      </p>
-                    ) : (
-                      <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
-                        Choose at least one day to continue.
-                      </p>
-                    )}
-                  </div>
-
-                  {selectedPreferredDates.length > 0 ? (
-                    <div>
-                      <span className={LABEL_CLASS}>
-                        Pick a time for each day
-                      </span>
-                      <ul className="mt-2 space-y-3">
-                        {sortPreferredSlots(form.preferredSlots).map((slot) => {
-                          const slotIndex = form.preferredSlots.findIndex(
-                            (entry) => entry.date === slot.date,
-                          );
-                          return (
-                            <PreferredDayTimeRow
-                              key={slot.date}
-                              slot={slot}
-                              timeZone={timeZone}
-                              onTimeChange={(range) => {
-                                touchField("preferredSlots");
-                                updateSlotTime(slotIndex, range);
-                              }}
-                            />
-                          );
-                        })}
-                      </ul>
+                  {form.calendarWindow ? (
+                    <div className="space-y-4 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                      <div>
+                        <span className={LABEL_CLASS}>Date</span>
+                        <p className="mt-1 font-body text-[15px] font-semibold text-on-surface">
+                          {formatSlotDate(form.calendarWindow.date, timeZone)}
+                        </p>
+                      </div>
+                      <AdminDaySchedulePicker
+                        date={form.calendarWindow.date}
+                        kind={variant === "job" ? "job" : "inspection"}
+                        startTime={form.calendarWindow.startTime}
+                        endTime={form.calendarWindow.endTime}
+                        onStartTimeChange={(startTime) => {
+                          touchField("preferredSlots");
+                          updateCalendarWindow({
+                            startTime,
+                            endTime: defaultCalendarVisitEnd(startTime),
+                          });
+                        }}
+                        onEndTimeChange={(endTime) => {
+                          touchField("preferredSlots");
+                          updateCalendarWindow({ endTime });
+                        }}
+                      />
                     </div>
-                  ) : null}
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                        <SlotDayPicker
+                          mode="multiple"
+                          selectedIsos={selectedPreferredDates}
+                          maxSelections={3}
+                          minDate={minDate}
+                          dayPage={workingDayPage}
+                          onDayPageChange={setWorkingDayPage}
+                          onToggle={(iso) => {
+                            touchField("preferredSlots");
+                            togglePreferredDay(iso);
+                          }}
+                          label="Pick up to 3 days"
+                          dayStripLayout="fit"
+                          timeZone={timeZone}
+                        />
+                        {selectedPreferredDates.length > 0 ? (
+                          <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                            Tap a selected day again to remove it.
+                          </p>
+                        ) : (
+                          <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                            Choose at least one day to continue.
+                          </p>
+                        )}
+                      </div>
+
+                      {selectedPreferredDates.length > 0 ? (
+                        <div>
+                          <span className={LABEL_CLASS}>
+                            Pick a time for each day
+                          </span>
+                          <ul className="mt-2 space-y-3">
+                            {sortPreferredSlots(form.preferredSlots).map(
+                              (slot) => {
+                                const slotIndex = form.preferredSlots.findIndex(
+                                  (entry) => entry.date === slot.date,
+                                );
+                                return (
+                                  <PreferredDayTimeRow
+                                    key={slot.date}
+                                    slot={slot}
+                                    kind={variant === "job" ? "job" : "inspection"}
+                                    timeZone={timeZone}
+                                    onWindowChange={(startTime, endTime) => {
+                                      touchField("preferredSlots");
+                                      updateSlotWindow(slotIndex, startTime, endTime);
+                                    }}
+                                  />
+                                );
+                              },
+                            )}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               ) : null}
 

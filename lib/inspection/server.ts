@@ -1,6 +1,11 @@
 import "server-only";
 
 import {
+  computeDaySlotOccupancy,
+  rangeOverlapsFullSlots,
+} from "@/lib/calendar/slot-occupancy";
+import type { CalendarScheduleInput } from "@/lib/calendar/schedule-input";
+import {
   customerOwnsRequestRecord,
   type CustomerOwnershipIdentity,
 } from "@/lib/customer/ownership";
@@ -12,13 +17,14 @@ import {
 } from "@/lib/inspection/map-inspection-doc";
 import { getRequestDocument } from "@/lib/inspection/request-document";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
-import type {
+import {
   InspectionAssignment,
   InspectionRequestCreatedSource,
   InspectionRequestDetail,
   InspectionRequestInput,
   InspectionRequestStatus,
   InspectionSlot,
+  timeRangeFromStartTime,
 } from "@/lib/inspection/types";
 import {
   notifyBusinessOfCustomerAcceptance,
@@ -127,6 +133,7 @@ export async function createInspectionRequest(
   options: {
     customerId?: string | null;
     createdSource: InspectionRequestCreatedSource;
+    scheduleOnCreate?: CalendarScheduleInput;
   },
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
@@ -148,11 +155,39 @@ export async function createInspectionRequest(
   const now = FieldValue.serverTimestamp();
   const requestCode = await allocateInspectionRequestCode();
 
+  const schedule = options.scheduleOnCreate ?? null;
+  if (schedule) {
+    const occupancy = await computeDaySlotOccupancy(businessId, schedule.date);
+    if (
+      rangeOverlapsFullSlots(
+        occupancy.slots,
+        schedule.startTime,
+        schedule.endTime,
+        "inspection",
+      )
+    ) {
+      return {
+        ok: false,
+        error:
+          "One or more time slots in that range are full for inspection requests. Choose another time or update capacity in Settings.",
+      };
+    }
+  }
+
+  const scheduledSlot = schedule
+    ? {
+        date: schedule.date,
+        timeRange: timeRangeFromStartTime(schedule.startTime),
+      }
+    : null;
+
   await ref.set({
     id: ref.id,
     businessId,
     requestCode,
-    status: "pending" satisfies InspectionRequestStatus,
+    status: (schedule
+      ? "scheduled"
+      : "pending") satisfies InspectionRequestStatus,
     requestType: input.requestType,
     serviceId: input.serviceId,
     serviceName,
@@ -164,13 +199,14 @@ export async function createInspectionRequest(
     address: input.address,
     preferredSlots: input.preferredSlots,
     ownerProposedSlots: [],
-    scheduledSlot: null,
-    scheduledStartTime: null,
-    scheduledEndTime: null,
+    scheduledSlot,
+    scheduledStartTime: schedule?.startTime ?? null,
+    scheduledEndTime: schedule?.endTime ?? null,
     assignedTo: null,
     ownerNote: null,
     customerNotes: input.customerNotes,
     budgetAud: input.budgetAud,
+    customerImageUrls: input.customerImageUrls,
     createdAt: now,
     updatedAt: now,
   });
@@ -259,6 +295,25 @@ export async function applyOwnerAction(
   };
 
   if (action.type === "accept") {
+    const occupancy = await computeDaySlotOccupancy(
+      businessId,
+      action.slot.date,
+    );
+    if (
+      rangeOverlapsFullSlots(
+        occupancy.slots,
+        action.startTime,
+        action.endTime,
+        "inspection",
+      )
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          "One or more time slots in that range are full for inspection requests. Choose another time or update capacity in Settings.",
+      };
+    }
     updates.status = "scheduled" satisfies InspectionRequestStatus;
     updates.scheduledSlot = action.slot;
     updates.scheduledStartTime = action.startTime;

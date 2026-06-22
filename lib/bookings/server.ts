@@ -16,6 +16,10 @@ import type {
 } from "@/lib/inspection/types";
 import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
+import {
+  computeDaySlotOccupancy,
+  rangeOverlapsFullSlots,
+} from "@/lib/calendar/slot-occupancy";
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
@@ -129,6 +133,26 @@ export async function createBookingFromInspection(
       ok: false,
       status: 400,
       error: "A booking already exists for this request.",
+    };
+  }
+
+  const occupancy = await computeDaySlotOccupancy(
+    input.businessId,
+    input.slot.date,
+  );
+  if (
+    rangeOverlapsFullSlots(
+      occupancy.slots,
+      input.startTime,
+      input.endTime,
+      "job",
+    )
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "One or more time slots in that range are full for jobs. Choose another time or update capacity in Settings.",
     };
   }
 
