@@ -20,6 +20,7 @@ import {
   computeDaySlotOccupancy,
   rangeOverlapsFullSlots,
 } from "@/lib/calendar/slot-occupancy";
+import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
@@ -133,6 +134,15 @@ export async function createBookingFromInspection(
       ok: false,
       status: 400,
       error: "A booking already exists for this request.",
+    };
+  }
+
+  if (await isBusinessClosedOnDate(input.businessId, input.slot.date)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
     };
   }
 

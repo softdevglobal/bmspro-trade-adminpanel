@@ -5,7 +5,7 @@ import {
   defaultCalendarVisitEnd,
   validateCalendarVisitWindow,
 } from "@/components/calendar-visit-time-range";
-import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy";
+import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatClockTime } from "@/lib/inspection/types";
 import { parseClockMinutes } from "@/lib/leave/clock";
@@ -54,10 +54,12 @@ export function AdminDaySchedulePicker({
   const [slots, setSlots] = useState<HourSlotOccupancy[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isBusinessClosed, setIsBusinessClosed] = useState(false);
 
   useEffect(() => {
     if (!user || !date) {
       setSlots([]);
+      setIsBusinessClosed(false);
       return;
     }
 
@@ -68,22 +70,40 @@ export function AdminDaySchedulePicker({
     void (async () => {
       try {
         const token = await user.getIdToken();
-        const response = await fetch(
-          `/api/calendar/slot-occupancy?date=${encodeURIComponent(date)}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: "no-store",
-          },
-        );
-        const payload = (await response.json()) as {
+        const [occupancyResponse, closureResponse] = await Promise.all([
+          fetch(
+            `/api/calendar/slot-occupancy?date=${encodeURIComponent(date)}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            },
+          ),
+          fetch(
+            `/api/calendar/business-closures?date=${encodeURIComponent(date)}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            },
+          ),
+        ]);
+        const occupancyPayload = (await occupancyResponse.json()) as {
           ok?: boolean;
           slots?: HourSlotOccupancy[];
           error?: string;
         };
-        if (!response.ok || !payload.ok || !payload.slots) {
-          throw new Error(payload.error ?? "Could not load time slots.");
+        const closurePayload = (await closureResponse.json()) as {
+          ok?: boolean;
+          isClosed?: boolean;
+        };
+
+        if (!occupancyResponse.ok || !occupancyPayload.ok || !occupancyPayload.slots) {
+          throw new Error(occupancyPayload.error ?? "Could not load time slots.");
         }
-        if (!cancelled) setSlots(payload.slots);
+
+        if (!cancelled) {
+          setSlots(occupancyPayload.slots);
+          setIsBusinessClosed(closurePayload.isClosed === true);
+        }
       } catch (error) {
         if (!cancelled) {
           setLoadError(
@@ -92,6 +112,7 @@ export function AdminDaySchedulePicker({
               : "Could not load time slots.",
           );
           setSlots([]);
+          setIsBusinessClosed(false);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -102,6 +123,8 @@ export function AdminDaySchedulePicker({
       cancelled = true;
     };
   }, [user, date]);
+
+  const pickerDisabled = disabled || isBusinessClosed;
 
   const rangeError = useMemo(() => {
     const windowError = validateCalendarVisitWindow(startTime, endTime);
@@ -142,6 +165,12 @@ export function AdminDaySchedulePicker({
 
   return (
     <div className="space-y-3">
+      {isBusinessClosed ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] text-amber-900">
+          This date is marked as a business off day. Reactivate it on the
+          calendar before scheduling new work.
+        </p>
+      ) : null}
       <div>
         <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
           Hourly slots
@@ -164,13 +193,13 @@ export function AdminDaySchedulePicker({
                 <button
                   key={slot.startTime}
                   type="button"
-                  disabled={disabled || full}
+                  disabled={pickerDisabled || full}
                   onClick={() => {
                     onStartTimeChange(slot.startTime);
                     onEndTimeChange(defaultCalendarVisitEnd(slot.startTime));
                   }}
                   className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                    disabled || full
+                    pickerDisabled || full
                       ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-60"
                       : selected
                         ? "border-primary bg-primary/10 ring-1 ring-primary/25"
@@ -201,7 +230,7 @@ export function AdminDaySchedulePicker({
       <CalendarVisitTimeRangeFields
         startTime={startTime}
         endTime={endTime}
-        disabled={disabled}
+        disabled={pickerDisabled}
         onStartTimeChange={onStartTimeChange}
         onEndTimeChange={onEndTimeChange}
       />

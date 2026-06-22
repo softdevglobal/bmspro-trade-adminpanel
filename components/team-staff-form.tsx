@@ -11,7 +11,7 @@ import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-const STEPS = ["Details", "Role & areas", "Review"] as const;
+const STEPS = ["Details", "Role & schedule", "Review"] as const;
 
 const WEEK_DAYS = [
   { id: "monday", label: "Monday" },
@@ -78,7 +78,6 @@ function emptyForm(): StaffFormState {
 export function TeamStaffForm() {
   const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
-  const [serviceAreas, setServiceAreas] = useState<string[]>([]);
   const [form, setForm] = useState<StaffFormState>(() => emptyForm());
   const [error, setError] = useState<string | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
@@ -100,8 +99,8 @@ export function TeamStaffForm() {
   const [showDetailsErrors, setShowDetailsErrors] = useState(false);
 
   const canSubmit = useMemo(
-    () => staffFormValidationError(form, serviceAreas) === null,
-    [form, serviceAreas],
+    () => staffFormValidationError(form) === null,
+    [form],
   );
 
   const filteredStaffMembers = useMemo(() => {
@@ -138,35 +137,11 @@ export function TeamStaffForm() {
   }
 
   function toggleOffDay(day: WeekDayId) {
-    setForm((current) => {
-      return {
-        ...current,
-        availability: current.availability.map((item) =>
-          item.day === day
-            ? {
-                ...item,
-                isOff: !item.isOff,
-                serviceAreas: item.isOff ? item.serviceAreas : [],
-              }
-            : item,
-        ),
-      };
-    });
-    setError(null);
-  }
-
-  function toggleDayServiceArea(day: WeekDayId, area: string) {
     setForm((current) => ({
       ...current,
-      availability: current.availability.map((item) => {
-        if (item.day !== day) return item;
-        const selected = item.serviceAreas[0] === area;
-        return {
-          ...item,
-          isOff: false,
-          serviceAreas: selected ? [] : [area],
-        };
-      }),
+      availability: current.availability.map((item) =>
+        item.day === day ? { ...item, isOff: !item.isOff, serviceAreas: [] } : item,
+      ),
     }));
     setError(null);
   }
@@ -192,7 +167,7 @@ export function TeamStaffForm() {
       phone: toAuLocalPhoneDigits(member.phone ?? ""),
       email: member.email,
       staffType: member.staffType,
-      availability: normalizeAvailability(member.availability, serviceAreas),
+      availability: normalizeAvailability(member.availability),
       canget_qutaion: member.canget_qutaion,
     });
     setCurrentStep(1);
@@ -230,7 +205,6 @@ export function TeamStaffForm() {
       const data = (await response.json()) as {
         ok?: boolean;
         staff?: StaffMember[];
-        serviceAreas?: string[];
         error?: string;
       };
 
@@ -244,7 +218,6 @@ export function TeamStaffForm() {
           canget_qutaion: member.canget_qutaion === true,
         })),
       );
-      setServiceAreas(data.serviceAreas ?? []);
     } catch (loadError) {
       setStaffListError(
         loadError instanceof Error
@@ -280,10 +253,8 @@ export function TeamStaffForm() {
         setError("Type a staff role, e.g. Plumber or Electrician.");
         return;
       }
-      if (!availabilityIsValid(form.availability, serviceAreas)) {
-        setError(
-          "For each working day, select one service area or mark the day off.",
-        );
+      if (!availabilityIsValid(form.availability)) {
+        setError("Mark at least one day as a working day.");
         return;
       }
     }
@@ -300,7 +271,7 @@ export function TeamStaffForm() {
 
     if (!canSubmit) {
       setError(
-        staffFormValidationError(form, serviceAreas) ??
+        staffFormValidationError(form) ??
           "Could not validate this staff member.",
       );
       return;
@@ -323,7 +294,10 @@ export function TeamStaffForm() {
           phone: form.phone.replace(/\D/g, ""),
           email: form.email.trim(),
           staffType: form.staffType.trim(),
-          availability: form.availability,
+          availability: form.availability.map((day) => ({
+            ...day,
+            serviceAreas: [],
+          })),
           canget_qutaion: form.canget_qutaion,
         }),
       });
@@ -497,13 +471,11 @@ export function TeamStaffForm() {
             <StaffSetupStepContent
               currentStep={currentStep}
               form={form}
-              serviceAreas={serviceAreas}
               showDetailsErrors={showDetailsErrors}
               onUpdateField={updateField}
               onStaffTypeChange={updateStaffType}
               onCanGetQuotationChange={updateCanGetQuotation}
               onToggleOffDay={toggleOffDay}
-              onToggleServiceArea={toggleDayServiceArea}
             />
           </form>
         </StaffSetupModal>
@@ -566,23 +538,19 @@ export function TeamStaffForm() {
 function StaffSetupStepContent({
   currentStep,
   form,
-  serviceAreas,
   showDetailsErrors,
   onUpdateField,
   onStaffTypeChange,
   onCanGetQuotationChange,
   onToggleOffDay,
-  onToggleServiceArea,
 }: {
   currentStep: number;
   form: StaffFormState;
-  serviceAreas: string[];
   showDetailsErrors: boolean;
   onUpdateField: (field: "fullName" | "phone" | "email", value: string) => void;
   onStaffTypeChange: (staffType: string) => void;
   onCanGetQuotationChange: (value: boolean) => void;
   onToggleOffDay: (day: WeekDayId) => void;
-  onToggleServiceArea: (day: WeekDayId, area: string) => void;
 }) {
   if (currentStep === 1) {
     const fieldErrors = getDetailsFieldErrors(form);
@@ -683,9 +651,9 @@ function StaffSetupStepContent({
     return (
       <>
         <StaffSetupHero
-          eyebrow="Step 2 · Role & daily areas"
-          title="Role and where they work each day"
-          description="Set their job role, then pick one service area per working day (or mark days off)."
+          eyebrow="Step 2 · Role & schedule"
+          title="Role and weekly schedule"
+          description="Set their job role, then mark each day as a working day or off."
           icon="construction"
         />
 
@@ -705,17 +673,15 @@ function StaffSetupStepContent({
 
         <StaffWizardSection
           icon="calendar_month"
-          title="Daily service areas"
-          subtitle="One area per working day. Mark a day off if they do not work that day."
+          title="Weekly schedule"
+          subtitle="Mark each day as working or off."
         >
           <div className="grid grid-cols-1 gap-3" aria-required="true">
             {form.availability.map((day) => (
               <DayAvailabilityCard
                 key={day.day}
                 availability={day}
-                serviceAreas={serviceAreas}
                 onToggleOff={() => onToggleOffDay(day.day)}
-                onToggleArea={(area) => onToggleServiceArea(day.day, area)}
               />
             ))}
           </div>
@@ -729,7 +695,7 @@ function StaffSetupStepContent({
       <StaffSetupHero
         eyebrow="Step 3 · Review"
         title="Preview before saving"
-        description="Check contact details, role and daily areas, then save this staff member."
+        description="Check contact details, role and weekly schedule, then save this staff member."
         icon="fact_check"
       />
 
@@ -867,8 +833,8 @@ function StaffSetupModal({
             </h2>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
               {mode === "edit"
-                ? "Update contact details, role, daily areas, then review."
-                : "Add contact details, role and daily service areas, then review."}
+                ? "Update contact details, role, weekly schedule, then review."
+                : "Add contact details, role and weekly schedule, then review."}
             </p>
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant sm:max-w-md">
               <div
@@ -1016,14 +982,10 @@ function RequiredMark() {
 
 function DayAvailabilityCard({
   availability,
-  serviceAreas,
   onToggleOff,
-  onToggleArea,
 }: {
   availability: DayAvailability;
-  serviceAreas: string[];
   onToggleOff: () => void;
-  onToggleArea: (area: string) => void;
 }) {
   const dayLabel = dayName(availability.day);
 
@@ -1035,7 +997,7 @@ function DayAvailabilityCard({
           : "border-primary/30 bg-primary-fixed/20 shadow-sm"
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <span
             className={`flex h-11 w-11 items-center justify-center rounded-xl ${
@@ -1053,11 +1015,7 @@ function DayAvailabilityCard({
               {dayLabel}
             </p>
             <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
-              {availability.isOff
-                ? "Off day"
-                : availability.serviceAreas[0]
-                  ? availability.serviceAreas[0]
-                  : "Select one service area"}
+              {availability.isOff ? "Off day" : "Working day"}
             </p>
           </div>
         </div>
@@ -1073,41 +1031,6 @@ function DayAvailabilityCard({
           {availability.isOff ? "Mark working" : "Mark off"}
         </button>
       </div>
-
-      {!availability.isOff && (
-        <div className="mt-4">
-          {serviceAreas.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-outline-variant bg-surface-container-lowest px-3 py-3 font-body text-[12px] text-on-surface-variant">
-              No business service areas configured yet.
-            </p>
-          ) : (
-            <>
-            <p className="mb-2 font-body text-[11px] font-semibold text-on-surface-variant">
-              One area per day — tap to select
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {serviceAreas.map((area) => {
-                const selected = availability.serviceAreas[0] === area;
-                return (
-                  <button
-                    key={area}
-                    type="button"
-                    onClick={() => onToggleArea(area)}
-                    className={`rounded-full border px-3 py-1.5 font-body text-[12px] font-semibold transition-all ${
-                      selected
-                        ? "border-primary bg-primary text-on-primary"
-                        : "border-outline-variant bg-surface-container-lowest text-on-surface hover:border-primary/40"
-                    }`}
-                  >
-                    {area}
-                  </button>
-                );
-              })}
-            </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -1172,7 +1095,7 @@ function StaffReviewPanel({
       {detailed ? (
         <div className="border-t border-outline-variant/60 px-4 py-4">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            Daily areas
+            Weekly schedule
           </p>
           <ul className="mt-3 space-y-2">
             {form.availability.map((day) => (
@@ -1184,9 +1107,7 @@ function StaffReviewPanel({
                   {dayName(day.day)}
                 </span>
                 <span className="font-body text-[12px] text-on-surface-variant">
-                  {day.isOff
-                    ? "Off"
-                    : day.serviceAreas[0] ?? "No area selected"}
+                  {day.isOff ? "Off" : "Working"}
                 </span>
               </li>
             ))}
@@ -1375,7 +1296,9 @@ function StaffMemberCard({
   onToggleStatus: () => void;
 }) {
   const roleLabel = staffTypeLabel(member.staffType);
-  const serviceAreaLabels = serviceAreasForStaff(member);
+  const workingDayLabels = member.availability
+    .filter((day) => !day.isOff)
+    .map((day) => dayName(day.day).slice(0, 3));
   const isSuspended = member.status === "suspended";
 
   return (
@@ -1484,25 +1407,20 @@ function StaffMemberCard({
             {member.email || "No email"}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {serviceAreaLabels.length > 0 ? (
-              serviceAreaLabels.slice(0, 3).map((area) => (
+            {workingDayLabels.length > 0 ? (
+              workingDayLabels.map((label) => (
                 <span
-                  key={area}
+                  key={label}
                   className="rounded-full bg-primary/10 px-2 py-0.5 font-body text-[10px] font-bold text-primary"
                 >
-                  {area}
+                  {label}
                 </span>
               ))
             ) : (
               <span className="font-body text-[11px] italic text-outline">
-                No service areas
+                No working days
               </span>
             )}
-            {serviceAreaLabels.length > 3 ? (
-              <span className="rounded-full bg-primary-fixed px-2 py-0.5 font-body text-[10px] font-bold text-on-primary-fixed-variant">
-                +{serviceAreaLabels.length - 3}
-              </span>
-            ) : null}
           </div>
         </div>
 
@@ -1575,7 +1493,7 @@ function StaffDetailDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="staff-detail-title"
-        className="absolute inset-y-0 right-0 flex w-[calc(100%-1.25rem)] max-w-md flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-outline-variant bg-background shadow-2xl sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l"
+        className="absolute inset-y-0 right-0 flex w-[calc(100%-1.25rem)] max-w-[512px] flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-outline-variant bg-background shadow-2xl sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l"
       >
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant px-5 py-4">
           <div className="flex min-w-0 items-start gap-3">
@@ -1642,18 +1560,12 @@ function StaffDetailDrawer({
             />
           </DetailSection>
 
-          <DetailSection title="Weekly service areas">
+          <DetailSection title="Weekly schedule">
             {member.availability.map((day) => (
               <DetailRow
                 key={day.day}
                 label={dayName(day.day)}
-                value={
-                  day.isOff
-                    ? "Off day"
-                    : day.serviceAreas.length > 0
-                      ? day.serviceAreas.join(", ")
-                      : "No service areas"
-                }
+                value={day.isOff ? "Off day" : "Working"}
               />
             ))}
           </DetailSection>
@@ -1772,10 +1684,7 @@ function detailsStepError(form: StaffFormState): string | null {
   return errors.fullName ?? errors.phone ?? errors.email ?? null;
 }
 
-function normalizeAvailability(
-  availability: unknown,
-  serviceAreas: string[],
-): DayAvailability[] {
+function normalizeAvailability(availability: unknown): DayAvailability[] {
   if (Array.isArray(availability)) {
     const byDay = new Map<string, unknown>();
     for (const item of availability) {
@@ -1799,15 +1708,7 @@ function normalizeAvailability(
       return {
         day: day.id,
         isOff: record.isOff === true,
-        serviceAreas: Array.isArray(record.serviceAreas)
-          ? record.serviceAreas
-              .filter(
-                (area): area is string =>
-                  typeof area === "string" &&
-                  (serviceAreas.length === 0 || serviceAreas.includes(area)),
-              )
-              .slice(0, 1)
-          : [],
+        serviceAreas: [],
       };
     });
   }
@@ -1815,10 +1716,7 @@ function normalizeAvailability(
   return defaultAvailability();
 }
 
-function staffFormValidationError(
-  form: StaffFormState,
-  serviceAreas: string[],
-) {
+function staffFormValidationError(form: StaffFormState) {
   const phone = phoneDigits(form.phone);
 
   if (!form.fullName.trim() || !phone || !isValidEmail(form.email)) {
@@ -1832,23 +1730,15 @@ function staffFormValidationError(
     return "Type a staff role, e.g. Plumber or Electrician.";
   }
 
-  if (!availabilityIsValid(form.availability, serviceAreas)) {
-    return "For each working day, select one service area or mark the day off.";
+  if (!availabilityIsValid(form.availability)) {
+    return "Mark at least one day as a working day.";
   }
 
   return null;
 }
 
-function availabilityIsValid(
-  availability: DayAvailability[],
-  serviceAreas: string[],
-) {
-  const workingDays = availability.filter((day) => !day.isOff);
-  if (workingDays.length === 0) return false;
-  if (serviceAreas.length === 0) return true;
-  return workingDays.every(
-    (day) => day.serviceAreas.length === 1 && Boolean(day.serviceAreas[0]),
-  );
+function availabilityIsValid(availability: DayAvailability[]) {
+  return availability.some((day) => !day.isOff);
 }
 
 function workingDayCount(availability: DayAvailability[]) {
@@ -1857,16 +1747,6 @@ function workingDayCount(availability: DayAvailability[]) {
 
 function formatWorkingDaysLabel(count: number) {
   return `${count} working day${count === 1 ? "" : "s"}`;
-}
-
-function serviceAreasForStaff(member: StaffMember) {
-  return Array.from(
-    new Set(
-      member.availability.flatMap((day) =>
-        day.isOff ? [] : day.serviceAreas,
-      ),
-    ),
-  );
 }
 
 function StaffStatusConfirmModal({

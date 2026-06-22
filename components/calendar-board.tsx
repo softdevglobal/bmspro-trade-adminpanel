@@ -46,6 +46,12 @@ import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
+import { useCalendarSlotOccupancy } from "@/lib/calendar/use-calendar-slot-occupancy";
+import { occupancyForHour } from "@/lib/calendar/slot-occupancy-types";
+import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
+import { useBusinessClosures } from "@/lib/calendar/use-business-closures";
+import type { BusinessClosure } from "@/lib/calendar/business-closures/types";
+import { MarkBusinessClosureModal } from "@/components/mark-business-closure-modal";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { AddPersonalEventModal } from "@/components/add-personal-event-modal";
 import {
@@ -54,6 +60,7 @@ import {
 } from "@/components/calendar-slot-add-menu";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 const VIEW_TABS = ["Today", "Week", "Month"] as const;
@@ -82,7 +89,27 @@ const WEEKDAY_LONG_FORMAT = new Intl.DateTimeFormat("en-AU", {
 
 /** Matches service-detail-drawer: curved left edge, inset width, and max width on mobile. */
 const MOBILE_DRAWER_PANEL_CLASS =
-  "absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-md flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl transition-transform duration-300 will-change-transform sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l";
+  "absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-[512px] flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl transition-transform duration-300 will-change-transform sm:w-full sm:rounded-none sm:border-y-0 sm:border-r-0 sm:border-l";
+
+const CLOSED_DAY_MONTH_CELL_CLASS =
+  "bg-amber-100 ring-1 ring-inset ring-amber-300 hover:bg-amber-50";
+const CLOSED_DAY_WEEK_SURFACE_CLASS = "bg-amber-50";
+const CLOSED_DAY_WEEK_HEADER_CLASS =
+  "bg-amber-100 ring-1 ring-inset ring-amber-300/80";
+
+function BusinessOffDayBadge({ compact = false }: { compact?: boolean }) {
+  return (
+    <span
+      className={`rounded-full bg-amber-200 font-body font-bold uppercase tracking-wide text-amber-950 ${
+        compact
+          ? "px-1.5 py-0.5 text-[9px]"
+          : "px-2 py-0.5 text-[10px]"
+      }`}
+    >
+      Off day
+    </span>
+  );
+}
 
 function startOfMonth(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -171,7 +198,10 @@ function CalendarHourSlotRow({
   slot,
   isoDate,
   placements,
+  occupancy,
+  capacityLoading,
   canAddEvents,
+  closedDay = false,
   onAddEvent,
   onOpenLink,
   onEditPersonalEvent,
@@ -179,7 +209,10 @@ function CalendarHourSlotRow({
   slot: CalendarTimeSlot;
   isoDate: string;
   placements: CalendarHourSlotPlacement[];
+  occupancy?: HourSlotOccupancy;
+  capacityLoading: boolean;
   canAddEvents: boolean;
+  closedDay?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
   onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
@@ -189,15 +222,40 @@ function CalendarHourSlotRow({
   const endLabel = formatClockTime(slot.endTime);
   const timeLabel =
     startLabel && endLabel ? `${startLabel} – ${endLabel}` : slot.startTime;
+  const slotFull =
+    !capacityLoading && occupancy != null && occupancy.jobsFull && occupancy.requestsFull;
 
   return (
     <div className="rounded-lg border border-outline-variant/50 bg-surface-container-lowest/80">
-      <div className="flex items-center justify-between gap-3 border-b border-outline-variant/40 px-3 py-2">
-        <p className="font-numeric text-[13px] font-bold text-on-surface">
-          {timeLabel}
-        </p>
+      <div className="relative z-10 flex items-center justify-between gap-3 border-b border-outline-variant/40 bg-surface-container-lowest/80 px-3 py-2">
+        <div className="min-w-0">
+          <p className="font-numeric text-[13px] font-bold text-on-surface">
+            {timeLabel}
+          </p>
+          {occupancy ? (
+            <p className="mt-0.5 font-body text-[10px] text-on-surface-variant">
+              {occupancy.jobCount}/{occupancy.maxJobs} jobs ·{" "}
+              {occupancy.requestCount}/{occupancy.maxRequests} requests
+              {slotFull ? (
+                <span className="ml-1 font-semibold uppercase text-error">
+                  · Full
+                </span>
+              ) : null}
+            </p>
+          ) : capacityLoading ? (
+            <p className="mt-0.5 font-body text-[10px] text-on-surface-variant">
+              Checking capacity…
+            </p>
+          ) : null}
+        </div>
         {canAddEvents ? (
-          <CalendarSlotAddMenu slot={selection} onSelect={onAddEvent} />
+          <CalendarSlotAddMenu
+            slot={selection}
+            occupancy={occupancy}
+            capacityLoading={capacityLoading}
+            closedDay={closedDay}
+            onSelect={onAddEvent}
+          />
         ) : null}
       </div>
       <div className="p-3">
@@ -225,6 +283,7 @@ function CalendarDayTimeSlots({
   isoDate,
   events,
   canAddEvents,
+  isBusinessClosed,
   onAddEvent,
   onOpenLink,
   onEditPersonalEvent,
@@ -232,10 +291,21 @@ function CalendarDayTimeSlots({
   isoDate: string;
   events: CalendarEvent[];
   canAddEvents: boolean;
+  isBusinessClosed?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
   onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
 }) {
+  const occupancyRefreshKey = useMemo(
+    () => events.map((event) => event.key).join("|"),
+    [events],
+  );
+  const {
+    slots: occupancySlots,
+    loading: capacityLoading,
+    reload: reloadOccupancy,
+  } = useCalendarSlotOccupancy(isoDate, occupancyRefreshKey);
+
   const placementsByHour = useMemo(
     () => calendarEventPlacementsForDay(events),
     [events],
@@ -246,8 +316,33 @@ function CalendarDayTimeSlots({
     [events],
   );
 
+  function handleAddEvent(
+    kind: CalendarAddEventKind,
+    selection: CalendarSlotSelection,
+  ) {
+    if (isBusinessClosed) return;
+    const occupancy = occupancyForHour(occupancySlots, selection.startTime);
+    if (kind === "job" && occupancy?.jobsFull) return;
+    if (kind === "inspection" && occupancy?.requestsFull) return;
+    onAddEvent(kind, selection);
+    window.setTimeout(() => {
+      void reloadOccupancy();
+    }, 0);
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      {isBusinessClosed ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="font-body text-[13px] font-semibold text-amber-900">
+            Business off day
+          </p>
+          <p className="mt-1 font-body text-[12px] leading-relaxed text-amber-800">
+            Jobs, inspection requests, and personal events cannot be added on
+            this date. Reactivate the day to schedule again.
+          </p>
+        </div>
+      ) : null}
       {CALENDAR_SESSIONS.map(({ session, slots }) => {
         const meta = CALENDAR_SESSION_META[session];
 
@@ -279,8 +374,11 @@ function CalendarDayTimeSlots({
                   slot={slot}
                   isoDate={isoDate}
                   placements={placementsByHour[slot.startTime] ?? []}
+                  occupancy={occupancyForHour(occupancySlots, slot.startTime)}
+                  capacityLoading={capacityLoading}
                   canAddEvents={canAddEvents}
-                  onAddEvent={onAddEvent}
+                  closedDay={isBusinessClosed}
+                  onAddEvent={handleAddEvent}
                   onOpenLink={onOpenLink}
                   onEditPersonalEvent={onEditPersonalEvent}
                 />
@@ -450,9 +548,11 @@ function CalendarDayEventCards({
               : "bg-green-50 text-green-700 border border-green-200";
 
         return (
-          <article
+          <Link
             key={`${event.key}-${continued ? "continued" : "start"}`}
-            className={`${CALENDAR_SOURCE_CARD_CLASS[event.source]}${compact ? " !p-3" : ""}${continued ? " border-l-4 border-l-primary/50" : ""}`}
+            href={card.openHref}
+            onClick={onOpenLink}
+            className={`block transition-colors hover:opacity-95 ${CALENDAR_SOURCE_CARD_CLASS[event.source]}${compact ? " !p-3" : ""}${continued ? " border-l-4 border-l-primary/50" : ""}`}
           >
             <div className={`flex flex-col ${compact ? "gap-2" : "gap-3"}`}>
               <div className="flex items-start justify-between gap-3">
@@ -543,17 +643,18 @@ function CalendarDayEventCards({
                 </CalendarDetailRow>
               ) : null}
 
-              <Link
-                href={card.openHref}
-                className={`inline-flex w-fit font-body font-semibold text-primary hover:underline ${
-                  compact ? "text-[13px]" : "text-[14px]"
+              <span
+                className={`inline-flex w-fit items-center gap-1 font-body font-semibold text-primary ${
+                  compact ? "text-[12px]" : "text-[14px]"
                 }`}
-                onClick={onOpenLink}
               >
                 Open
-              </Link>
+                <span className="material-symbols-outlined text-[16px]">
+                  arrow_forward
+                </span>
+              </span>
             </div>
-          </article>
+          </Link>
         );
       })}
     </>
@@ -609,6 +710,7 @@ function eventTimeLabel(
 }
 
 export function CalendarBoard() {
+  const router = useRouter();
   const { user, role } = useAuth();
   const {
     requests,
@@ -646,9 +748,56 @@ export function CalendarBoard() {
     useState<CalendarSlotSelection | null>(null);
   const [editingPersonalEvent, setEditingPersonalEvent] =
     useState<PersonalCalendarEvent | null>(null);
+  const [closureModalOpen, setClosureModalOpen] = useState(false);
+  const [closureModalDate, setClosureModalDate] = useState<string | null>(null);
   const [filters, setFilters] = useState<CalendarFilters>(() =>
     emptyCalendarFilters(null),
   );
+
+  const closureRange = useMemo(() => {
+    const from = isoDateFromParts(viewMonth, 1);
+    const to = isoDateFromParts(viewMonth, daysInMonth(viewMonth));
+    return { from, to };
+  }, [viewMonth]);
+
+  const {
+    closures,
+    reload: reloadClosures,
+  } = useBusinessClosures(closureRange.from, closureRange.to);
+
+  const closedDates = useMemo(
+    () => new Set(closures.map((closure) => closure.date)),
+    [closures],
+  );
+
+  const selectedDayClosure = useMemo((): BusinessClosure | null => {
+    if (!selectedIsoDate) return null;
+    return closures.find((closure) => closure.date === selectedIsoDate) ?? null;
+  }, [closures, selectedIsoDate]);
+
+  const isSelectedDayClosed = selectedDayClosure != null;
+
+  const closureModalIsoDate = closureModalDate ?? selectedIsoDate ?? "";
+  const isClosureModalDayClosed = closureModalIsoDate
+    ? closedDates.has(closureModalIsoDate)
+    : false;
+  const closureModalClosure = useMemo((): BusinessClosure | null => {
+    if (!closureModalIsoDate) return null;
+    return closures.find((closure) => closure.date === closureModalIsoDate) ?? null;
+  }, [closures, closureModalIsoDate]);
+  const closureModalDateLabel = closureModalIsoDate
+    ? DAY_FORMAT.format(new Date(`${closureModalIsoDate}T12:00:00`))
+    : "";
+
+  function openClosureModal(isoDate: string) {
+    setClosureModalDate(isoDate);
+    setClosureModalOpen(true);
+  }
+
+  function closeClosureModal() {
+    setClosureModalOpen(false);
+    setClosureModalDate(null);
+  }
 
   const canAddEvents = role === "business_owner";
 
@@ -784,6 +933,10 @@ export function CalendarBoard() {
     kind: CalendarAddEventKind,
     selection: CalendarSlotSelection,
   ) {
+    if (closedDates.has(selection.date)) {
+      return;
+    }
+
     if (kind === "personal") {
       setEditingPersonalEvent(null);
       setPersonalEventSlot(selection);
@@ -812,6 +965,22 @@ export function CalendarBoard() {
     setEditingPersonalEvent(event);
     setPersonalEventSlot(null);
     setPersonalEventModalOpen(true);
+  }
+
+  function openCalendarEvent(event: CalendarEvent, isoDate: string) {
+    if (event.personalEvent) {
+      openEditPersonalEvent(event.personalEvent);
+      return;
+    }
+
+    const card = calendarCardView(event);
+    if (card) {
+      closeBookingDrawer();
+      router.push(card.openHref);
+      return;
+    }
+
+    openDayByIso(isoDate);
   }
 
   function toggleAssignedToMe(checked: boolean) {
@@ -1056,6 +1225,7 @@ export function CalendarBoard() {
               const cellDate = new Date(`${isoDate}T12:00:00`);
               const isTodayCell = isSameDay(cellDate, today);
               const dayEvents = monthEventsByDate[isoDate] ?? [];
+              const isClosedDay = closedDates.has(isoDate);
 
               return (
                 <button
@@ -1063,25 +1233,40 @@ export function CalendarBoard() {
                   type="button"
                   onClick={() => openDay(day)}
                   className={`group flex min-h-[88px] cursor-pointer flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors hover:bg-surface-container-low active:scale-[0.99] sm:min-h-[120px] sm:p-3 ${
-                    isTodayCell ? "bg-primary/5" : ""
+                    isClosedDay
+                      ? isTodayCell
+                        ? `${CLOSED_DAY_MONTH_CELL_CLASS} ring-2 ring-amber-400`
+                        : CLOSED_DAY_MONTH_CELL_CLASS
+                      : isTodayCell
+                        ? "bg-primary/5"
+                        : ""
                   }`}
                 >
                   <div className="flex items-start justify-between gap-1">
                     <span
                       className={`font-numeric text-base font-bold sm:text-lg ${
                         isTodayCell
-                          ? "flex h-8 w-8 items-center justify-center rounded-full bg-primary text-on-primary"
-                          : "text-on-surface"
+                          ? `flex h-8 w-8 items-center justify-center rounded-full ${
+                              isClosedDay
+                                ? "bg-amber-600 text-white"
+                                : "bg-primary text-on-primary"
+                            }`
+                          : isClosedDay
+                            ? "text-amber-900"
+                            : "text-on-surface"
                       }`}
                     >
                       {day}
                     </span>
-                    {dayEvents.length > 0 ? (
-                      <span className="font-numeric text-[10px] font-bold text-outline-variant group-hover:text-primary">
-                        {dayEvents.length}{" "}
-                        {dayEvents.length === 1 ? "item" : "items"}
-                      </span>
-                    ) : null}
+                    <div className="flex flex-col items-end gap-1">
+                      {isClosedDay ? <BusinessOffDayBadge compact /> : null}
+                      {dayEvents.length > 0 ? (
+                        <span className="font-numeric text-[10px] font-bold text-outline-variant group-hover:text-primary">
+                          {dayEvents.length}{" "}
+                          {dayEvents.length === 1 ? "item" : "items"}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   {dayEvents.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -1106,12 +1291,19 @@ export function CalendarBoard() {
               {weekDays.map((day) => {
                 const isoDate = toIsoDateLocal(day);
                 const isTodayCell = isSameDay(day, today);
+                const isClosedDay = closedDates.has(isoDate);
                 const dayEvents = monthEventsByDate[isoDate] ?? [];
 
                 return (
                   <div
                     key={`week-mobile-${isoDate}`}
-                    className={isTodayCell ? "bg-primary/[0.04]" : ""}
+                    className={
+                      isClosedDay
+                        ? CLOSED_DAY_WEEK_SURFACE_CLASS
+                        : isTodayCell
+                          ? "bg-primary/[0.04]"
+                          : ""
+                    }
                   >
                     <button
                       type="button"
@@ -1119,14 +1311,22 @@ export function CalendarBoard() {
                         setFocusDate(day);
                         openDayByIso(isoDate);
                       }}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-container-low"
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-container-low ${
+                        isClosedDay ? "active:bg-amber-100" : ""
+                      }`}
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <span
                           className={`flex h-11 w-11 shrink-0 items-center justify-center font-numeric text-base font-bold ${
                             isTodayCell
-                              ? "rounded-full bg-primary text-on-primary"
-                              : "rounded-full bg-surface-container text-on-surface"
+                              ? `rounded-full ${
+                                  isClosedDay
+                                    ? "bg-amber-600 text-white"
+                                    : "bg-primary text-on-primary"
+                                }`
+                              : isClosedDay
+                                ? "rounded-full bg-amber-200 text-amber-950"
+                                : "rounded-full bg-surface-container text-on-surface"
                           }`}
                         >
                           {day.getDate()}
@@ -1140,15 +1340,18 @@ export function CalendarBoard() {
                           </p>
                         </div>
                       </div>
-                      {dayEvents.length > 0 ? (
-                        <span className="shrink-0 rounded-full bg-surface-container-high px-2.5 py-1 font-numeric text-[11px] font-bold text-on-surface-variant">
-                          {dayEvents.length}
-                        </span>
-                      ) : (
-                        <span className="font-body text-[12px] text-outline-variant">
-                          Free
-                        </span>
-                      )}
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        {isClosedDay ? <BusinessOffDayBadge /> : null}
+                        {dayEvents.length > 0 ? (
+                          <span className="rounded-full bg-surface-container-high px-2.5 py-1 font-numeric text-[11px] font-bold text-on-surface-variant">
+                            {dayEvents.length}
+                          </span>
+                        ) : !isClosedDay ? (
+                          <span className="font-body text-[12px] text-outline-variant">
+                            Free
+                          </span>
+                        ) : null}
+                      </div>
                     </button>
                     {dayEvents.length > 0 ? (
                       <div className="flex flex-col gap-2 px-4 pb-4">
@@ -1156,7 +1359,7 @@ export function CalendarBoard() {
                           <button
                             key={event.key}
                             type="button"
-                            onClick={() => openDayByIso(isoDate)}
+                            onClick={() => openCalendarEvent(event, isoDate)}
                             className={`w-full rounded-xl border px-3 py-2.5 text-left font-body text-[13px] font-semibold leading-snug transition-opacity active:opacity-90 ${
                               event.source === "jobs"
                                 ? "border-primary/25 bg-primary/10 text-primary"
@@ -1180,6 +1383,7 @@ export function CalendarBoard() {
                   const isoDate = toIsoDateLocal(day);
                   const isTodayCell = isSameDay(day, today);
                   const isFocusDay = isSameDay(day, focusDate);
+                  const isClosedDay = closedDates.has(isoDate);
 
                   return (
                     <button
@@ -1190,17 +1394,30 @@ export function CalendarBoard() {
                         openDayByIso(isoDate);
                       }}
                       className={`flex h-14 items-center justify-between gap-1 border-r border-outline-variant px-2 text-left transition-colors hover:bg-surface-container-low last:border-r-0 sm:px-3 ${
-                        isTodayCell ? "bg-primary/5" : "bg-surface-container-low"
-                      } ${isFocusDay && !isTodayCell ? "ring-1 ring-inset ring-primary/30" : ""}`}
+                        isClosedDay
+                          ? CLOSED_DAY_WEEK_HEADER_CLASS
+                          : isTodayCell
+                            ? "bg-primary/5"
+                            : "bg-surface-container-low"
+                      } ${isFocusDay && !isTodayCell && !isClosedDay ? "ring-1 ring-inset ring-primary/30" : ""}`}
                     >
-                      <span className="font-body text-[10px] font-semibold uppercase tracking-wide text-outline sm:text-[11px]">
-                        {WEEKDAY_LABELS[index]}
-                      </span>
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="font-body text-[10px] font-semibold uppercase tracking-wide text-outline sm:text-[11px]">
+                          {WEEKDAY_LABELS[index]}
+                        </span>
+                        {isClosedDay ? <BusinessOffDayBadge compact /> : null}
+                      </div>
                       <span
                         className={`flex h-8 w-8 shrink-0 items-center justify-center font-numeric text-sm font-bold ${
                           isTodayCell
-                            ? "rounded-full bg-primary text-on-primary"
-                            : "text-on-surface"
+                            ? `rounded-full ${
+                                isClosedDay
+                                  ? "bg-amber-600 text-white"
+                                  : "bg-primary text-on-primary"
+                              }`
+                            : isClosedDay
+                              ? "rounded-full bg-amber-200 text-amber-950"
+                              : "text-on-surface"
                         }`}
                       >
                         {day.getDate()}
@@ -1212,24 +1429,34 @@ export function CalendarBoard() {
               <div className="grid min-h-[280px] grid-cols-7 auto-rows-fr">
                 {weekDays.map((day) => {
                   const isoDate = toIsoDateLocal(day);
+                  const isClosedDay = closedDates.has(isoDate);
                   const dayEvents = monthEventsByDate[isoDate] ?? [];
 
                   return (
                     <div
                       key={`week-body-${isoDate}`}
-                      className="flex flex-col border-r border-outline-variant last:border-r-0"
+                      className={`flex flex-col border-r border-outline-variant last:border-r-0 ${
+                        isClosedDay ? CLOSED_DAY_WEEK_SURFACE_CLASS : ""
+                      }`}
                     >
                       <div className="flex flex-1 flex-col gap-1.5 p-2">
-                        {dayEvents.length === 0 ? (
-                          <p className="py-4 text-center font-body text-[11px] text-outline-variant">
-                            —
+                        {isClosedDay ? (
+                          <p className="py-2 text-center font-body text-[11px] font-semibold text-amber-900">
+                            Off day
                           </p>
+                        ) : null}
+                        {dayEvents.length === 0 ? (
+                          !isClosedDay ? (
+                            <p className="py-4 text-center font-body text-[11px] text-outline-variant">
+                              —
+                            </p>
+                          ) : null
                         ) : (
                           dayEvents.map((event) => (
                             <button
                               key={event.key}
                               type="button"
-                              onClick={() => openDayByIso(isoDate)}
+                              onClick={() => openCalendarEvent(event, isoDate)}
                               className={`w-full truncate rounded-lg border px-2 py-1.5 text-left font-body text-[11px] font-semibold transition-opacity hover:opacity-90 ${
                                 event.source === "jobs"
                                   ? "border-primary/25 bg-primary/10 text-primary"
@@ -1251,6 +1478,47 @@ export function CalendarBoard() {
 
         {viewTab === "Today" ? (
           <div className="p-4 sm:p-6">
+            {closedDates.has(focusIso) ? (
+              <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <BusinessOffDayBadge />
+                    <p className="font-body text-[13px] font-semibold text-amber-950">
+                      Business off day
+                    </p>
+                  </div>
+                  <p className="mt-1 font-body text-[12px] leading-relaxed text-amber-900">
+                    Customers cannot book this date. You can reactivate it when
+                    you are open again.
+                  </p>
+                </div>
+                {canAddEvents ? (
+                  <button
+                    type="button"
+                    onClick={() => openClosureModal(focusIso)}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 font-body text-[12px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">
+                      event_available
+                    </span>
+                    Reactivate day
+                  </button>
+                ) : null}
+              </div>
+            ) : canAddEvents ? (
+              <div className="mb-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => openClosureModal(focusIso)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] font-semibold text-amber-900 transition-colors hover:bg-amber-100"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    event_busy
+                  </span>
+                  Mark as off day
+                </button>
+              </div>
+            ) : null}
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="font-body text-[13px] font-semibold text-on-surface-variant">
                 {focusDayEvents.length > 0
@@ -1267,6 +1535,7 @@ export function CalendarBoard() {
               isoDate={focusIso}
               events={focusDayEvents}
               canAddEvents={canAddEvents}
+              isBusinessClosed={closedDates.has(focusIso)}
               onAddEvent={openAddEvent}
               onEditPersonalEvent={openEditPersonalEvent}
             />
@@ -1295,21 +1564,43 @@ export function CalendarBoard() {
             bookingDrawerOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <div className="flex shrink-0 items-center justify-between border-b border-outline-variant p-5">
-            <div>
+          <div
+            className={`flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant p-5 ${
+              isSelectedDayClosed ? "bg-amber-50" : ""
+            }`}
+          >
+            <div className="min-w-0">
               <h3 className="font-display text-headline-sm font-bold text-on-surface">
                 {selectedDate ? DAY_FORMAT.format(selectedDate) : "Calendar"}
               </h3>
               <p className="font-body text-[13px] font-semibold text-on-surface-variant">
-                {selectedDayEvents.length > 0
-                  ? `${selectedDayEvents.length} ${selectedDayEvents.length === 1 ? "item" : "items"} on this day`
-                  : "Nothing scheduled on this day"}
+                {isSelectedDayClosed
+                  ? "Business off day"
+                  : selectedDayEvents.length > 0
+                    ? `${selectedDayEvents.length} ${selectedDayEvents.length === 1 ? "item" : "items"} on this day`
+                    : "Nothing scheduled on this day"}
               </p>
+              {canAddEvents && selectedIsoDate ? (
+                <button
+                  type="button"
+                  onClick={() => openClosureModal(selectedIsoDate)}
+                  className={`mt-3 inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 font-body text-[12px] font-semibold transition-colors ${
+                    isSelectedDayClosed
+                      ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
+                      : "border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    {isSelectedDayClosed ? "event_available" : "event_busy"}
+                  </span>
+                  {isSelectedDayClosed ? "Reactivate day" : "Mark as off day"}
+                </button>
+              ) : null}
             </div>
             <button
               type="button"
               onClick={closeBookingDrawer}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-surface-container"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-surface-container"
               aria-label="Close"
             >
               <span className="material-symbols-outlined">close</span>
@@ -1322,6 +1613,7 @@ export function CalendarBoard() {
                 isoDate={selectedIsoDate ?? ""}
                 events={selectedDayEvents}
                 canAddEvents={canAddEvents}
+                isBusinessClosed={isSelectedDayClosed}
                 onAddEvent={openAddEvent}
                 onOpenLink={closeBookingDrawer}
                 onEditPersonalEvent={openEditPersonalEvent}
@@ -1330,6 +1622,18 @@ export function CalendarBoard() {
           </div>
         </aside>
       </div>
+
+      <MarkBusinessClosureModal
+        open={closureModalOpen}
+        date={closureModalIsoDate}
+        dateLabel={closureModalDateLabel}
+        isClosed={isClosureModalDayClosed}
+        closure={closureModalClosure}
+        onClose={closeClosureModal}
+        onChanged={() => {
+          void reloadClosures();
+        }}
+      />
 
       <AddInspectionModal
         open={addModalOpen}

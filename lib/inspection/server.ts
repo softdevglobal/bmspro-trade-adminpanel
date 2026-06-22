@@ -4,6 +4,7 @@ import {
   computeDaySlotOccupancy,
   rangeOverlapsFullSlots,
 } from "@/lib/calendar/slot-occupancy";
+import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
 import type { CalendarScheduleInput } from "@/lib/calendar/schedule-input";
 import {
   customerOwnsRequestRecord,
@@ -157,6 +158,14 @@ export async function createInspectionRequest(
 
   const schedule = options.scheduleOnCreate ?? null;
   if (schedule) {
+    if (await isBusinessClosedOnDate(businessId, schedule.date)) {
+      return {
+        ok: false,
+        error:
+          "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+      };
+    }
+
     const occupancy = await computeDaySlotOccupancy(businessId, schedule.date);
     if (
       rangeOverlapsFullSlots(
@@ -295,6 +304,15 @@ export async function applyOwnerAction(
   };
 
   if (action.type === "accept") {
+    if (await isBusinessClosedOnDate(businessId, action.slot.date)) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+      };
+    }
+
     const occupancy = await computeDaySlotOccupancy(
       businessId,
       action.slot.date,
@@ -672,6 +690,15 @@ export async function customerAcceptProposedSlot(
       ok: false,
       status: 400,
       error: "That time is no longer offered. Please pick another option.",
+    };
+  }
+
+  if (await isBusinessClosedOnDate(current.businessId, matched.date)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Please choose another day.",
     };
   }
 

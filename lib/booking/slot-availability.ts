@@ -1,6 +1,10 @@
 import "server-only";
 
 import { computeCapacityUnavailableSessions } from "@/lib/calendar/slot-occupancy";
+import {
+  closureUnavailableSlots,
+  listBusinessClosuresInRange,
+} from "@/lib/calendar/business-closures/server";
 import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
@@ -238,18 +242,24 @@ function mergeUnavailableSlots(slots: UnavailableSlot[]): UnavailableSlot[] {
   return Array.from(merged.values());
 }
 
-/** Team, leave, and hourly-capacity constraints for customer morning/afternoon picks. */
+/** Team, leave, hourly-capacity, and business off-day constraints for customer picks. */
 export async function computeUnavailableSlots(
   businessId: string,
   fromDate: string,
   toDate: string,
   timeZone: string,
 ): Promise<UnavailableSlot[]> {
-  const [teamUnavailable, capacityUnavailable] = await Promise.all([
-    computeTeamUnavailableSlots(businessId, fromDate, toDate, timeZone),
-    computeCapacityUnavailableSessions(businessId, fromDate, toDate),
+  const [teamUnavailable, capacityUnavailable, businessClosures] =
+    await Promise.all([
+      computeTeamUnavailableSlots(businessId, fromDate, toDate, timeZone),
+      computeCapacityUnavailableSessions(businessId, fromDate, toDate),
+      listBusinessClosuresInRange(businessId, fromDate, toDate),
+    ]);
+  return mergeUnavailableSlots([
+    ...teamUnavailable,
+    ...capacityUnavailable,
+    ...closureUnavailableSlots(businessClosures),
   ]);
-  return mergeUnavailableSlots([...teamUnavailable, ...capacityUnavailable]);
 }
 
 function formatUnavailableSlotMessage(

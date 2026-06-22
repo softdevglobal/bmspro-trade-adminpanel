@@ -120,7 +120,7 @@ export function LeaveRequestsDetailDrawer({
             exit={{ x: "100%" }}
             transition={panelTransition}
             onClick={(event) => event.stopPropagation()}
-            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-[480px] flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-background shadow-2xl will-change-transform sm:max-w-[480px]"
+            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-[520px] flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-background shadow-2xl will-change-transform sm:max-w-[520px]"
           >
             <LeaveRequestPreviewContent
               item={item}
