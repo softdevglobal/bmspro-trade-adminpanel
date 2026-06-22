@@ -8,7 +8,10 @@ import { adminAuth } from "@/lib/firebase/admin";
 
 export const runtime = "nodejs";
 
-async function requireBusinessOwner(request: Request) {
+async function requireBusinessMember(
+  request: Request,
+  { allowStaff = false }: { allowStaff?: boolean } = {},
+) {
   const authHeader = request.headers.get("authorization") ?? "";
   const match = authHeader.match(/^Bearer (.+)$/);
   if (!match) {
@@ -24,11 +27,16 @@ async function requireBusinessOwner(request: Request) {
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
-    if (!businessId || (role !== "owner" && role !== "admin")) {
+    const allowedRoles = allowStaff
+      ? ["owner", "admin", "staff"]
+      : ["owner", "admin"];
+    if (!businessId || typeof role !== "string" || !allowedRoles.includes(role)) {
       return {
         ok: false as const,
         status: 403,
-        error: "Business owner access required.",
+        error: allowStaff
+          ? "Business team access required."
+          : "Business owner access required.",
       };
     }
     return {
@@ -45,8 +53,13 @@ async function requireBusinessOwner(request: Request) {
   }
 }
 
+async function requireBusinessOwner(request: Request) {
+  return requireBusinessMember(request);
+}
+
 export async function GET(request: Request) {
-  const auth = await requireBusinessOwner(request);
+  // Staff get a read-only view of personal events on the mobile calendar.
+  const auth = await requireBusinessMember(request, { allowStaff: true });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },

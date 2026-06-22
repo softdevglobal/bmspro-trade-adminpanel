@@ -351,6 +351,74 @@ export async function assignBusinessBooking(
   };
 }
 
+/**
+ * Reschedules a scheduled/ongoing job to a new date + time window. Re-checks
+ * business closures and per-hour job capacity so the move respects the same
+ * rules as creating a job. The schedule reminder cron reads the updated
+ * `scheduledStartTime`, so reminders automatically follow the new time.
+ */
+export async function updateBusinessBookingSchedule(
+  businessId: string,
+  bookingId: string,
+  input: { slot: InspectionSlot; startTime: string; endTime: string },
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 403, error: "Job not found." };
+  }
+
+  if (current.status !== "scheduled" && current.status !== "ongoing") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only scheduled or in-progress jobs can be rescheduled.",
+    };
+  }
+
+  if (await isBusinessClosedOnDate(businessId, input.slot.date)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+    };
+  }
+
+  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date);
+  if (
+    rangeOverlapsFullSlots(occupancy.slots, input.startTime, input.endTime, "job")
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "One or more time slots in that range are full for jobs. Choose another time or update capacity in Settings.",
+    };
+  }
+
+  await ref.update({
+    scheduledSlot: input.slot,
+    scheduledStartTime: input.startTime,
+    scheduledEndTime: input.endTime,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+  };
+}
+
 async function loadBusinessSummary(businessId: string): Promise<{
   businessName: string | null;
   bookingSlug: string | null;
