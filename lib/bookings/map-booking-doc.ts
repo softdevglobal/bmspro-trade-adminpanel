@@ -9,6 +9,8 @@ import {
   isClockTime,
   isRequestType,
   isTimeRange,
+  resolveSlotStartTime,
+  UNSCHEDULED_SORT_KEY,
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
@@ -161,4 +163,28 @@ export function mapBookingDoc(
 
 export function sortBookingsNewestFirst(records: BookingDetail[]): BookingDetail[] {
   return [...records].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+}
+
+export function bookingScheduleSortKey(booking: BookingDetail): string {
+  if (booking.scheduledSlot?.date) {
+    const start =
+      booking.scheduledStartTime && isClockTime(booking.scheduledStartTime)
+        ? booking.scheduledStartTime
+        : resolveSlotStartTime(booking.scheduledSlot);
+    return `${booking.scheduledSlot.date}T${start}`;
+  }
+  return UNSCHEDULED_SORT_KEY;
+}
+
+export function sortBookingsBySchedule(records: BookingDetail[]): BookingDetail[] {
+  return [...records].sort((a, b) => {
+    const keyA = bookingScheduleSortKey(a);
+    const keyB = bookingScheduleSortKey(b);
+    const scheduledA = keyA !== UNSCHEDULED_SORT_KEY;
+    const scheduledB = keyB !== UNSCHEDULED_SORT_KEY;
+    if (scheduledA && scheduledB) return keyA.localeCompare(keyB);
+    if (scheduledA) return -1;
+    if (scheduledB) return 1;
+    return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+  });
 }

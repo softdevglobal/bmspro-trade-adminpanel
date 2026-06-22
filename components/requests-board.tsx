@@ -45,7 +45,9 @@ import {
   type InspectionRequestStatus,
   type InspectionSlot,
   type InspectionTimeRange,
+  sortInspectionSlots,
 } from "@/lib/inspection/types";
+import { sortInspectionRequestsBySchedule } from "@/lib/inspection/map-inspection-doc";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
@@ -211,8 +213,11 @@ export function RequestsBoard() {
   const boardRequests = requestsLocal;
 
   const filtered = useMemo(() => {
-    if (filter === "all") return boardRequests;
-    return boardRequests.filter((req) => req.status === filter);
+    const list =
+      filter === "all"
+        ? boardRequests
+        : boardRequests.filter((req) => req.status === filter);
+    return sortInspectionRequestsBySchedule(list);
   }, [boardRequests, filter]);
 
   const counts = useMemo(() => {
@@ -561,7 +566,7 @@ function RequestCard({
           </span>
         ) : (
           <>
-            {request.preferredSlots.slice(0, 3).map((slot, idx) => (
+            {sortInspectionSlots(request.preferredSlots).slice(0, 3).map((slot, idx) => (
               <SlotPill
                 key={`${slot.date}-${slot.timeRange}-${idx}`}
                 slot={slot}
@@ -2225,6 +2230,8 @@ function InspectionSlotsList({
   const timeZone = useRequestsTimeZone();
   if (slots.length === 0) return null;
 
+  const orderedSlots = sortInspectionSlots(slots);
+
   const cardClass =
     variant === "proposed"
       ? "border-violet-200/90 bg-violet-50/70"
@@ -2241,12 +2248,12 @@ function InspectionSlotsList({
 
   return (
     <ul className="mt-1.5 space-y-1.5">
-      {slots.map((slot, index) => (
+      {orderedSlots.map((slot, index) => (
         <li
           key={`${slot.date}-${slot.timeRange}-${index}`}
           className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 shadow-sm ${cardClass}`}
         >
-          {slots.length > 1 ? (
+          {orderedSlots.length > 1 ? (
             <span
               className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 font-body text-[11px] font-bold text-primary"
               aria-hidden
@@ -2727,7 +2734,7 @@ function AcceptForm({
         {description}
       </p>
       <ul className="mt-3 space-y-2">
-        {slots.map((slot, idx) => {
+        {sortInspectionSlots(slots).map((slot, idx) => {
           const id = `${slot.date}-${slot.timeRange}-${idx}`;
           const checked =
             value?.date === slot.date && value.timeRange === slot.timeRange;

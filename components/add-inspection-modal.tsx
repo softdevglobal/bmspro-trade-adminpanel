@@ -20,6 +20,8 @@ import {
   TIME_RANGE_LABELS,
   formatAddress,
   formatSlotDate,
+  formatVisitWindow,
+  sortInspectionSlots,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
@@ -408,7 +410,7 @@ function RequestTypeCard({
 }
 
 function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
-  return [...slots].sort((a, b) => a.date.localeCompare(b.date));
+  return sortInspectionSlots(slots);
 }
 
 function PreferredDayTimeRow({
@@ -530,7 +532,7 @@ function InspectionPreview({
 
       <PreviewSection title="Preferred visits" icon="event">
         <ul className="space-y-2">
-          {form.preferredSlots.map((slot, index) => (
+          {sortPreferredSlots(form.preferredSlots).map((slot, index) => (
             <li
               key={`${slot.date}-${slot.timeRange}-${index}`}
               className="flex items-center gap-2 rounded-lg border border-outline-variant/40 bg-white px-3 py-2 font-body text-[13px] text-on-surface"
@@ -540,7 +542,8 @@ function InspectionPreview({
               </span>
               <span>
                 {formatSlotDate(slot.date, timeZone)} ·{" "}
-                {TIME_RANGE_LABELS[slot.timeRange]}
+                {formatVisitWindow(slot.startTime, slot.endTime) ??
+                  TIME_RANGE_LABELS[slot.timeRange]}
               </span>
             </li>
           ))}

@@ -2,6 +2,8 @@ import { parseBookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   REQUEST_STATUSES,
+  UNSCHEDULED_SORT_KEY,
+  inspectionRequestScheduleSortKey,
   isClockTime,
   isRequestType,
   isTimeRange,
@@ -184,4 +186,19 @@ export function sortInspectionRequestsNewestFirst(
   records: InspectionRequestDetail[],
 ): InspectionRequestDetail[] {
   return [...records].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+}
+
+export function sortInspectionRequestsBySchedule(
+  records: InspectionRequestDetail[],
+): InspectionRequestDetail[] {
+  return [...records].sort((a, b) => {
+    const keyA = inspectionRequestScheduleSortKey(a);
+    const keyB = inspectionRequestScheduleSortKey(b);
+    const scheduledA = keyA !== UNSCHEDULED_SORT_KEY;
+    const scheduledB = keyB !== UNSCHEDULED_SORT_KEY;
+    if (scheduledA && scheduledB) return keyA.localeCompare(keyB);
+    if (scheduledA) return -1;
+    if (scheduledB) return 1;
+    return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+  });
 }
