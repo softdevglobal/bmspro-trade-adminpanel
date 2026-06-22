@@ -8,6 +8,7 @@ import {
   BOOKING_STATUS_TONE,
 } from "@/lib/bookings/types";
 import type { BookingDetail, BookingStatus } from "@/lib/bookings/types";
+import { sortBookingsBySchedule } from "@/lib/bookings/map-booking-doc";
 import {
   formatAddress,
   formatSlotDate,
@@ -889,7 +890,7 @@ export function JobsBoard({
       ? localBookingState.bookings
       : bookings;
   const groupedBookings = useMemo(() => {
-    return displayBookings.reduce(
+    const groups = displayBookings.reduce(
       (groups, booking) => {
         if (booking.status === "completed") {
           groups.completed.push(booking);
@@ -903,6 +904,10 @@ export function JobsBoard({
         completed: [] as BookingDetail[],
       },
     );
+    return {
+      active: sortBookingsBySchedule(groups.active),
+      completed: sortBookingsBySchedule(groups.completed),
+    };
   }, [displayBookings]);
   const timeZone = profile?.timezone;
 
