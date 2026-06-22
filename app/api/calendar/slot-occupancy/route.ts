@@ -24,11 +24,16 @@ async function requireBusinessOwner(request: Request) {
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
-    if (!businessId || (role !== "owner" && role !== "admin")) {
+    // Read-only occupancy is also surfaced to staff in the mobile calendar so
+    // they can see the day's slot order (without editing).
+    if (
+      !businessId ||
+      (role !== "owner" && role !== "admin" && role !== "staff")
+    ) {
       return {
         ok: false as const,
         status: 403,
-        error: "Business owner access required.",
+        error: "Business team access required.",
       };
     }
     return { ok: true as const, businessId };

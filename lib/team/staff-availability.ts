@@ -49,6 +49,15 @@ export function normalizeStaffDayAvailability(
     }
   } else {
     const legacy = sanitizeStringArray(value);
+    // Missing or empty availability means "not configured" — available all days.
+    // Legacy string arrays like ["Weekdays"] are handled below.
+    if (legacy.length === 0) {
+      return WEEK_DAY_IDS.map((day) => ({
+        day,
+        isOff: false,
+        serviceAreas: [],
+      }));
+    }
     for (const day of WEEK_DAY_IDS) {
       const isWeekday = day !== "saturday" && day !== "sunday";
       const available =

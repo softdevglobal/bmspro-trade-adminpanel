@@ -4,6 +4,7 @@ import {
   assignBusinessBooking,
   completeBusinessBooking,
   updateBookingCompletionPhotos,
+  updateBusinessBookingSchedule,
   getBusinessBooking,
   startBusinessBookingJob,
   startBusinessBookingVisit,
@@ -528,6 +529,83 @@ export async function PATCH(
       targetId: id,
       targetLabel: assignment.name,
       metadata: { assignedToUid: assignment.uid, assignedToType: assignment.type },
+    });
+
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "reschedule") {
+    const slotRaw =
+      payload.slot && typeof payload.slot === "object"
+        ? (payload.slot as Record<string, unknown>)
+        : null;
+    const date =
+      typeof slotRaw?.date === "string" ? slotRaw.date.trim() : "";
+    const timeRangeRaw =
+      typeof slotRaw?.timeRange === "string" ? slotRaw.timeRange.trim() : "";
+    const timeRange =
+      timeRangeRaw === "morning" || timeRangeRaw === "afternoon"
+        ? timeRangeRaw
+        : "";
+    const startTime =
+      typeof payload.startTime === "string" ? payload.startTime.trim() : "";
+    const endTime =
+      typeof payload.endTime === "string" ? payload.endTime.trim() : "";
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !timeRange) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid date and time of day." },
+        { status: 400 },
+      );
+    }
+    const startMin = clockToMinutes(startTime);
+    const endMin = clockToMinutes(endTime);
+    if (startMin == null || endMin == null || endMin <= startMin) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid time window." },
+        { status: 400 },
+      );
+    }
+
+    const result = await updateBusinessBookingSchedule(auth.businessId, id, {
+      slot: { date, timeRange },
+      startTime,
+      endTime,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    let actorUid = "";
+    let actorEmail: string | undefined;
+    let actorRole = "";
+    try {
+      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      actorUid = decoded.uid;
+      actorEmail = decoded.email;
+      actorRole = typeof decoded.role === "string" ? decoded.role : "";
+    } catch {
+      // Best-effort actor metadata; the reschedule already succeeded.
+    }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "booking",
+      action: "booking.rescheduled",
+      actor: {
+        uid: actorUid,
+        role: actorRoleFromClaim(actorRole),
+        name: actorEmail ?? null,
+        email: actorEmail ?? null,
+      },
+      source: "admin_panel",
+      summary: `Job rescheduled to ${date} ${startTime}–${endTime}`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+      metadata: { date, startTime, endTime },
     });
 
     return NextResponse.json({ ok: true, booking: result.booking });

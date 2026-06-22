@@ -611,21 +611,11 @@ export function ServiceOwnerChecklistSection({
       title="Checklist tasks"
       subtitle="Steps your team completes on site — drag to reorder"
     >
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="font-body text-[12px] text-on-surface-variant">
-          {tasks.length === 0
-            ? "Optional, but helps staff follow the same process every job."
-            : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
+      {tasks.length > 0 ? (
+        <p className="mb-3 font-body text-[12px] text-on-surface-variant">
+          {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
         </p>
-        <button
-          type="button"
-          onClick={onAddTask}
-          className="flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 font-body text-[12px] font-semibold text-on-primary shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.99]"
-        >
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          Add task
-        </button>
-      </div>
+      ) : null}
 
       {tasks.length === 0 ? (
         <p className="rounded-xl border border-dashed border-outline-variant/80 bg-surface-container-low/40 px-4 py-8 text-center font-body text-[13px] text-on-surface-variant">
@@ -639,6 +629,17 @@ export function ServiceOwnerChecklistSection({
           onRemove={onRemoveTask}
         />
       )}
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={onAddTask}
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 font-body text-[12px] font-semibold text-on-primary shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.99]"
+        >
+          <span className="material-symbols-outlined text-[18px]">add</span>
+          Add task
+        </button>
+      </div>
     </WizardSection>
   );
 }

@@ -6,6 +6,7 @@
  */
 
 import type { BookingStatus } from "@/lib/bookings/types";
+import { parseClockMinutes } from "@/lib/leave/clock";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   formatIsoDateInPlatformTimeZone,
@@ -609,4 +610,55 @@ export function formatVisitWindow(
   if (startLabel) return `From ${startLabel}`;
   if (endLabel) return `Until ${endLabel}`;
   return null;
+}
+
+const DEFAULT_SLOT_START: Record<InspectionTimeRange, string> = {
+  morning: "10:00",
+  afternoon: "13:00",
+};
+
+/** Resolve the sortable start time for a slot (hourly window or session default). */
+export function resolveSlotStartTime(slot: InspectionSlot): string {
+  if (slot.startTime && isClockTime(slot.startTime)) return slot.startTime.trim();
+  return DEFAULT_SLOT_START[slot.timeRange];
+}
+
+/** Compare slots by date, then hourly start time. */
+export function compareInspectionSlots(
+  a: InspectionSlot,
+  b: InspectionSlot,
+): number {
+  const dateCmp = a.date.localeCompare(b.date);
+  if (dateCmp !== 0) return dateCmp;
+  const aMin = parseClockMinutes(resolveSlotStartTime(a)) ?? 0;
+  const bMin = parseClockMinutes(resolveSlotStartTime(b)) ?? 0;
+  if (aMin !== bMin) return aMin - bMin;
+  return a.timeRange.localeCompare(b.timeRange);
+}
+
+/** Sort slots in calendar time order (date, then start time). */
+export function sortInspectionSlots<T extends InspectionSlot>(
+  slots: readonly T[],
+): T[] {
+  return [...slots].sort(compareInspectionSlots);
+}
+
+export const UNSCHEDULED_SORT_KEY = "9999-12-31T23:59";
+
+/** Sort key for board views: scheduled visit, else earliest preferred slot. */
+export function inspectionRequestScheduleSortKey(
+  request: InspectionRequestDetail,
+): string {
+  if (request.scheduledSlot?.date) {
+    const start =
+      request.scheduledStartTime && isClockTime(request.scheduledStartTime)
+        ? request.scheduledStartTime
+        : resolveSlotStartTime(request.scheduledSlot);
+    return `${request.scheduledSlot.date}T${start}`;
+  }
+  const [earliest] = sortInspectionSlots(request.preferredSlots);
+  if (earliest?.date) {
+    return `${earliest.date}T${resolveSlotStartTime(earliest)}`;
+  }
+  return UNSCHEDULED_SORT_KEY;
 }
