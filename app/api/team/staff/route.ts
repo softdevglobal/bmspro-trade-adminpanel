@@ -170,25 +170,10 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
     return { ok: false, error: "Select at least one availability option." };
   }
 
-  if (
-    allowedServiceAreas.length > 0 &&
-    workingDays.some((day) => day.serviceAreas.length === 0)
-  ) {
-    return {
-      ok: false,
-      error: "Select one service area for each working day or mark it off.",
-    };
-  }
-
-  if (
-    allowedServiceAreas.length > 0 &&
-    workingDays.some((day) => day.serviceAreas.length > 1)
-  ) {
-    return {
-      ok: false,
-      error: "Only one service area can be selected per day.",
-    };
-  }
+  const normalizedAvailability = availability.map((day) => ({
+    ...day,
+    serviceAreas: [],
+  }));
 
   return {
     ok: true,
@@ -197,7 +182,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
       email,
       phone,
       staffType,
-      availability,
+      availability: normalizedAvailability,
       canget_qutaion,
     },
   };
@@ -296,7 +281,7 @@ function availabilityForResponse(
     return {
       day,
       isOff: !available,
-      serviceAreas: available ? serviceAreas : [],
+      serviceAreas: [],
     };
   });
 }
@@ -432,6 +417,7 @@ export async function POST(request: Request) {
         staffType: parsed.value.staffType,
         temporaryPassword: DEFAULT_STAFF_PASSWORD,
         logoUrl: business?.logoUrl ?? null,
+        businessId: auth.businessId,
       });
     } catch (emailError) {
       console.error("[staff] welcome email failed:", emailError);

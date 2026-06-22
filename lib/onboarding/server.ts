@@ -1,4 +1,5 @@
 import "server-only";
+import { parseSlotCapacityFromBusiness } from "@/lib/calendar/slot-capacity";
 import { assertBusinessActive } from "@/lib/onboarding/business-status";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
@@ -16,6 +17,10 @@ import {
   buildTenantSubscriptionFields,
   getSubscriptionPlanById,
 } from "@/lib/subscription-plans/server";
+import {
+  buildTenantSmsFields,
+  resolveSmsPackageForPlan,
+} from "@/lib/sms-packages/server";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
 import { sendOwnerWelcomeEmail } from "@/lib/email/templates";
 import {
@@ -190,6 +195,12 @@ async function createTenantWithOwnerAccount(
     });
 
     const subscriptionFields = buildTenantSubscriptionFields(selectedPlan);
+    const smsPackage = await resolveSmsPackageForPlan(selectedPlan);
+    const smsFields = smsPackage
+      ? buildTenantSmsFields(smsPackage, {
+          subscriptionValidityDays: selectedPlan.validityDays,
+        })
+      : {};
     const batch = adminDb.batch();
     batch.set(
       businessRef,
@@ -200,7 +211,7 @@ async function createTenantWithOwnerAccount(
         bookingSlug,
         createdByUid: options.createdByUid ?? null,
         createdByEmail: options.createdByEmail ?? null,
-        subscriptionFields: subscriptionFields.business,
+        subscriptionFields: { ...subscriptionFields.business, ...smsFields },
       })
     );
     batch.set(adminDb.collection("users").doc(uid), {
@@ -223,6 +234,7 @@ async function createTenantWithOwnerAccount(
       bookingSlug,
       planName: selectedPlan.name,
       logoUrl: value.logoUrl ?? null,
+      businessId: tenantId,
       temporaryPassword:
         options.source === "super_admin_create"
           ? options.password
@@ -332,6 +344,8 @@ export type BusinessProfile = {
   plan: BusinessProfilePlan | null;
   termsAndConditions: string | null;
   serviceAreas: string[];
+  slotCapacityJobs: number;
+  slotCapacityInspectionRequests: number;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -407,6 +421,9 @@ export async function getBusinessProfile(
           .map((area) => area.trim())
           .filter(Boolean)
       : [],
+    slotCapacityJobs: parseSlotCapacityFromBusiness(data).maxJobsPerHour,
+    slotCapacityInspectionRequests:
+      parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
   };
 }
 
@@ -425,6 +442,8 @@ export async function updateBusinessProfile(
     gstPercentage?: number | null;
     termsAndConditions?: string | null;
     serviceAreas?: string[];
+    slotCapacityJobs?: number;
+    slotCapacityInspectionRequests?: number;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -476,6 +495,14 @@ export async function updateBusinessProfile(
 
   if ("serviceAreas" in updates) {
     payload.serviceAreas = updates.serviceAreas;
+  }
+
+  if ("slotCapacityJobs" in updates) {
+    payload.slotCapacityJobs = updates.slotCapacityJobs;
+  }
+
+  if ("slotCapacityInspectionRequests" in updates) {
+    payload.slotCapacityInspectionRequests = updates.slotCapacityInspectionRequests;
   }
 
   await adminDb.collection("businesses").doc(businessId).update(payload);

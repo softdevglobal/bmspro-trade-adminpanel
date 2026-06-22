@@ -1,22 +1,40 @@
 import "server-only";
 
 import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
+import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import {
   JOBS_COLLECTION,
   type BookingDetail,
 } from "@/lib/bookings/types";
-import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
-import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import type {
   InspectionAddress,
   InspectionAssignment,
   InspectionCustomer,
   InspectionRequestDetail,
+  InspectionRequestType,
   InspectionSlot,
+} from "@/lib/inspection/types";
+import {
+  REQUESTS_COLLECTION,
 } from "@/lib/inspection/types";
 import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
+import {
+  computeDaySlotOccupancy,
+  rangeOverlapsFullSlots,
+} from "@/lib/calendar/slot-occupancy";
+import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
 import { allocateBookingCode } from "@/lib/reference-codes.server";
+import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
+import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+import { COLLECTIONS } from "@/lib/onboarding/services/collections";
+import {
+  QUOTATION_COLLECTION,
+  serializeLineItemsForFirestore,
+} from "@/lib/quotations/server";
+import type { QuotationLineItem } from "@/lib/quotations/types";
+import { ensureCustomerAccount } from "@/lib/customer/server";
+import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
 import {
@@ -25,7 +43,6 @@ import {
 } from "@/lib/notifications/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
-import { QUOTATION_COLLECTION } from "@/lib/quotations/server";
 import type { BookingStatus } from "@/lib/bookings/types";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
@@ -129,6 +146,35 @@ export async function createBookingFromInspection(
       ok: false,
       status: 400,
       error: "A booking already exists for this request.",
+    };
+  }
+
+  if (await isBusinessClosedOnDate(input.businessId, input.slot.date)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+    };
+  }
+
+  const occupancy = await computeDaySlotOccupancy(
+    input.businessId,
+    input.slot.date,
+  );
+  if (
+    rangeOverlapsFullSlots(
+      occupancy.slots,
+      input.startTime,
+      input.endTime,
+      "job",
+    )
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "One or more time slots in that range are full for jobs. Choose another time or update capacity in Settings.",
     };
   }
 
@@ -902,4 +948,344 @@ export async function updateBookingCompletionPhotos(
     ok: true,
     booking: mapBookingDoc(updated.id, updated.data() ?? {}),
   };
+}
+
+export type CreateDirectJobInput = {
+  requestType: InspectionRequestType;
+  serviceId: string | null;
+  customRequest: { title: string; description: string } | null;
+  customer: InspectionCustomer;
+  address: InspectionAddress;
+  customerNotes: string | null;
+  budgetAud: number | null;
+  slot: InspectionSlot;
+  startTime: string;
+  endTime: string;
+  estimatedDurationMinutes: number;
+  note?: string | null;
+  instructionDescription?: string | null;
+  instructionTasks?: string[];
+  assignedTo?: InspectionAssignment | null;
+};
+
+async function lookupBusinessServiceForJob(
+  businessId: string,
+  serviceId: string,
+): Promise<{ name: string; businessType: string } | null> {
+  const snap = await adminDb.collection(COLLECTIONS.SERVICES).doc(serviceId).get();
+  if (!snap.exists) return null;
+  const data = snap.data();
+  if (!data || data.businessId !== businessId) return null;
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const businessType =
+    typeof data.businessType === "string"
+      ? data.businessType
+      : typeof data.category === "string"
+        ? data.category
+        : "";
+  return name ? { name, businessType } : null;
+}
+
+/**
+ * Creates a scheduled job directly (no prior inspection/quote flow). A
+ * completed request (`job_direct`), sent + accepted quotation, and scheduled
+ * booking are created so downstream steps (invoice, completion) work normally.
+ */
+export async function createDirectJob(
+  businessId: string,
+  createdBy: string,
+  input: CreateDirectJobInput,
+  audit?: { actor: AuditActor; source: AuditSource },
+): Promise<
+  | { ok: true; booking: BookingDetail; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  if (await isBusinessClosedOnDate(businessId, input.slot.date)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
+    };
+  }
+
+  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date);
+  if (
+    rangeOverlapsFullSlots(
+      occupancy.slots,
+      input.startTime,
+      input.endTime,
+      "job",
+    )
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "One or more time slots in that range are full for jobs. Choose another time or update capacity in Settings.",
+    };
+  }
+
+  let serviceName: string | null = null;
+  let serviceBusinessType: string | null = null;
+  let serviceId: string | null = input.serviceId;
+  let customRequest = input.customRequest;
+  let quotationTitle = "";
+
+  if (input.requestType === "existing_service") {
+    const sid = input.serviceId?.trim() ?? "";
+    if (!sid) {
+      return { ok: false, status: 400, error: "Select a service from the list." };
+    }
+    const service = await lookupBusinessServiceForJob(businessId, sid);
+    if (!service) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Selected service is no longer available.",
+      };
+    }
+    serviceName = service.name;
+    serviceBusinessType = service.businessType;
+    quotationTitle = service.name;
+  } else {
+    const title = customRequest?.title?.trim() ?? "";
+    const description = customRequest?.description?.trim() ?? "";
+    if (title.length < 3) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Add a job title (at least 3 characters).",
+      };
+    }
+    if (description.length < 10) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Describe the work needed (at least 10 characters).",
+      };
+    }
+    customRequest = { title, description };
+    serviceId = null;
+    quotationTitle = title;
+  }
+
+  const priceAud =
+    typeof input.budgetAud === "number" &&
+    Number.isFinite(input.budgetAud) &&
+    input.budgetAud >= 0
+      ? input.budgetAud
+      : 0;
+  const lineItems: QuotationLineItem[] = [
+    {
+      name: quotationTitle,
+      priceAud,
+      quantity: 1,
+      description:
+        input.requestType === "custom_quote"
+          ? (customRequest?.description ?? "Agreed work")
+          : "Agreed work",
+    },
+  ];
+  const subtotalAud = priceAud;
+  const finalPriceAud = priceAud;
+  const balanceDueAud = finalPriceAud;
+
+  let customerId: string | null = null;
+  try {
+    const businessSnap = await adminDb.collection("businesses").doc(businessId).get();
+    const businessData = businessSnap.data() ?? {};
+    const account = await ensureCustomerAccount({
+      email: input.customer.email,
+      fullName: input.customer.fullName,
+      phone: input.customer.phone,
+      businessId,
+      businessName:
+        typeof businessData.businessName === "string"
+          ? businessData.businessName
+          : null,
+      bookingSlug:
+        typeof businessData.bookingSlug === "string"
+          ? businessData.bookingSlug
+          : null,
+      logoUrl:
+        typeof businessData.logoUrl === "string" ? businessData.logoUrl : null,
+      context: "inspection",
+    });
+    customerId = account.uid;
+  } catch (error) {
+    console.error("[direct-job] customer account creation failed:", error);
+  }
+
+  const now = FieldValue.serverTimestamp();
+  const inspectionRef = adminDb.collection(REQUESTS_COLLECTION).doc();
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc();
+  const bookingRef = adminDb.collection(JOBS_COLLECTION).doc();
+  const requestCode = await allocateInspectionRequestCode();
+  const quotationCode = buildQuotationCodeForInspection({
+    id: inspectionRef.id,
+    requestCode,
+  });
+  const bookingCode = await allocateBookingCode();
+  const ownerUid = await resolveBusinessOwnerUid(businessId);
+
+  const quotationSummary = {
+    id: quotationRef.id,
+    quotationCode,
+    finalPriceAud,
+    subtotalAud,
+    balanceDueAud,
+    pdfUrl: null,
+    status: "sent",
+    customerDecision: "accepted",
+    customerDecisionAt: now,
+    createdAt: now,
+  };
+
+  const inspectionPayload: Record<string, unknown> = {
+    id: inspectionRef.id,
+    businessId,
+    requestCode,
+    status: "completed",
+    requestType: input.requestType,
+    serviceId,
+    serviceName,
+    serviceBusinessType,
+    customRequest,
+    customer: input.customer,
+    customerId,
+    createdSource: "job_direct",
+    address: input.address,
+    preferredSlots: [],
+    ownerProposedSlots: [],
+    scheduledSlot: input.slot,
+    scheduledStartTime: input.startTime,
+    scheduledEndTime: input.endTime,
+    assignedTo: input.assignedTo ?? null,
+    ownerNote: typeof input.note === "string" ? input.note : null,
+    customerNotes: input.customerNotes,
+    budgetAud: input.budgetAud,
+    quotation: quotationSummary,
+    bookingId: bookingRef.id,
+    bookingCode,
+    bookingStatus: "scheduled",
+    bookingStatusAt: now,
+    bookingConfirmedAt: now,
+    visitStartedAt: now,
+    visitEndedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const quotationPayload: Record<string, unknown> = {
+    quotationCode,
+    businessId,
+    inspectionRequestId: inspectionRef.id,
+    serviceTitle: quotationTitle,
+    serviceDescription:
+      input.requestType === "custom_quote"
+        ? (customRequest?.description ?? null)
+        : null,
+    customer: input.customer,
+    address: input.address,
+    lineItems: serializeLineItemsForFirestore(lineItems),
+    subtotalAud,
+    finalPriceAud,
+    balanceDueAud,
+    imageUrls: [],
+    notes: input.customerNotes,
+    paymentInstructions: null,
+    termsAndConditions: null,
+    discountAud: 0,
+    depositRequest: null,
+    validUntil: null,
+    status: "sent",
+    customerDecision: "accepted",
+    customerDecisionAt: now,
+    bookingId: bookingRef.id,
+    bookingCode,
+    bookingStatus: "scheduled",
+    bookingStatusAt: now,
+    createdBy,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const bookingPayload: Record<string, unknown> = {
+    businessId,
+    ownerUid: ownerUid ?? null,
+    bookingCode,
+    inspectionRequestId: inspectionRef.id,
+    inspectionRequestCode: requestCode,
+    quotationId: quotationRef.id,
+    status: "scheduled",
+    requestType: input.requestType,
+    serviceId,
+    serviceName,
+    serviceBusinessType,
+    customRequest,
+    customer: input.customer,
+    customerId,
+    address: input.address,
+    scheduledSlot: input.slot,
+    scheduledStartTime: input.startTime,
+    scheduledEndTime: input.endTime,
+    estimatedDurationMinutes: input.estimatedDurationMinutes,
+    assignedTo: input.assignedTo ?? null,
+    ownerNote: typeof input.note === "string" ? input.note : null,
+    jobInstructionsDescription:
+      typeof input.instructionDescription === "string"
+        ? input.instructionDescription
+        : null,
+    jobInstructionsTasks: input.instructionTasks ?? [],
+    quotation: quotationSummary,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await adminDb.runTransaction(async (transaction) => {
+    transaction.set(inspectionRef, inspectionPayload);
+    transaction.set(quotationRef, quotationPayload);
+    transaction.set(bookingRef, bookingPayload);
+  });
+
+  const [bookingSnap, requestSnap] = await Promise.all([
+    bookingRef.get(),
+    inspectionRef.get(),
+  ]);
+
+  const booking = mapBookingDoc(bookingRef.id, bookingSnap.data() ?? {});
+  const request = mapInspectionDoc(requestSnap.id, requestSnap.data() ?? {});
+
+  const summary = await loadBusinessSummary(businessId);
+  try {
+    await notifyCustomerOfStatusChange(request, "scheduled", summary);
+  } catch (error) {
+    console.error("[direct-job] customer notification failed:", error);
+  }
+
+  if (audit) {
+    await logAuditEvent({
+      businessId,
+      category: "booking",
+      action: "booking.created",
+      actor: audit.actor,
+      source: audit.source,
+      summary: `Job ${booking.bookingCode ?? booking.id} created directly (inspection and quotation marked complete)`,
+      targetId: booking.id,
+      targetLabel:
+        booking.bookingCode ||
+        booking.serviceName ||
+        booking.customer.fullName ||
+        null,
+      metadata: {
+        origin: "direct",
+        inspectionId: request.id,
+        bookingCode: booking.bookingCode ?? null,
+        requestCode: request.requestCode ?? null,
+      },
+    });
+  }
+
+  return { ok: true, booking, request };
 }

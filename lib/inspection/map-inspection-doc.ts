@@ -5,6 +5,7 @@ import {
   isClockTime,
   isRequestType,
   isTimeRange,
+  parseCustomerImageUrls,
   type InspectionAddress,
   type InspectionAssignment,
   type InspectionCustomer,
@@ -142,6 +143,7 @@ export function mapInspectionDoc(
       typeof data.budgetAud === "number" && Number.isFinite(data.budgetAud)
         ? data.budgetAud
         : null,
+    customerImageUrls: parseCustomerImageUrls(data.customerImageUrls),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
     visitStartedAt: toMillis(data.visitStartedAt),

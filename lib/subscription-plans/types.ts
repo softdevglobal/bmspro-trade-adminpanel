@@ -8,7 +8,6 @@ export type SubscriptionPlan = {
   name: string;
   price: number;
   priceLabel: string;
-  branches: number;
   staff: number;
   features: string[];
   popular: boolean;
@@ -23,6 +22,7 @@ export type SubscriptionPlan = {
   billingCycle: BillingCycle;
   validityDays: number;
   description: string | null;
+  smsPackageId: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
@@ -31,7 +31,6 @@ export type SubscriptionPlanInput = {
   name: string;
   price: number;
   priceLabel?: string;
-  branches: number;
   staff: number;
   features?: string[];
   popular?: boolean;
@@ -45,4 +44,5 @@ export type SubscriptionPlanInput = {
   plan_key?: string | null;
   billingCycle?: BillingCycle;
   description?: string | null;
+  smsPackageId?: string | null;
 };

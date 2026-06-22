@@ -121,7 +121,6 @@ export function AuditLogView({
       if (isCustomer && bookingSlug?.trim()) {
         params.set("bookingSlug", bookingSlug.trim());
       }
-      if (source !== "all") params.set("source", source);
       params.set("limit", "300");
 
       const res = await fetch(`/api/audit-logs?${params.toString()}`, {
@@ -149,7 +148,7 @@ export function AuditLogView({
     } finally {
       setIsLoading(false);
     }
-  }, [businessId, source, isPlatform, isCustomer, bookingSlug, user]);
+  }, [businessId, isPlatform, isCustomer, bookingSlug, user]);
 
   useEffect(() => {
     void loadTenants();
@@ -190,26 +189,34 @@ export function AuditLogView({
       .sort((a, b) => a.businessName.localeCompare(b.businessName));
   }, [tenants, processedLogs]);
 
+  const logsForStats = useMemo(
+    () =>
+      source === "all"
+        ? processedLogs
+        : processedLogs.filter((entry) => entry.source === source),
+    [processedLogs, source],
+  );
+
   const stats = useMemo(() => {
     const byCategory = new Map<AuditCategory, number>();
     for (const cat of AUDIT_CATEGORIES) {
       byCategory.set(
         cat,
-        countAuditEntriesForCategory(processedLogs, cat, isTenantOwner),
+        countAuditEntriesForCategory(logsForStats, cat, isTenantOwner),
       );
     }
     return {
-      total: processedLogs.length,
+      total: logsForStats.length,
       byCategory,
     };
-  }, [processedLogs, isTenantOwner]);
+  }, [logsForStats, isTenantOwner]);
 
   const visibleLogs = useMemo(
     () =>
-      processedLogs.filter((entry) =>
+      logsForStats.filter((entry) =>
         matchesAuditCategoryFilter(entry, category, isTenantOwner),
       ),
-    [processedLogs, category, isTenantOwner],
+    [logsForStats, category, isTenantOwner],
   );
 
   const totalPages = Math.max(
@@ -229,6 +236,7 @@ export function AuditLogView({
   const categoryOptions = useMemo(() => {
     const categories = AUDIT_CATEGORIES.filter((cat) => {
       if (cat === "staff") return isTenantOwner;
+      if (cat === "custom_notification") return isPlatform;
       if (isCustomer) {
         return (
           cat === "auth" ||
@@ -249,7 +257,7 @@ export function AuditLogView({
         count: stats.byCategory.get(cat) ?? 0,
       })),
     ];
-  }, [isTenantOwner, isCustomer, stats]);
+  }, [isTenantOwner, isCustomer, isPlatform, stats]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -260,7 +268,8 @@ export function AuditLogView({
             setCategory(value as AuditCategory | "all")
           }
           ariaLabel="Filter by category"
-          className="sm:w-48"
+          className="sm:w-55"
+          
         >
           {categoryOptions.map((option) => (
             <option key={option.value} value={option.value}>

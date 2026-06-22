@@ -4,6 +4,7 @@ import { BusinessProfileProvider } from "@/lib/business/business-profile-context
 import { BookingsProvider } from "@/lib/bookings/bookings-context";
 import { InspectionRequestsProvider } from "@/lib/inspection/inspection-requests-context";
 import { LeaveRequestsProvider } from "@/lib/leave/leave-requests-context";
+import { SmsBalanceProvider } from "@/lib/sms/sms-balance-context";
 import { BusinessNotificationsProvider } from "@/lib/notifications/business-notifications-context";
 import type { ReactNode } from "react";
 
@@ -13,9 +14,11 @@ export function DashboardDataProviders({ children }: { children: ReactNode }) {
     <BusinessProfileProvider>
       <InspectionRequestsProvider>
         <LeaveRequestsProvider>
-          <BookingsProvider>
-            <BusinessNotificationsProvider>{children}</BusinessNotificationsProvider>
-          </BookingsProvider>
+          <SmsBalanceProvider>
+            <BookingsProvider>
+              <BusinessNotificationsProvider>{children}</BusinessNotificationsProvider>
+            </BookingsProvider>
+          </SmsBalanceProvider>
         </LeaveRequestsProvider>
       </InspectionRequestsProvider>
     </BusinessProfileProvider>

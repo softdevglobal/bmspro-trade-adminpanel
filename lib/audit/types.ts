@@ -24,6 +24,8 @@ export const AUDIT_CATEGORIES = [
   "customer",
   "service",
   "item",
+  "custom_notification",
+  "customer_notification",
 ] as const;
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
@@ -59,6 +61,8 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   customer: "Customer",
   service: "Service",
   item: "Item",
+  custom_notification: "Platform messages",
+  customer_notification: "Customer notifications",
 };
 
 export const CATEGORY_ICONS: Record<AuditCategory, string> = {
@@ -71,6 +75,8 @@ export const CATEGORY_ICONS: Record<AuditCategory, string> = {
   customer: "group",
   service: "settings_suggest",
   item: "inventory_2",
+  custom_notification: "campaign",
+  customer_notification: "notifications",
 };
 
 export const ACTOR_ROLE_LABELS: Record<AuditActorRole, string> = {
@@ -140,7 +146,7 @@ export type AuditLogEntry = {
 /** Maps a raw Firebase custom-claim role to an audit actor role. */
 export function actorRoleFromClaim(role: unknown): AuditActorRole {
   if (role === "super_admin") return "super_admin";
-  if (role === "owner") return "owner";
+  if (role === "owner" || role === "business_owner") return "owner";
   if (role === "admin") return "admin";
   if (role === "staff") return "staff";
   if (role === "call_center") return "call_center";

@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
       code,
       businessName,
       logoUrl,
+      businessId,
     });
 
     return NextResponse.json({ ok: true });

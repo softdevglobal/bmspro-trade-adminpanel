@@ -1,5 +1,6 @@
 import "server-only";
 
+import { logCustomerNotificationCreated } from "@/lib/audit/action-logs";
 import { customerOwnsNotificationRecord } from "@/lib/customer/ownership";
 import { normalizeEmail } from "@/lib/customer/types";
 import { adminDb } from "@/lib/firebase/admin";
@@ -31,6 +32,14 @@ import {
   sendOwnerMobilePush,
   sendStaffMobilePush,
 } from "@/lib/notifications/push";
+import {
+  formatInPlatformTimeZone,
+  formatIsoDateInPlatformTimeZone,
+} from "@/lib/platform/timezone";
+import { zonedDateTimeToUtcMs } from "@/lib/platform/zoned-datetime";
+import type { ScheduleReminderKind } from "@/lib/scheduling/types";
+import { resolveBusinessAdminPhones } from "@/lib/scheduling/admin-phones";
+import { sendBulkSms } from "@/lib/sms/textbee";
 import { FieldValue } from "firebase-admin/firestore";
 import {
   notifyBusinessNotificationsChanged,
@@ -116,6 +125,7 @@ async function createNotification(
       bookingSlug: input.bookingSlug,
       businessName: input.businessName,
       logoUrl: input.logoUrl,
+      businessId: input.businessId,
       inspectionRequestId: input.requestId,
       type: input.type,
       title: input.title,
@@ -130,6 +140,22 @@ async function createNotification(
     notifyBusinessNotificationsChanged(input.businessId);
   } else if (input.audience === "customer" && input.customerId) {
     notifyCustomerNotificationsChanged(input.customerId);
+  }
+
+  if (input.audience === "customer") {
+    await logCustomerNotificationCreated({
+      notificationId: ref.id,
+      businessId: input.businessId,
+      customerId: input.customerId,
+      customerEmail: customerEmail,
+      customerName: input.customerName,
+      businessName: input.businessName,
+      requestId: input.requestId,
+      type: input.type,
+      title: input.title,
+      status: input.status,
+      portalOnly: input.portalOnly,
+    });
   }
 
   return ref.id;
@@ -873,6 +899,80 @@ export async function notifyCustomerOfVisitOnTheWay(
       emailHighlight: visitWindow,
       emailHighlightLabel: visitWindow ? "Expected arrival" : null,
     });
+  } catch {
+    /* best-effort */
+  }
+}
+
+export type ScheduleReminderNotifyInput = {
+  businessId: string;
+  entityId: string;
+  kind: ScheduleReminderKind;
+  title: string;
+  date: string;
+  startTime: string;
+  timeZone: string;
+};
+
+/** 30-minute heads-up for jobs, inspections, and personal calendar events. */
+export async function notifyBusinessOfScheduleReminder(
+  input: ScheduleReminderNotifyInput,
+): Promise<void> {
+  const kindLabel =
+    input.kind === "job"
+      ? "Job"
+      : input.kind === "inspection_request"
+        ? "Inspection"
+        : "Event";
+  const startAtMs = zonedDateTimeToUtcMs(
+    input.date,
+    input.startTime,
+    input.timeZone,
+  );
+  const timeLabel = startAtMs
+    ? formatInPlatformTimeZone(
+        startAtMs,
+        { hour: "numeric", minute: "2-digit", hour12: true },
+        input.timeZone,
+      )
+    : input.startTime;
+  const dateLabel = formatIsoDateInPlatformTimeZone(
+    input.date,
+    { weekday: "short", month: "short", day: "numeric" },
+    input.timeZone,
+  );
+  const title = `${kindLabel} in 30 minutes`;
+  const body = `${input.title} starts at ${timeLabel} on ${dateLabel}.`;
+  const smsBody = `Reminder: ${input.title} starts in 30 min (${timeLabel}, ${dateLabel}).`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: input.businessId,
+      customerId: null,
+      requestId: input.entityId,
+      status: "scheduled",
+      type: "schedule_reminder",
+      title,
+      body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(input.businessId, {
+      title,
+      body,
+      data: {
+        type: "schedule_reminder",
+        requestId: input.entityId,
+        kind: input.kind,
+        audience: "owner",
+      },
+    });
+
+    const phones = await resolveBusinessAdminPhones(input.businessId);
+    if (phones.length > 0) {
+      await sendBulkSms(phones, smsBody, input.businessId);
+    }
   } catch {
     /* best-effort */
   }

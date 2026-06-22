@@ -1,5 +1,9 @@
 import { requireSuperAdmin } from "@/lib/onboarding/server";
 import {
+  logCustomNotificationSent,
+  resolveAuditIdentityForUid,
+} from "@/lib/audit/action-logs";
+import {
   createBroadcast,
   listAllBroadcasts,
 } from "@/lib/broadcasts/server";
@@ -75,6 +79,20 @@ export async function POST(request: Request) {
     audience,
     createdByUid: auth.uid,
     createdByEmail: auth.email ?? null,
+  });
+
+  const identity = await resolveAuditIdentityForUid(auth.uid);
+  await logCustomNotificationSent({
+    actor: {
+      uid: auth.uid,
+      email: identity.email ?? auth.email ?? null,
+      name: identity.name,
+    },
+    broadcastId: result.id,
+    title,
+    audience,
+    platforms: { admin: targetAdmin, mobile: targetMobile },
+    mobilePushCount: result.mobilePushCount,
   });
 
   return NextResponse.json({ ok: true, ...result });

@@ -17,6 +17,7 @@ import {
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
@@ -223,7 +224,7 @@ function BookingPreviewDrawer({
             exit={{ x: "100%" }}
             transition={{ type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
+            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[720px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
             <BookingPreviewContent
               key={booking.id}
@@ -875,6 +876,7 @@ export function JobsBoard({
   const { staff } = useBusinessStaffSummary();
   const [selectedId, setSelectedId] = useState<string | null>(initialJobId);
   const [filter, setFilter] = useState<JobsFilter>("active");
+  const [addModalOpen, setAddModalOpen] = useState(false);
   const [localBookingState, setLocalBookingState] = useState<{
     source: BookingDetail[];
     bookings: BookingDetail[];
@@ -958,37 +960,73 @@ export function JobsBoard({
 
   if (displayBookings.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-6 py-14 text-center sm:rounded-2xl sm:py-16">
-        <span className="material-symbols-outlined text-[40px] text-outline-variant">
-          assignment
-        </span>
-        <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
-          No jobs yet
-        </p>
-        <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
-          After a request is complete and you have sent a quotation,
-          use Create job on the completed visit to schedule the job here.
-        </p>
-        <Link
-          href="/dashboard/requests"
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
-        >
-          <span className="material-symbols-outlined text-[20px]">
-            event_available
+      <>
+        <div className="mb-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setAddModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[14px] leading-none">
+              add
+            </span>
+            Add job
+          </button>
+        </div>
+        <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-6 py-14 text-center sm:rounded-2xl sm:py-16">
+          <span className="material-symbols-outlined text-[40px] text-outline-variant">
+            assignment
           </span>
-          Requests
-        </Link>
-      </div>
+          <p className="mt-4 font-display text-[20px] font-semibold text-on-surface">
+            No jobs yet
+          </p>
+          <p className="mx-auto mt-2 max-w-md font-body text-[14px] leading-relaxed text-on-surface-variant">
+            Add a job directly when work is already agreed, or create one from a
+            completed request and quotation.
+          </p>
+          <button
+            type="button"
+            onClick={() => setAddModalOpen(true)}
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              handyman
+            </span>
+            Add job
+          </button>
+        </div>
+        <AddInspectionModal
+          open={addModalOpen}
+          variant="job"
+          onClose={() => setAddModalOpen(false)}
+          onCreated={(jobId) => {
+            setAddModalOpen(false);
+            if (jobId) setSelectedId(jobId);
+          }}
+        />
+      </>
     );
   }
 
   return (
     <>
-      <p className="mb-3 font-body text-[12px] text-on-surface-variant">
-        {groupedBookings.active.length} active ·{" "}
-        {groupedBookings.completed.length} completed · tap a card to open the
-        side preview
-      </p>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="font-body text-[12px] text-on-surface-variant">
+          {groupedBookings.active.length} active ·{" "}
+          {groupedBookings.completed.length} completed · tap a card to open the
+          side preview
+        </p>
+        <button
+          type="button"
+          onClick={() => setAddModalOpen(true)}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
+        >
+          <span className="material-symbols-outlined text-[14px] leading-none">
+            add
+          </span>
+          Add job
+        </button>
+      </div>
 
       <div
         role="tablist"
@@ -1056,6 +1094,16 @@ export function JobsBoard({
         onClose={() => setSelectedId(null)}
         onUpdated={handleBookingUpdated}
         timeZone={timeZone}
+      />
+
+      <AddInspectionModal
+        open={addModalOpen}
+        variant="job"
+        onClose={() => setAddModalOpen(false)}
+        onCreated={(jobId) => {
+          setAddModalOpen(false);
+          if (jobId) setSelectedId(jobId);
+        }}
       />
     </>
   );

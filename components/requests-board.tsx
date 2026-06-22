@@ -7,6 +7,11 @@ import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
+import { AdminDaySchedulePicker } from "@/components/admin-day-schedule-picker";
+import {
+  calendarVisitTimeRange,
+  defaultCalendarVisitEnd,
+} from "@/components/calendar-visit-time-range";
 import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
 import { JobInstructionsDisplay } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
@@ -29,10 +34,8 @@ import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 import {
   formatAddress,
   formatBudgetAud,
-  formatClockTime,
   formatSlotDate,
   formatVisitWindow,
-  isClockTime,
   CREATED_SOURCE_LABELS,
   STATUS_LABELS,
   TIME_RANGE_LABELS,
@@ -86,7 +89,11 @@ function CreatedSourcePill({
         ? "smartphone"
         : source === "quotation_direct"
           ? "request_quote"
-          : "dashboard";
+          : source === "job_direct"
+            ? "handyman"
+            : source === "invoice_direct"
+              ? "receipt_long"
+              : "dashboard";
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
       <span className="material-symbols-outlined text-[12px] leading-none text-primary">
@@ -724,7 +731,7 @@ function RequestDetailDrawer({
             exit={{ x: "100%" }}
             transition={{ type: "tween", duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[640px] sm:rounded-none sm:border-y-0 sm:border-r-0"
+            className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:w-full sm:max-w-[720px] sm:rounded-none sm:border-y-0 sm:border-r-0"
           >
             <DetailDrawerContent
               key={request.id}
@@ -2290,7 +2297,8 @@ function CustomerExtrasSection({
   request: InspectionRequestDetail;
 }) {
   const budgetLabel = formatBudgetAud(request.budgetAud);
-  if (!request.customerNotes && !budgetLabel) return null;
+  const hasImages = request.customerImageUrls.length > 0;
+  if (!request.customerNotes && !budgetLabel && !hasImages) return null;
 
   return (
     <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
@@ -2310,6 +2318,31 @@ function CustomerExtrasSection({
         >
           {budgetLabel}
         </p>
+      ) : null}
+      {hasImages ? (
+        <ul
+          className={`flex flex-wrap gap-2 ${
+            request.customerNotes || budgetLabel ? "mt-3" : "mt-1.5"
+          }`}
+        >
+          {request.customerImageUrls.map((url) => (
+            <li key={url}>
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block overflow-hidden rounded-lg border border-outline-variant/50"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt="Customer photo"
+                  className="h-20 w-20 object-cover transition-opacity hover:opacity-90"
+                />
+              </a>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   );
@@ -2399,25 +2432,20 @@ function ScheduledVisitSection({
               : "Add the exact visit time"}
           </p>
           <p className="mt-1 pl-7 font-body text-[12px] leading-relaxed text-amber-900/90">
-            Pick a time within{" "}
-            {TIME_RANGE_SHORT_LABELS[slot.timeRange].toLowerCase()} so the
-            customer knows when you will arrive.
+            Choose an hourly time slot so the customer knows when you will
+            arrive.
           </p>
-          <label className="mt-3 block pl-7">
-            <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-amber-900/80">
-              Visit time range
-            </span>
-            <div className="mt-1.5">
-              <VisitTimeRangeFields
-                startTime={inlineVisitTime.startTime}
-                endTime={inlineVisitTime.endTime}
-                timeRange={slot.timeRange}
-                disabled={inlineVisitTime.disabled}
-                onStartTimeChange={inlineVisitTime.onStartTimeChange}
-                onEndTimeChange={inlineVisitTime.onEndTimeChange}
-              />
-            </div>
-          </label>
+          <div className="mt-3 pl-7">
+            <AdminDaySchedulePicker
+              date={slot.date}
+              kind="inspection"
+              startTime={inlineVisitTime.startTime}
+              endTime={inlineVisitTime.endTime}
+              disabled={inlineVisitTime.disabled}
+              onStartTimeChange={inlineVisitTime.onStartTimeChange}
+              onEndTimeChange={inlineVisitTime.onEndTimeChange}
+            />
+          </div>
           <button
             type="button"
             disabled={inlineVisitTime.disabled}
@@ -2468,48 +2496,6 @@ function AssignmentSummary({
  * Visit time range (two dropdowns, no native time picker)
  * ========================================================================== */
 
-const VISIT_TIME_STEP_MINUTES = 30;
-
-function minutesFromMidnight(clock: string): number {
-  if (!isClockTime(clock)) return 0;
-  const [h, m] = clock.split(":").map(Number);
-  return h * 60 + m;
-}
-
-const JOB_TIME_START_HOUR = 6;
-const JOB_TIME_END_HOUR = 23;
-
-/** 15-minute slots for a full job day (bookings), 6:00am–11:45pm. */
-function jobTimeOptions(): { value: string; label: string }[] {
-  const options: { value: string; label: string }[] = [];
-  for (let hour = JOB_TIME_START_HOUR; hour <= JOB_TIME_END_HOUR; hour += 1) {
-    for (let minute = 0; minute < 60; minute += VISIT_TIME_STEP_MINUTES) {
-      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      const label = formatClockTime(value);
-      if (label) options.push({ value, label });
-    }
-  }
-  return options;
-}
-
-/** 15-minute options within morning (8–12) or afternoon (12–17). */
-function visitTimeOptions(
-  timeRange: InspectionTimeRange | null,
-): { value: string; label: string }[] {
-  const startHour = timeRange === "afternoon" ? 12 : 8;
-  const endHour = timeRange === "afternoon" ? 17 : 12;
-  const options: { value: string; label: string }[] = [];
-  for (let hour = startHour; hour <= endHour; hour++) {
-    for (let minute = 0; minute < 60; minute += VISIT_TIME_STEP_MINUTES) {
-      if (hour === endHour && minute > 0) continue;
-      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      const label = formatClockTime(value);
-      if (label) options.push({ value, label });
-    }
-  }
-  return options;
-}
-
 const DEFAULT_VISIT_WINDOW: Record<
   InspectionTimeRange,
   { start: string; end: string }
@@ -2517,97 +2503,6 @@ const DEFAULT_VISIT_WINDOW: Record<
   morning: { start: "10:00", end: "11:00" },
   afternoon: { start: "13:00", end: "14:00" },
 };
-
-function VisitTimeRangeFields({
-  startTime,
-  endTime,
-  timeRange,
-  fullDay = false,
-  disabled,
-  onStartTimeChange,
-  onEndTimeChange,
-}: {
-  startTime: string;
-  endTime: string;
-  timeRange: InspectionTimeRange | null;
-  /** Job bookings: full day (6am–11:45pm), not morning/afternoon visit windows. */
-  fullDay?: boolean;
-  disabled: boolean;
-  onStartTimeChange: (value: string) => void;
-  onEndTimeChange: (value: string) => void;
-}) {
-  const options = useMemo(
-    () => (fullDay ? jobTimeOptions() : visitTimeOptions(timeRange)),
-    [timeRange, fullDay],
-  );
-  const startValid = isClockTime(startTime);
-  const endValid = isClockTime(endTime);
-
-  const endOptions = useMemo(() => {
-    if (!startValid) return options;
-    const minEnd = minutesFromMidnight(startTime) + VISIT_TIME_STEP_MINUTES;
-    return options.filter((opt) => minutesFromMidnight(opt.value) >= minEnd);
-  }, [options, startTime, startValid]);
-
-  useEffect(() => {
-    if (fullDay || !timeRange) return;
-    const opts = visitTimeOptions(timeRange);
-    if (!opts.some((o) => o.value === startTime)) {
-      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
-      onStartTimeChange(defaults.start);
-      onEndTimeChange(defaults.end);
-    }
-  }, [fullDay, timeRange, startTime, onStartTimeChange, onEndTimeChange]);
-
-  useEffect(() => {
-    if (!startValid || !endValid) return;
-    if (minutesFromMidnight(startTime) >= minutesFromMidnight(endTime)) {
-      const next = endOptions[0]?.value;
-      if (next) onEndTimeChange(next);
-    }
-  }, [startTime, endTime, startValid, endValid, endOptions, onEndTimeChange]);
-
-  const selectClass =
-    "w-full appearance-none rounded-lg border border-outline-variant/60 bg-white bg-[length:0.875rem] bg-[right_1.1rem_center] bg-no-repeat py-2 pl-2.5 pr-9 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60";
-  const chevronBg =
-    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='%236b7280'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E\")";
-
-  return (
-    <div className="flex items-center gap-2">
-      <select
-        value={startTime}
-        disabled={disabled}
-        aria-label="Visit start time"
-        onChange={(event) => onStartTimeChange(event.target.value)}
-        className={selectClass}
-        style={{ backgroundImage: chevronBg }}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <span className="shrink-0 font-body text-[13px] text-on-surface-variant">
-        –
-      </span>
-      <select
-        value={endTime}
-        disabled={disabled || endOptions.length === 0}
-        aria-label="Visit end time"
-        onChange={(event) => onEndTimeChange(event.target.value)}
-        className={selectClass}
-        style={{ backgroundImage: chevronBg }}
-      >
-        {endOptions.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
 
 /* ==========================================================================
  * Action forms
@@ -2697,14 +2592,17 @@ function SetTimeForm({
           Time range
         </span>
         <div className="mt-1">
-          <VisitTimeRangeFields
-            startTime={startTime}
-            endTime={endTime}
-            timeRange={slot?.timeRange ?? null}
-            disabled={disabled}
-            onStartTimeChange={onStartTimeChange}
-            onEndTimeChange={onEndTimeChange}
-          />
+          {slot?.date ? (
+            <AdminDaySchedulePicker
+              date={slot.date}
+              kind="inspection"
+              startTime={startTime}
+              endTime={endTime}
+              disabled={disabled}
+              onStartTimeChange={onStartTimeChange}
+              onEndTimeChange={onEndTimeChange}
+            />
+          ) : null}
         </div>
       </label>
       <FormActions
@@ -2819,7 +2717,6 @@ function AcceptForm({
   onSubmit: () => void;
 }) {
   const timeZone = useRequestsTimeZone();
-  const selectedRange = value?.timeRange ?? null;
 
   return (
     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
@@ -2879,22 +2776,18 @@ function AcceptForm({
         })}
       </ul>
 
-      {value ? (
-        <label className="mt-3 block">
-          <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-            Time range
-          </span>
-          <div className="mt-1">
-            <VisitTimeRangeFields
-              startTime={startTime}
-              endTime={endTime}
-              timeRange={selectedRange}
-              disabled={disabled}
-              onStartTimeChange={onStartTimeChange}
-              onEndTimeChange={onEndTimeChange}
-            />
-          </div>
-        </label>
+      {value?.date ? (
+        <div className="mt-3">
+          <AdminDaySchedulePicker
+            date={value.date}
+            kind="inspection"
+            startTime={startTime}
+            endTime={endTime}
+            disabled={disabled}
+            onStartTimeChange={onStartTimeChange}
+            onEndTimeChange={onEndTimeChange}
+          />
+        </div>
       ) : null}
 
       <label className="mt-3 block">
@@ -2920,16 +2813,6 @@ function AcceptForm({
     </section>
   );
 }
-
-const PROPOSE_TIME_OPTIONS: {
-  id: InspectionTimeRange;
-  label: string;
-  hint: string;
-  icon: string;
-}[] = [
-  { id: "morning", label: "Morning", hint: "8am – 12pm", icon: "wb_twilight" },
-  { id: "afternoon", label: "Afternoon", hint: "12pm – 5pm", icon: "wb_sunny" },
-];
 
 function ProposeSlotOption({
   slot,
@@ -2975,14 +2858,9 @@ function ProposeSlotOption({
 
   function selectDate(iso: string) {
     onUpdate("date", iso);
-    if (blockedCombos.has(slotComboKey(iso, slot.timeRange))) {
-      for (const range of TIME_RANGES) {
-        if (!blockedCombos.has(slotComboKey(iso, range))) {
-          onUpdate("timeRange", range);
-          return;
-        }
-      }
-    }
+    onUpdate("startTime", "08:00");
+    onUpdate("endTime", "09:00");
+    onUpdate("timeRange", calendarVisitTimeRange("08:00"));
   }
 
   return (
@@ -3017,65 +2895,26 @@ function ProposeSlotOption({
         />
       </div>
 
-      <div className="mt-4">
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Time window
-        </span>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {PROPOSE_TIME_OPTIONS.map((option) => {
-            const checked = slot.timeRange === option.id;
-            const comboBlocked =
-              !!slot.date &&
-              blockedCombos.has(slotComboKey(slot.date, option.id));
-            const customerPick =
-              !!slot.date &&
-              customerBlocked.has(slotComboKey(slot.date, option.id));
-            const timeDisabled = !slot.date || comboBlocked;
-            return (
-              <button
-                type="button"
-                key={option.id}
-                disabled={disabled || timeDisabled}
-                title={
-                  customerPick
-                    ? "Customer already chose this time"
-                    : comboBlocked
-                      ? "Already used in another option"
-                      : undefined
-                }
-                onClick={() => onUpdate("timeRange", option.id)}
-                className={`relative flex min-h-[4.5rem] flex-col justify-between rounded-2xl border px-3 py-2.5 text-left transition-all ${
-                  timeDisabled || disabled
-                    ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-45"
-                    : checked
-                      ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                      : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
-                }`}
-              >
-                <span
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${
-                    checked
-                      ? "bg-primary text-on-primary shadow-sm"
-                      : "bg-stone-100 text-stone-600"
-                  }`}
-                >
-                  <span className="material-symbols-outlined material-symbols-filled text-[18px]">
-                    {option.icon}
-                  </span>
-                </span>
-                <span>
-                  <span className="block font-body text-[12px] font-bold text-on-surface">
-                    {option.label}
-                  </span>
-                  <span className="font-body text-[10px] text-on-surface-variant">
-                    {customerPick ? "Customer's pick" : option.hint}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
+      {slot.date ? (
+        <div className="mt-4">
+          <AdminDaySchedulePicker
+            date={slot.date}
+            kind="inspection"
+            startTime={slot.startTime ?? "08:00"}
+            endTime={
+              slot.endTime ??
+              defaultCalendarVisitEnd(slot.startTime ?? "08:00")
+            }
+            disabled={disabled}
+            onStartTimeChange={(start) => {
+              onUpdate("startTime", start);
+              onUpdate("endTime", defaultCalendarVisitEnd(start));
+              onUpdate("timeRange", calendarVisitTimeRange(start));
+            }}
+            onEndTimeChange={(end) => onUpdate("endTime", end)}
+          />
         </div>
-      </div>
+      ) : null}
     </li>
   );
 }
@@ -3116,7 +2955,7 @@ function ProposeForm({
 
   function addSlot() {
     if (slots.length >= 3) return;
-    onChange([...slots, { date: "", timeRange: "morning" }]);
+    onChange([...slots, { date: "", timeRange: "morning", startTime: "08:00", endTime: "09:00" }]);
   }
 
   function removeSlot(index: number) {

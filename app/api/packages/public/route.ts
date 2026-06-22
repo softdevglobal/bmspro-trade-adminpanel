@@ -1,4 +1,5 @@
 import { listSubscriptionPlans } from "@/lib/subscription-plans/server";
+import { enrichPlansWithBundledSms } from "@/lib/sms-packages/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -9,5 +10,6 @@ export async function GET() {
     includeInactive: false,
     includeHidden: false,
   });
-  return NextResponse.json({ ok: true, plans });
+  const plansWithSms = await enrichPlansWithBundledSms(plans);
+  return NextResponse.json({ ok: true, plans: plansWithSms });
 }

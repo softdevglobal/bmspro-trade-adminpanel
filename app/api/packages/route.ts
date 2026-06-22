@@ -6,6 +6,7 @@ import {
   listSubscriptionPlans,
   updateSubscriptionPlan,
 } from "@/lib/subscription-plans/server";
+import { enrichPlansWithBundledSms } from "@/lib/sms-packages/server";
 import type { SubscriptionPlanInput } from "@/lib/subscription-plans/types";
 import { validatePlanDescription } from "@/lib/subscription-plans/helpers";
 import { NextResponse } from "next/server";
@@ -37,10 +38,6 @@ function parsePlanBody(
         typeof raw.price === "number" && Number.isFinite(raw.price) ? raw.price : 0,
       priceLabel:
         typeof raw.priceLabel === "string" ? raw.priceLabel : undefined,
-      branches:
-        typeof raw.branches === "number" && Number.isFinite(raw.branches)
-          ? raw.branches
-          : 1,
       staff:
         typeof raw.staff === "number" && Number.isFinite(raw.staff)
           ? raw.staff
@@ -63,6 +60,10 @@ function parsePlanBody(
       plan_key: typeof raw.plan_key === "string" ? raw.plan_key : null,
       billingCycle: raw.billingCycle === "monthly" ? "monthly" : "weekly",
       description: description.value,
+      smsPackageId:
+        typeof raw.smsPackageId === "string" && raw.smsPackageId.trim()
+          ? raw.smsPackageId.trim()
+          : null,
     },
   };
 }
@@ -81,8 +82,9 @@ export async function GET(request: Request) {
     includeInactive: true,
     includeHidden: true,
   });
+  const plansWithSms = await enrichPlansWithBundledSms(plans);
   const tenantCounts = await countTenantsByPlan();
-  return NextResponse.json({ ok: true, plans, tenantCounts });
+  return NextResponse.json({ ok: true, plans: plansWithSms, tenantCounts });
 }
 
 /** Super admin — create a subscription plan. */

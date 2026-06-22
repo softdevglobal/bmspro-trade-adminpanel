@@ -57,7 +57,7 @@ export async function GET(request: Request) {
 
   let logs = await listAuditLogs({
     businessId,
-    category: tenantOwnerView ? null : category,
+    category,
     source,
     participantUid,
     limit: tenantOwnerView ? 500 : limit,

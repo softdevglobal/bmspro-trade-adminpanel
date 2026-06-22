@@ -14,6 +14,7 @@ import {
   type InspectionCustomer,
   type InspectionSlot,
   parseCreatedSource,
+  parseCustomerImageUrls,
   parseInspectionInvoice,
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
@@ -156,6 +157,7 @@ function mapBookingDoc(
       typeof data.budgetAud === "number" && Number.isFinite(data.budgetAud)
         ? data.budgetAud
         : null,
+    customerImageUrls: parseCustomerImageUrls(data.customerImageUrls),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
     visitStartedAt: toMillis(data.visitStartedAt),

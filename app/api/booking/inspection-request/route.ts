@@ -3,6 +3,7 @@ import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   isTenantAccessAllowed,
 } from "@/lib/onboarding/business-status";
+import { validatePreferredSlotsAvailable } from "@/lib/booking/slot-availability";
 import { createInspectionRequest } from "@/lib/inspection/server";
 import { parseInspectionRequestInput } from "@/lib/inspection/types";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
@@ -89,6 +90,15 @@ export async function POST(request: Request) {
   const parsed = parseInspectionRequestInput(body, business.timeZone);
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
+  }
+
+  const slotCheck = await validatePreferredSlotsAvailable(
+    business.id,
+    parsed.value.preferredSlots,
+    business.timeZone,
+  );
+  if (!slotCheck.ok) {
+    return NextResponse.json(slotCheck, { status: 400 });
   }
 
   const customer = await readCustomer(request);

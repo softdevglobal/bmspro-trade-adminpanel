@@ -35,6 +35,7 @@ const EMAIL_PRESENTATION: Record<
   leave_requested: { eyebrow: "Leave request", tone: "warning" },
   leave_assignment_conflict: { eyebrow: "Schedule conflict", tone: "warning" },
   staff_off_day: { eyebrow: "Staff off day", tone: "warning" },
+  schedule_reminder: { eyebrow: "Schedule reminder", tone: "brand" },
   // Custom messages are in-app/push only and never emailed to customers.
   system_message: { eyebrow: "Announcement", tone: "brand" },
 };
@@ -46,6 +47,7 @@ export type InspectionCustomerNotificationEmailInput = {
   bookingSlug?: string | null;
   businessName?: string | null;
   logoUrl?: string | null;
+  businessId?: string | null;
   inspectionRequestId?: string | null;
   type: NotificationType;
   title: string;
@@ -145,6 +147,7 @@ export async function sendInspectionCustomerNotificationEmail(
     const smsBody = input.body?.replace(/\s+/g, " ").trim();
     await sendSms({
       to: input.customerPhone,
+      businessId: input.businessId,
       message: smsBody ? `${input.title}. ${smsBody}` : input.title,
     });
   }

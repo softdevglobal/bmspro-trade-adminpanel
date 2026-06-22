@@ -29,7 +29,8 @@ import {
   planThemeGradient,
   planThemeSurface,
 } from "@/lib/subscription-plans/theme";
-import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
+import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
+import { formatMessageQuotaLabel } from "@/lib/sms-packages/helpers";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -227,7 +228,7 @@ export const BusinessOnboardingForm = forwardRef<
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [plans, setPlans] = useState<SubscriptionPlanDisplay[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);
   const [plansError, setPlansError] = useState<string | null>(null);
 
@@ -266,7 +267,7 @@ export const BusinessOnboardingForm = forwardRef<
         });
         const data = (await res.json()) as {
           ok?: boolean;
-          plans?: SubscriptionPlan[];
+          plans?: SubscriptionPlanDisplay[];
           error?: string;
         };
         if (!active) return;
@@ -1116,10 +1117,11 @@ export const BusinessOnboardingForm = forwardRef<
                   const isActive = form.selectedPlanId === plan.id;
                   const gradient = planThemeGradient(plan.color);
                   const featurePreview = plan.features.slice(0, 3);
+                  const sms = plan.bundledSmsPackage;
                   return (
                     <div
                       key={plan.id}
-                      className={`flex min-h-[26rem] flex-col overflow-hidden rounded-2xl transition-all ${
+                      className={`flex flex-col overflow-hidden rounded-2xl transition-all ${
                         isActive
                           ? "border-2 border-primary shadow-lg shadow-primary/15 ring-2 ring-primary/10"
                           : "border border-outline-variant hover:border-primary/30 hover:shadow-md"
@@ -1152,19 +1154,24 @@ export const BusinessOnboardingForm = forwardRef<
                             plan.validityDays,
                           )}
                         </p>
-                        <div className="mt-3 flex flex-wrap gap-3 font-body text-[11px] text-white/90">
-                          <span className="flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[14px]">
-                              storefront
-                            </span>
-                            {formatLimitLabel(plan.branches, "Branch")}
-                          </span>
+                        <div className="mt-3 space-y-1.5 font-body text-[11px] text-white/90">
                           <span className="flex items-center gap-1">
                             <span className="material-symbols-outlined text-[14px]">
                               groups
                             </span>
                             {formatLimitLabel(plan.staff, "Staff", "Staff")}
                           </span>
+                          {sms ? (
+                            <span className="flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[14px]">
+                                sms
+                              </span>
+                              <span className="font-semibold">{sms.name}</span>
+                              <span className="text-white/75">
+                                · {formatMessageQuotaLabel(sms.messageQuota)}
+                              </span>
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                       <div
@@ -1178,14 +1185,33 @@ export const BusinessOnboardingForm = forwardRef<
                               </p>
                             ) : null}
                           </div>
-                          <div className="mt-2 min-h-[3.75rem]">
+                          {sms ? (
+                            <p className="mt-2 font-body text-[11px] font-semibold text-teal-700">
+                              Includes {sms.name}
+                            </p>
+                          ) : null}
+                          <div className="mt-2">
                             {plan.description ? (
                               <p className="line-clamp-3 font-body text-[12px] leading-relaxed text-on-surface-variant">
                                 {plan.description}
                               </p>
                             ) : null}
                           </div>
-                          <ul className="mt-2 min-h-[4.5rem] space-y-1.5">
+                          <ul className="mt-2 space-y-1.5">
+                            {sms ? (
+                              <li className="flex items-start gap-1.5 font-body text-[11px] text-on-surface-variant">
+                                <span className="material-symbols-outlined text-[14px] text-teal-600">
+                                  sms
+                                </span>
+                                <span>
+                                  <span className="font-semibold text-on-surface">
+                                    {sms.name}
+                                  </span>
+                                  {" — "}
+                                  {formatMessageQuotaLabel(sms.messageQuota)} included
+                                </span>
+                              </li>
+                            ) : null}
                             {featurePreview.map((feature) => (
                               <li
                                 key={feature}
@@ -1349,7 +1375,7 @@ function PreviewPanel({
   step: Step;
   completion: number;
   mode: Mode;
-  selectedPlan: SubscriptionPlan | undefined;
+  selectedPlan: SubscriptionPlanDisplay | undefined;
 }) {
   return (
     <>

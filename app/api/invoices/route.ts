@@ -1,8 +1,4 @@
-import {
-  logInvoiceCreated,
-  logInvoiceSent,
-} from "@/lib/audit/action-logs";
-import { adminAuth } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   createDirectInvoice,
   createInvoiceFromQuotation,
@@ -27,9 +23,29 @@ async function requireInvoiceAuthor(request: Request) {
 
   try {
     const decoded = await adminAuth.verifyIdToken(match[1]);
-    const businessId =
+    let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
-    const role = decoded.role;
+    let role = typeof decoded.role === "string" ? decoded.role : null;
+    let name = typeof decoded.name === "string" ? decoded.name : null;
+
+    if (!businessId || !role) {
+      const userSnap = await adminDb.collection("users").doc(decoded.uid).get();
+      if (userSnap.exists) {
+        const data = userSnap.data() ?? {};
+        if (!businessId && typeof data.businessId === "string") {
+          businessId = data.businessId;
+        }
+        if (!role && typeof data.role === "string") {
+          role = data.role;
+        }
+        if (!name && typeof data.fullName === "string") {
+          name = data.fullName;
+        }
+      }
+    }
+
+    if (role === "business_owner") role = "owner";
+
     if (
       !businessId ||
       (role !== "staff" && role !== "owner" && role !== "admin")
@@ -45,8 +61,8 @@ async function requireInvoiceAuthor(request: Request) {
       ok: true as const,
       uid: decoded.uid,
       email: decoded.email ?? null,
-      name: typeof decoded.name === "string" ? decoded.name : null,
-      role: typeof role === "string" ? role : null,
+      name,
+      role,
       businessId,
     };
   } catch {
@@ -275,20 +291,6 @@ export async function POST(request: Request) {
       { ok: false, error: result.error },
       { status: result.status },
     );
-  }
-
-  const invoiceOrigin = direct ? "direct" : "from_quotation";
-  const invoiceSummary = {
-    id: result.invoice.id,
-    invoiceCode: result.invoice.invoiceCode,
-    finalPriceAud: result.invoice.finalPriceAud,
-    customer: result.invoice.customer,
-    quotationCode: result.invoice.quotationCode,
-  };
-
-  await logInvoiceCreated(auth, invoiceSummary, invoiceOrigin);
-  if (sharedInput.send) {
-    await logInvoiceSent(auth, invoiceSummary, invoiceOrigin);
   }
 
   return NextResponse.json({ ok: true, invoice: result.invoice }, { status: 201 });

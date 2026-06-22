@@ -16,8 +16,13 @@ function generateCode(): string {
 }
 
 async function resolveBusinessBranding(
+  customerData: Record<string, unknown>,
   bookingSlug: string,
-): Promise<{ businessName: string | null; logoUrl: string | null }> {
+): Promise<{
+  businessId: string | null;
+  businessName: string | null;
+  logoUrl: string | null;
+}> {
   if (bookingSlug) {
     const snap = await adminDb
       .collection("businesses")
@@ -25,8 +30,10 @@ async function resolveBusinessBranding(
       .limit(1)
       .get();
     if (!snap.empty) {
-      const data = snap.docs[0].data();
+      const doc = snap.docs[0];
+      const data = doc.data();
       return {
+        businessId: doc.id,
         businessName:
           typeof data.businessName === "string" ? data.businessName : null,
         logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
@@ -34,7 +41,31 @@ async function resolveBusinessBranding(
     }
   }
 
-  return { businessName: null, logoUrl: null };
+  const registeredBusinessId =
+    typeof customerData.registeredBusinessId === "string"
+      ? customerData.registeredBusinessId
+      : null;
+  const registeredBusinessName =
+    typeof customerData.registeredBusinessName === "string"
+      ? customerData.registeredBusinessName
+      : null;
+
+  if (registeredBusinessId) {
+    const profile = await getBusinessProfile(registeredBusinessId);
+    if (profile) {
+      return {
+        businessId: registeredBusinessId,
+        businessName: profile.businessName ?? registeredBusinessName,
+        logoUrl: profile.logoUrl,
+      };
+    }
+  }
+
+  return {
+    businessId: registeredBusinessId,
+    businessName: registeredBusinessName,
+    logoUrl: null,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -82,7 +113,10 @@ export async function POST(req: NextRequest) {
     const customerData = customerSnap.data() ?? {};
     const phone =
       typeof customerData.phone === "string" ? customerData.phone : null;
-    const { businessName, logoUrl } = await resolveBusinessBranding(bookingSlug);
+    const { businessId, businessName, logoUrl } = await resolveBusinessBranding(
+      customerData,
+      bookingSlug,
+    );
 
     const docRef = adminDb
       .collection(COLLECTION)
@@ -123,6 +157,7 @@ export async function POST(req: NextRequest) {
       code,
       businessName,
       logoUrl,
+      businessId,
     });
 
     return NextResponse.json({ ok: true });

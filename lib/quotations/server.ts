@@ -1,5 +1,6 @@
 import "server-only";
 
+import { logQuotationAuditForActor } from "@/lib/audit/action-logs";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseBookingStatus } from "@/lib/bookings/types";
 import type {
@@ -841,7 +842,7 @@ export async function createQuotationForInspection(
   }
 
   if (shouldSend) {
-    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
     try {
       const updatedSnap = await requestSnap.ref.get();
       const updatedRequest = mapInspectionDoc(
@@ -861,6 +862,22 @@ export async function createQuotationForInspection(
       console.error("quotation sent notification failed:", error);
     }
   }
+
+  await logQuotationAuditForActor(
+    businessId,
+    createdBy,
+    {
+      id: quotation.id,
+      quotationCode: quotation.quotationCode,
+      finalPriceAud: quotation.finalPriceAud,
+      customer: quotation.customer,
+    },
+    {
+      logCreated: true,
+      logSent: shouldSend,
+      origin: "from_inspection",
+    },
+  );
 
   return { ok: true, quotation };
 }
@@ -1211,7 +1228,7 @@ export async function updateDraftQuotation(
   }
 
   if (shouldSend) {
-    await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
     try {
       const updatedSnap = await requestSnap.ref.get();
       const updatedRequest = mapInspectionDoc(
@@ -1234,6 +1251,25 @@ export async function updateDraftQuotation(
 
   saved = await quotationRef.get();
   quotation = mapQuotationDoc(quotationRef.id, saved.data() ?? {});
+
+  if (shouldSend) {
+    await logQuotationAuditForActor(
+      businessId,
+      updatedBy,
+      {
+        id: quotation.id,
+        quotationCode: quotation.quotationCode,
+        finalPriceAud: quotation.finalPriceAud,
+        customer: quotation.customer,
+      },
+      {
+        logCreated: false,
+        logSent: true,
+        origin: "from_inspection",
+      },
+    );
+  }
+
   return { ok: true, quotation };
 }
 
@@ -1993,7 +2029,7 @@ export async function createStandaloneQuotation(
   // 6. Email the customer their quotation PDF and surface it in the portal when explicitly sending.
   if (shouldSend) {
     try {
-      await sendQuotationCreatedEmail(quotation, pdfBytes, businessBranding);
+      await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
     } catch (error) {
       console.error("standalone quotation email failed:", error);
     }
@@ -2016,6 +2052,22 @@ export async function createStandaloneQuotation(
       console.error("standalone quotation sent notification failed:", error);
     }
   }
+
+  await logQuotationAuditForActor(
+    businessId,
+    createdBy,
+    {
+      id: quotation.id,
+      quotationCode: quotation.quotationCode,
+      finalPriceAud: quotation.finalPriceAud,
+      customer: quotation.customer,
+    },
+    {
+      logCreated: true,
+      logSent: shouldSend,
+      origin: "standalone",
+    },
+  );
 
   return { ok: true, quotation };
 }
@@ -2491,6 +2543,7 @@ export async function businessRecordQuotationCustomerDecision(
 }
 
 async function sendQuotationCreatedEmail(
+  businessId: string,
   quotation: QuotationDetail,
   pdfBytes: Buffer | null,
   businessBranding: QuotationBusinessBranding,
@@ -2521,6 +2574,7 @@ async function sendQuotationCreatedEmail(
     businessName,
     bookingSlug,
     logoUrl,
+    businessId,
     pdfBytes,
     pdfFileName: `${quoteCode || "quotation"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });

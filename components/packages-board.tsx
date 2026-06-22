@@ -17,14 +17,21 @@ import {
   planThemeGradient,
   planThemeSurface,
 } from "@/lib/subscription-plans/theme";
+import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
+import {
+  formatBundledSmsInclusionLabel,
+  formatMessageQuotaLabel,
+  SMS_BUNDLE_RENEWS_NOTE,
+} from "@/lib/sms-packages/helpers";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";
+import type { SmsPackage } from "@/lib/sms-packages/types";
 import { useCallback, useEffect, useState } from "react";
 
 function PlanShowcaseCard({
   plan,
   onEdit,
 }: {
-  plan: SubscriptionPlan;
+  plan: SubscriptionPlanDisplay;
   onEdit: () => void;
 }) {
   const gradient = planThemeGradient(plan.color);
@@ -71,13 +78,15 @@ function PlanShowcaseCard({
           </p>
           <div className="mt-4 flex flex-wrap gap-4 font-body text-[12px] text-white/90">
             <span className="flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[16px]">storefront</span>
-              {formatLimitLabel(plan.branches, "Branch")}
-            </span>
-            <span className="flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">groups</span>
               {formatLimitLabel(plan.staff, "Staff", "Staff")}
             </span>
+            {plan.bundledSmsPackage ? (
+              <span className="flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px]">sms</span>
+                {plan.bundledSmsPackage.name}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className={`${planThemeSurface(plan.color)} px-5 py-4`}>
@@ -100,6 +109,22 @@ function PlanShowcaseCard({
                 </li>
               ))}
             </ul>
+          ) : null}
+          {plan.bundledSmsPackage ? (
+            <div className="mt-3 rounded-lg border border-teal-200/80 bg-teal-50 px-3 py-2">
+              <p className="font-body text-[10px] font-bold uppercase tracking-wide text-teal-800">
+                SMS included
+              </p>
+              <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                {formatBundledSmsInclusionLabel(
+                  plan.bundledSmsPackage.name,
+                  plan.bundledSmsPackage.messageQuota,
+                )}
+              </p>
+              <p className="mt-1 font-body text-[11px] text-teal-800/80">
+                {SMS_BUNDLE_RENEWS_NOTE}
+              </p>
+            </div>
           ) : null}
           {!plan.active || plan.hidden ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -126,7 +151,7 @@ function SummaryPlanCard({
   tenantCount,
   onEdit,
 }: {
-  plan: SubscriptionPlan;
+  plan: SubscriptionPlanDisplay;
   tenantCount: number;
   onEdit: () => void;
 }) {
@@ -148,13 +173,15 @@ function SummaryPlanCard({
         </p>
         <div className="mt-2 flex flex-wrap gap-3 font-body text-[12px] text-on-surface-variant">
           <span className="flex items-center gap-1">
-            <span className="material-symbols-outlined text-[14px]">storefront</span>
-            {formatLimitLabel(plan.branches, "Branch")}
-          </span>
-          <span className="flex items-center gap-1">
             <span className="material-symbols-outlined text-[14px]">groups</span>
             {formatLimitLabel(plan.staff, "Staff", "Staff")}
           </span>
+          {plan.bundledSmsPackage ? (
+            <span className="flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">sms</span>
+              {plan.bundledSmsPackage.name}
+            </span>
+          ) : null}
         </div>
       </div>
       <span className="mt-3 inline-flex shrink-0 items-center justify-center self-start rounded-full bg-primary/10 px-3 py-1 font-body text-[12px] font-bold text-primary sm:mt-0 sm:self-center">
@@ -166,7 +193,8 @@ function SummaryPlanCard({
 
 export function PackagesBoard() {
   const { user } = useAuth();
-  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [plans, setPlans] = useState<SubscriptionPlanDisplay[]>([]);
+  const [smsPackages, setSmsPackages] = useState<SmsPackage[]>([]);
   const [tenantCounts, setTenantCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -185,12 +213,21 @@ export function PackagesBoard() {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
+      const smsRes = await fetch("/api/sms-packages", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
       const data = await readJsonResponse<{
         ok?: boolean;
-        plans?: SubscriptionPlan[];
+        plans?: SubscriptionPlanDisplay[];
         tenantCounts?: Record<string, number>;
         error?: string;
       }>(res);
+      const smsData = await readJsonResponse<{
+        ok?: boolean;
+        packages?: SmsPackage[];
+        error?: string;
+      }>(smsRes);
       if (!res.ok || !data.ok) {
         setPlans([]);
         setError(data.error ?? "Could not load packages.");
@@ -198,6 +235,7 @@ export function PackagesBoard() {
       }
       setPlans(data.plans ?? []);
       setTenantCounts(data.tenantCounts ?? {});
+      setSmsPackages(smsData.ok ? (smsData.packages ?? []) : []);
     } catch {
       setError("Could not load packages.");
     } finally {
@@ -353,6 +391,7 @@ export function PackagesBoard() {
         editingId={editingId}
         form={form}
         saving={saving}
+        smsPackages={smsPackages}
         onClose={() => setModalOpen(false)}
         onSave={() => void handleSave()}
         onFormChange={setForm}

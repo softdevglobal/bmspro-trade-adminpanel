@@ -42,9 +42,10 @@ async function resolveInvoiceAuthorActor(
 ): Promise<AuditActor> {
   const userSnap = await adminDb.collection("users").doc(author.uid).get();
   const userData = userSnap.exists ? userSnap.data() : null;
+  const role = actorRoleFromClaim(author.role ?? userData?.role);
   return {
     uid: author.uid,
-    role: actorRoleFromClaim(author.role),
+    role,
     name:
       userData && typeof userData.fullName === "string"
         ? userData.fullName
@@ -945,6 +946,7 @@ async function sendInvoiceEmailForDetail(
     businessName: profile?.businessName ?? null,
     bookingSlug: profile?.bookingSlug ?? null,
     logoUrl: profile?.logoUrl ?? null,
+    businessId,
     pdfBytes: bytes,
     pdfFileName: `${invoiceCode}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });

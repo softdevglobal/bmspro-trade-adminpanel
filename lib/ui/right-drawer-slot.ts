@@ -5,9 +5,9 @@ import { useEffect, useId, useState, useSyncExternalStore } from "react";
 export type RightDrawerWidth = "sm" | "md" | "lg";
 
 const DESKTOP_WIDTH: Record<RightDrawerWidth, number> = {
-  sm: 480,
-  md: 448,
-  lg: 640,
+  sm: 520,
+  md: 512,
+  lg: 720,
 };
 
 const registrations = new Map<string, number>();

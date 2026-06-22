@@ -16,10 +16,10 @@ function StaffQuotationAccessBadge({
           : "border border-amber-500/25 bg-amber-50 text-amber-800"
       }`}
     >
-      <span className="material-symbols-outlined text-[12px]">
-        {cangetQuotation ? "request_quote" : "support_agent"}
+      <span className="material-symbols-outlined material-symbols-filled text-[12px]">
+        {cangetQuotation ? "request_quote" : "error"}
       </span>
-      {cangetQuotation ? "Can get quotation" : "Cannot get quotation"}
+      {cangetQuotation ? "Can get quotation" : "Quotation creation Not allowed"}
     </span>
   );
 }

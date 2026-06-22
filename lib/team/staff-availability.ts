@@ -41,18 +41,10 @@ export function normalizeStaffDayAvailability(
         typeof record.day === "string" ? record.day.trim().toLowerCase() : "";
       if (!WEEK_DAY_SET.has(day)) continue;
 
-      const serviceAreas = sanitizeStringArray(record.serviceAreas)
-        .filter(
-          (area) =>
-            allowedServiceAreas.length === 0 ||
-            allowedServiceAreas.includes(area),
-        )
-        .slice(0, 1);
-
       parsed.set(day as WeekDayId, {
         day: day as WeekDayId,
         isOff: record.isOff === true,
-        serviceAreas,
+        serviceAreas: [],
       });
     }
   } else {
@@ -66,7 +58,7 @@ export function normalizeStaffDayAvailability(
       parsed.set(day, {
         day,
         isOff: !available,
-        serviceAreas: available ? allowedServiceAreas.slice(0, 1) : [],
+        serviceAreas: [],
       });
     }
   }
