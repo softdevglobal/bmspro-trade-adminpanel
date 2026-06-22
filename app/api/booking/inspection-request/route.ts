@@ -1,5 +1,9 @@
 import { logAuditEvent } from "@/lib/audit/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import {
+  isTenantAccessAllowed,
+} from "@/lib/onboarding/business-status";
+import { validatePreferredSlotsAvailable } from "@/lib/booking/slot-availability";
 import { createInspectionRequest } from "@/lib/inspection/server";
 import { parseInspectionRequestInput } from "@/lib/inspection/types";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
@@ -36,6 +40,9 @@ async function resolveBusinessFromSlug(
   if (snap.empty) return null;
   const doc = snap.docs[0];
   const data = doc.data();
+  if (!isTenantAccessAllowed(data.status, data.isActive)) {
+    return null;
+  }
   return {
     id: doc.id,
     timeZone:
@@ -70,14 +77,28 @@ export async function POST(request: Request) {
   const business = await resolveBusinessFromSlug(slug);
   if (!business) {
     return NextResponse.json(
-      { ok: false, error: "Business not found." },
-      { status: 404 },
+      {
+        ok: false,
+        error:
+          "This business is not accepting bookings right now. Please contact them directly.",
+        code: "BUSINESS_UNAVAILABLE",
+      },
+      { status: 403 },
     );
   }
 
   const parsed = parseInspectionRequestInput(body, business.timeZone);
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
+  }
+
+  const slotCheck = await validatePreferredSlotsAvailable(
+    business.id,
+    parsed.value.preferredSlots,
+    business.timeZone,
+  );
+  if (!slotCheck.ok) {
+    return NextResponse.json(slotCheck, { status: 400 });
   }
 
   const customer = await readCustomer(request);

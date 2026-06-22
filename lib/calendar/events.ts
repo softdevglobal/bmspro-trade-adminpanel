@@ -1,3 +1,4 @@
+import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types";
 import type { BookingDetail } from "@/lib/bookings/types";
 import { BOOKING_STATUS_LABELS } from "@/lib/bookings/types";
 import {
@@ -6,18 +7,21 @@ import {
 } from "@/lib/reference-codes";
 import {
   STATUS_LABELS,
+  TIME_RANGES,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
+  type InspectionTimeRange,
 } from "@/lib/inspection/types";
 
-export type CalendarSource = "requests" | "jobs";
+export type CalendarSource = "requests" | "jobs" | "personal";
 
 export type DotColor =
   | "primary"
   | "error"
   | "amber-500"
   | "green-500"
-  | "sky-500";
+  | "sky-500"
+  | "violet-500";
 
 export type CalendarEvent = {
   key: string;
@@ -28,11 +32,13 @@ export type CalendarEvent = {
   dotColor: DotColor;
   request?: InspectionRequestDetail;
   booking?: BookingDetail;
+  personalEvent?: PersonalCalendarEvent;
 };
 
 export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
   jobs: "Job",
   requests: "Request",
+  personal: "Personal",
 };
 
 /** Day-drawer card chrome (light blue vs light green). */
@@ -41,6 +47,8 @@ export const CALENDAR_SOURCE_CARD_CLASS: Record<CalendarSource, string> = {
     "rounded-xl border border-primary/25 bg-primary/5 p-card-padding transition-all hover:border-primary/45 hover:shadow-md",
   requests:
     "rounded-xl border border-green-200 bg-green-50 p-card-padding transition-all hover:border-green-400 hover:shadow-md",
+  personal:
+    "rounded-xl border border-violet-200 bg-violet-50 p-card-padding transition-all hover:border-violet-400 hover:shadow-md",
 };
 
 export type CalendarStat = {
@@ -56,6 +64,7 @@ export const DOT_CLASS: Record<DotColor, string> = {
   "amber-500": "bg-amber-500",
   "green-500": "bg-green-500",
   "sky-500": "bg-sky-500",
+  "violet-500": "bg-violet-500",
 };
 
 export function toIsoDateLocal(date: Date): string {
@@ -398,16 +407,31 @@ export function buildCalendarEvents(
   return buildInspectionCalendarEvents(requests, filters, sourceFilter);
 }
 
-/** Month grid: requests + jobs. */
+/** Month grid: requests + jobs + personal events. */
 export function buildMonthGridCalendarEvents(
   requests: InspectionRequestDetail[],
   filters: CalendarFilters,
   bookings: BookingDetail[] = [],
+  personalEvents: PersonalCalendarEvent[] = [],
 ): CalendarEvent[] {
   return [
     ...buildInspectionCalendarEvents(requests, filters),
     ...buildBookingCalendarEvents(bookings, filters),
+    ...buildPersonalCalendarEvents(personalEvents),
   ];
+}
+
+export function buildPersonalCalendarEvents(
+  personalEvents: PersonalCalendarEvent[],
+): CalendarEvent[] {
+  return personalEvents.map((event) => ({
+    key: `personal-${event.id}-${event.date}`,
+    requestId: event.id,
+    date: event.date,
+    source: "personal" as const,
+    dotColor: "violet-500" as const,
+    personalEvent: event,
+  }));
 }
 
 export function groupEventsByDate(
@@ -420,6 +444,37 @@ export function groupEventsByDate(
   }
   return grouped;
 }
+
+/** Morning / afternoon window for a calendar event on its display date. */
+export function calendarEventTimeRange(
+  event: CalendarEvent,
+): InspectionTimeRange | null {
+  const slot = event.booking?.scheduledSlot ?? event.request?.scheduledSlot;
+  if (!slot || slot.date !== event.date) return null;
+  return slot.timeRange;
+}
+
+export function groupEventsByDateAndTimeRange(
+  events: CalendarEvent[],
+): Record<string, Partial<Record<InspectionTimeRange, CalendarEvent[]>>> {
+  const grouped: Record<
+    string,
+    Partial<Record<InspectionTimeRange, CalendarEvent[]>>
+  > = {};
+
+  for (const event of events) {
+    const range = calendarEventTimeRange(event);
+    if (!range) continue;
+    if (!grouped[event.date]) grouped[event.date] = {};
+    const bucket = grouped[event.date]![range] ?? [];
+    bucket.push(event);
+    grouped[event.date]![range] = bucket;
+  }
+
+  return grouped;
+}
+
+export const CALENDAR_DAY_TIME_RANGES = TIME_RANGES;
 
 /** Summary stats across jobs and requests together. */
 export function computeCombinedCalendarStats(

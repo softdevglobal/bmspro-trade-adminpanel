@@ -1,5 +1,6 @@
 "use client";
 
+import { AdminDaySchedulePicker } from "@/components/admin-day-schedule-picker";
 import {
   SlotDayPicker,
   todayIso,
@@ -8,6 +9,10 @@ import {
   BookingStaffAssignSection,
   type BookingAssignChoice,
 } from "@/components/booking-staff-assign-section";
+import {
+  JobInstructionsFields,
+  normalizeInstructionTasksForSubmit,
+} from "@/components/job-instructions-fields";
 import { JobEstimateSelect } from "@/components/job-estimate-select";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -18,108 +23,11 @@ import {
 } from "@/lib/bookings/job-estimate";
 import type { BookingStatus } from "@/lib/bookings/types";
 import {
-  formatClockTime,
-  isClockTime,
   timeRangeFromStartTime,
   type InspectionRequestDetail,
   type InspectionSlot,
 } from "@/lib/inspection/types";
-import { useEffect, useMemo, useState } from "react";
-
-const VISIT_TIME_STEP_MINUTES = 30;
-const JOB_TIME_START_HOUR = 6;
-const JOB_TIME_END_HOUR = 23;
-
-function minutesFromMidnight(clock: string): number {
-  if (!isClockTime(clock)) return 0;
-  const [h, m] = clock.split(":").map(Number);
-  return h * 60 + m;
-}
-
-function jobTimeOptions(): { value: string; label: string }[] {
-  const options: { value: string; label: string }[] = [];
-  for (let hour = JOB_TIME_START_HOUR; hour <= JOB_TIME_END_HOUR; hour += 1) {
-    for (let minute = 0; minute < 60; minute += VISIT_TIME_STEP_MINUTES) {
-      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      const label = formatClockTime(value);
-      if (label) options.push({ value, label });
-    }
-  }
-  return options;
-}
-
-function JobTimeRangeFields({
-  startTime,
-  endTime,
-  disabled,
-  onStartTimeChange,
-  onEndTimeChange,
-}: {
-  startTime: string;
-  endTime: string;
-  disabled: boolean;
-  onStartTimeChange: (value: string) => void;
-  onEndTimeChange: (value: string) => void;
-}) {
-  const options = useMemo(() => jobTimeOptions(), []);
-  const startValid = isClockTime(startTime);
-  const endValid = isClockTime(endTime);
-
-  const endOptions = useMemo(() => {
-    if (!startValid) return options;
-    const minEnd = minutesFromMidnight(startTime) + VISIT_TIME_STEP_MINUTES;
-    return options.filter((opt) => minutesFromMidnight(opt.value) >= minEnd);
-  }, [options, startTime, startValid]);
-
-  useEffect(() => {
-    if (!startValid || !endValid) return;
-    if (minutesFromMidnight(startTime) >= minutesFromMidnight(endTime)) {
-      const next = endOptions[0]?.value;
-      if (next) onEndTimeChange(next);
-    }
-  }, [startTime, endTime, startValid, endValid, endOptions, onEndTimeChange]);
-
-  const selectClass =
-    "w-full appearance-none rounded-lg border border-outline-variant/60 bg-white bg-[length:0.875rem] bg-[right_1.1rem_center] bg-no-repeat py-2 pl-2.5 pr-9 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60";
-  const chevronBg =
-    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='%236b7280'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E\")";
-
-  return (
-    <div className="flex items-center gap-2">
-      <select
-        value={startTime}
-        disabled={disabled}
-        aria-label="Job start time"
-        onChange={(event) => onStartTimeChange(event.target.value)}
-        className={selectClass}
-        style={{ backgroundImage: chevronBg }}
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <span className="shrink-0 font-body text-[13px] text-on-surface-variant">
-        –
-      </span>
-      <select
-        value={endTime}
-        disabled={disabled || endOptions.length === 0}
-        aria-label="Job end time"
-        onChange={(event) => onEndTimeChange(event.target.value)}
-        className={selectClass}
-        style={{ backgroundImage: chevronBg }}
-      >
-        {endOptions.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
+import { useEffect, useState } from "react";
 
 export function bookingMinDateFromInspection(
   request: Pick<
@@ -186,6 +94,8 @@ export function ConvertToBookingPanel({
     estimateMinutesFromTimeRange(initialStartTime, initialEndTime),
   );
   const [note, setNote] = useState("");
+  const [instructionDescription, setInstructionDescription] = useState("");
+  const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -198,6 +108,8 @@ export function ConvertToBookingPanel({
       estimateMinutesFromTimeRange(initialStartTime, initialEndTime),
     );
     setNote("");
+    setInstructionDescription("");
+    setInstructionTasks([]);
     setAssignChoice("owner");
     setStaffId("");
     setError(null);
@@ -260,6 +172,8 @@ export function ConvertToBookingPanel({
             endTime,
             estimatedDurationMinutes: estimatedMinutes,
             note: note.trim() || undefined,
+            instructionDescription: instructionDescription.trim() || undefined,
+            instructionTasks: normalizeInstructionTasksForSubmit(instructionTasks),
             assignTo: assignChoice,
             ...(assignChoice === "staff" ? { staffId } : {}),
           }),
@@ -304,20 +218,19 @@ export function ConvertToBookingPanel({
         />
       </div>
 
-      <label className="mt-4 block">
-        <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-          Job time
-        </span>
-        <div className="mt-1">
-          <JobTimeRangeFields
+      {slot.date ? (
+        <div className="mt-4">
+          <AdminDaySchedulePicker
+            date={slot.date}
+            kind="job"
             startTime={startTime}
             endTime={endTime}
-            disabled={submitting || !slot.date}
+            disabled={submitting}
             onStartTimeChange={setStartTime}
             onEndTimeChange={setEndTime}
           />
         </div>
-      </label>
+      ) : null}
 
       <label className="mt-4 block">
         <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -344,6 +257,16 @@ export function ConvertToBookingPanel({
             if (next !== "staff") setStaffId("");
           }}
           onStaffIdChange={setStaffId}
+        />
+      </div>
+
+      <div className="mt-4">
+        <JobInstructionsFields
+          description={instructionDescription}
+          tasks={instructionTasks}
+          disabled={submitting}
+          onDescriptionChange={setInstructionDescription}
+          onTasksChange={setInstructionTasks}
         />
       </div>
 

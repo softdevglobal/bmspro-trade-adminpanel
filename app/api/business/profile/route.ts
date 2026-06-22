@@ -5,6 +5,7 @@
  * PATCH — updates contact details, logo, GST, or quotation terms.
  */
 
+import { parseSlotCapacityInput } from "@/lib/calendar/slot-capacity";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import {
   getBusinessProfile,
@@ -91,6 +92,8 @@ export async function PATCH(request: Request) {
     gstPercentage?: number | null;
     termsAndConditions?: string | null;
     serviceAreas?: string[];
+    slotCapacityJobs?: number;
+    slotCapacityInspectionRequests?: number;
   } = {};
 
   if ("businessName" in raw) {
@@ -257,6 +260,25 @@ export async function PATCH(request: Request) {
       );
     }
     updates.serviceAreas = normalized;
+  }
+
+  if (
+    "slotCapacityJobs" in raw ||
+    "slotCapacityInspectionRequests" in raw
+  ) {
+    const parsed = parseSlotCapacityInput(
+      raw.slotCapacityJobs,
+      raw.slotCapacityInspectionRequests,
+    );
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error },
+        { status: 400 },
+      );
+    }
+    updates.slotCapacityJobs = parsed.value.maxJobsPerHour;
+    updates.slotCapacityInspectionRequests =
+      parsed.value.maxInspectionsPerHour;
   }
 
   const current = await getBusinessProfile(auth.businessId);

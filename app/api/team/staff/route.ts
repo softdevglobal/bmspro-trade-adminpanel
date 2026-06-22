@@ -7,6 +7,7 @@ import {
   findStaffOwnerPhoneConflict,
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
+import { offDayIdsFromAvailability, normalizeStaffDayAvailability } from "@/lib/team/staff-availability";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
@@ -112,27 +113,7 @@ function sanitizeStringArray(value: unknown) {
 }
 
 function parseAvailability(value: unknown, allowedServiceAreas: string[]) {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .filter((item): item is Record<string, unknown> => {
-      return Boolean(item) && typeof item === "object";
-    })
-    .map((item) => {
-      const day = sanitizeString(item.day).toLowerCase();
-      return {
-        day,
-        isOff: item.isOff === true,
-        serviceAreas: sanitizeStringArray(item.serviceAreas)
-          .filter(
-            (area) =>
-              allowedServiceAreas.length === 0 ||
-              allowedServiceAreas.includes(area),
-          )
-          .slice(0, 1),
-      };
-    })
-    .filter((item) => WEEK_DAYS.has(item.day));
+  return normalizeStaffDayAvailability(value, allowedServiceAreas);
 }
 
 function timestampMillis(value: unknown) {
@@ -524,6 +505,9 @@ export async function GET(request: Request) {
   const staff = snapshot.docs
     .map((doc) => {
       const data = doc.data();
+      const availability = summaryOnly
+        ? undefined
+        : availabilityForResponse(data.availability, serviceAreas);
       return {
         id: doc.id,
         fullName: sanitizeString(data.fullName) || "Unnamed Staff",
@@ -532,9 +516,8 @@ export async function GET(request: Request) {
         role: sanitizeString(data.role),
         staffType: staffType(data.staffType, data.skills),
         canget_qutaion: data.canget_qutaion === true,
-        availability: summaryOnly
-          ? {}
-          : availabilityForResponse(data.availability, serviceAreas),
+        availability,
+        offDays: offDayIdsFromAvailability(data.availability),
         status: staffStatus(data.status),
         createdAt: timestampIso(data.createdAt),
         createdAtMillis: timestampMillis(data.createdAt),
@@ -550,6 +533,7 @@ export async function GET(request: Request) {
       staffType: member.staffType,
       canget_qutaion: member.canget_qutaion,
       availability: member.availability,
+      offDays: member.offDays,
       status: member.status,
       createdAt: member.createdAt,
     }));

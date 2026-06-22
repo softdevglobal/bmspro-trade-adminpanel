@@ -148,15 +148,25 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    function belongsToActiveBusiness(businessId) {
+      return belongsToBusiness(businessId)
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.isActive == true
+        && get(/databases/$(database)/documents/businesses/$(businessId)).data.status != 'suspended';
+    }
+
     // Staff attendance / GPS check-ins (mobile background location).
     match /staff_check_ins/{checkInId} {
       allow read: if isSuperAdmin()
         || (isSignedIn() && resource.data.staffId == request.auth.uid);
       allow create: if isSignedIn()
-        && request.resource.data.staffId == request.auth.uid;
+        && request.resource.data.staffId == request.auth.uid
+        && request.resource.data.businessId is string
+        && belongsToActiveBusiness(request.resource.data.businessId);
       allow update: if isSignedIn()
         && resource.data.staffId == request.auth.uid
-        && request.resource.data.staffId == request.auth.uid;
+        && request.resource.data.staffId == request.auth.uid
+        && resource.data.businessId is string
+        && belongsToActiveBusiness(resource.data.businessId);
       allow delete: if false;
     }
 

@@ -1,4 +1,6 @@
 import "server-only";
+import { parseSlotCapacityFromBusiness } from "@/lib/calendar/slot-capacity";
+import { assertBusinessActive } from "@/lib/onboarding/business-status";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   isReservedSlug,
@@ -342,6 +344,8 @@ export type BusinessProfile = {
   plan: BusinessProfilePlan | null;
   termsAndConditions: string | null;
   serviceAreas: string[];
+  slotCapacityJobs: number;
+  slotCapacityInspectionRequests: number;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -417,6 +421,9 @@ export async function getBusinessProfile(
           .map((area) => area.trim())
           .filter(Boolean)
       : [],
+    slotCapacityJobs: parseSlotCapacityFromBusiness(data).maxJobsPerHour,
+    slotCapacityInspectionRequests:
+      parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
   };
 }
 
@@ -435,6 +442,8 @@ export async function updateBusinessProfile(
     gstPercentage?: number | null;
     termsAndConditions?: string | null;
     serviceAreas?: string[];
+    slotCapacityJobs?: number;
+    slotCapacityInspectionRequests?: number;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -486,6 +495,14 @@ export async function updateBusinessProfile(
 
   if ("serviceAreas" in updates) {
     payload.serviceAreas = updates.serviceAreas;
+  }
+
+  if ("slotCapacityJobs" in updates) {
+    payload.slotCapacityJobs = updates.slotCapacityJobs;
+  }
+
+  if ("slotCapacityInspectionRequests" in updates) {
+    payload.slotCapacityInspectionRequests = updates.slotCapacityInspectionRequests;
   }
 
   await adminDb.collection("businesses").doc(businessId).update(payload);
@@ -549,6 +566,11 @@ export async function requireBusinessMember(req: Request): Promise<
         status: 403,
         error: "Business member access required.",
       };
+    }
+
+    const accessDenied = await assertBusinessActive(businessId);
+    if (accessDenied) {
+      return accessDenied;
     }
 
     return {

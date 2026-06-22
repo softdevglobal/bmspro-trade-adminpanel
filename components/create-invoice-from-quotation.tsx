@@ -14,6 +14,12 @@ import { MonthCalendarField } from "@/components/month-calendar-field";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import {
+  buildCustomerOptions,
+  filterCustomerOptions,
+  type CustomerOption,
+} from "@/lib/inspection/customer-options";
+import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import {
   formatAddress,
@@ -172,11 +178,39 @@ function quotationLineToSaved(
   index: number,
 ): SavedLineItem {
   const quantity = item.quantity ?? 1;
-  const rate =
+  let discountPercent =
+    typeof item.discountPercent === "number" && item.discountPercent > 0
+      ? Math.min(100, item.discountPercent)
+      : 0;
+  const unitRate =
     item.rateAud ??
     (quantity > 0
       ? Math.round((item.priceAud / quantity) * 100) / 100
       : item.priceAud);
+
+  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
+    const gross = Math.round(unitRate * quantity * 100) / 100;
+    if (gross > item.priceAud + 0.01) {
+      const inferred = Math.min(
+        100,
+        Math.round((1 - item.priceAud / gross) * 10000) / 100,
+      );
+      if (inferred > 0.01) discountPercent = inferred;
+    }
+  }
+
+  let rate: number;
+  if (
+    discountPercent > 0 &&
+    typeof item.discountPercent === "number" &&
+    item.discountPercent > 0
+  ) {
+    rate =
+      Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100;
+  } else {
+    rate = unitRate;
+  }
+
   return {
     id: `line-${index}-${Math.random().toString(36).slice(2, 8)}`,
     code: item.code?.trim() ?? "",
@@ -184,7 +218,7 @@ function quotationLineToSaved(
     description: item.description?.trim() ?? "",
     quantity,
     rate,
-    discountPercent: 0,
+    discountPercent,
     applyGst: (item.gstPercent ?? 0) > 0,
     amountAud: item.priceAud,
   };
@@ -220,11 +254,12 @@ function toApiLineItems(
   gstPricing: GstPricingMode,
 ): QuotationLineItem[] {
   return items.map((item) => {
-    const { rateAudExGst } = computeQuotationLineAmounts({
+    const gstPercent = lineGstPercent(item.applyGst, gstEnabled, gstPercentage);
+    const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
       quantity: item.quantity,
       rate: item.rate,
       discountPercent: item.discountPercent,
-      gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
+      gstPercent,
       gstPricing,
     });
     return {
@@ -232,9 +267,10 @@ function toApiLineItems(
       name: item.name.trim(),
       description: item.description.trim() || null,
       quantity: item.quantity,
-      rateAud: rateAudExGst,
-      gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
-      priceAud: item.amountAud,
+      rateAud: listRateAudExGst,
+      discountPercent: item.discountPercent > 0 ? item.discountPercent : null,
+      gstPercent,
+      priceAud: amountAud,
     };
   });
 }
@@ -253,6 +289,7 @@ export function CreateInvoiceFromQuotation({
   const router = useRouter();
   const { user } = useAuth();
   const business = useBusinessProfile();
+  const { requests } = useInspectionRequests();
   const timeZone = business?.timezone;
 
   const [tab, setTab] = useState<Tab>("create");
@@ -274,6 +311,8 @@ export function CreateInvoiceFromQuotation({
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [address, setAddress] = useState<InspectionAddress>({
     street: "",
     suburb: "",
@@ -391,6 +430,7 @@ export function CreateInvoiceFromQuotation({
         setCustomerName(q.customer.fullName);
         setCustomerEmail(q.customer.email);
         setCustomerPhone(q.customer.phone);
+        setCustomerSearch(q.customer.fullName);
         setAddress(q.address);
         setLineItems(q.lineItems.map(quotationLineToSaved));
         if (q.discountAud > 0) {
@@ -432,6 +472,7 @@ export function CreateInvoiceFromQuotation({
         setCustomerName(loadedDraftInvoice.customer.fullName);
         setCustomerEmail(loadedDraftInvoice.customer.email);
         setCustomerPhone(loadedDraftInvoice.customer.phone);
+        setCustomerSearch(loadedDraftInvoice.customer.fullName);
         setAddress(loadedDraftInvoice.address);
         setLineItems(loadedDraftInvoice.lineItems.map(quotationLineToSaved));
         setDiscount(
@@ -577,6 +618,28 @@ export function CreateInvoiceFromQuotation({
     isEditingDraftInvoice && quotation?.createdSource === "invoice_direct";
   const directMode = direct || isDirectDraftInvoice;
 
+  const customerOptions = useMemo(
+    () => buildCustomerOptions(requests),
+    [requests],
+  );
+
+  const filteredCustomers = useMemo(
+    () => filterCustomerOptions(customerOptions, customerSearch),
+    [customerOptions, customerSearch],
+  );
+
+  function selectCustomer(option: CustomerOption) {
+    setCustomerName(option.fullName);
+    setCustomerEmail(option.email);
+    setCustomerPhone(option.phone);
+    if (option.address && directMode) {
+      setAddress({ ...option.address });
+    }
+    setCustomerSearch(option.fullName);
+    setShowCustomerDropdown(false);
+    setError(null);
+  }
+
   const directServiceTitle = useMemo(() => {
     if (!directMode) return "";
     if (requestType === "existing_service") {
@@ -608,11 +671,12 @@ export function CreateInvoiceFromQuotation({
 
   const documentLineItems = useMemo((): QuotationDocumentLineItem[] => {
     return lineItems.map((item) => {
-      const { rateAudExGst } = computeQuotationLineAmounts({
+      const gstPercent = lineGstPercent(item.applyGst, gstEnabled, gstPercentage);
+      const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
         quantity: item.quantity,
         rate: item.rate,
         discountPercent: item.discountPercent,
-        gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
+        gstPercent,
         gstPricing,
       });
       return {
@@ -620,9 +684,10 @@ export function CreateInvoiceFromQuotation({
         name: item.name.trim() || "Line item",
         description: item.description.trim() || null,
         quantity: item.quantity,
-        rateAud: rateAudExGst,
-        gstPercent: lineGstPercent(item.applyGst, gstEnabled, gstPercentage),
-        amountAud: item.amountAud,
+        rateAud: listRateAudExGst,
+        discountPercent: item.discountPercent,
+        gstPercent,
+        amountAud,
       };
     });
   }, [lineItems, gstEnabled, gstPercentage, gstPricing]);
@@ -1370,15 +1435,56 @@ export function CreateInvoiceFromQuotation({
                   Customer
                 </h2>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <label className="block sm:col-span-2">
-                    <span className={LABEL_CLASS}>Name</span>
-                    <input
-                      type="text"
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      className={INPUT_CLASS}
-                    />
-                  </label>
+                  <div className="relative sm:col-span-2">
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Name</span>
+                      <input
+                        type="text"
+                        value={customerSearch || customerName}
+                        onChange={(e) => {
+                          setCustomerSearch(e.target.value);
+                          setCustomerName(e.target.value);
+                          setShowCustomerDropdown(true);
+                          setError(null);
+                        }}
+                        onFocus={() => setShowCustomerDropdown(true)}
+                        onBlur={() => {
+                          window.setTimeout(
+                            () => setShowCustomerDropdown(false),
+                            150,
+                          );
+                        }}
+                        placeholder="Search or enter name"
+                        className={INPUT_CLASS}
+                      />
+                    </label>
+                    {showCustomerDropdown && filteredCustomers.length > 0 ? (
+                      <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-lowest shadow-lg">
+                        <li className="border-b border-outline-variant/40 px-3 py-2 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                          Recently created
+                        </li>
+                        {filteredCustomers.map((option) => (
+                          <li key={option.id}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => selectCustomer(option)}
+                              className="flex w-full flex-col px-3 py-2.5 text-left transition-colors hover:bg-surface-container-low"
+                            >
+                              <span className="font-body text-[14px] font-semibold text-on-surface">
+                                {option.fullName}
+                              </span>
+                              {option.email ? (
+                                <span className="font-body text-[12px] text-on-surface-variant">
+                                  {option.email}
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                   <label className="block">
                     <span className={LABEL_CLASS}>Email</span>
                     <input
@@ -2070,7 +2176,7 @@ export function CreateInvoiceFromQuotation({
                       <button
                         type="button"
                         onClick={() => setDepositModalOpen(true)}
-                        className="shrink-0 font-body text-[11px] font-semibold text-primary hover:underline"
+                        className="shrink-0 rounded-full border border-primary/25 px-3 py-1.5 font-body text-[13px] font-semibold text-primary hover:bg-primary/5"
                       >
                         Edit
                       </button>

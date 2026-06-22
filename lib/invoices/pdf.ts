@@ -5,6 +5,7 @@ import {
   buildQuotationDocumentDeposit,
   computeDocumentTotals,
   formatQuoteDate,
+  resolveDocumentLineFromQuotationItem,
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
@@ -14,15 +15,9 @@ function lineItemsFromInvoice(
   invoice: InvoiceDetail,
   defaultGst: number,
 ): QuotationDocumentLineItem[] {
-  return invoice.lineItems.map((item) => ({
-    code: item.code ?? null,
-    name: item.name,
-    description: item.description ?? null,
-    quantity: item.quantity ?? 1,
-    rateAud: item.rateAud ?? item.priceAud,
-    gstPercent: item.gstPercent ?? defaultGst,
-    amountAud: item.priceAud,
-  }));
+  return invoice.lineItems.map((item) =>
+    resolveDocumentLineFromQuotationItem(item, defaultGst),
+  );
 }
 
 export function buildInvoiceDocumentFromDetail(

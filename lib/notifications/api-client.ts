@@ -112,8 +112,12 @@ export async function fetchBusinessNotifications(
 
 export async function fetchCustomerNotifications(
   idToken: string,
+  bookingSlug?: string,
 ): Promise<NotificationRecord[]> {
-  const response = await fetch("/api/customer/notifications", {
+  const qs = bookingSlug
+    ? `?bookingSlug=${encodeURIComponent(bookingSlug)}`
+    : "";
+  const response = await fetch(`/api/customer/notifications${qs}`, {
     headers: { authorization: `Bearer ${idToken}` },
     cache: "no-store",
   });

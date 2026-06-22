@@ -1,9 +1,11 @@
 "use client";
 
+import type { ChangeEvent } from "react";
+
 import type { BookingBusiness, BookingService } from "@/app/booknow/[slug]/page";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CUSTOMER_FIXED_NAV_BAR_CLASS,
   CUSTOMER_FIXED_NAV_INNER_CLASS,
@@ -16,13 +18,22 @@ import {
 } from "@/components/customer-account-nav";
 import { CustomerNotificationBanner } from "@/components/customer-notification-banner";
 import { accountPath, rememberBookingSlug } from "@/lib/customer/booking-routes";
-import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
+import { useCustomerAuth, useCustomerBookingSlug } from "@/lib/customer-auth/customer-auth-context";
 import {
   SlotDayPicker,
+  SLOT_DAYS_PER_PAGE,
+  SLOT_MAX_DAY_PAGES,
+  buildBlockedComboSet,
+  isDayFullyBlocked,
+  slotComboKey,
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import { AuPhoneInput } from "@/components/au-phone-input";
-import { formatAddress } from "@/lib/inspection/types";
+import {
+  TIME_RANGES,
+  formatAddress,
+  type InspectionTimeRange,
+} from "@/lib/inspection/types";
 import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   isValidAuLocalPhone,
@@ -56,6 +67,7 @@ function isServiceAddressComplete(address: ServiceAddress): boolean {
 
 export function BookingEngine({ business, services }: Props) {
   const reducedMotion = useReducedMotion();
+  useCustomerBookingSlug(business.slug);
 
   const location = useMemo(() => {
     if (business.state && business.postcode) {
@@ -112,6 +124,7 @@ export function BookingEngine({ business, services }: Props) {
             <ServiceBookingFlow
               slug={business.slug}
               businessName={business.businessName}
+              businessActive={business.isActive}
               services={services}
               timeZone={business.timezone}
               reducedMotion={!!reducedMotion}
@@ -532,17 +545,29 @@ function normalizeBudgetInput(value: string): string {
   return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
 }
 
+const MAX_BOOKING_IMAGES = 5;
+
 function BookingRequestExtras({
   notes,
   budget,
+  imageUrls,
+  uploadingImage,
   onNotesChange,
   onBudgetChange,
+  onUploadImage,
+  onRemoveImage,
 }: {
   notes: string;
   budget: string;
+  imageUrls: string[];
+  uploadingImage: boolean;
   onNotesChange: (value: string) => void;
   onBudgetChange: (value: string) => void;
+  onUploadImage: (event: ChangeEvent<HTMLInputElement>) => void;
+  onRemoveImage: (index: number) => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <div className="mt-4 rounded-xl border border-stone-200/90 bg-white p-3 shadow-sm sm:p-4">
       <p className={BOOKING_LABEL_CLASS}>Additional details</p>
@@ -563,6 +588,56 @@ function BookingRequestExtras({
             maxLength={2000}
           />
         </label>
+
+        <div className="block">
+          <span className={BOOKING_LABEL_CLASS}>Photos</span>
+          <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
+            Add photos of the area or issue (optional, up to {MAX_BOOKING_IMAGES}{" "}
+            images).
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={(event) => onUploadImage(event)}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage || imageUrls.length >= MAX_BOOKING_IMAGES}
+            className="mt-2 inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-[#faf8f5] px-3 py-2 font-body text-[13px] font-semibold text-primary transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              add_a_photo
+            </span>
+            {uploadingImage ? "Uploading…" : "Add photo"}
+          </button>
+          {imageUrls.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {imageUrls.map((url, index) => (
+                <li key={url} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt=""
+                    className="h-16 w-16 rounded-lg border border-stone-200 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onRemoveImage(index)}
+                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-on-surface text-surface shadow-sm"
+                    aria-label="Remove photo"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">
+                      close
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
 
         <label className="block">
           <span className={BOOKING_LABEL_CLASS}>Your budget</span>
@@ -687,33 +762,89 @@ function sortPreferredSlots(slots: PreferredSlot[]): PreferredSlot[] {
   return [...slots].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+const BLOCKED_DAY_HINT =
+  "Both morning and afternoon are unavailable on this day — choose another date";
+
+const BLOCKED_SESSION_HINT =
+  "This session is fully booked or unavailable — choose another time";
+
+function addDaysIso(iso: string, days: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(year!, month! - 1, day!, 12, 0, 0, 0);
+  date.setDate(date.getDate() + days);
+  const nextYear = date.getFullYear();
+  const nextMonth = String(date.getMonth() + 1).padStart(2, "0");
+  const nextDay = String(date.getDate()).padStart(2, "0");
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function firstAvailableTimeRange(
+  date: string,
+  blockedCombos: Set<string>,
+): SlotTimeRange | null {
+  for (const range of TIME_RANGES) {
+    if (!blockedCombos.has(slotComboKey(date, range))) {
+      return range;
+    }
+  }
+  return null;
+}
+
 function DayTimePicker({
+  date,
   timeRange,
   onTimeChange,
+  blockedCombos,
+  availabilityReady = true,
 }: {
+  date: string;
   timeRange: SlotTimeRange;
   onTimeChange: (timeRange: SlotTimeRange) => void;
+  blockedCombos?: Set<string>;
+  availabilityReady?: boolean;
 }) {
+  useEffect(() => {
+    if (!availabilityReady || !date || !blockedCombos) return;
+    if (!blockedCombos.has(slotComboKey(date, timeRange))) return;
+    const fallback = firstAvailableTimeRange(date, blockedCombos);
+    if (fallback) onTimeChange(fallback);
+  }, [availabilityReady, date, timeRange, blockedCombos, onTimeChange]);
+
   return (
     <div className="mt-2 grid grid-cols-2 gap-2">
       {TIME_RANGE_OPTIONS.map((option) => {
-        const checked = timeRange === option.id;
+        const comboBlocked = Boolean(
+          availabilityReady &&
+            date &&
+            blockedCombos?.has(slotComboKey(date, option.id)),
+        );
+        const checked = !comboBlocked && timeRange === option.id;
         return (
           <button
             type="button"
             key={option.id}
-            onClick={() => onTimeChange(option.id)}
-            className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all ${
-              checked
-                ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
-                : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
+            disabled={!availabilityReady || comboBlocked}
+            title={
+              comboBlocked ? BLOCKED_SESSION_HINT : undefined
+            }
+            onClick={() => {
+              if (!comboBlocked) onTimeChange(option.id);
+            }}
+            className={`relative flex min-h-[5rem] flex-col justify-between overflow-hidden rounded-2xl border px-3 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-45 ${
+              comboBlocked
+                ? "border-stone-100 bg-stone-50"
+                : checked
+                  ? "border-primary bg-gradient-to-br from-primary/15 via-white to-amber-50/80 ring-2 ring-primary/20"
+                  : "border-stone-200 bg-white hover:border-stone-300 hover:shadow-sm"
             }`}
           >
             <span
               className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
                 checked
                   ? "bg-primary text-on-primary shadow-sm"
-                  : "bg-stone-100 text-stone-600"
+                  : comboBlocked
+                    ? "bg-stone-100 text-stone-400"
+                    : "bg-stone-100 text-stone-600"
               }`}
             >
               <span className="material-symbols-outlined material-symbols-filled text-[20px]">
@@ -723,13 +854,23 @@ function DayTimePicker({
             <span>
               <span
                 className={`block font-body text-[14px] font-bold ${
-                  checked ? "text-primary" : "text-on-surface"
+                  checked
+                    ? "text-primary"
+                    : comboBlocked
+                      ? "text-stone-400"
+                      : "text-on-surface"
                 }`}
               >
                 {option.label}
               </span>
-              <span className="font-body text-[11px] text-on-surface-variant">
-                {option.hint}
+              <span
+                className={`font-body text-[11px] ${
+                  comboBlocked
+                    ? "font-semibold text-stone-400"
+                    : "text-on-surface-variant"
+                }`}
+              >
+                {comboBlocked ? "Unavailable" : option.hint}
               </span>
             </span>
             {checked ? (
@@ -747,6 +888,7 @@ function DayTimePicker({
 function ServiceBookingFlow({
   slug,
   businessName,
+  businessActive,
   services,
   timeZone,
   phoneHref,
@@ -755,6 +897,7 @@ function ServiceBookingFlow({
 }: {
   slug: string;
   businessName: string;
+  businessActive: boolean;
   services: BookingService[];
   timeZone: string;
   phoneHref: string | null;
@@ -771,6 +914,8 @@ function ServiceBookingFlow({
   const [customDescription, setCustomDescription] = useState("");
   const [customerNotes, setCustomerNotes] = useState("");
   const [budgetAud, setBudgetAud] = useState("");
+  const [customerImageUrls, setCustomerImageUrls] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [address, setAddress] = useState<ServiceAddress>(EMPTY_ADDRESS);
   const [preferredSlots, setPreferredSlots] = useState<PreferredSlot[]>([]);
   const [customer, setCustomer] = useState({
@@ -785,12 +930,21 @@ function ServiceBookingFlow({
     null,
   );
   const [workingDayPage, setWorkingDayPage] = useState(0);
+  const [unavailableSlots, setUnavailableSlots] = useState<
+    { date: string; timeRange: InspectionTimeRange }[]
+  >([]);
+  const [availabilityLoading, setAvailabilityLoading] = useState(true);
+  const [availabilityLoadError, setAvailabilityLoadError] = useState<
+    string | null
+  >(null);
+  const [slotSelectionNotice, setSlotSelectionNotice] = useState<
+    string | null
+  >(null);
 
   const customerAuth = useCustomerAuth();
   const isAuthenticated = customerAuth.status === "authenticated";
   const profile = customerAuth.profile;
-  const customerEmailFromAuth =
-    profile?.email ?? customerAuth.user?.email ?? "";
+  const customerEmailFromAuth = profile?.email ?? "";
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -809,6 +963,15 @@ function ServiceBookingFlow({
   const profileLocked = isAuthenticated;
 
   const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
+  const maxBookableDate = useMemo(
+    () => addDaysIso(minDate, SLOT_MAX_DAY_PAGES * SLOT_DAYS_PER_PAGE - 1),
+    [minDate],
+  );
+  const blockedCombos = useMemo(
+    () => buildBlockedComboSet(unavailableSlots),
+    [unavailableSlots],
+  );
+  const availabilityReady = !availabilityLoading && !availabilityLoadError;
   const selectedService =
     services.find((service) => service.id === selectedServiceId) ?? null;
 
@@ -821,10 +984,86 @@ function ServiceBookingFlow({
         customDescription.trim().length >= 10;
 
   const slotsValid =
+    availabilityReady &&
     preferredSlots.length > 0 &&
     preferredSlots.every((slot) => slot.date.trim().length > 0) &&
+    preferredSlots.every((slot) => !isDayFullyBlocked(slot.date, blockedCombos)) &&
     new Set(preferredSlots.map((slot) => `${slot.date}-${slot.timeRange}`))
-      .size === preferredSlots.length;
+      .size === preferredSlots.length &&
+    preferredSlots.every(
+      (slot) => !blockedCombos.has(slotComboKey(slot.date, slot.timeRange)),
+    );
+
+  useEffect(() => {
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    setAvailabilityLoadError(null);
+    setSlotSelectionNotice(null);
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          slug,
+          from: minDate,
+          to: maxBookableDate,
+        });
+        const response = await fetch(
+          `/api/booking/slot-availability?${params.toString()}`,
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          unavailable?: { date: string; timeRange: InspectionTimeRange }[];
+        };
+        if (cancelled) return;
+        if (!response.ok || !payload.ok || !payload.unavailable) {
+          throw new Error(
+            payload.error ?? "Could not load available time slots.",
+          );
+        }
+        setUnavailableSlots(payload.unavailable);
+      } catch (error) {
+        if (cancelled) return;
+        setAvailabilityLoadError(
+          error instanceof Error
+            ? error.message
+            : "Could not load available time slots.",
+        );
+        setUnavailableSlots([]);
+      } finally {
+        if (!cancelled) setAvailabilityLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, minDate, maxBookableDate]);
+
+  useEffect(() => {
+    if (!availabilityReady) return;
+    setPreferredSlots((prev) => {
+      let changed = false;
+      const next = prev.flatMap((slot) => {
+        if (!slot.date) return [slot];
+        if (isDayFullyBlocked(slot.date, blockedCombos)) {
+          changed = true;
+          return [];
+        }
+        if (!blockedCombos.has(slotComboKey(slot.date, slot.timeRange))) {
+          return [slot];
+        }
+        const fallback = firstAvailableTimeRange(slot.date, blockedCombos);
+        if (!fallback) {
+          changed = true;
+          return [];
+        }
+        if (fallback !== slot.timeRange) changed = true;
+        return [{ ...slot, timeRange: fallback }];
+      });
+      return changed ? next : prev;
+    });
+  }, [availabilityReady, blockedCombos]);
 
   const customerValid =
     customer.fullName.trim().length >= 2 &&
@@ -854,12 +1093,14 @@ function ServiceBookingFlow({
   );
 
   const canSubmit =
+    businessActive &&
     requestStepValid &&
     addressComplete &&
     slotsValid &&
     customerValid &&
     !submitting &&
-    !submittedRequestId;
+    !submittedRequestId &&
+    !availabilityLoading;
 
   function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
@@ -880,10 +1121,24 @@ function ServiceBookingFlow({
     key: K,
     value: PreferredSlot[K],
   ) {
+    if (
+      key === "timeRange" &&
+      typeof value === "string" &&
+      preferredSlots[index]?.date
+    ) {
+      const date = preferredSlots[index]!.date;
+      if (blockedCombos.has(slotComboKey(date, value))) {
+        setSlotSelectionNotice(
+          "That time is not available. Please choose another session.",
+        );
+        return;
+      }
+    }
     setPreferredSlots((prev) =>
       prev.map((slot, idx) => (idx === index ? { ...slot, [key]: value } : slot)),
     );
     setSubmitError(null);
+    setSlotSelectionNotice(null);
   }
 
   const selectedPreferredDates = useMemo(
@@ -892,18 +1147,80 @@ function ServiceBookingFlow({
   );
 
   function togglePreferredDay(iso: string) {
+    if (!availabilityReady) return;
+
+    let blockedDay = false;
     setPreferredSlots((prev) => {
       const exists = prev.some((slot) => slot.date === iso);
       if (exists) {
         return prev.filter((slot) => slot.date !== iso);
       }
       if (prev.length >= 3) return prev;
-      return sortPreferredSlots([
-        ...prev,
-        { date: iso, timeRange: "morning" },
-      ]);
+      if (isDayFullyBlocked(iso, blockedCombos)) {
+        blockedDay = true;
+        return prev;
+      }
+      const timeRange = firstAvailableTimeRange(iso, blockedCombos);
+      if (!timeRange) {
+        blockedDay = true;
+        return prev;
+      }
+      return sortPreferredSlots([...prev, { date: iso, timeRange }]);
     });
+
+    if (blockedDay) {
+      setSlotSelectionNotice(
+        "That day is not available. Please choose another date.",
+      );
+      return;
+    }
+
     setSubmitError(null);
+    setSlotSelectionNotice(null);
+  }
+
+  async function uploadBookingImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (customerImageUrls.length >= MAX_BOOKING_IMAGES) return;
+
+    setUploadingImage(true);
+    setSubmitError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("slug", slug);
+
+      const headers: Record<string, string> = {};
+      const idToken = await customerAuth.getIdToken();
+      if (idToken) {
+        headers.authorization = `Bearer ${idToken}`;
+      }
+
+      const response = await fetch("/api/uploads/booking-image", {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        imageUrl?: string;
+      };
+      if (!response.ok || !data.ok || !data.imageUrl) {
+        throw new Error(data.error ?? "Could not upload photo.");
+      }
+      setCustomerImageUrls((prev) =>
+        [...prev, data.imageUrl!].slice(0, MAX_BOOKING_IMAGES),
+      );
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : "Could not upload photo.",
+      );
+    } finally {
+      setUploadingImage(false);
+      event.target.value = "";
+    }
   }
 
   async function submitInspectionRequest() {
@@ -942,6 +1259,7 @@ function ServiceBookingFlow({
           preferredSlots,
           customerNotes: customerNotes.trim() || null,
           budgetAud: budgetAud.trim() || null,
+          customerImageUrls,
         }),
       });
 
@@ -1136,12 +1454,21 @@ function ServiceBookingFlow({
           <BookingRequestExtras
             notes={customerNotes}
             budget={budgetAud}
+            imageUrls={customerImageUrls}
+            uploadingImage={uploadingImage}
             onNotesChange={(value) => {
               setCustomerNotes(value);
               setSubmitError(null);
             }}
             onBudgetChange={(value) => {
               setBudgetAud(value);
+              setSubmitError(null);
+            }}
+            onUploadImage={(event) => void uploadBookingImage(event)}
+            onRemoveImage={(index) => {
+              setCustomerImageUrls((prev) =>
+                prev.filter((_, idx) => idx !== index),
+              );
               setSubmitError(null);
             }}
           />
@@ -1239,13 +1566,32 @@ function ServiceBookingFlow({
               dayPage={workingDayPage}
               onDayPageChange={setWorkingDayPage}
               onToggle={togglePreferredDay}
+              disabled={!availabilityReady}
               label="Pick up to 3 days"
               dayStripLayout="fit"
+              blockedCombos={blockedCombos}
+              blockedDayHint={BLOCKED_DAY_HINT}
               timeZone={timeZone}
             />
-            {selectedPreferredDates.length > 0 ? (
+            {availabilityLoading ? (
+              <p className="mt-3 inline-flex items-center gap-2 font-body text-[12px] text-on-surface-variant">
+                <span className="material-symbols-outlined animate-spin text-[16px] text-primary">
+                  progress_activity
+                </span>
+                Checking availability…
+              </p>
+            ) : availabilityLoadError ? (
+              <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-800">
+                {availabilityLoadError}
+              </p>
+            ) : slotSelectionNotice ? (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] text-amber-900">
+                {slotSelectionNotice}
+              </p>
+            ) : selectedPreferredDates.length > 0 ? (
               <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                Tap a selected day again to remove it.
+                Tap a selected day again to remove it. Unavailable sessions are
+                greyed out when fully booked or when no one is available.
               </p>
             ) : (
               <p className="mt-3 rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
@@ -1282,7 +1628,10 @@ function ServiceBookingFlow({
                         {formatPrettyDate(slot.date, timeZone)}
                       </p>
                       <DayTimePicker
+                        date={slot.date}
                         timeRange={slot.timeRange}
+                        blockedCombos={blockedCombos}
+                        availabilityReady={availabilityReady}
                         onTimeChange={(timeRange) =>
                           updateSlot(slotIndex, "timeRange", timeRange)
                         }
@@ -1392,6 +1741,16 @@ function ServiceBookingFlow({
             </p>
           ) : null}
         </div>
+
+        {!businessActive ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-900"
+          >
+            This business is not accepting online bookings right now. Please
+            contact them directly.
+          </div>
+        ) : null}
 
         {submitError ? (
           <div

@@ -95,10 +95,12 @@ export function parseCreatedSource(
   return isCreatedSource(raw) ? raw : null;
 }
 
-/** Each preferred or proposed slot — date plus a coarse time range. */
+/** Each preferred or proposed slot — date plus session and optional hour window. */
 export type InspectionSlot = {
   date: string; // YYYY-MM-DD
   timeRange: InspectionTimeRange;
+  startTime?: string | null;
+  endTime?: string | null;
 };
 
 export type InspectionAddress = {
@@ -132,6 +134,8 @@ export type InspectionRequestInput = {
   customerNotes: string | null;
   /** Optional budget in Australian dollars. */
   budgetAud: number | null;
+  /** Optional photos uploaded by the customer when placing the request. */
+  customerImageUrls: string[];
 };
 
 /** Detail returned by the API and rendered in the admin UI. */
@@ -161,6 +165,7 @@ export type InspectionRequestDetail = {
   ownerNote: string | null;
   customerNotes: string | null;
   budgetAud: number | null;
+  customerImageUrls: string[];
   createdAt: number | null;
   updatedAt: number | null;
   visitStartedAt: number | null;
@@ -341,7 +346,14 @@ function parseSlot(raw: unknown, timeZone?: string | null): InspectionSlot | nul
   const timeRange = item.timeRange;
   if (!isFutureOrTodayDate(date, timeZone)) return null;
   if (!isTimeRange(timeRange)) return null;
-  return { date, timeRange };
+  const startTime = isClockTime(item.startTime) ? item.startTime : null;
+  const endTime = isClockTime(item.endTime) ? item.endTime : null;
+  return {
+    date,
+    timeRange,
+    ...(startTime ? { startTime } : {}),
+    ...(endTime ? { endTime } : {}),
+  };
 }
 
 function dedupeSlots(slots: InspectionSlot[]): InspectionSlot[] {
@@ -456,6 +468,8 @@ export function parseInspectionRequestInput(
     return { ok: false, error: budgetParsed.error };
   }
 
+  const customerImageUrls = parseCustomerImageUrls(input.customerImageUrls);
+
   return {
     ok: true,
     value: {
@@ -467,8 +481,25 @@ export function parseInspectionRequestInput(
       preferredSlots,
       customerNotes: customerNotes || null,
       budgetAud: budgetParsed.value,
+      customerImageUrls,
     },
   };
+}
+
+const MAX_CUSTOMER_BOOKING_IMAGES = 5;
+
+/** Parses optional customer photo URLs from the booking portal. */
+export function parseCustomerImageUrls(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const result: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const url = entry.trim();
+    if (!url.startsWith("https://") || url.length > 2048) continue;
+    result.push(url);
+    if (result.length >= MAX_CUSTOMER_BOOKING_IMAGES) break;
+  }
+  return result;
 }
 
 /** Parses optional budget from form/API (AUD). Empty is allowed. */

@@ -115,10 +115,13 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
     try {
       const token = await getIdToken();
       if (!token) return;
-      const response = await fetch("/api/customer/jobs", {
-        headers: { authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/customer/jobs?bookingSlug=${encodeURIComponent(slug)}`,
+        {
+          headers: { authorization: `Bearer ${token}` },
+          cache: "no-store",
+        },
+      );
       const payload = (await response.json()) as {
         ok?: boolean;
         jobs?: CustomerBooking[];

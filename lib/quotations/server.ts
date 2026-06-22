@@ -29,6 +29,10 @@ import {
   parseCreatedSource,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
+import {
+  customerOwnsRequestRecord,
+  type CustomerOwnershipIdentity,
+} from "@/lib/customer/ownership";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
@@ -376,6 +380,7 @@ export function parseLineItems(raw: unknown): QuotationLineItem[] | null {
       description: readOptionalString(item.description),
       quantity: readOptionalNumber(item.quantity),
       rateAud: readOptionalNumber(item.rateAud),
+      discountPercent: readOptionalNumber(item.discountPercent),
       gstPercent: readOptionalNumber(item.gstPercent),
     });
   }
@@ -390,6 +395,8 @@ function serializeLineItemForFirestore(item: QuotationLineItem) {
     description: item.description?.trim() || null,
     quantity: typeof item.quantity === "number" ? item.quantity : null,
     rateAud: typeof item.rateAud === "number" ? item.rateAud : null,
+    discountPercent:
+      typeof item.discountPercent === "number" ? item.discountPercent : null,
     gstPercent: typeof item.gstPercent === "number" ? item.gstPercent : null,
   };
 }
@@ -2444,7 +2451,7 @@ async function applyQuotationCustomerDecision(
  */
 export async function customerDecideQuotation(
   requestId: string,
-  identity: { customerId: string; customerEmail: string },
+  identity: CustomerOwnershipIdentity,
   decision: "accepted" | "rejected",
 ): Promise<
   | { ok: true }
@@ -2460,13 +2467,7 @@ export async function customerDecideQuotation(
   const data = snap.data() ?? {};
   const request = mapInspectionDoc(snap.id, data);
 
-  const ownsById =
-    !!request.customerId && request.customerId === identity.customerId;
-  const ownsByEmail =
-    !!identity.customerEmail &&
-    request.customer.email.toLowerCase() ===
-      identity.customerEmail.toLowerCase();
-  if (!ownsById && !ownsByEmail) {
+  if (!customerOwnsRequestRecord(request, identity)) {
     return { ok: false, status: 404, error: "Request not found." };
   }
 

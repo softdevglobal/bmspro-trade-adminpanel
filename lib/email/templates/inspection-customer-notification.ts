@@ -32,6 +32,9 @@ const EMAIL_PRESENTATION: Record<
   quotation_sent: { eyebrow: "Quotation", tone: "brand" },
   quotation_accepted: { eyebrow: "Quotation accepted", tone: "success" },
   quotation_rejected: { eyebrow: "Quotation rejected", tone: "danger" },
+  leave_requested: { eyebrow: "Leave request", tone: "warning" },
+  leave_assignment_conflict: { eyebrow: "Schedule conflict", tone: "warning" },
+  staff_off_day: { eyebrow: "Staff off day", tone: "warning" },
   // Custom messages are in-app/push only and never emailed to customers.
   system_message: { eyebrow: "Announcement", tone: "brand" },
 };

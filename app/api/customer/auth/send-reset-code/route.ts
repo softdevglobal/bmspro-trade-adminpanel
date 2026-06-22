@@ -1,5 +1,9 @@
 import { sendCustomerPasswordResetCodeEmail } from "@/lib/email/templates";
 import { CUSTOMER_COLLECTION } from "@/lib/customer/types";
+import {
+  buildCustomerAuthEmail,
+  customerPasswordResetDocId,
+} from "@/lib/customer/scoped-auth";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -81,9 +85,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!bookingSlug) {
+      return NextResponse.json(
+        { error: "Business booking link is required." },
+        { status: 400 },
+      );
+    }
+
+    const authEmail = await buildCustomerAuthEmail(bookingSlug, trimmed);
+
     let authUid: string;
     try {
-      const authUser = await adminAuth.getUserByEmail(trimmed);
+      const authUser = await adminAuth.getUserByEmail(authEmail);
       authUid = authUser.uid;
     } catch {
       return NextResponse.json({ ok: true });
@@ -105,7 +118,9 @@ export async function POST(req: NextRequest) {
       bookingSlug,
     );
 
-    const docRef = adminDb.collection(COLLECTION).doc(trimmed);
+    const docRef = adminDb
+      .collection(COLLECTION)
+      .doc(customerPasswordResetDocId(bookingSlug, trimmed));
     const existing = await docRef.get();
     if (existing.exists) {
       const data = existing.data();
@@ -131,6 +146,9 @@ export async function POST(req: NextRequest) {
       createdAt: FieldValue.serverTimestamp(),
       attempts: 0,
       used: false,
+      bookingSlug,
+      displayEmail: trimmed,
+      authEmail,
     });
 
     await sendCustomerPasswordResetCodeEmail({

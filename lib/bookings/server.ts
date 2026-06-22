@@ -16,6 +16,10 @@ import type {
 } from "@/lib/inspection/types";
 import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
+import {
+  computeDaySlotOccupancy,
+  rangeOverlapsFullSlots,
+} from "@/lib/calendar/slot-occupancy";
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
@@ -39,6 +43,8 @@ export type CreateBookingInput = {
   endTime: string;
   estimatedDurationMinutes: number;
   note?: string;
+  instructionDescription?: string;
+  instructionTasks?: string[];
   assignedTo?: InspectionAssignment | null;
 };
 
@@ -130,6 +136,26 @@ export async function createBookingFromInspection(
     };
   }
 
+  const occupancy = await computeDaySlotOccupancy(
+    input.businessId,
+    input.slot.date,
+  );
+  if (
+    rangeOverlapsFullSlots(
+      occupancy.slots,
+      input.startTime,
+      input.endTime,
+      "job",
+    )
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "One or more time slots in that range are full for jobs. Choose another time or update capacity in Settings.",
+    };
+  }
+
   const bookingCode = await allocateBookingCode();
   const bookingRef = adminDb.collection(JOBS_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
@@ -157,6 +183,11 @@ export async function createBookingFromInspection(
     estimatedDurationMinutes: input.estimatedDurationMinutes,
     assignedTo: input.assignedTo ?? null,
     ownerNote: typeof input.note === "string" ? input.note : null,
+    jobInstructionsDescription:
+      typeof input.instructionDescription === "string"
+        ? input.instructionDescription
+        : null,
+    jobInstructionsTasks: input.instructionTasks ?? [],
     quotation: current.quotation,
     createdAt: now,
     updatedAt: now,

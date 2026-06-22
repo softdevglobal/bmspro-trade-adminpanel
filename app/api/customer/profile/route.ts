@@ -9,15 +9,18 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const auth = await authenticateCustomerRequest(request);
+  const url = new URL(request.url);
+  const bookingSlug =
+    url.searchParams.get("bookingSlug")?.trim() ||
+    request.headers.get("x-booking-slug")?.trim() ||
+    undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
       { status: auth.status },
     );
   }
-  const url = new URL(request.url);
-  const bookingSlug = url.searchParams.get("bookingSlug")?.trim() || undefined;
 
   const profile = await getOrCreateCustomerProfile(auth.customer, {
     bookingSlug,
@@ -26,7 +29,8 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await authenticateCustomerRequest(request);
+  const bookingSlug = request.headers.get("x-booking-slug")?.trim() || undefined;
+  const auth = await authenticateCustomerRequest(request, { bookingSlug });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
