@@ -1640,8 +1640,11 @@ export function CalendarBoard() {
         onClose={closeAddModal}
         variant={addModalVariant}
         initialCalendarWindow={addModalInitialWindow}
-        onCreated={() => {
+        onCreated={(jobId) => {
           closeAddModal();
+          if (jobId && addModalVariant === "job") {
+            router.push(`/dashboard/jobs?job=${encodeURIComponent(jobId)}`);
+          }
         }}
       />
 

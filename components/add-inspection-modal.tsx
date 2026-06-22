@@ -38,7 +38,8 @@ import {
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreated?: (requestId: string) => void;
+  /** Called with the new request id (inspection) or job id (direct job). */
+  onCreated?: (id: string) => void;
   /** Pre-select date and time range when opening from the calendar. */
   initialCalendarWindow?: CalendarSlotSelection | null;
   /** @deprecated Use initialCalendarWindow */
@@ -77,6 +78,29 @@ const STEPS = [
     title: "Review & create",
     subtitle:
       "Check everything below, then create the request.",
+  },
+] as const;
+
+const JOB_STEPS = [
+  {
+    title: "What is the job?",
+    subtitle: "Choose an existing service or describe custom work.",
+  },
+  {
+    title: "Service address",
+    subtitle: "Where should the team visit?",
+  },
+  {
+    title: "Schedule the job",
+    subtitle: "Pick the date and time for this job on site.",
+  },
+  {
+    title: "Contact details",
+    subtitle: "Customer contact info for the visit and follow-up.",
+  },
+  {
+    title: "Review & create",
+    subtitle: "Check everything below, then create the job.",
   },
 ] as const;
 
@@ -894,7 +918,8 @@ export function AddInspectionModal({
       return;
     }
     setError(null);
-    if (step < STEPS.length) setStep(step + 1);
+    const totalSteps = variant === "job" ? JOB_STEPS.length : STEPS.length;
+    if (step < totalSteps) setStep(step + 1);
   }
 
   function goBack() {
@@ -911,75 +936,88 @@ export function AddInspectionModal({
     setSubmitting(true);
     setError(null);
 
+    const schedulePayload = form.calendarWindow
+      ? {
+          calendarSchedule: form.calendarWindow,
+          preferredSlots: [
+            {
+              date: form.calendarWindow.date,
+              timeRange: calendarVisitTimeRange(form.calendarWindow.startTime),
+              startTime: form.calendarWindow.startTime,
+              endTime: form.calendarWindow.endTime,
+            },
+          ],
+        }
+      : {
+          preferredSlots: form.preferredSlots.map((slot) => ({
+            date: slot.date,
+            timeRange: slot.timeRange,
+            startTime: slot.startTime ?? "08:00",
+            endTime:
+              slot.endTime ??
+              defaultCalendarVisitEnd(slot.startTime ?? "08:00"),
+          })),
+        };
+
+    const sharedBody = {
+      requestType: form.requestType,
+      serviceId:
+        form.requestType === "existing_service"
+          ? form.selectedServiceId
+          : null,
+      customRequest:
+        form.requestType === "custom_quote"
+          ? {
+              title: form.customTitle.trim(),
+              description: form.customDescription.trim(),
+            }
+          : null,
+      customer: {
+        fullName: form.customer.fullName.trim(),
+        email: form.customer.email.trim().toLowerCase(),
+        phone: form.customer.phone,
+      },
+      address: form.address,
+      ...schedulePayload,
+      customerNotes: form.customerNotes.trim() || null,
+      budgetAud: form.budgetAud.trim() || null,
+    };
+
     try {
       const token = await user.getIdToken();
-      const response = await fetch("/api/requests", {
+      const isJob = variant === "job";
+      const response = await fetch(isJob ? "/api/jobs" : "/api/requests", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          requestType: form.requestType,
-          serviceId:
-            form.requestType === "existing_service"
-              ? form.selectedServiceId
-              : null,
-          customRequest:
-            form.requestType === "custom_quote"
-              ? {
-                  title: form.customTitle.trim(),
-                  description: form.customDescription.trim(),
-                }
-              : null,
-          customer: {
-            fullName: form.customer.fullName.trim(),
-            email: form.customer.email.trim().toLowerCase(),
-            phone: form.customer.phone,
-          },
-          address: form.address,
-          preferredSlots: form.calendarWindow
-            ? [
-                {
-                  date: form.calendarWindow.date,
-                  timeRange: calendarVisitTimeRange(form.calendarWindow.startTime),
-                  startTime: form.calendarWindow.startTime,
-                  endTime: form.calendarWindow.endTime,
-                },
-              ]
-            : form.preferredSlots.map((slot) => ({
-                date: slot.date,
-                timeRange: slot.timeRange,
-                startTime: slot.startTime ?? "08:00",
-                endTime:
-                  slot.endTime ??
-                  defaultCalendarVisitEnd(slot.startTime ?? "08:00"),
-              })),
-          ...(form.calendarWindow
-            ? { calendarSchedule: form.calendarWindow }
-            : {}),
-          customerNotes: form.customerNotes.trim() || null,
-          budgetAud: form.budgetAud.trim() || null,
-        }),
+        body: JSON.stringify(sharedBody),
       });
 
       const payload = (await response.json()) as {
         ok?: boolean;
         error?: string;
         requestId?: string;
+        jobId?: string;
       };
 
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Could not create request.");
+        throw new Error(
+          payload.error ??
+            (isJob ? "Could not create job." : "Could not create request."),
+        );
       }
 
       setSuccess(true);
-      onCreated?.(payload.requestId ?? "");
+      onCreated?.(payload.jobId ?? payload.requestId ?? "");
     } catch (submitError) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Could not create request.",
+          : variant === "job"
+            ? "Could not create job."
+            : "Could not create request.",
       );
     } finally {
       setSubmitting(false);
@@ -988,8 +1026,9 @@ export function AddInspectionModal({
 
   if (!open) return null;
 
-  const current = STEPS[step - 1];
-  const progressPercent = Math.round((step / STEPS.length) * 100);
+  const steps = variant === "job" ? JOB_STEPS : STEPS;
+  const current = steps[step - 1];
+  const progressPercent = Math.round((step / steps.length) * 100);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden overscroll-contain p-0 sm:items-center sm:p-4">
@@ -1010,7 +1049,7 @@ export function AddInspectionModal({
         <header className="flex items-start justify-between gap-4 border-b border-outline-variant bg-surface/90 px-5 py-4 backdrop-blur-md sm:px-6">
           <div className="min-w-0 flex-1">
             <p className="font-body text-[12px] font-semibold uppercase tracking-wider text-primary">
-              Step {step} of {STEPS.length}
+              Step {step} of {steps.length}
             </p>
             <h2
               id="add-inspection-title"
@@ -1048,11 +1087,12 @@ export function AddInspectionModal({
                 </span>
               </span>
               <h3 className="mt-4 font-display text-headline-sm font-semibold text-on-surface">
-                Request created
+                {variant === "job" ? "Job created" : "Request created"}
               </h3>
               <p className="mt-2 max-w-sm font-body text-body-md text-on-surface-variant">
-                The request is now on your board. You can review it, assign an
-                inspector, and confirm a visit time.
+                {variant === "job"
+                  ? "The job is scheduled on your board and calendar. The inspection and quotation steps are already marked complete — issue an invoice after the work is done."
+                  : "The request is now on your board. You can review it, assign an inspector, and confirm a visit time."}
               </p>
             </div>
           ) : (
@@ -1624,7 +1664,7 @@ export function AddInspectionModal({
                 {step === 1 ? "Cancel" : "Back"}
               </button>
 
-              {step < STEPS.length ? (
+              {step < steps.length ? (
                 <button
                   type="button"
                   onClick={goNext}
@@ -1655,7 +1695,7 @@ export function AddInspectionModal({
                       <span className="material-symbols-outlined text-[18px]">
                         add
                       </span>
-                      Create inspection
+                      {variant === "job" ? "Create job" : "Create inspection"}
                     </>
                   )}
                 </button>

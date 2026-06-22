@@ -24,7 +24,7 @@ export default async function JobsPage({
   return (
     <DashboardShell
       title="Jobs"
-      subtitle="Confirmed jobs converted from completed requests and quotations."
+      subtitle="Scheduled jobs from the normal request flow, or added directly when work is already agreed."
     >
       <BusinessOwnerGuard>
         <JobsBoard initialJobId={initialJobId} />

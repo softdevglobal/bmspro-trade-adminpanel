@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed:super-admin": "tsx --env-file=.env.local scripts/seed-super-admin.ts",
+    "cron:reminders": "tsx --env-file=.env scripts/run-schedule-reminders.ts",
     "firebase:deploy-rules": "firebase deploy --only firestore:rules"
   },
   "dependencies": {
