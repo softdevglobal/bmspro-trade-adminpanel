@@ -239,19 +239,27 @@ export function ScheduleDatePill({
   slot,
   timeZone,
   prefix,
+  variant = "default",
+  suffix,
 }: {
   category: ScheduleCategory;
   slot: InspectionSlot;
   timeZone?: string | null;
   prefix?: string;
+  variant?: "default" | "confirmed";
+  suffix?: string | null;
 }) {
   const meta = CATEGORY_META[category];
+  const pillClass =
+    variant === "confirmed"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200"
+      : meta.pillClass;
   return (
     <span
-      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 font-body text-[10px] font-semibold sm:px-2.5 sm:text-[11px] ${meta.pillClass}`}
+      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 font-body text-[10px] font-semibold sm:px-2.5 sm:text-[11px] ${pillClass}`}
     >
       <span className="material-symbols-outlined shrink-0 text-[12px] leading-none">
-        {meta.icon}
+        {variant === "confirmed" ? "event_available" : meta.icon}
       </span>
       {prefix ? (
         <span className="shrink-0 font-bold uppercase tracking-wide opacity-80">
@@ -261,7 +269,30 @@ export function ScheduleDatePill({
       <span className="truncate">
         {formatSlotDate(slot.date, timeZone)} ·{" "}
         {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
+        {suffix ? ` · ${suffix}` : ""}
       </span>
+    </span>
+  );
+}
+
+export function ScheduleNotConfirmedPill({
+  category,
+}: {
+  category: ScheduleCategory;
+}) {
+  const meta = CATEGORY_META[category];
+  const label = category === "inspection" ? "Inspection" : "Job";
+  return (
+    <span
+      className={`inline-flex max-w-full items-center gap-1 rounded-full border border-dashed px-2 py-1 font-body text-[10px] font-semibold sm:px-2.5 sm:text-[11px] ${meta.pillClass}`}
+    >
+      <span className="material-symbols-outlined shrink-0 text-[12px] leading-none opacity-70">
+        {meta.icon}
+      </span>
+      <span className="shrink-0 font-bold uppercase tracking-wide opacity-80">
+        {label}
+      </span>
+      <span className="truncate opacity-80">· not confirmed</span>
     </span>
   );
 }

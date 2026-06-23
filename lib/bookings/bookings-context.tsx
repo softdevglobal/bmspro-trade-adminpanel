@@ -15,6 +15,7 @@ import {
 } from "react";
 
 const BOOKING_ROUTES = [
+  "/dashboard/requests",
   "/dashboard/jobs",
   "/dashboard/calendar",
 ] as const;

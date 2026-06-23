@@ -20,6 +20,7 @@ import {
 import {
   ScheduleCategoryPanel,
   ScheduleDatePill,
+  ScheduleNotConfirmedPill,
   ScheduleSlotsList,
   ScheduleSubsection,
 } from "@/components/schedule-dates-display";
@@ -28,14 +29,15 @@ import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
-import { useAuth } from "@/lib/auth/auth-context";
-import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useBookings } from "@/lib/bookings/use-bookings";
 import {
   BOOKING_STATUS_LABELS,
   BOOKING_STATUS_TONE,
   type BookingDetail,
   type BookingStatus,
 } from "@/lib/bookings/types";
+import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
@@ -221,6 +223,15 @@ export function RequestsBoard() {
     setRequestsLocal(requests);
   }, [requests]);
 
+  const { bookings } = useBookings();
+  const bookingById = useMemo(() => {
+    const map = new Map<string, BookingDetail>();
+    for (const booking of bookings) {
+      map.set(booking.id, booking);
+    }
+    return map;
+  }, [bookings]);
+
   const isLoading = requestsLoading;
   const loadError = requestsError;
   const boardRequests = requestsLocal;
@@ -375,6 +386,9 @@ export function RequestsBoard() {
             <li key={req.id}>
               <RequestCard
                 request={req}
+                linkedJob={
+                  req.bookingId ? bookingById.get(req.bookingId) ?? null : null
+                }
                 onOpen={() => {
                   setDrawerOpenMode(null);
                   setSelectedId(req.id);
@@ -451,13 +465,98 @@ function EmptyState({ filter }: { filter: StatusFilter }) {
   );
 }
 
+function jobSchedulingRelevant(request: InspectionRequestDetail): boolean {
+  return (
+    request.quotation?.customerDecision === "accepted" ||
+    Boolean(request.bookingId) ||
+    request.bookingStatus === "scheduled" ||
+    request.bookingStatus === "ongoing" ||
+    request.bookingStatus === "completed"
+  );
+}
+
+function inspectionSchedulePending(request: InspectionRequestDetail): boolean {
+  if (request.scheduledSlot) return false;
+  return (
+    request.status === "pending" ||
+    request.status === "owner_proposed" ||
+    request.status === "scheduled"
+  );
+}
+
+function linkedJobIsScheduled(
+  linkedJob: BookingDetail | null,
+): linkedJob is BookingDetail & { scheduledSlot: InspectionSlot } {
+  if (!linkedJob?.scheduledSlot) return false;
+  return (
+    linkedJob.status === "scheduled" ||
+    linkedJob.status === "ongoing" ||
+    linkedJob.status === "completed"
+  );
+}
+
+function RequestScheduleSummary({
+  request,
+  linkedJob,
+  timeZone,
+}: {
+  request: InspectionRequestDetail;
+  linkedJob: BookingDetail | null;
+  timeZone?: string | null;
+}) {
+  if (request.status === "cancelled") return null;
+
+  const visitWindow = formatVisitWindow(
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  );
+  const jobWindow =
+    linkedJob && linkedJobIsScheduled(linkedJob)
+      ? formatVisitWindow(linkedJob.scheduledStartTime, linkedJob.scheduledEndTime)
+      : null;
+
+  return (
+    <>
+      {request.scheduledSlot ? (
+        <ScheduleDatePill
+          category="inspection"
+          prefix="Inspection"
+          slot={request.scheduledSlot}
+          timeZone={timeZone}
+          variant="confirmed"
+          suffix={visitWindow}
+        />
+      ) : inspectionSchedulePending(request) ? (
+        <ScheduleNotConfirmedPill category="inspection" />
+      ) : null}
+
+      {jobSchedulingRelevant(request) ? (
+        linkedJobIsScheduled(linkedJob) ? (
+          <ScheduleDatePill
+            category="job"
+            prefix="Job"
+            slot={linkedJob.scheduledSlot}
+            timeZone={timeZone}
+            variant="confirmed"
+            suffix={jobWindow}
+          />
+        ) : (
+          <ScheduleNotConfirmedPill category="job" />
+        )
+      ) : null}
+    </>
+  );
+}
+
 function RequestCard({
   request,
+  linkedJob,
   onOpen,
   onCreateBooking,
   onAwaitingDecision,
 }: {
   request: InspectionRequestDetail;
+  linkedJob: BookingDetail | null;
   onOpen: () => void;
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
@@ -488,14 +587,6 @@ function RequestCard({
       )
     : "—";
 
-  const showScheduledOnly =
-    Boolean(request.scheduledSlot) &&
-    (request.status === "scheduled" || request.status === "completed");
-
-  const visitWindow = formatVisitWindow(
-    request.scheduledStartTime,
-    request.scheduledEndTime,
-  );
   const cardQuotationAwaitingCustomer = Boolean(
     request.quotation &&
       request.quotation.status === "sent" &&
@@ -569,69 +660,11 @@ function RequestCard({
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
-        {showScheduledOnly && request.scheduledSlot ? (
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200"
-          >
-            <span className="material-symbols-outlined text-[12px] leading-none">
-              event_available
-            </span>
-            {formatSlotDate(request.scheduledSlot.date, timeZone)} ·{" "}
-            {TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange]}
-            {visitWindow ? ` · ${visitWindow}` : null}
-          </span>
-        ) : (
-          <>
-            {request.preferredSlots.length > 0 ? (
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {sortInspectionSlots(request.preferredSlots)
-                  .slice(0, 3)
-                  .map((slot, idx) => (
-                    <ScheduleDatePill
-                      key={`insp-${slot.date}-${slot.timeRange}-${idx}`}
-                      category="inspection"
-                      prefix="Inspection"
-                      slot={slot}
-                      timeZone={timeZone}
-                    />
-                  ))}
-              </div>
-            ) : null}
-            {request.jobPreferredSlots.length > 0 ? (
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {sortInspectionSlots(request.jobPreferredSlots)
-                  .slice(0, 3)
-                  .map((slot, idx) => (
-                    <ScheduleDatePill
-                      key={`job-${slot.date}-${slot.timeRange}-${idx}`}
-                      category="job"
-                      prefix="Job"
-                      slot={slot}
-                      timeZone={timeZone}
-                    />
-                  ))}
-              </div>
-            ) : null}
-            {request.customerAcceptedJobSlot ? (
-              <ScheduleDatePill
-                category="job"
-                prefix="Job accepted"
-                slot={request.customerAcceptedJobSlot}
-                timeZone={timeZone}
-              />
-            ) : null}
-            {request.scheduledSlot ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                <span className="material-symbols-outlined text-[12px] leading-none">
-                  event_available
-                </span>
-                Scheduled ·{" "}
-                {formatSlotDate(request.scheduledSlot.date, timeZone)} ·{" "}
-                {TIME_RANGE_SHORT_LABELS[request.scheduledSlot.timeRange]}
-              </span>
-            ) : null}
-          </>
-        )}
+        <RequestScheduleSummary
+          request={request}
+          linkedJob={linkedJob}
+          timeZone={timeZone}
+        />
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:ml-auto">
           {request.assignedTo ? (
             <span
