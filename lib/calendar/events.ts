@@ -152,6 +152,10 @@ export type CalendarCardView = {
   scheduledSlot: InspectionRequestDetail["scheduledSlot"];
   ownerProposedSlots: InspectionRequestDetail["ownerProposedSlots"];
   preferredSlots: InspectionRequestDetail["preferredSlots"];
+  jobPreferredSlots: InspectionRequestDetail["jobPreferredSlots"];
+  adminJobPreferredSlots: InspectionRequestDetail["adminJobPreferredSlots"];
+  jobProposedSlots: InspectionRequestDetail["jobProposedSlots"];
+  customerAcceptedJobSlot: InspectionRequestDetail["customerAcceptedJobSlot"];
   openHref: string;
 };
 
@@ -171,6 +175,10 @@ export function calendarCardView(event: CalendarEvent): CalendarCardView | null 
       scheduledSlot: booking.scheduledSlot,
       ownerProposedSlots: [],
       preferredSlots: [],
+      jobPreferredSlots: [],
+      adminJobPreferredSlots: [],
+      jobProposedSlots: [],
+      customerAcceptedJobSlot: null,
       openHref: `/dashboard/jobs?job=${encodeURIComponent(booking.id)}`,
     };
   }
@@ -190,6 +198,10 @@ export function calendarCardView(event: CalendarEvent): CalendarCardView | null 
     scheduledSlot: request.scheduledSlot,
     ownerProposedSlots: request.ownerProposedSlots,
     preferredSlots: request.preferredSlots,
+    jobPreferredSlots: request.jobPreferredSlots,
+    adminJobPreferredSlots: request.adminJobPreferredSlots,
+    jobProposedSlots: request.jobProposedSlots,
+    customerAcceptedJobSlot: request.customerAcceptedJobSlot,
     openHref: `/dashboard/requests?request=${encodeURIComponent(request.id)}`,
   };
 }

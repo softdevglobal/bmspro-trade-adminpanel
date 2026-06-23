@@ -22,8 +22,11 @@ import type { InspectionRequestDetail } from "@/lib/inspection/types";
 import {
   CREATED_SOURCE_LABELS,
   formatAddress,
+  canAdminProposeJobDates,
+  needsAdminJobDateProposal,
   type InspectionRequestCreatedSource,
 } from "@/lib/inspection/types";
+import { ScheduleSlotsList } from "@/components/schedule-dates-display";
 import {
   canCancelQuotation,
   quotationAwaitingCustomerAcceptance,
@@ -52,6 +55,10 @@ function formatWhen(timestamp: number | null, timeZone?: string | null): string 
     hour: "numeric",
     minute: "2-digit",
   }, timeZone);
+}
+
+function jobBoardHref(bookingId: string): string {
+  return `/dashboard/jobs?job=${encodeURIComponent(bookingId)}`;
 }
 
 type QuotationPreviewMode = "review" | "convert_booking";
@@ -310,7 +317,7 @@ function QuotationCardMenu({
               </span>
             ) : (
               <Link
-                href="/dashboard/jobs"
+                href={jobBoardHref(quotation.bookingId!)}
                 role="menuitem"
                 className={menuItemClass}
                 onClick={() => setOpen(false)}
@@ -639,6 +646,12 @@ function QuotationPreviewContent({
     quotation.customerDecision === "rejected"
       ? "The customer rejected this quotation"
       : "Waiting for the customer to accept this quotation";
+  const canProposeJobDates = linkedInspection
+    ? canAdminProposeJobDates(linkedInspection)
+    : false;
+  const needsJobDateProposal = linkedInspection
+    ? needsAdminJobDateProposal(linkedInspection)
+    : false;
   const editDraftHref = `/dashboard/quotations/new?quotationId=${encodeURIComponent(quotation.id)}`;
   const hasFooterActions =
     previewMode === "review" &&
@@ -743,6 +756,16 @@ function QuotationPreviewContent({
               linkedInspection,
               timeZone,
             )}
+            customerJobPreferredSlots={
+              linkedInspection?.jobPreferredSlots ?? []
+            }
+            adminJobPreferredSlots={
+              linkedInspection?.adminJobPreferredSlots ?? []
+            }
+            jobProposedSlots={linkedInspection?.jobProposedSlots ?? []}
+            customerAcceptedJobSlot={
+              linkedInspection?.customerAcceptedJobSlot ?? null
+            }
             initialStartTime={linkedInspection?.scheduledStartTime ?? "10:00"}
             initialEndTime={linkedInspection?.scheduledEndTime ?? "11:00"}
             onSuccess={onBookingCreated}
@@ -875,12 +898,21 @@ function QuotationPreviewContent({
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
               Linked job
             </p>
-            <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
-              {displayBookingCode({
-                id: quotation.bookingId,
-                bookingCode: quotation.bookingCode,
-              })}
-            </p>
+            <Link
+              href={jobBoardHref(quotation.bookingId)}
+              onClick={onClose}
+              className="mt-2 flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2.5 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-surface-container"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                assignment
+              </span>
+              <span className="font-mono text-[13px] font-semibold text-primary">
+                {displayBookingCode({
+                  id: quotation.bookingId,
+                  bookingCode: quotation.bookingCode,
+                })}
+              </span>
+            </Link>
           </section>
         ) : null}
 
@@ -913,6 +945,52 @@ function QuotationPreviewContent({
             />
           </Link>
         </section>
+
+        {previewMode === "review" &&
+        linkedInspection &&
+        quotation.customerDecision === "accepted" &&
+        !quotation.bookingId &&
+        linkedInspection.jobPreferredSlots.length > 0 ? (
+          <section className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-amber-900">
+              Customer preferred job days
+            </p>
+            <p className="mt-1 font-body text-[12px] text-amber-800">
+              Picked when they accepted this quotation.
+            </p>
+            <div className="mt-2">
+              <ScheduleSlotsList
+                slots={linkedInspection.jobPreferredSlots}
+                category="job"
+                timeZone={timeZone}
+              />
+            </div>
+            {needsJobDateProposal ? (
+              <p className="mt-2.5 font-body text-[12px] font-semibold text-amber-900">
+                If these days don&apos;t work, propose alternatives on the
+                linked visit.
+              </p>
+            ) : null}
+            {canProposeJobDates ? (
+              <Link
+                href={`/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=propose-job-dates`}
+                onClick={onClose}
+                className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-body text-[13px] font-semibold transition-colors ${
+                  needsJobDateProposal
+                    ? "bg-primary text-on-primary hover:bg-primary/90"
+                    : "border border-amber-300/80 bg-white text-amber-900 hover:bg-amber-50"
+                }`}
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  edit_calendar
+                </span>
+                {linkedInspection.jobProposedSlots.length > 0
+                  ? "Edit job day proposal"
+                  : "Propose alternative job days"}
+              </Link>
+            ) : null}
+          </section>
+        ) : null}
 
         {hasFooterActions ? (
           <footer className="space-y-2 border-t border-outline-variant/40 pt-3">
@@ -973,7 +1051,7 @@ function QuotationPreviewContent({
                     </span>
                   ) : (
                     <Link
-                      href="/dashboard/jobs"
+                      href={jobBoardHref(quotation.bookingId)}
                       onClick={onClose}
                       className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
                     >

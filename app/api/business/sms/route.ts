@@ -1,11 +1,11 @@
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
+import { isStripeConfigured } from "@/lib/stripe/config";
 import {
   getBusinessSmsBalance,
   listSmsPackages,
   purchaseSmsPackageForBusiness,
 } from "@/lib/sms-packages/server";
 import { NextResponse } from "next/server";
-
 export const runtime = "nodejs";
 
 /** Business owner — SMS balance and available top-up packages. */
@@ -35,6 +35,17 @@ export async function GET(request: Request) {
 
 /** Business owner — purchase an SMS top-up package (adds credits to limit). */
 export async function POST(request: Request) {
+  if (isStripeConfigured() && process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "SMS top-ups are processed through Stripe Checkout. Open SMS Credits and pay with Stripe.",
+      },
+      { status: 403 },
+    );
+  }
+
   const auth = await requireBusinessOwner(request);
   if (!auth.ok) {
     return NextResponse.json(

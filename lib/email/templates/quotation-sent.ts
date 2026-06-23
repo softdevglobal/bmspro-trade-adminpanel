@@ -168,6 +168,8 @@ export async function sendQuotationSentEmail(
     await sendSms({
       to: input.customerPhone,
       businessId: input.businessId,
+      senderName: businessLabel,
+      source: "quotation_sent",
       message: `${businessLabel}: Your quotation ${input.quoteNo.trim() || ""} for ${serviceTitle} is ready (${total}). We've emailed you the PDF.`,
     });
   }

@@ -38,8 +38,6 @@ import {
 } from "@/lib/platform/timezone";
 import { zonedDateTimeToUtcMs } from "@/lib/platform/zoned-datetime";
 import type { ScheduleReminderKind } from "@/lib/scheduling/types";
-import { resolveBusinessAdminPhones } from "@/lib/scheduling/admin-phones";
-import { sendBulkSms } from "@/lib/sms/textbee";
 import { FieldValue } from "firebase-admin/firestore";
 import {
   notifyBusinessNotificationsChanged,
@@ -639,6 +637,72 @@ function bookingHeadline(booking: BookingDetail): string {
   );
 }
 
+/** Notify the customer when the business confirms a job day after quotation acceptance. */
+export async function notifyCustomerOfJobScheduled(
+  booking: BookingDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const email = booking.customer.email?.trim();
+  if (!email && !booking.customerId) return;
+
+  const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
+  const headline = bookingHeadline(booking);
+  const visitWindow = formatVisitWindow(
+    booking.scheduledStartTime,
+    booking.scheduledEndTime,
+  );
+  const title = `${business} confirmed your job`;
+  const body = booking.scheduledSlot
+    ? visitWindow
+      ? `Your job (${headline}) is scheduled for ${slotLabel(booking.scheduledSlot, timeZone)}, arriving ${visitWindow}.`
+      : `Your job (${headline}) is scheduled for ${slotLabel(booking.scheduledSlot, timeZone)}. We'll confirm the exact arrival time shortly.`
+    : `${headline} is now scheduled as a job.`;
+
+  const emailDetails: EmailDetailRow[] = [{ label: "Job", value: headline }];
+  if (booking.bookingCode) {
+    emailDetails.push({ label: "Reference", value: booking.bookingCode });
+  }
+  if (booking.scheduledSlot) {
+    emailDetails.push({
+      label: "Date",
+      value: formatSlotDate(booking.scheduledSlot.date, timeZone),
+    });
+    emailDetails.push({
+      label: "Time of day",
+      value: TIME_RANGE_LABELS[booking.scheduledSlot.timeRange],
+    });
+  }
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: booking.businessId,
+      customerId: booking.customerId,
+      customerEmail: booking.customer.email || null,
+      customerPhone: booking.customer.phone || null,
+      customerName: booking.customer.fullName || null,
+      requestId: booking.inspectionRequestId || booking.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "scheduled",
+      type: "request_scheduled",
+      title,
+      body,
+      emailDetails,
+      emailHighlight: visitWindow
+        ? visitWindow
+        : booking.scheduledSlot
+          ? "To be confirmed by the business"
+          : null,
+      emailHighlightLabel: visitWindow ? "Arrival window" : "Arrival time",
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Notify the customer their technician has started the booked job and is on the way. */
 export async function notifyCustomerOfBookingOnTheWay(
   booking: BookingDetail,
@@ -943,7 +1007,6 @@ export async function notifyBusinessOfScheduleReminder(
   );
   const title = `${kindLabel} in 30 minutes`;
   const body = `${input.title} starts at ${timeLabel} on ${dateLabel}.`;
-  const smsBody = `Reminder: ${input.title} starts in 30 min (${timeLabel}, ${dateLabel}).`;
 
   try {
     await createNotification({
@@ -968,11 +1031,90 @@ export async function notifyBusinessOfScheduleReminder(
         audience: "owner",
       },
     });
+  } catch {
+    /* best-effort */
+  }
+}
 
-    const phones = await resolveBusinessAdminPhones(input.businessId);
-    if (phones.length > 0) {
-      await sendBulkSms(phones, smsBody, input.businessId);
-    }
+/** Notify the customer that the business proposed alternative job days. */
+export async function notifyCustomerOfJobDatesProposed(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
+  const headline = requestHeadline(request);
+  const proposed = request.jobProposedSlots
+    .map((slot) => slotLabel(slot, timeZone))
+    .join(", ");
+  const title = `${business} proposed new job days`;
+  const body = proposed
+    ? `${business} suggested new days for your job (${headline}). Open your request to accept one.`
+    : `${business} suggested new options for scheduling your job.`;
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      requestId: request.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: request.status,
+      type: "request_proposed",
+      title,
+      body,
+      emailDetails:
+        request.jobProposedSlots.length > 0
+          ? [
+              { label: "Service", value: headline },
+              ...request.jobProposedSlots.map((slot, index) => ({
+                label: `Option ${index + 1}`,
+                value: slotLabel(slot, timeZone),
+              })),
+            ]
+          : undefined,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Notify the business owner that the customer accepted a proposed job day. */
+export async function notifyBusinessOfCustomerJobDateAcceptance(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const who = request.customer.fullName?.trim() || "The customer";
+  const when = request.customerAcceptedJobSlot
+    ? slotLabel(request.customerAcceptedJobSlot, context.timezone)
+    : "";
+  const headline = requestHeadline(request);
+  const title = "Customer accepted a proposed job day";
+  const body = when
+    ? `${who} picked ${when} for ${headline}. You can now create the job.`
+    : `${who} accepted one of your proposed job days for ${headline}.`;
+
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      requestId: request.id,
+      status: request.status,
+      type: "request_scheduled",
+      title,
+      body,
+    });
   } catch {
     /* best-effort */
   }
@@ -992,9 +1134,18 @@ export async function notifyBusinessOfQuotationDecision(
     decision === "accepted"
       ? "Quotation accepted"
       : "Quotation rejected";
+  const timeZone = context.timezone;
+  const jobDates =
+    decision === "accepted" && request.jobPreferredSlots.length > 0
+      ? request.jobPreferredSlots
+          .map((slot) => slotLabel(slot, timeZone))
+          .join(" · ")
+      : "";
   const body =
     decision === "accepted"
-      ? `${who} accepted ${quoteLabel} for ${headline}. You can now schedule the job or issue an invoice.`
+      ? jobDates
+        ? `${who} accepted ${quoteLabel} for ${headline}. Preferred job days: ${jobDates}. You can now schedule the job or issue an invoice.`
+        : `${who} accepted ${quoteLabel} for ${headline}. You can now schedule the job or issue an invoice.`
       : `${who} rejected ${quoteLabel} for ${headline}.`;
   try {
     const notificationType =

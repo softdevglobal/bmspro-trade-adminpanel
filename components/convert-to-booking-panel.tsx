@@ -2,7 +2,6 @@
 
 import { AdminDaySchedulePicker } from "@/components/admin-day-schedule-picker";
 import {
-  SlotDayPicker,
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import {
@@ -23,22 +22,105 @@ import {
 } from "@/lib/bookings/job-estimate";
 import type { BookingStatus } from "@/lib/bookings/types";
 import {
+  TIME_RANGE_LABELS,
+  formatSlotDate,
+  sortInspectionSlots,
   timeRangeFromStartTime,
   type InspectionRequestDetail,
   type InspectionSlot,
 } from "@/lib/inspection/types";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+type JobDateSource = "customer" | "admin" | "accepted";
+
+type JobDayGroup = {
+  id: JobDateSource;
+  label: string;
+  hint: string;
+  slots: InspectionSlot[];
+};
+
+function slotKey(slot: InspectionSlot): string {
+  return `${slot.date}-${slot.timeRange}`;
+}
+
+function buildJobDayGroups({
+  customerJobPreferredSlots,
+  adminJobPreferredSlots,
+  jobProposedSlots,
+  customerAcceptedJobSlot,
+}: {
+  customerJobPreferredSlots: InspectionSlot[];
+  adminJobPreferredSlots: InspectionSlot[];
+  jobProposedSlots: InspectionSlot[];
+  customerAcceptedJobSlot: InspectionSlot | null;
+}): JobDayGroup[] {
+  const groups: JobDayGroup[] = [];
+
+  if (customerAcceptedJobSlot) {
+    groups.push({
+      id: "accepted",
+      label: "Customer accepted day",
+      hint: "They picked this from your proposed dates. This is the default for the job.",
+      slots: [customerAcceptedJobSlot],
+    });
+  }
+
+  if (customerJobPreferredSlots.length > 0) {
+    groups.push({
+      id: "customer",
+      label: "Customer's original job days",
+      hint: "Chosen when they accepted your quotation. You can still schedule on one of these instead.",
+      slots: customerJobPreferredSlots,
+    });
+  }
+
+  const adminSlots =
+    jobProposedSlots.length > 0 ? jobProposedSlots : adminJobPreferredSlots;
+  if (adminSlots.length > 0) {
+    groups.push({
+      id: "admin",
+      label: "Your proposed job days",
+      hint: "Alternatives you sent when their original dates did not work.",
+      slots: adminSlots,
+    });
+  }
+
+  return groups;
+}
+
+function defaultJobSlot(
+  groups: JobDayGroup[],
+  minBookingDate: string,
+): InspectionSlot {
+  const accepted = groups.find((group) => group.id === "accepted")?.slots[0];
+  if (accepted) return accepted;
+  const customer = groups.find((group) => group.id === "customer")?.slots;
+  const [firstCustomer] = sortInspectionSlots(customer ?? []);
+  if (firstCustomer) return firstCustomer;
+  const admin = groups.find((group) => group.id === "admin")?.slots;
+  const [firstAdmin] = sortInspectionSlots(admin ?? []);
+  if (firstAdmin) return firstAdmin;
+  return { date: minBookingDate, timeRange: "morning" };
+}
 
 export function bookingMinDateFromInspection(
   request: Pick<
     InspectionRequestDetail,
-    "scheduledSlot" | "preferredSlots"
+    | "scheduledSlot"
+    | "preferredSlots"
+    | "jobPreferredSlots"
+    | "adminJobPreferredSlots"
   > | null,
   timeZone?: string | null,
 ): string {
   const scheduled = request?.scheduledSlot?.date?.trim();
   if (scheduled) return scheduled;
-  const preferredDates = (request?.preferredSlots ?? [])
+  const preferredDates = [
+    ...(request?.jobPreferredSlots ?? []),
+    ...(request?.adminJobPreferredSlots ?? []),
+    ...(request?.preferredSlots ?? []),
+  ]
     .map((slot) => slot.date?.trim())
     .filter((date): date is string => Boolean(date))
     .sort();
@@ -65,6 +147,10 @@ export function canConvertQuotationToBooking(quotation: {
 export function ConvertToBookingPanel({
   inspectionRequestId,
   minBookingDate,
+  customerJobPreferredSlots = [],
+  adminJobPreferredSlots = [],
+  jobProposedSlots = [],
+  customerAcceptedJobSlot = null,
   initialStartTime = "10:00",
   initialEndTime = "11:00",
   onSuccess,
@@ -72,6 +158,10 @@ export function ConvertToBookingPanel({
 }: {
   inspectionRequestId: string;
   minBookingDate: string;
+  customerJobPreferredSlots?: InspectionSlot[];
+  adminJobPreferredSlots?: InspectionSlot[];
+  jobProposedSlots?: InspectionSlot[];
+  customerAcceptedJobSlot?: InspectionSlot | null;
   initialStartTime?: string;
   initialEndTime?: string;
   onSuccess: (request: InspectionRequestDetail) => void;
@@ -81,13 +171,32 @@ export function ConvertToBookingPanel({
   const profile = useBusinessProfile();
   const { staff } = useBusinessStaffSummary();
   const timeZone = profile?.timezone;
+  const dayGroups = useMemo(
+    () =>
+      buildJobDayGroups({
+        customerJobPreferredSlots,
+        adminJobPreferredSlots,
+        jobProposedSlots,
+        customerAcceptedJobSlot,
+      }),
+    [
+      customerJobPreferredSlots,
+      adminJobPreferredSlots,
+      jobProposedSlots,
+      customerAcceptedJobSlot,
+    ],
+  );
+  const selectableSlots = useMemo(
+    () => dayGroups.flatMap((group) => group.slots),
+    [dayGroups],
+  );
+  const initialSlot = useMemo(
+    () => defaultJobSlot(dayGroups, minBookingDate),
+    [dayGroups, minBookingDate],
+  );
   const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("owner");
   const [staffId, setStaffId] = useState("");
-  const [slot, setSlot] = useState<InspectionSlot>({
-    date: minBookingDate,
-    timeRange: "morning",
-  });
-  const [dayPage, setDayPage] = useState(0);
+  const [slot, setSlot] = useState<InspectionSlot>(initialSlot);
   const [startTime, setStartTime] = useState(initialStartTime);
   const [endTime, setEndTime] = useState(initialEndTime);
   const [estimatedMinutes, setEstimatedMinutes] = useState(() =>
@@ -100,8 +209,7 @@ export function ConvertToBookingPanel({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setSlot({ date: minBookingDate, timeRange: "morning" });
-    setDayPage(0);
+    setSlot(initialSlot);
     setStartTime(initialStartTime);
     setEndTime(initialEndTime);
     setEstimatedMinutes(
@@ -118,7 +226,20 @@ export function ConvertToBookingPanel({
     minBookingDate,
     initialStartTime,
     initialEndTime,
+    initialSlot,
   ]);
+
+  useEffect(() => {
+    if (
+      selectableSlots.some(
+        (option) =>
+          option.date === slot.date && option.timeRange === slot.timeRange,
+      )
+    ) {
+      return;
+    }
+    setSlot(initialSlot);
+  }, [selectableSlots, initialSlot, slot.date, slot.timeRange]);
 
   useEffect(() => {
     const minutes = minutesBetweenClockTimes(startTime, endTime);
@@ -201,22 +322,58 @@ export function ConvertToBookingPanel({
         Create job
       </h4>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Schedule the job after the customer accepted your quotation (or when they
-        confirmed by phone).
+        Schedule the job after the customer accepted your quotation. If they
+        accepted a proposed day, that is selected by default — you can still
+        pick one of their original job days instead.
       </p>
 
-      <div className="mt-4">
-        <SlotDayPicker
-          selectedIso={slot.date}
-          minDate={minBookingDate}
-          dayPage={dayPage}
-          onDayPageChange={setDayPage}
-          onSelect={(iso) => setSlot({ ...slot, date: iso })}
-          disabled={submitting}
-          dayStripLayout="fit"
-          timeZone={timeZone}
-        />
-      </div>
+      {dayGroups.length > 0 ? (
+        <div className="mt-4 space-y-4">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+            Choose a day
+          </p>
+          {dayGroups.map((group) => (
+            <div key={group.id} className="space-y-2">
+              <div>
+                <p className="font-body text-[12px] font-bold text-on-surface">
+                  {group.label}
+                </p>
+                <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
+                  {group.hint}
+                </p>
+              </div>
+              <ul className="flex flex-wrap gap-2">
+                {sortInspectionSlots(group.slots).map((preferred) => {
+                  const active = slotKey(slot) === slotKey(preferred);
+                  return (
+                    <li key={slotKey(preferred)}>
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setSlot(preferred)}
+                        className={`rounded-lg border px-3 py-2 font-body text-[12px] font-semibold transition-colors disabled:opacity-60 ${
+                          active
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-outline-variant/60 bg-white text-on-surface hover:bg-surface-container"
+                        }`}
+                      >
+                        {formatSlotDate(preferred.date, timeZone)} ·{" "}
+                        {TIME_RANGE_LABELS[preferred.timeRange]}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-xl border border-dashed border-amber-200 bg-amber-50/80 px-3 py-2.5 font-body text-[12px] text-amber-900">
+          No job days to schedule yet. Use the customer&apos;s preferred dates,
+          propose alternative days, or wait for the customer to accept a proposed
+          day.
+        </p>
+      )}
 
       {slot.date ? (
         <div className="mt-4">
@@ -298,7 +455,7 @@ export function ConvertToBookingPanel({
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={submitting}
+          disabled={submitting || selectableSlots.length === 0 || !slot.date}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span

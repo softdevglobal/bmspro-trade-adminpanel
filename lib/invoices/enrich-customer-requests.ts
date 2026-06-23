@@ -6,7 +6,40 @@ import type {
   InspectionAssignment,
   InspectionInvoiceSummary,
   InspectionRequestDetail,
+  InspectionSlot,
 } from "@/lib/inspection/types";
+import { isClockTime, isTimeRange } from "@/lib/inspection/types";
+
+function parseSlot(raw: unknown): InspectionSlot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const date = typeof item.date === "string" ? item.date : null;
+  const timeRange = item.timeRange;
+  if (!date || !isTimeRange(timeRange)) return null;
+  return { date, timeRange };
+}
+
+type JobDocumentEnrichment = {
+  jobAssignedTo: InspectionAssignment | null;
+  jobScheduledSlot: InspectionSlot | null;
+  jobScheduledStartTime: string | null;
+  jobScheduledEndTime: string | null;
+};
+
+function parseJobDocumentEnrichment(
+  data: Record<string, unknown>,
+): JobDocumentEnrichment {
+  return {
+    jobAssignedTo: parseAssignment(data.assignedTo),
+    jobScheduledSlot: parseSlot(data.scheduledSlot),
+    jobScheduledStartTime: isClockTime(data.scheduledStartTime)
+      ? data.scheduledStartTime
+      : null,
+    jobScheduledEndTime: isClockTime(data.scheduledEndTime)
+      ? data.scheduledEndTime
+      : null,
+  };
+}
 
 function parseAssignment(raw: unknown): InspectionAssignment | null {
   if (!raw || typeof raw !== "object") return null;
@@ -93,39 +126,50 @@ export async function enrichRequestsWithInvoices(
   });
 }
 
-/** Loads who is assigned on the linked job document (may differ from visit inspector). */
+export type CustomerJobEnrichment = {
+  jobAssignedTo: InspectionAssignment | null;
+  jobScheduledSlot: InspectionSlot | null;
+  jobScheduledStartTime: string | null;
+  jobScheduledEndTime: string | null;
+};
+
+const EMPTY_JOB_ENRICHMENT: CustomerJobEnrichment = {
+  jobAssignedTo: null,
+  jobScheduledSlot: null,
+  jobScheduledStartTime: null,
+  jobScheduledEndTime: null,
+};
+
+/** Loads linked job schedule and assignee (may differ from the inspection visit). */
 export async function enrichRequestsWithJobAssignees<
   T extends InspectionRequestDetail,
 >(
   requests: T[],
-): Promise<(T & { jobAssignedTo: InspectionAssignment | null })[]> {
+): Promise<(T & CustomerJobEnrichment)[]> {
   const withJob = requests.filter((request) => request.bookingId?.trim());
   if (withJob.length === 0) {
-    return requests.map((request) => ({ ...request, jobAssignedTo: null }));
+    return requests.map((request) => ({ ...request, ...EMPTY_JOB_ENRICHMENT }));
   }
 
   const refs = withJob.map((request) =>
     adminDb.collection(JOBS_COLLECTION).doc(request.bookingId!.trim()),
   );
   const snaps = await adminDb.getAll(...refs);
-  const assigneeByBookingId = new Map(
+  const jobByBookingId = new Map(
     snaps
       .filter((snap) => snap.exists)
       .map(
         (snap) =>
-          [
-            snap.id,
-            parseAssignment((snap.data() ?? {}).assignedTo),
-          ] as const,
+          [snap.id, parseJobDocumentEnrichment(snap.data() ?? {})] as const,
       ),
   );
 
   return requests.map((request) => {
     const bookingId = request.bookingId?.trim();
-    if (!bookingId) return { ...request, jobAssignedTo: null };
+    if (!bookingId) return { ...request, ...EMPTY_JOB_ENRICHMENT };
     return {
       ...request,
-      jobAssignedTo: assigneeByBookingId.get(bookingId) ?? null,
+      ...(jobByBookingId.get(bookingId) ?? EMPTY_JOB_ENRICHMENT),
     };
   });
 }
