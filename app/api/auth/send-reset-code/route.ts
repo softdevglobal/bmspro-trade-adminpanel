@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     }
 
     const code = generateCode();
-    const expiresAt = Timestamp.fromMillis(Date.now() + 15 * 60 * 1000);
+    const expiresAt = Timestamp.fromMillis(Date.now() + 2 * 60 * 1000);
 
     await docRef.set({
       code,
