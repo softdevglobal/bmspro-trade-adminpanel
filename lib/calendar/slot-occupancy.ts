@@ -8,9 +8,10 @@ import {
   type SlotCapacitySettings,
 } from "@/lib/calendar/slot-capacity";
 import {
-  CALENDAR_SLOT_END_HOUR,
-  CALENDAR_SLOT_START_HOUR,
-} from "@/lib/calendar/time-slots";
+  parseWorkingHoursFromBusiness,
+  resolveCalendarSlotBounds,
+  type BusinessWorkingHours,
+} from "@/lib/calendar/working-hours";
 import { listPersonalCalendarEvents } from "@/lib/calendar/personal-events/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
@@ -33,12 +34,16 @@ export type HourSlotOccupancy = {
 export type DaySlotOccupancy = {
   date: string;
   capacity: SlotCapacitySettings;
+  workingHours: BusinessWorkingHours;
   slots: HourSlotOccupancy[];
 };
 
-function hourSlotDefinitions(): { startTime: string; endTime: string }[] {
+function hourSlotDefinitions(
+  startHour: number,
+  endHour: number,
+): { startTime: string; endTime: string }[] {
   const slots: { startTime: string; endTime: string }[] = [];
-  for (let hour = CALENDAR_SLOT_START_HOUR; hour < CALENDAR_SLOT_END_HOUR; hour += 1) {
+  for (let hour = startHour; hour < endHour; hour += 1) {
     slots.push({
       startTime: `${String(hour).padStart(2, "0")}:00`,
       endTime: `${String(hour + 1).padStart(2, "0")}:00`,
@@ -124,14 +129,17 @@ export function isSessionFullyBookedForRequests(
 function buildHourSlotOccupancyForDate(
   date: string,
   capacity: SlotCapacitySettings,
+  workingHours: BusinessWorkingHours,
   requestsSnap: Awaited<
     ReturnType<ReturnType<typeof adminDb.collection>["get"]>
   >,
   jobsSnap: Awaited<ReturnType<ReturnType<typeof adminDb.collection>["get"]>>,
   personalEvents: Awaited<ReturnType<typeof listPersonalCalendarEvents>>,
 ): HourSlotOccupancy[] {
+  const { startHour, endHour } = resolveCalendarSlotBounds(workingHours);
+  const slotDefs = hourSlotDefinitions(startHour, endHour);
   const windows: { jobs: number; requests: number; personal: number }[] =
-    hourSlotDefinitions().map(() => ({ jobs: 0, requests: 0, personal: 0 }));
+    slotDefs.map(() => ({ jobs: 0, requests: 0, personal: 0 }));
 
   for (const doc of requestsSnap.docs) {
     const request = mapInspectionDoc(doc.id, doc.data() ?? {});
@@ -149,7 +157,7 @@ function buildHourSlotOccupancyForDate(
     );
     if (!window) continue;
     windows.forEach((bucket, index) => {
-      const slotStartMin = CALENDAR_SLOT_START_HOUR * 60 + index * 60;
+      const slotStartMin = startHour * 60 + index * 60;
       if (overlapsHourBucket(window, slotStartMin)) bucket.requests += 1;
     });
   }
@@ -170,7 +178,7 @@ function buildHourSlotOccupancyForDate(
     );
     if (!window) continue;
     windows.forEach((bucket, index) => {
-      const slotStartMin = CALENDAR_SLOT_START_HOUR * 60 + index * 60;
+      const slotStartMin = startHour * 60 + index * 60;
       if (overlapsHourBucket(window, slotStartMin)) bucket.jobs += 1;
     });
   }
@@ -183,12 +191,12 @@ function buildHourSlotOccupancyForDate(
     if (startMin == null || endMin == null || endMin <= startMin) continue;
     const window = { startMin, endMin };
     windows.forEach((bucket, index) => {
-      const slotStartMin = CALENDAR_SLOT_START_HOUR * 60 + index * 60;
+      const slotStartMin = startHour * 60 + index * 60;
       if (overlapsHourBucket(window, slotStartMin)) bucket.personal += 1;
     });
   }
 
-  return hourSlotDefinitions().map((slot, index) => {
+  return slotDefs.map((slot, index) => {
     const counts = windows[index]!;
     return {
       startTime: slot.startTime,
@@ -212,11 +220,24 @@ export async function loadBusinessSlotCapacity(
   return parseSlotCapacityFromBusiness(snap.data() ?? {});
 }
 
+export async function loadBusinessWorkingHours(
+  businessId: string,
+): Promise<BusinessWorkingHours> {
+  const snap = await adminDb.collection("businesses").doc(businessId).get();
+  if (!snap.exists) {
+    return parseWorkingHoursFromBusiness(null);
+  }
+  return parseWorkingHoursFromBusiness(snap.data() ?? {});
+}
+
 export async function computeDaySlotOccupancy(
   businessId: string,
   date: string,
 ): Promise<DaySlotOccupancy> {
-  const capacity = await loadBusinessSlotCapacity(businessId);
+  const snap = await adminDb.collection("businesses").doc(businessId).get();
+  const businessData = snap.exists ? (snap.data() ?? {}) : {};
+  const capacity = parseSlotCapacityFromBusiness(businessData);
+  const workingHours = parseWorkingHoursFromBusiness(businessData);
 
   const [requestsSnap, jobsSnap, personalEvents] = await Promise.all([
     adminDb
@@ -230,12 +251,13 @@ export async function computeDaySlotOccupancy(
   const slots = buildHourSlotOccupancyForDate(
     date,
     capacity,
+    workingHours,
     requestsSnap,
     jobsSnap,
     personalEvents,
   );
 
-  return { date, capacity, slots };
+  return { date, capacity, workingHours, slots };
 }
 
 /** Morning/afternoon sessions where every hourly slot is at request capacity. */
@@ -248,7 +270,10 @@ export async function computeCapacityUnavailableSessions(
     return [];
   }
 
-  const capacity = await loadBusinessSlotCapacity(businessId);
+  const snap = await adminDb.collection("businesses").doc(businessId).get();
+  const businessData = snap.exists ? (snap.data() ?? {}) : {};
+  const capacity = parseSlotCapacityFromBusiness(businessData);
+  const workingHours = parseWorkingHoursFromBusiness(businessData);
   const [requestsSnap, jobsSnap, personalEvents] = await Promise.all([
     adminDb
       .collection(REQUESTS_COLLECTION)
@@ -264,6 +289,7 @@ export async function computeCapacityUnavailableSessions(
     const slots = buildHourSlotOccupancyForDate(
       cursor,
       capacity,
+      workingHours,
       requestsSnap,
       jobsSnap,
       personalEvents,

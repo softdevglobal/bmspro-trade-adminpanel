@@ -7,6 +7,7 @@ import {
 } from "@/components/calendar-visit-time-range";
 import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
 import { formatClockTime } from "@/lib/inspection/types";
 import { parseClockMinutes } from "@/lib/leave/clock";
 import { useEffect, useMemo, useState } from "react";
@@ -51,6 +52,7 @@ export function AdminDaySchedulePicker({
   onEndTimeChange: (value: string) => void;
 }) {
   const { user } = useAuth();
+  const { workingHours } = useBusinessWorkingHours();
   const [slots, setSlots] = useState<HourSlotOccupancy[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -127,7 +129,11 @@ export function AdminDaySchedulePicker({
   const pickerDisabled = disabled || isBusinessClosed;
 
   const rangeError = useMemo(() => {
-    const windowError = validateCalendarVisitWindow(startTime, endTime);
+    const windowError = validateCalendarVisitWindow(
+      startTime,
+      endTime,
+      workingHours,
+    );
     if (windowError) return windowError;
     if (slots.length === 0) return null;
 
@@ -146,7 +152,7 @@ export function AdminDaySchedulePicker({
       }
     }
     return null;
-  }, [startTime, endTime, slots, kind]);
+  }, [startTime, endTime, slots, kind, workingHours]);
 
   const selectedHours = useMemo(() => {
     const startMin = parseClockMinutes(startTime);
@@ -231,6 +237,7 @@ export function AdminDaySchedulePicker({
         startTime={startTime}
         endTime={endTime}
         disabled={pickerDisabled}
+        workingHours={workingHours}
         onStartTimeChange={onStartTimeChange}
         onEndTimeChange={onEndTimeChange}
       />

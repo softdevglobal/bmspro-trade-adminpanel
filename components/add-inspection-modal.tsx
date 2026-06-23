@@ -11,6 +11,8 @@ import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
+import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import type {
   InspectionRequestType,
   InspectionSlot,
@@ -162,7 +164,10 @@ type InspectionFormState = {
   customer: { fullName: string; email: string; phone: string };
 };
 
-function computeFieldErrors(form: InspectionFormState): FieldErrors {
+function computeFieldErrors(
+  form: InspectionFormState,
+  workingHours: BusinessWorkingHours,
+): FieldErrors {
   const errors: FieldErrors = {};
 
   if (form.requestType === "existing_service") {
@@ -227,6 +232,7 @@ function computeFieldErrors(form: InspectionFormState): FieldErrors {
     const windowError = validateCalendarVisitWindow(
       form.calendarWindow.startTime,
       form.calendarWindow.endTime,
+      workingHours,
     );
     if (windowError) errors.preferredSlots = windowError;
   } else if (form.preferredSlots.length === 0) {
@@ -234,8 +240,8 @@ function computeFieldErrors(form: InspectionFormState): FieldErrors {
   } else {
     for (const slot of form.preferredSlots) {
       const start = slot.startTime ?? "08:00";
-      const end = slot.endTime ?? defaultCalendarVisitEnd(start);
-      const windowError = validateCalendarVisitWindow(start, end);
+      const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+      const windowError = validateCalendarVisitWindow(start, end, workingHours);
       if (windowError) {
         errors.preferredSlots = windowError;
         break;
@@ -623,6 +629,7 @@ export function AddInspectionModal({
       : null);
   const { user } = useAuth();
   const profile = useBusinessProfile();
+  const { workingHours } = useBusinessWorkingHours();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(createInitialForm);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
@@ -738,13 +745,14 @@ export function AddInspectionModal({
     ? validateCalendarVisitWindow(
         form.calendarWindow.startTime,
         form.calendarWindow.endTime,
+        workingHours,
       ) === null
     : form.preferredSlots.length > 0 &&
       form.preferredSlots.every((slot) => {
         if (!slot.date.trim()) return false;
         const start = slot.startTime ?? "08:00";
-        const end = slot.endTime ?? defaultCalendarVisitEnd(start);
-        return validateCalendarVisitWindow(start, end) === null;
+        const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+        return validateCalendarVisitWindow(start, end, workingHours) === null;
       }) &&
       new Set(form.preferredSlots.map((slot) => slot.date)).size ===
         form.preferredSlots.length;
@@ -773,7 +781,10 @@ export function AddInspectionModal({
     EMAIL_REGEX.test(form.customer.email.trim()) &&
     form.customer.phone.replace(/\D/g, "").length >= 6;
 
-  const fieldErrors = useMemo(() => computeFieldErrors(form), [form]);
+  const fieldErrors = useMemo(
+    () => computeFieldErrors(form, workingHours),
+    [form, workingHours],
+  );
 
   const showFieldError = useCallback(
     (key: FieldKey) => Boolean(touched[key] && fieldErrors[key]),
