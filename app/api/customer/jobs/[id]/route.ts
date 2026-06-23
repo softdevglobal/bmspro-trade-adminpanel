@@ -55,6 +55,24 @@ export async function PATCH(
         { status: 400 },
       );
     }
+
+    let jobPreferredSlots: InspectionSlot[] | undefined;
+    if (decision === "accepted") {
+      const { validateJobPreferredSlotsForAcceptance } = await import(
+        "@/lib/inspection/types"
+      );
+      const parsed = validateJobPreferredSlotsForAcceptance(
+        payload.jobPreferredSlots,
+      );
+      if (!parsed.ok) {
+        return NextResponse.json(
+          { ok: false, error: parsed.error },
+          { status: 400 },
+        );
+      }
+      jobPreferredSlots = parsed.value;
+    }
+
     const result = await customerDecideQuotation(
       id,
       {
@@ -63,6 +81,7 @@ export async function PATCH(
         businessId: auth.customer.businessId,
       },
       decision,
+      jobPreferredSlots,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -74,6 +93,35 @@ export async function PATCH(
   }
 
   if (action !== "accept_proposed") {
+    if (action === "accept_job_proposed") {
+      const slot = parseSlot(payload.slot);
+      if (!slot) {
+        return NextResponse.json(
+          { ok: false, error: "Choose a valid proposed job day." },
+          { status: 400 },
+        );
+      }
+      const { customerAcceptJobProposedSlot } = await import(
+        "@/lib/inspection/server"
+      );
+      const result = await customerAcceptJobProposedSlot(
+        id,
+        {
+          customerId: auth.customer.uid,
+          customerEmail: auth.customer.email,
+          businessId: auth.customer.businessId,
+        },
+        slot,
+      );
+      if (!result.ok) {
+        return NextResponse.json(
+          { ok: false, error: result.error },
+          { status: result.status },
+        );
+      }
+      return NextResponse.json({ ok: true, request: result.request });
+    }
+
     return NextResponse.json(
       { ok: false, error: "Unsupported action." },
       { status: 400 },

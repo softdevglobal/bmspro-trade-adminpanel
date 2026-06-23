@@ -750,6 +750,41 @@ export async function PATCH(
     return NextResponse.json({ ok: true, request: result.request });
   }
 
+  if (action === "update_admin_job_dates" || action === "propose_job_dates") {
+    const { validateAdminJobPreferredSlots } = await import(
+      "@/lib/inspection/types"
+    );
+    const slotsRaw =
+      action === "propose_job_dates"
+        ? payload.jobProposedSlots ?? payload.adminJobPreferredSlots
+        : payload.adminJobPreferredSlots;
+    const parsed = validateAdminJobPreferredSlots(slotsRaw);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error },
+        { status: 400 },
+      );
+    }
+    const note =
+      typeof payload.note === "string" ? payload.note.trim() : undefined;
+    const { proposeJobDatesToCustomer } = await import(
+      "@/lib/inspection/server"
+    );
+    const result = await proposeJobDatesToCustomer(
+      id,
+      auth.businessId,
+      parsed.value,
+      note,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
   return NextResponse.json(
     { ok: false, error: "Unsupported action." },
     { status: 400 },

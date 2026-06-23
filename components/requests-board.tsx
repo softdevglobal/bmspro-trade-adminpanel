@@ -13,6 +13,16 @@ import {
   defaultCalendarVisitEnd,
 } from "@/components/calendar-visit-time-range";
 import { ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
+import {
+  JobPreferredDatesPicker,
+  isJobPreferredDatesComplete,
+} from "@/components/job-preferred-dates-picker";
+import {
+  ScheduleCategoryPanel,
+  ScheduleDatePill,
+  ScheduleSlotsList,
+  ScheduleSubsection,
+} from "@/components/schedule-dates-display";
 import { JobInstructionsDisplay } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
@@ -46,6 +56,8 @@ import {
   type InspectionSlot,
   type InspectionTimeRange,
   sortInspectionSlots,
+  canAdminProposeJobDates,
+  needsAdminJobDateProposal,
 } from "@/lib/inspection/types";
 import { sortInspectionRequestsBySchedule } from "@/lib/inspection/map-inspection-doc";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
@@ -126,7 +138,8 @@ type DrawerMode =
   | "assign"
   | "cancel"
   | "convert_booking"
-  | "awaiting_decision";
+  | "awaiting_decision"
+  | "propose_job_dates";
 
 const STATUS_TONE: Record<InspectionRequestStatus, string> = {
   pending:
@@ -248,6 +261,9 @@ export function RequestsBoard() {
     }
     if (action === "awaiting-decision") {
       setPendingDrawerMode("awaiting_decision");
+    }
+    if (action === "propose-job-dates") {
+      setPendingDrawerMode("propose_job_dates");
     }
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<string>).detail;
@@ -566,13 +582,44 @@ function RequestCard({
           </span>
         ) : (
           <>
-            {sortInspectionSlots(request.preferredSlots).slice(0, 3).map((slot, idx) => (
-              <SlotPill
-                key={`${slot.date}-${slot.timeRange}-${idx}`}
-                slot={slot}
-                tone="customer"
+            {request.preferredSlots.length > 0 ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                {sortInspectionSlots(request.preferredSlots)
+                  .slice(0, 3)
+                  .map((slot, idx) => (
+                    <ScheduleDatePill
+                      key={`insp-${slot.date}-${slot.timeRange}-${idx}`}
+                      category="inspection"
+                      prefix="Inspection"
+                      slot={slot}
+                      timeZone={timeZone}
+                    />
+                  ))}
+              </div>
+            ) : null}
+            {request.jobPreferredSlots.length > 0 ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                {sortInspectionSlots(request.jobPreferredSlots)
+                  .slice(0, 3)
+                  .map((slot, idx) => (
+                    <ScheduleDatePill
+                      key={`job-${slot.date}-${slot.timeRange}-${idx}`}
+                      category="job"
+                      prefix="Job"
+                      slot={slot}
+                      timeZone={timeZone}
+                    />
+                  ))}
+              </div>
+            ) : null}
+            {request.customerAcceptedJobSlot ? (
+              <ScheduleDatePill
+                category="job"
+                prefix="Job accepted"
+                slot={request.customerAcceptedJobSlot}
+                timeZone={timeZone}
               />
-            ))}
+            ) : null}
             {request.scheduledSlot ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
                 <span className="material-symbols-outlined text-[12px] leading-none">
@@ -804,6 +851,7 @@ function DrawerReviewFooter({
   onCancel,
   onCreateBooking,
   onAwaitingDecision,
+  onProposeJobDates,
   onQuotationDecided,
 }: {
   request: InspectionRequestDetail;
@@ -817,6 +865,7 @@ function DrawerReviewFooter({
   onCancel: () => void;
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
+  onProposeJobDates: () => void;
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
   const timeZone = useRequestsTimeZone();
@@ -828,6 +877,17 @@ function DrawerReviewFooter({
       !request.bookingId &&
       request.quotation.customerDecision !== "accepted",
   );
+  const quotationAccepted = Boolean(
+    request.quotation?.customerDecision === "accepted" && !request.bookingId,
+  );
+  const canProposeJobDates = canAdminProposeJobDates(request);
+  const needsJobDateProposal = needsAdminJobDateProposal(request);
+  const awaitingCustomerJobDays =
+    quotationAccepted && request.jobPreferredSlots.length === 0;
+  const awaitingCustomerJobPick =
+    quotationAccepted &&
+    request.jobProposedSlots.length > 0 &&
+    !request.customerAcceptedJobSlot;
 
   if (request.quotation) {
     const headline =
@@ -908,12 +968,63 @@ function DrawerReviewFooter({
                 </div>
               </div>
             ) : null}
+            {quotationAccepted && awaitingCustomerJobDays ? (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+                <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-600">
+                  hourglass_top
+                </span>
+                <p className="font-body text-[12px] font-semibold text-amber-800">
+                  Waiting for the customer to pick 3 preferred job days after
+                  accepting your quotation.
+                </p>
+              </div>
+            ) : null}
+            {quotationAccepted && needsJobDateProposal ? (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+                <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-600">
+                  edit_calendar
+                </span>
+                <p className="font-body text-[12px] font-semibold text-amber-800">
+                  The customer sent 3 preferred job days. If none work for your
+                  schedule, propose alternative days — they will be notified to
+                  pick one.
+                </p>
+              </div>
+            ) : null}
+            {awaitingCustomerJobPick ? (
+              <div className="flex items-start gap-2 rounded-xl border border-violet-200 bg-violet-50/80 p-3">
+                <span className="material-symbols-outlined shrink-0 text-[18px] text-violet-600">
+                  pending
+                </span>
+                <p className="font-body text-[12px] font-semibold text-violet-800">
+                  Waiting for the customer to pick one of your proposed job
+                  days.
+                </p>
+              </div>
+            ) : null}
+            {canProposeJobDates ? (
+              <DrawerFooterAction
+                icon="edit_calendar"
+                label={
+                  request.jobProposedSlots.length > 0
+                    ? "Edit job day proposal"
+                    : "Propose alternative job days"
+                }
+                variant={needsJobDateProposal ? "primary" : "secondary"}
+                onClick={onProposeJobDates}
+                disabled={submitting}
+              />
+            ) : null}
             <DrawerFooterAction
               icon="assignment"
               label="Create job"
-              variant="primary"
+              variant={canProposeJobDates ? "secondary" : "primary"}
               onClick={onCreateBooking}
-              disabled={submitting || quotationAwaitingCustomer}
+              disabled={
+                submitting ||
+                quotationAwaitingCustomer ||
+                awaitingCustomerJobDays
+              }
             />
             {request.status === "completed" ? (
               <DrawerFooterAction
@@ -1322,6 +1433,14 @@ function DetailDrawerContent({
       setAcceptedSlot(request.ownerProposedSlots[0] ?? null);
       setAcceptNote("Customer confirmed this proposed date by phone.");
     }
+    if (nextMode === "propose_job_dates") {
+      setProposedSlots(
+        request.jobProposedSlots.length > 0
+          ? request.jobProposedSlots
+          : [{ date: "", timeRange: "morning" }],
+      );
+      setProposeNote("");
+    }
     setMode(nextMode);
   }
 
@@ -1373,6 +1492,10 @@ function DetailDrawerContent({
           <ConvertToBookingPanel
             inspectionRequestId={request.id}
             minBookingDate={bookingMinDateFromRequest(request, timeZone)}
+            customerJobPreferredSlots={request.jobPreferredSlots}
+            adminJobPreferredSlots={request.adminJobPreferredSlots}
+            customerAcceptedJobSlot={request.customerAcceptedJobSlot}
+            jobProposedSlots={request.jobProposedSlots}
             initialStartTime={bookingTimeDefaults.start}
             initialEndTime={bookingTimeDefaults.end}
             onSuccess={(updated) => {
@@ -1393,6 +1516,7 @@ function DetailDrawerContent({
             <CustomerExtrasSection request={request} />
             <SlotsOverview
               request={request}
+              onRequestUpdated={onUpdated}
               inlineVisitTime={
                 needsInlineVisitTime
                   ? {
@@ -1540,6 +1664,47 @@ function DetailDrawerContent({
           />
         ) : null}
 
+        {mode === "propose_job_dates" ? (
+          <ProposeForm
+            title="Propose job days to customer"
+            description="Suggest up to 3 alternative days when the customer's preferred job dates do not work. They will be notified to pick one."
+            slots={proposedSlots}
+            customerPreferredSlots={request.jobPreferredSlots}
+            note={proposeNote}
+            disabled={submitting}
+            onChange={setProposedSlots}
+            onNoteChange={setProposeNote}
+            onCancel={() => setMode("review")}
+            onSubmit={() => {
+              const validSlots = proposedSlots.filter(
+                (slot) => slot.date && slot.timeRange,
+              );
+              if (validSlots.length === 0) {
+                setActionError("Add at least one proposed job day.");
+                return;
+              }
+              const repeatsCustomer = validSlots.some((slot) =>
+                request.jobPreferredSlots.some(
+                  (preferred) =>
+                    preferred.date === slot.date &&
+                    preferred.timeRange === slot.timeRange,
+                ),
+              );
+              if (repeatsCustomer) {
+                setActionError(
+                  "Each option must be different from the customer's preferred job days.",
+                );
+                return;
+              }
+              void callAction({
+                action: "propose_job_dates",
+                jobProposedSlots: validSlots,
+                note: proposeNote || undefined,
+              });
+            }}
+          />
+        ) : null}
+
         {mode === "propose" ? (
           <ProposeForm
             slots={proposedSlots}
@@ -1661,6 +1826,7 @@ function DetailDrawerContent({
             onCancel={() => openAction("cancel")}
             onCreateBooking={() => openAction("convert_booking")}
             onAwaitingDecision={() => openAction("awaiting_decision")}
+            onProposeJobDates={() => openAction("propose_job_dates")}
             onQuotationDecided={(decision) => {
               if (!request.quotation) return;
               onUpdated({
@@ -2364,40 +2530,344 @@ type InlineVisitTimeControl = {
   onSave: () => void;
 };
 
-function SlotsOverview({
+function AdminJobDatesEditor({
   request,
-  inlineVisitTime,
+  timeZone,
+  onUpdated,
+  embedded = false,
 }: {
   request: InspectionRequestDetail;
-  inlineVisitTime?: InlineVisitTimeControl;
+  timeZone?: string | null;
+  onUpdated?: (request: InspectionRequestDetail) => void;
+  embedded?: boolean;
 }) {
-  const timeZone = useRequestsTimeZone();
-  return (
-    <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
-      <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-        Customer&apos;s preferred dates
-      </p>
-      <InspectionSlotsList slots={request.preferredSlots} variant="customer" />
+  const { user } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [slots, setSlots] = useState<InspectionSlot[]>(
+    request.jobProposedSlots.length > 0
+      ? request.jobProposedSlots
+      : request.adminJobPreferredSlots,
+  );
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-      {request.ownerProposedSlots.length > 0 ? (
-        <>
-          <p className="mt-2.5 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            Your proposed dates
+  useEffect(() => {
+    setSlots(
+      request.jobProposedSlots.length > 0
+        ? request.jobProposedSlots
+        : request.adminJobPreferredSlots,
+    );
+    setNote("");
+    setEditing(false);
+    setError(null);
+  }, [
+    request.id,
+    request.jobProposedSlots,
+    request.adminJobPreferredSlots,
+  ]);
+
+  async function save() {
+    if (!user || !onUpdated) return;
+    if (!isJobPreferredDatesComplete(slots, false)) {
+      setError("Pick at least one job day to propose.");
+      return;
+    }
+    const repeatsCustomer = slots.some((slot) =>
+      request.jobPreferredSlots.some(
+        (preferred) =>
+          preferred.date === slot.date &&
+          preferred.timeRange === slot.timeRange,
+      ),
+    );
+    if (repeatsCustomer) {
+      setError(
+        "Each option must be different from the customer's preferred job days.",
+      );
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(`/api/requests/${request.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "propose_job_dates",
+          jobProposedSlots: slots,
+          note: note.trim() || undefined,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        request?: InspectionRequestDetail;
+      };
+      if (!response.ok || !data.ok || !data.request) {
+        throw new Error(data.error ?? "Could not propose job days.");
+      }
+      onUpdated(data.request);
+      setEditing(false);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not propose job days.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const displayedSlots =
+    request.jobProposedSlots.length > 0
+      ? request.jobProposedSlots
+      : request.adminJobPreferredSlots;
+  const awaitingCustomer =
+    request.jobProposedSlots.length > 0 && !request.customerAcceptedJobSlot;
+
+  const content = (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {!embedded ? (
+          <p className="font-body text-[11px] font-bold uppercase tracking-wider text-amber-900">
+            Propose job days to customer
           </p>
-          <InspectionSlotsList
-            slots={request.ownerProposedSlots}
+        ) : null}
+        {!editing ? (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1 rounded-lg border border-amber-200/80 bg-white px-2.5 py-1 font-body text-[11px] font-semibold text-amber-900 transition-colors hover:bg-amber-50"
+          >
+            <span className="material-symbols-outlined text-[14px]">edit</span>
+            {displayedSlots.length > 0 ? "Edit proposal" : "Propose job days"}
+          </button>
+        ) : null}
+      </div>
+
+      {!editing && displayedSlots.length > 0 ? (
+        <>
+          <ScheduleSlotsList
+            slots={displayedSlots}
+            category="job"
             variant="proposed"
+            timeZone={timeZone}
           />
+          {awaitingCustomer ? (
+            <p className="mt-1.5 font-body text-[12px] text-violet-800">
+              Waiting for the customer to pick one of these job days.
+            </p>
+          ) : null}
         </>
       ) : null}
 
-      {request.scheduledSlot ? (
-        <ScheduledVisitSection
-          request={request}
-          inlineVisitTime={inlineVisitTime}
-        />
+      {!editing && displayedSlots.length === 0 ? (
+        <p className="font-body text-[12px] text-on-surface-variant">
+          Propose alternative job days if the customer&apos;s choices do not work.
+          They will be notified to pick one.
+        </p>
       ) : null}
-    </section>
+
+      {editing ? (
+        <div className="mt-2 space-y-3">
+          <JobPreferredDatesPicker
+            value={slots}
+            onChange={setSlots}
+            timeZone={timeZone}
+            disabled={saving}
+            label="Pick job days to propose"
+          />
+          <label className="block">
+            <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+              Message to customer (optional)
+            </span>
+            <textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="e.g. None of your dates work — here are some alternatives."
+              disabled={saving}
+              className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-white px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60"
+            />
+          </label>
+          {error ? (
+            <p className="font-body text-[12px] font-semibold text-rose-600">
+              {error}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void save()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 font-body text-[12px] font-semibold text-on-primary disabled:opacity-60"
+            >
+              <span
+                className={`material-symbols-outlined text-[16px] ${
+                  saving ? "animate-spin" : ""
+                }`}
+              >
+                {saving ? "progress_activity" : "send"}
+              </span>
+              {saving ? "Sending…" : "Send proposal to customer"}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setSlots(
+                  request.jobProposedSlots.length > 0
+                    ? request.jobProposedSlots
+                    : request.adminJobPreferredSlots,
+                );
+                setNote("");
+                setEditing(false);
+                setError(null);
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-outline-variant/60 px-3 py-2 font-body text-[12px] font-semibold text-on-surface-variant"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <ScheduleSubsection
+        category="job"
+        label="Your proposed job days"
+        hint="Send alternatives when the customer's job days do not work."
+      >
+        {content}
+      </ScheduleSubsection>
+    );
+  }
+
+  return <div className="mt-2.5">{content}</div>;
+}
+
+function SlotsOverview({
+  request,
+  onRequestUpdated,
+  inlineVisitTime,
+}: {
+  request: InspectionRequestDetail;
+  onRequestUpdated?: (request: InspectionRequestDetail) => void;
+  inlineVisitTime?: InlineVisitTimeControl;
+}) {
+  const timeZone = useRequestsTimeZone();
+  const showJobSection =
+    Boolean(request.quotation?.customerDecision === "accepted" && !request.bookingId) ||
+    request.jobPreferredSlots.length > 0 ||
+    request.jobProposedSlots.length > 0 ||
+    Boolean(request.customerAcceptedJobSlot);
+
+  const hasInspectionSection =
+    request.preferredSlots.length > 0 ||
+    request.ownerProposedSlots.length > 0 ||
+    Boolean(request.scheduledSlot);
+
+  return (
+    <div className="space-y-3">
+      {hasInspectionSection ? (
+        <ScheduleCategoryPanel category="inspection" audience="admin">
+          {request.preferredSlots.length > 0 ? (
+            <ScheduleSubsection
+              category="inspection"
+              label="Customer preferred visit times"
+              hint="Chosen when they first booked the inspection."
+            >
+              <ScheduleSlotsList
+                slots={request.preferredSlots}
+                category="inspection"
+                timeZone={timeZone}
+              />
+            </ScheduleSubsection>
+          ) : null}
+
+          {request.ownerProposedSlots.length > 0 ? (
+            <ScheduleSubsection
+              category="inspection"
+              label="Your proposed visit times"
+              hint="Sent to the customer when their inspection times did not work."
+            >
+              <ScheduleSlotsList
+                slots={request.ownerProposedSlots}
+                category="inspection"
+                variant="proposed"
+                timeZone={timeZone}
+              />
+            </ScheduleSubsection>
+          ) : null}
+
+          {request.scheduledSlot ? (
+            <ScheduledVisitSection
+              request={request}
+              inlineVisitTime={inlineVisitTime}
+            />
+          ) : null}
+        </ScheduleCategoryPanel>
+      ) : null}
+
+      {showJobSection ? (
+        <ScheduleCategoryPanel category="job" audience="admin">
+          {needsAdminJobDateProposal(request) ? (
+            <div className="mb-1 flex items-start gap-2 rounded-lg border border-amber-300/80 bg-amber-100/60 px-3 py-2.5">
+              <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-800">
+                info
+              </span>
+              <p className="font-body text-[12px] font-semibold leading-relaxed text-amber-950">
+                Customer&apos;s preferred job days are below. If they don&apos;t
+                work for you, use &ldquo;Propose job days&rdquo; to send
+                alternatives.
+              </p>
+            </div>
+          ) : null}
+          {request.jobPreferredSlots.length > 0 ? (
+            <ScheduleSubsection
+              category="job"
+              label="Customer preferred job days"
+              hint="Chosen when they accepted your quotation."
+            >
+              <ScheduleSlotsList
+                slots={request.jobPreferredSlots}
+                category="job"
+                timeZone={timeZone}
+              />
+            </ScheduleSubsection>
+          ) : null}
+
+          {request.customerAcceptedJobSlot ? (
+            <ScheduleSubsection
+              category="job"
+              label="Customer accepted job day"
+              hint="They picked one of your proposed job days."
+            >
+              <ScheduleSlotsList
+                slots={[request.customerAcceptedJobSlot]}
+                category="job"
+                variant="confirmed"
+                timeZone={timeZone}
+              />
+            </ScheduleSubsection>
+          ) : null}
+
+          <AdminJobDatesEditor
+            request={request}
+            timeZone={timeZone}
+            onUpdated={onRequestUpdated}
+            embedded
+          />
+        </ScheduleCategoryPanel>
+      ) : null}
+    </div>
   );
 }
 
@@ -2417,15 +2887,23 @@ function ScheduledVisitSection({
   );
   const customerAccepted =
     request.status === "scheduled" && request.ownerProposedSlots.length > 0;
+  const timeZone = useRequestsTimeZone();
 
   return (
-    <>
-      <p className="mt-2.5 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-        Scheduled visit
-      </p>
-      <InspectionSlotsList
+    <ScheduleSubsection
+      category="inspection"
+      label="Confirmed inspection visit"
+      hint={
+        customerAccepted
+          ? "The customer accepted this visit date."
+          : "The inspection is booked for this day."
+      }
+    >
+      <ScheduleSlotsList
         slots={[slot]}
+        category="inspection"
         variant="scheduled"
+        timeZone={timeZone}
         timeWindow={visitWindow}
       />
       {inlineVisitTime ? (
@@ -2471,7 +2949,7 @@ function ScheduledVisitSection({
           Time window not set yet
         </p>
       ) : null}
-    </>
+    </ScheduleSubsection>
   );
 }
 
@@ -2623,18 +3101,23 @@ function SetTimeForm({
   );
 }
 
-/** Earliest selectable job day: request date (inclusive), then later days only. */
+/** Earliest selectable job day: scheduled date, then job/customer preferred dates. */
 function bookingMinDateFromRequest(
   request: InspectionRequestDetail,
   timeZone?: string | null,
 ): string {
   const scheduled = request.scheduledSlot?.date?.trim();
   if (scheduled) return scheduled;
-  const preferredDates = request.preferredSlots
+  const jobDates = [
+    ...request.jobPreferredSlots,
+    ...request.adminJobPreferredSlots,
+    ...(request.customerAcceptedJobSlot ? [request.customerAcceptedJobSlot] : []),
+    ...request.preferredSlots,
+  ]
     .map((slot) => slot.date?.trim())
     .filter((date): date is string => Boolean(date))
     .sort();
-  if (preferredDates.length > 0) return preferredDates[0];
+  if (jobDates.length > 0) return jobDates[0];
   return todayIso(timeZone);
 }
 
@@ -2829,7 +3312,7 @@ function ProposeSlotOption({
   canRemove,
   customerPreferredSlots,
   allSlots,
-  onUpdate,
+  onPatch,
   onRemove,
 }: {
   slot: InspectionSlot;
@@ -2839,10 +3322,7 @@ function ProposeSlotOption({
   canRemove: boolean;
   customerPreferredSlots: InspectionSlot[];
   allSlots: InspectionSlot[];
-  onUpdate: <K extends keyof InspectionSlot>(
-    key: K,
-    value: InspectionSlot[K],
-  ) => void;
+  onPatch: (patch: Partial<InspectionSlot>) => void;
   onRemove: () => void;
 }) {
   const timeZone = useRequestsTimeZone();
@@ -2864,10 +3344,12 @@ function ProposeSlotOption({
   }, [customerBlocked, allSlots, index]);
 
   function selectDate(iso: string) {
-    onUpdate("date", iso);
-    onUpdate("startTime", "08:00");
-    onUpdate("endTime", "09:00");
-    onUpdate("timeRange", calendarVisitTimeRange("08:00"));
+    onPatch({
+      date: iso,
+      startTime: "08:00",
+      endTime: "09:00",
+      timeRange: calendarVisitTimeRange("08:00"),
+    });
   }
 
   return (
@@ -2914,11 +3396,13 @@ function ProposeSlotOption({
             }
             disabled={disabled}
             onStartTimeChange={(start) => {
-              onUpdate("startTime", start);
-              onUpdate("endTime", defaultCalendarVisitEnd(start));
-              onUpdate("timeRange", calendarVisitTimeRange(start));
+              onPatch({
+                startTime: start,
+                endTime: defaultCalendarVisitEnd(start),
+                timeRange: calendarVisitTimeRange(start),
+              });
             }}
-            onEndTimeChange={(end) => onUpdate("endTime", end)}
+            onEndTimeChange={(end) => onPatch({ endTime: end })}
           />
         </div>
       ) : null}
@@ -2931,6 +3415,8 @@ function ProposeForm({
   customerPreferredSlots,
   note,
   disabled,
+  title = "Propose new dates",
+  description = "Add up to 3 alternatives. Times the customer already chose cannot be selected again.",
   onChange,
   onNoteChange,
   onCancel,
@@ -2940,6 +3426,8 @@ function ProposeForm({
   customerPreferredSlots: InspectionSlot[];
   note: string;
   disabled: boolean;
+  title?: string;
+  description?: string;
   onChange: (slots: InspectionSlot[]) => void;
   onNoteChange: (note: string) => void;
   onCancel: () => void;
@@ -2948,14 +3436,10 @@ function ProposeForm({
   const timeZone = useRequestsTimeZone();
   const minDate = todayIso(timeZone);
 
-  function updateSlot<K extends keyof InspectionSlot>(
-    index: number,
-    key: K,
-    value: InspectionSlot[K],
-  ) {
+  function patchSlot(index: number, patch: Partial<InspectionSlot>) {
     onChange(
       slots.map((slot, idx) =>
-        idx === index ? { ...slot, [key]: value } : slot,
+        idx === index ? { ...slot, ...patch } : slot,
       ),
     );
   }
@@ -2973,11 +3457,10 @@ function ProposeForm({
   return (
     <section className="rounded-xl border border-violet-200 bg-violet-50/50 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">
-        Propose new dates
+        {title}
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Add up to 3 alternatives. Times the customer already chose cannot be
-        selected again.
+        {description}
       </p>
 
       <ul className="mt-3 space-y-3">
@@ -2991,7 +3474,7 @@ function ProposeForm({
             canRemove={slots.length > 1}
             customerPreferredSlots={customerPreferredSlots}
             allSlots={slots}
-            onUpdate={(key, value) => updateSlot(index, key, value)}
+            onPatch={(patch) => patchSlot(index, patch)}
             onRemove={() => removeSlot(index)}
           />
         ))}

@@ -160,6 +160,14 @@ export type InspectionRequestDetail = {
   address: InspectionAddress;
   preferredSlots: InspectionSlot[];
   ownerProposedSlots: InspectionSlot[];
+  /** Up to 3 job days the customer picks when accepting a quotation. */
+  jobPreferredSlots: InspectionSlot[];
+  /** Admin-editable alternative job days when customer dates do not work. */
+  adminJobPreferredSlots: InspectionSlot[];
+  /** Job days proposed to the customer when their choices do not work. */
+  jobProposedSlots: InspectionSlot[];
+  /** Customer's pick from `jobProposedSlots` (null until they accept one). */
+  customerAcceptedJobSlot: InspectionSlot | null;
   scheduledSlot: InspectionSlot | null;
   /** Specific visit window the owner sets when confirming, e.g. 10:00–11:00. */
   scheduledStartTime: string | null; // "HH:MM" 24h
@@ -381,6 +389,79 @@ export function parseSlotsArray(
     .map((slot) => parseSlot(slot, timeZone))
     .filter((slot): slot is InspectionSlot => slot !== null);
   return dedupeSlots(parsed).slice(0, max);
+}
+
+/** Validates job-day preferences (exactly 3 unique dates when accepting a quote). */
+export function validateJobPreferredSlotsForAcceptance(
+  raw: unknown,
+  timeZone?: string | null,
+): { ok: true; value: InspectionSlot[] } | { ok: false; error: string } {
+  const slots = parseSlotsArray(raw, 3, timeZone);
+  if (slots.length !== 3) {
+    return {
+      ok: false,
+      error: "Pick exactly 3 preferred job days before accepting.",
+    };
+  }
+  const uniqueDates = new Set(slots.map((slot) => slot.date));
+  if (uniqueDates.size !== 3) {
+    return {
+      ok: false,
+      error: "Each preferred job day must be a different date.",
+    };
+  }
+  return { ok: true, value: slots };
+}
+
+/** Validates admin-editable alternative job days (1–3 unique dates). */
+export function validateAdminJobPreferredSlots(
+  raw: unknown,
+  timeZone?: string | null,
+): { ok: true; value: InspectionSlot[] } | { ok: false; error: string } {
+  const slots = parseSlotsArray(raw, 3, timeZone);
+  if (slots.length === 0) {
+    return { ok: false, error: "Pick at least one alternative job day." };
+  }
+  const uniqueDates = new Set(slots.map((slot) => slot.date));
+  if (uniqueDates.size !== slots.length) {
+    return {
+      ok: false,
+      error: "Each alternative job day must be a different date.",
+    };
+  }
+  return { ok: true, value: slots };
+}
+
+type JobDateProposalContext = Pick<
+  InspectionRequestDetail,
+  | "quotation"
+  | "bookingId"
+  | "jobPreferredSlots"
+  | "jobProposedSlots"
+  | "customerAcceptedJobSlot"
+>;
+
+/** Customer accepted the quote and sent job days; admin may propose alternatives. */
+export function canAdminProposeJobDates(
+  request: JobDateProposalContext,
+): boolean {
+  return (
+    !!request.quotation &&
+    request.quotation.status !== "cancelled" &&
+    request.quotation.customerDecision === "accepted" &&
+    !request.bookingId &&
+    request.jobPreferredSlots.length > 0 &&
+    !request.customerAcceptedJobSlot
+  );
+}
+
+/** Customer sent job days but admin has not proposed alternatives yet. */
+export function needsAdminJobDateProposal(
+  request: JobDateProposalContext,
+): boolean {
+  return (
+    canAdminProposeJobDates(request) && request.jobProposedSlots.length === 0
+  );
 }
 
 /** Validates and normalises a raw payload from the booking page. */
