@@ -35,6 +35,15 @@ import {
   CustomerShellPanel,
 } from "@/components/customer-booking-shell";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
+import {
+  JobPreferredDatesPicker,
+  isJobPreferredDatesComplete,
+} from "@/components/job-preferred-dates-picker";
+import {
+  ScheduleCategoryPanel,
+  ScheduleSlotsList,
+  ScheduleSubsection,
+} from "@/components/schedule-dates-display";
 import Link from "next/link";
 import {
   accountBookingFocusPath,
@@ -1117,22 +1126,25 @@ function ConfirmedVisitHighlight({
   startTime,
   endTime,
   timeZone,
+  kind = "inspection",
 }: {
   slot: InspectionSlot;
   assignedTo: InspectionAssignment | null;
   startTime: string | null;
   endTime: string | null;
   timeZone?: string | null;
+  kind?: "inspection" | "job";
 }) {
   const visitWindow = formatVisitWindow(startTime, endTime);
+  const isJob = kind === "job";
   return (
     <section className="overflow-hidden rounded-2xl border-2 border-emerald-300/90 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.35)] ring-1 ring-emerald-200/80">
       <div className="border-b border-emerald-200/70 bg-emerald-600/10 px-4 py-2.5">
         <p className="inline-flex items-center gap-2 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
           <span className="material-symbols-outlined material-symbols-filled text-[18px] text-emerald-600">
-            event_available
+            {isJob ? "handyman" : "event_available"}
           </span>
-          Your visit is confirmed
+          {isJob ? "Your job is confirmed" : "Your visit is confirmed"}
         </p>
       </div>
 
@@ -1158,7 +1170,7 @@ function ConfirmedVisitHighlight({
                 <span className="material-symbols-outlined text-[17px] text-emerald-700">
                   schedule
                 </span>
-                Arrival window: {visitWindow}
+                {isJob ? "Scheduled time" : "Arrival window"}: {visitWindow}
               </p>
             ) : (
               <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-emerald-300 bg-white/70 px-2.5 py-1 font-body text-[12px] font-semibold text-emerald-800/90">
@@ -1181,7 +1193,7 @@ function ConfirmedVisitHighlight({
             />
             <div className="min-w-0 flex-1">
               <p className="font-body text-[10px] font-bold uppercase tracking-wider text-emerald-700/90">
-                Who will visit
+                {isJob ? "Assigned to" : "Who will visit"}
               </p>
               <p className="mt-0.5 font-body text-[15px] font-bold text-on-surface">
                 {assignedTo.name}
@@ -1189,12 +1201,14 @@ function ConfirmedVisitHighlight({
               <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
                 {assignedTo.type === "owner"
                   ? "Business owner"
-                  : "Assigned inspector"}
+                  : isJob
+                    ? "Assigned technician"
+                    : "Assigned inspector"}
                 {assignedTo.email ? ` · ${assignedTo.email}` : ""}
               </p>
             </div>
             <span className="material-symbols-outlined shrink-0 text-[22px] text-emerald-600/80">
-              engineering
+              {isJob ? "handyman" : "engineering"}
             </span>
           </div>
         ) : (
@@ -1202,7 +1216,9 @@ function ConfirmedVisitHighlight({
             <span className="material-symbols-outlined mr-1 align-middle text-[16px]">
               info
             </span>
-            An inspector will be assigned before your visit.
+            {isJob
+              ? "A team member will be assigned before your job."
+              : "An inspector will be assigned before your visit."}
           </p>
         )}
       </div>
@@ -1226,12 +1242,18 @@ function BookingCard({
   const [selectedProposed, setSelectedProposed] = useState<InspectionSlot | null>(
     null,
   );
+  const [selectedJobProposed, setSelectedJobProposed] =
+    useState<InspectionSlot | null>(null);
   const [accepting, setAccepting] = useState(false);
+  const [acceptingJob, setAcceptingJob] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<"accepted" | "rejected" | null>(
     null,
   );
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [jobPreferredSlots, setJobPreferredSlots] = useState<InspectionSlot[]>(
+    [],
+  );
   const timeZone = booking.businessTimezone;
 
   useEffect(() => {
@@ -1242,6 +1264,47 @@ function BookingCard({
     });
     return () => cancelAnimationFrame(frame);
   }, [isFocused, booking.id]);
+
+  async function acceptJobProposed() {
+    if (!selectedJobProposed) {
+      setAcceptError("Choose one of the proposed job days first.");
+      return;
+    }
+    setAcceptingJob(true);
+    setAcceptError(null);
+    try {
+      const idToken = await getIdToken();
+      const slugQuery = booking.bookingSlug
+        ? `?bookingSlug=${encodeURIComponent(booking.bookingSlug)}`
+        : "";
+      const response = await fetch(`/api/customer/jobs/${booking.id}${slugQuery}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "accept_job_proposed",
+          slot: selectedJobProposed,
+        }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not accept this day.");
+      }
+      setSelectedJobProposed(null);
+      onChanged();
+    } catch (err) {
+      setAcceptError(
+        err instanceof Error ? err.message : "Could not accept this day.",
+      );
+    } finally {
+      setAcceptingJob(false);
+    }
+  }
 
   async function acceptProposed() {
     if (!selectedProposed) {
@@ -1285,6 +1348,13 @@ function BookingCard({
   }
 
   async function decideQuotation(decision: "accepted" | "rejected") {
+    if (
+      decision === "accepted" &&
+      !isJobPreferredDatesComplete(jobPreferredSlots, true)
+    ) {
+      setDecisionError("Pick exactly 3 preferred job days before accepting.");
+      return;
+    }
     setDeciding(decision);
     setDecisionError(null);
     try {
@@ -1298,7 +1368,13 @@ function BookingCard({
           "Content-Type": "application/json",
           Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ action: "quotation_decision", decision }),
+        body: JSON.stringify({
+          action: "quotation_decision",
+          decision,
+          ...(decision === "accepted"
+            ? { jobPreferredSlots }
+            : {}),
+        }),
       });
       const payload = (await response.json()) as {
         ok?: boolean;
@@ -1338,6 +1414,9 @@ function BookingCard({
     booking.quotation?.status === "sent" &&
     !booking.quotation.customerDecision;
   const jobAssignee = booking.jobAssignedTo ?? booking.assignedTo;
+  const confirmedJobSlot = booking.jobScheduledSlot;
+  const confirmedJobStartTime = booking.jobScheduledStartTime;
+  const confirmedJobEndTime = booking.jobScheduledEndTime;
 
   return (
     <article
@@ -1392,7 +1471,21 @@ function BookingCard({
           </div>
         ) : null}
 
-        {booking.scheduledSlot && !expanded ? (
+        {confirmedJobSlot && !expanded ? (
+          <div className="mt-3 rounded-xl border border-sky-200/80 bg-sky-50/60 px-3 py-2.5">
+            <p className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-body text-[12px] font-semibold text-sky-900">
+              <span className="material-symbols-outlined text-[16px] text-sky-600">
+                handyman
+              </span>
+              Job confirmed ·{" "}
+              {formatSlotDate(confirmedJobSlot.date, timeZone)} ·{" "}
+              {TIME_RANGE_LABELS[confirmedJobSlot.timeRange]}
+            </p>
+            <p className="mt-1 font-body text-[11px] text-sky-800/85">
+              Open details for your scheduled time
+            </p>
+          </div>
+        ) : booking.scheduledSlot && !expanded ? (
           <div className="mt-3 rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-3 py-2.5">
             <p className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-body text-[12px] font-semibold text-emerald-900">
               <span className="material-symbols-outlined text-[16px] text-emerald-600">
@@ -1464,12 +1557,21 @@ function BookingCard({
           </div>
         ) : null}
 
+        {booking.jobProposedSlots.length > 0 &&
+        !booking.bookingId &&
+        booking.quotation?.customerDecision === "accepted" ? (
+          <p className="mt-2.5 inline-flex items-center gap-1 font-body text-[12px] font-semibold text-amber-800">
+            <span className="material-symbols-outlined text-[16px]">handyman</span>
+            New job days proposed — expand for details
+          </p>
+        ) : null}
+
         {booking.status === "owner_proposed" &&
         booking.ownerProposedSlots.length > 0 &&
         !expanded ? (
-          <p className="mt-2.5 inline-flex items-center gap-1 font-body text-[12px] font-semibold text-violet-700">
-            <span className="material-symbols-outlined text-[16px]">info</span>
-            New times proposed — expand for details
+          <p className="mt-2.5 inline-flex items-center gap-1 font-body text-[12px] font-semibold text-sky-800">
+            <span className="material-symbols-outlined text-[16px]">search</span>
+            New inspection times proposed — expand for details
           </p>
         ) : null}
       </div>
@@ -1610,7 +1712,16 @@ function BookingCard({
             </section>
           ) : null}
 
-          {booking.scheduledSlot ? (
+          {confirmedJobSlot ? (
+            <ConfirmedVisitHighlight
+              slot={confirmedJobSlot}
+              assignedTo={jobAssignee}
+              startTime={confirmedJobStartTime}
+              endTime={confirmedJobEndTime}
+              timeZone={timeZone}
+              kind="job"
+            />
+          ) : booking.scheduledSlot ? (
             <ConfirmedVisitHighlight
               slot={booking.scheduledSlot}
               assignedTo={booking.assignedTo}
@@ -1647,12 +1758,14 @@ function BookingCard({
                   />
 
                   {booking.quotation.customerDecision === "accepted" ? (
-                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-body text-[12px] font-bold text-emerald-700">
-                      <span className="material-symbols-outlined text-[16px]">
-                        check_circle
-                      </span>
-                      You accepted this quotation
-                    </p>
+                    <div className="mt-3 space-y-2">
+                      <p className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-body text-[12px] font-bold text-emerald-700">
+                        <span className="material-symbols-outlined text-[16px]">
+                          check_circle
+                        </span>
+                        You accepted this quotation
+                      </p>
+                    </div>
                   ) : booking.quotation.customerDecision === "rejected" ? (
                     <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 font-body text-[12px] font-bold text-rose-700">
                       <span className="material-symbols-outlined text-[16px]">
@@ -1668,7 +1781,21 @@ function BookingCard({
                       </p>
                       <p className="mt-0.5 font-body text-[11px] text-amber-800/90">
                         The business can only schedule the job once you accept.
+                        Pick 3 days when the actual work should be done.
                       </p>
+                      <div className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/60 p-3">
+                        <p className="mb-2 font-body text-[11px] font-bold uppercase tracking-wider text-amber-900">
+                          Job work dates
+                        </p>
+                        <JobPreferredDatesPicker
+                          value={jobPreferredSlots}
+                          onChange={setJobPreferredSlots}
+                          timeZone={timeZone}
+                          disabled={deciding !== null}
+                          requireThree
+                          label="Pick 3 preferred job days"
+                        />
+                      </div>
                       {decisionError ? (
                         <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
                           {decisionError}
@@ -1677,7 +1804,13 @@ function BookingCard({
                       <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
                         <button
                           type="button"
-                          disabled={deciding !== null}
+                          disabled={
+                            deciding !== null ||
+                            !isJobPreferredDatesComplete(
+                              jobPreferredSlots,
+                              true,
+                            )
+                          }
                           onClick={() => void decideQuotation("accepted")}
                           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -1781,57 +1914,181 @@ function BookingCard({
             value={fullAddress || "—"}
           />
 
-          <BookingDetailRow icon="calendar_month" label="Your preferred times">
-            <BookingSlotsList
-              slots={booking.preferredSlots}
-              timeZone={timeZone}
-            />
-          </BookingDetailRow>
+          {(() => {
+            const hasInspectionDates =
+              booking.preferredSlots.length > 0 ||
+              booking.ownerProposedSlots.length > 0;
+            const hasJobDates =
+              booking.jobPreferredSlots.length > 0 ||
+              booking.jobProposedSlots.length > 0 ||
+              Boolean(booking.customerAcceptedJobSlot) ||
+              Boolean(booking.jobScheduledSlot);
 
-          {booking.ownerProposedSlots.length > 0 ? (
-            booking.status === "owner_proposed" ? (
-              <BookingDetailRow
-                icon="swap_horiz"
-                label="Business proposed times — pick one"
-              >
-                <ProposedSlotPicker
-                  slots={booking.ownerProposedSlots}
-                  disabled={accepting}
-                  selected={selectedProposed}
-                  timeZone={timeZone}
-                  onSelect={setSelectedProposed}
-                />
-                {acceptError ? (
-                  <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
-                    {acceptError}
-                  </p>
+            return (
+              <div className="space-y-3">
+                {hasInspectionDates ? (
+                  <ScheduleCategoryPanel category="inspection" audience="customer">
+                    {booking.preferredSlots.length > 0 ? (
+                      <ScheduleSubsection
+                        category="inspection"
+                        label="Your preferred visit times"
+                        hint="When you wanted someone to come inspect and quote."
+                      >
+                        <ScheduleSlotsList
+                          slots={booking.preferredSlots}
+                          category="inspection"
+                          timeZone={timeZone}
+                        />
+                      </ScheduleSubsection>
+                    ) : null}
+
+                    {booking.ownerProposedSlots.length > 0 ? (
+                      <ScheduleSubsection
+                        category="inspection"
+                        label={
+                          booking.status === "owner_proposed"
+                            ? "Business proposed visit times — pick one"
+                            : "Business proposed visit times"
+                        }
+                        hint="Alternative days for the inspection visit."
+                      >
+                        {booking.status === "owner_proposed" ? (
+                          <>
+                            <ProposedSlotPicker
+                              slots={booking.ownerProposedSlots}
+                              disabled={accepting}
+                              selected={selectedProposed}
+                              timeZone={timeZone}
+                              onSelect={setSelectedProposed}
+                            />
+                            {acceptError ? (
+                              <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
+                                {acceptError}
+                              </p>
+                            ) : null}
+                            <button
+                              type="button"
+                              disabled={accepting || !selectedProposed}
+                              onClick={() => void acceptProposed()}
+                              className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">
+                                {accepting
+                                  ? "progress_activity"
+                                  : "event_available"}
+                              </span>
+                              {accepting
+                                ? "Confirming…"
+                                : "Accept this visit time"}
+                            </button>
+                          </>
+                        ) : (
+                          <ScheduleSlotsList
+                            slots={booking.ownerProposedSlots}
+                            category="inspection"
+                            variant="proposed"
+                            timeZone={timeZone}
+                          />
+                        )}
+                      </ScheduleSubsection>
+                    ) : null}
+                  </ScheduleCategoryPanel>
                 ) : null}
-                <button
-                  type="button"
-                  disabled={accepting || !selectedProposed}
-                  onClick={() => void acceptProposed()}
-                  className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {accepting ? "progress_activity" : "event_available"}
-                  </span>
-                  {accepting ? "Confirming…" : "Accept this time"}
-                </button>
-                <p className="mt-2 font-body text-[11px] text-on-surface-variant">
-                  The business will confirm the exact arrival time after you
-                  accept.
-                </p>
-              </BookingDetailRow>
-            ) : (
-              <BookingDetailRow icon="swap_horiz" label="Business proposed times">
-                <BookingSlotsList
-                  slots={booking.ownerProposedSlots}
-                  variant="proposed"
-                  timeZone={timeZone}
-                />
-              </BookingDetailRow>
-            )
-          ) : null}
+
+                {hasJobDates ? (
+                  <ScheduleCategoryPanel category="job" audience="customer">
+                    {booking.jobPreferredSlots.length > 0 ? (
+                      <ScheduleSubsection
+                        category="job"
+                        label="Your preferred job days"
+                        hint="When you want the actual work to be done."
+                      >
+                        <ScheduleSlotsList
+                          slots={booking.jobPreferredSlots}
+                          category="job"
+                          timeZone={timeZone}
+                        />
+                      </ScheduleSubsection>
+                    ) : null}
+
+                    {booking.jobProposedSlots.length > 0 &&
+                    !booking.bookingId &&
+                    booking.quotation?.customerDecision === "accepted" ? (
+                      <ScheduleSubsection
+                        category="job"
+                        label="Business proposed job days — pick one"
+                        hint="Alternative days for doing the job after you accepted the quote."
+                      >
+                        <ProposedSlotPicker
+                          slots={booking.jobProposedSlots}
+                          disabled={acceptingJob}
+                          selected={selectedJobProposed}
+                          timeZone={timeZone}
+                          onSelect={setSelectedJobProposed}
+                        />
+                        {acceptError ? (
+                          <p className="mt-2 font-body text-[12px] font-semibold text-rose-600">
+                            {acceptError}
+                          </p>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={acceptingJob || !selectedJobProposed}
+                          onClick={() => void acceptJobProposed()}
+                          className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            {acceptingJob
+                              ? "progress_activity"
+                              : "event_available"}
+                          </span>
+                          {acceptingJob
+                            ? "Confirming…"
+                            : "Accept this job day"}
+                        </button>
+                      </ScheduleSubsection>
+                    ) : null}
+
+                    {booking.customerAcceptedJobSlot &&
+                    !booking.bookingId &&
+                    booking.quotation?.customerDecision === "accepted" ? (
+                      <ScheduleSubsection
+                        category="job"
+                        label="Your accepted job day"
+                        hint="The business will schedule the job around this day."
+                      >
+                        <ScheduleSlotsList
+                          slots={[booking.customerAcceptedJobSlot]}
+                          category="job"
+                          variant="confirmed"
+                          timeZone={timeZone}
+                        />
+                      </ScheduleSubsection>
+                    ) : null}
+
+                    {booking.jobScheduledSlot && booking.bookingId ? (
+                      <ScheduleSubsection
+                        category="job"
+                        label="Confirmed job day"
+                        hint="When the business will do the work."
+                      >
+                        <ScheduleSlotsList
+                          slots={[booking.jobScheduledSlot]}
+                          category="job"
+                          variant="scheduled"
+                          timeZone={timeZone}
+                          timeWindow={formatVisitWindow(
+                            booking.jobScheduledStartTime,
+                            booking.jobScheduledEndTime,
+                          )}
+                        />
+                      </ScheduleSubsection>
+                    ) : null}
+                  </ScheduleCategoryPanel>
+                ) : null}
+              </div>
+            );
+          })()}
 
           {booking.ownerNote ? (
             <BookingDetailRow icon="chat" label="Message from business">

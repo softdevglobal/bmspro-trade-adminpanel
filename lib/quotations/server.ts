@@ -25,6 +25,7 @@ import {
   type InspectionRequestCreatedSource,
   type InspectionRequestStatus,
   type InspectionRequestType,
+  type InspectionSlot,
   REQUEST_STATUSES,
   parseCreatedSource,
 } from "@/lib/inspection/types";
@@ -1877,6 +1878,9 @@ export async function createStandaloneQuotation(
     createdSource: input.createdSource ?? "quotation_direct",
     address,
     preferredSlots: [],
+    jobPreferredSlots: [],
+    adminJobPreferredSlots: [],
+    jobProposedSlots: [],
     ownerProposedSlots: [],
     scheduledSlot: null,
     scheduledStartTime: null,
@@ -2348,13 +2352,16 @@ async function applyQuotationCustomerDecision(
   requestSnap: FirebaseFirestore.DocumentSnapshot,
   quotationId: string,
   decision: "accepted" | "rejected",
-  options: { notifyBusiness?: boolean } = {},
+  options: {
+    notifyBusiness?: boolean;
+    jobPreferredSlots?: InspectionSlot[];
+  } = {},
 ): Promise<
   | { ok: true; request: ReturnType<typeof mapInspectionDoc> }
   | { ok: false; status: number; error: string }
 > {
   const data = requestSnap.data() ?? {};
-  const request = mapInspectionDoc(requestSnap.id, data);
+  let request = mapInspectionDoc(requestSnap.id, data);
   const summary = request.quotation;
 
   if (!summary || summary.id !== quotationId) {
@@ -2381,6 +2388,11 @@ async function applyQuotationCustomerDecision(
   }
 
   const decidedAt = FieldValue.serverTimestamp();
+  const jobSlots =
+    decision === "accepted" && options.jobPreferredSlots?.length
+      ? options.jobPreferredSlots
+      : null;
+
   await adminDb
     .collection(QUOTATION_COLLECTION)
     .doc(quotationId)
@@ -2401,6 +2413,7 @@ async function applyQuotationCustomerDecision(
         customerDecision: decision,
         customerDecisionAt: decidedAt,
       },
+      ...(jobSlots ? { jobPreferredSlots: jobSlots } : {}),
       updatedAt: decidedAt,
     },
     { merge: true },
@@ -2408,6 +2421,7 @@ async function applyQuotationCustomerDecision(
 
   const updatedRequest = {
     ...request,
+    ...(jobSlots ? { jobPreferredSlots: jobSlots } : {}),
     quotation: summary
       ? {
           ...summary,
@@ -2416,6 +2430,7 @@ async function applyQuotationCustomerDecision(
         }
       : null,
   };
+  request = updatedRequest;
 
   if (options.notifyBusiness) {
     try {
@@ -2453,6 +2468,7 @@ export async function customerDecideQuotation(
   requestId: string,
   identity: CustomerOwnershipIdentity,
   decision: "accepted" | "rejected",
+  jobPreferredSlots?: InspectionSlot[],
 ): Promise<
   | { ok: true }
   | { ok: false; status: number; error: string }
@@ -2484,7 +2500,12 @@ export async function customerDecideQuotation(
     snap,
     summary.id,
     decision,
-    { notifyBusiness: true },
+    {
+      notifyBusiness: true,
+      ...(decision === "accepted" && jobPreferredSlots?.length
+        ? { jobPreferredSlots }
+        : {}),
+    },
   );
   if (!result.ok) return result;
   return { ok: true };

@@ -21,6 +21,7 @@ import {
 import {
   enrichRequestsWithInvoices,
   enrichRequestsWithJobAssignees,
+  type CustomerJobEnrichment,
 } from "@/lib/invoices/enrich-customer-requests";
 import { toMillis } from "@/lib/onboarding/services/display";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
@@ -28,11 +29,11 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-export type CustomerBooking = InspectionRequestDetail & {
+export type CustomerBooking = InspectionRequestDetail &
+  CustomerJobEnrichment & {
   businessName: string | null;
   bookingSlug: string | null;
   businessTimezone: string;
-  jobAssignedTo: InspectionAssignment | null;
 };
 
 function parseAddress(raw: unknown): InspectionAddress {
@@ -137,6 +138,13 @@ function mapBookingDoc(
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),
+    jobPreferredSlots: parseSlots(data.jobPreferredSlots),
+    adminJobPreferredSlots: parseSlots(data.adminJobPreferredSlots),
+    jobProposedSlots: parseSlots(data.jobProposedSlots),
+    customerAcceptedJobSlot: (() => {
+      const slots = parseSlots([data.customerAcceptedJobSlot]);
+      return slots[0] ?? null;
+    })(),
     scheduledSlot: (() => {
       const slots = parseSlots([data.scheduledSlot]);
       return slots[0] ?? null;
@@ -303,6 +311,9 @@ export async function GET(request: Request) {
         bookingSlug: summary?.bookingSlug ?? null,
         businessTimezone: summary?.businessTimezone ?? PLATFORM_TIME_ZONE,
         jobAssignedTo: req.jobAssignedTo ?? null,
+        jobScheduledSlot: req.jobScheduledSlot ?? null,
+        jobScheduledStartTime: req.jobScheduledStartTime ?? null,
+        jobScheduledEndTime: req.jobScheduledEndTime ?? null,
       } satisfies CustomerBooking;
     })
     .sort(

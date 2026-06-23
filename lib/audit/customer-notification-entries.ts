@@ -29,6 +29,10 @@ export const CUSTOMER_NOTIFICATION_TYPE_LABELS: Record<NotificationType, string>
     quotation_sent: "Quotation sent",
     quotation_accepted: "Quotation accepted",
     quotation_rejected: "Quotation rejected",
+    leave_requested: "Leave request",
+    leave_assignment_conflict: "Schedule conflict",
+    staff_off_day: "Staff off day",
+    schedule_reminder: "Schedule reminder",
     system_message: "System message",
   };
 

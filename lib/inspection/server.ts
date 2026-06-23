@@ -32,6 +32,7 @@ import {
   notifyBusinessOfNewRequest,
   notifyCustomerOfAssignment,
   notifyCustomerOfNewRequest,
+  notifyCustomerOfJobScheduled,
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
@@ -404,11 +405,7 @@ export async function applyOwnerAction(
       };
     }
     const summary = await loadBusinessSummary(businessId);
-    await notifyCustomerOfStatusChange(
-      created.request,
-      "scheduled",
-      summary,
-    );
+    await notifyCustomerOfJobScheduled(created.booking, summary);
     await logAuditEvent({
       businessId,
       category: "booking",
@@ -728,6 +725,189 @@ export async function customerAcceptProposedSlot(
     },
     source: "customer_portal",
     summary: `Customer accepted a proposed time for inspection ${request.requestCode ?? id}`,
+    targetId: id,
+    targetLabel: request.serviceName || request.customer.fullName || null,
+    metadata: {
+      requestCode: request.requestCode ?? null,
+      slot: matched,
+    },
+  });
+
+  return { ok: true, request };
+}
+
+/** Admin proposes alternative job days to the customer after quotation acceptance. */
+export async function proposeJobDatesToCustomer(
+  id: string,
+  businessId: string,
+  slots: InspectionSlot[],
+  note?: string | null,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+  const data = snap.data() ?? {};
+  if (data.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const request = mapInspectionDoc(snap.id, data);
+  if (!request.quotation || request.quotation.customerDecision !== "accepted") {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "Job days can only be proposed after the customer accepts the quotation.",
+    };
+  }
+  if (request.bookingId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This request already has a scheduled job.",
+    };
+  }
+
+  const trimmedNote =
+    typeof note === "string" && note.trim() ? note.trim() : null;
+
+  await snap.ref.set(
+    {
+      jobProposedSlots: slots,
+      adminJobPreferredSlots: slots,
+      customerAcceptedJobSlot: null,
+      ...(trimmedNote ? { ownerNote: trimmedNote } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  const after = await snap.ref.get();
+  const updated = mapInspectionDoc(snap.id, after.data() ?? {});
+
+  try {
+    const { notifyCustomerOfJobDatesProposed } = await import(
+      "@/lib/notifications/server"
+    );
+    const summary = await loadBusinessSummary(businessId);
+    await notifyCustomerOfJobDatesProposed(updated, summary);
+  } catch (error) {
+    console.error("job dates proposed notification failed:", error);
+  }
+
+  return { ok: true, request: updated };
+}
+
+/** @deprecated Use proposeJobDatesToCustomer */
+export async function updateAdminJobPreferredSlots(
+  id: string,
+  businessId: string,
+  slots: InspectionSlot[],
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  return proposeJobDatesToCustomer(id, businessId, slots);
+}
+
+/** Customer accepts one of the admin-proposed job days. */
+export async function customerAcceptJobProposedSlot(
+  id: string,
+  identity: CustomerOwnershipIdentity,
+  slot: InspectionSlot,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+  const ref = snap.ref;
+  const current = mapInspectionDoc(snap.id, snap.data() ?? {});
+
+  if (!customerOwnsRequestRecord(current, identity)) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (!current.quotation || current.quotation.customerDecision !== "accepted") {
+    return {
+      ok: false,
+      status: 400,
+      error: "There are no proposed job days to accept right now.",
+    };
+  }
+  if (current.bookingId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This job has already been scheduled.",
+    };
+  }
+  if (current.jobProposedSlots.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "There are no proposed job days to accept right now.",
+    };
+  }
+
+  const matched = current.jobProposedSlots.find(
+    (option) =>
+      option.date === slot.date && option.timeRange === slot.timeRange,
+  );
+  if (!matched) {
+    return {
+      ok: false,
+      status: 400,
+      error: "That day is no longer offered. Please pick another option.",
+    };
+  }
+
+  if (await isBusinessClosedOnDate(current.businessId, matched.date)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "This business is closed on the selected date. Please choose another day.",
+    };
+  }
+
+  await ref.update({
+    customerAcceptedJobSlot: matched,
+    jobProposedSlots: [],
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const after = await ref.get();
+  const request = mapInspectionDoc(ref.id, after.data() ?? {});
+
+  try {
+    const { notifyBusinessOfCustomerJobDateAcceptance } = await import(
+      "@/lib/notifications/server"
+    );
+    const summary = await loadBusinessSummary(request.businessId);
+    await notifyBusinessOfCustomerJobDateAcceptance(request, summary);
+  } catch (error) {
+    console.error("customer job date acceptance notification failed:", error);
+  }
+
+  await logAuditEvent({
+    businessId: request.businessId,
+    category: "booking",
+    action: "booking.job_date_accepted",
+    actor: {
+      uid: identity.customerId,
+      role: "customer",
+      name: request.customer.fullName || null,
+      email: identity.customerEmail || request.customer.email || null,
+    },
+    source: "customer_portal",
+    summary: `Customer accepted a proposed job day for ${request.requestCode ?? id}`,
     targetId: id,
     targetLabel: request.serviceName || request.customer.fullName || null,
     metadata: {

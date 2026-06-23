@@ -706,6 +706,16 @@ function eventTimeLabel(
   const preferred = card.preferredSlots.find((slot) => slot.date === date);
   if (preferred) return TIME_RANGE_SHORT_LABELS[preferred.timeRange];
 
+  const jobPreferred = card.jobPreferredSlots.find((slot) => slot.date === date);
+  if (jobPreferred) return TIME_RANGE_SHORT_LABELS[jobPreferred.timeRange];
+
+  const adminJobPreferred = card.adminJobPreferredSlots.find(
+    (slot) => slot.date === date,
+  );
+  if (adminJobPreferred) {
+    return TIME_RANGE_SHORT_LABELS[adminJobPreferred.timeRange];
+  }
+
   return "Time TBC";
 }
 

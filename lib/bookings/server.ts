@@ -34,13 +34,13 @@ import {
 } from "@/lib/quotations/server";
 import type { QuotationLineItem } from "@/lib/quotations/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
-import { notifyCustomerOfStatusChange } from "@/lib/notifications/server";
 import { adminDb } from "@/lib/firebase/admin";
-import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
 import {
   notifyCustomerOfBookingOnTheWay,
   notifyCustomerOfJobCompleted,
+  notifyCustomerOfJobScheduled,
 } from "@/lib/notifications/server";
+import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import type { BookingStatus } from "@/lib/bookings/types";
@@ -1327,7 +1327,7 @@ export async function createDirectJob(
 
   const summary = await loadBusinessSummary(businessId);
   try {
-    await notifyCustomerOfStatusChange(request, "scheduled", summary);
+    await notifyCustomerOfJobScheduled(booking, summary);
   } catch (error) {
     console.error("[direct-job] customer notification failed:", error);
   }

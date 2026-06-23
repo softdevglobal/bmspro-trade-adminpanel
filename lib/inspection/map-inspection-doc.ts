@@ -125,6 +125,13 @@ export function mapInspectionDoc(
     address: parseAddress(data.address),
     preferredSlots: parseSlots(data.preferredSlots),
     ownerProposedSlots: parseSlots(data.ownerProposedSlots),
+    jobPreferredSlots: parseSlots(data.jobPreferredSlots),
+    adminJobPreferredSlots: parseSlots(data.adminJobPreferredSlots),
+    jobProposedSlots: parseSlots(data.jobProposedSlots),
+    customerAcceptedJobSlot: (() => {
+      const slots = parseSlots([data.customerAcceptedJobSlot]);
+      return slots[0] ?? null;
+    })(),
     scheduledSlot: (() => {
       const slots = parseSlots([data.scheduledSlot]);
       return slots[0] ?? null;
