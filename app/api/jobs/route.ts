@@ -3,6 +3,8 @@ import { actorRoleFromClaim } from "@/lib/audit/types";
 import { createDirectJob, listBusinessBookings } from "@/lib/bookings/server";
 import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
 import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
+import { parseWorkingHoursFromBusiness } from "@/lib/calendar/working-hours";
+import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   parseInspectionRequestInput,
@@ -84,12 +86,16 @@ function deriveScheduleFromPreferredSlots(
 function resolveJobSchedule(
   payload: Record<string, unknown>,
   preferredSlots: InspectionSlot[],
+  workingHours: BusinessWorkingHours,
 ): {
   slot: InspectionSlot;
   startTime: string;
   endTime: string;
 } | null {
-  const calendar = parseCalendarScheduleInput(payload.calendarSchedule);
+  const calendar = parseCalendarScheduleInput(
+    payload.calendarSchedule,
+    workingHours,
+  );
   if (calendar) {
     return {
       slot: {
@@ -157,7 +163,12 @@ export async function POST(request: Request) {
     return NextResponse.json(parsed, { status: 400 });
   }
 
-  const jobSchedule = resolveJobSchedule(payload, parsed.value.preferredSlots);
+  const workingHours = parseWorkingHoursFromBusiness(businessData);
+  const jobSchedule = resolveJobSchedule(
+    payload,
+    parsed.value.preferredSlots,
+    workingHours,
+  );
 
   if (!jobSchedule) {
     return NextResponse.json(

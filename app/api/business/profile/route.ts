@@ -6,6 +6,7 @@
  */
 
 import { parseSlotCapacityInput } from "@/lib/calendar/slot-capacity";
+import { parseWorkingHoursInput } from "@/lib/calendar/working-hours";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import {
   getBusinessProfile,
@@ -94,6 +95,7 @@ export async function PATCH(request: Request) {
     serviceAreas?: string[];
     slotCapacityJobs?: number;
     slotCapacityInspectionRequests?: number;
+    workingHours?: { startTime: string; endTime: string };
   } = {};
 
   if ("businessName" in raw) {
@@ -279,6 +281,24 @@ export async function PATCH(request: Request) {
     updates.slotCapacityJobs = parsed.value.maxJobsPerHour;
     updates.slotCapacityInspectionRequests =
       parsed.value.maxInspectionsPerHour;
+  }
+
+  if ("workingHours" in raw) {
+    if (!raw.workingHours || typeof raw.workingHours !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "Enter valid working hours." },
+        { status: 400 },
+      );
+    }
+    const hoursRaw = raw.workingHours as Record<string, unknown>;
+    const parsed = parseWorkingHoursInput(hoursRaw.startTime, hoursRaw.endTime);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error },
+        { status: 400 },
+      );
+    }
+    updates.workingHours = parsed.value;
   }
 
   const current = await getBusinessProfile(auth.businessId);

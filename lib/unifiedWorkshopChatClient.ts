@@ -32,6 +32,7 @@ export type OwnerClosedNotice = {
 export type UnifiedChatSnapshot = {
   messages: UnifiedChatMessage[];
   unreadCount: number;
+  supportUnread: number;
   preferredCcChatId: string | null;
   supportConversationId: string | null;
   supportStatus: SupportConversationStatus;
@@ -274,6 +275,7 @@ export function subscribeUnifiedWorkshopChat(
       unreadCount: panelOpen
         ? 0
         : state.supportUnread + state.ccUnread,
+      supportUnread: panelOpen ? 0 : state.supportUnread,
       preferredCcChatId: state.preferredCcChatId,
       supportConversationId: state.supportConversationId,
       supportStatus: state.supportStatus,

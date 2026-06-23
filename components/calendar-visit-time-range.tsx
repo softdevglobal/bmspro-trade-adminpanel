@@ -1,9 +1,10 @@
 "use client";
 
 import {
-  CALENDAR_SLOT_END_HOUR,
-  CALENDAR_SLOT_START_HOUR,
-} from "@/lib/calendar/time-slots";
+  DEFAULT_WORKING_HOURS,
+  resolveCalendarSlotBounds,
+  type BusinessWorkingHours,
+} from "@/lib/calendar/working-hours";
 import { validateCalendarVisitWindow } from "@/lib/calendar/visit-window";
 import { parseClockMinutes } from "@/lib/leave/clock";
 import {
@@ -24,13 +25,12 @@ function minutesFromMidnight(clock: string): number {
   return h * 60 + m;
 }
 
-export function calendarVisitTimeOptions(): { value: string; label: string }[] {
+export function calendarVisitTimeOptions(
+  workingHours: BusinessWorkingHours = DEFAULT_WORKING_HOURS,
+): { value: string; label: string }[] {
+  const { startHour, endHour } = resolveCalendarSlotBounds(workingHours);
   const options: { value: string; label: string }[] = [];
-  for (
-    let hour = CALENDAR_SLOT_START_HOUR;
-    hour <= CALENDAR_SLOT_END_HOUR;
-    hour += 1
-  ) {
+  for (let hour = startHour; hour <= endHour; hour += 1) {
     const value = `${String(hour).padStart(2, "0")}:00`;
     const label = formatClockTime(value);
     if (label) options.push({ value, label });
@@ -38,13 +38,14 @@ export function calendarVisitTimeOptions(): { value: string; label: string }[] {
   return options;
 }
 
-export function defaultCalendarVisitEnd(startTime: string): string {
+export function defaultCalendarVisitEnd(
+  startTime: string,
+  workingHours: BusinessWorkingHours = DEFAULT_WORKING_HOURS,
+): string {
   const startMin = parseClockMinutes(startTime);
-  if (startMin == null) return "09:00";
-  const next = Math.min(
-    startMin + CALENDAR_VISIT_STEP_MINUTES,
-    CALENDAR_SLOT_END_HOUR * 60,
-  );
+  const { endHour } = resolveCalendarSlotBounds(workingHours);
+  if (startMin == null) return `${String(resolveCalendarSlotBounds(workingHours).startHour + 1).padStart(2, "0")}:00`;
+  const next = Math.min(startMin + CALENDAR_VISIT_STEP_MINUTES, endHour * 60);
   const hour = Math.floor(next / 60);
   return `${String(hour).padStart(2, "0")}:00`;
 }
@@ -64,16 +65,21 @@ export function CalendarVisitTimeRangeFields({
   startTime,
   endTime,
   disabled = false,
+  workingHours = DEFAULT_WORKING_HOURS,
   onStartTimeChange,
   onEndTimeChange,
 }: {
   startTime: string;
   endTime: string;
   disabled?: boolean;
+  workingHours?: BusinessWorkingHours;
   onStartTimeChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
 }) {
-  const options = useMemo(() => calendarVisitTimeOptions(), []);
+  const options = useMemo(
+    () => calendarVisitTimeOptions(workingHours),
+    [workingHours],
+  );
   const startValid = isClockTime(startTime);
 
   const endOptions = useMemo(() => {

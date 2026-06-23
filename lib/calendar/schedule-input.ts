@@ -1,4 +1,8 @@
 import { isClockTime } from "@/lib/inspection/types";
+import {
+  DEFAULT_WORKING_HOURS,
+  type BusinessWorkingHours,
+} from "@/lib/calendar/working-hours";
 import { validateCalendarVisitWindow } from "@/lib/calendar/visit-window";
 
 export type CalendarScheduleInput = {
@@ -13,6 +17,7 @@ function isIsoDate(value: string): boolean {
 
 export function parseCalendarScheduleInput(
   raw: unknown,
+  workingHours: BusinessWorkingHours = DEFAULT_WORKING_HOURS,
 ): CalendarScheduleInput | null {
   if (!raw || typeof raw !== "object") return null;
   const input = raw as Record<string, unknown>;
@@ -22,6 +27,6 @@ export function parseCalendarScheduleInput(
   const endTime = typeof input.endTime === "string" ? input.endTime.trim() : "";
   if (!isIsoDate(date)) return null;
   if (!isClockTime(startTime) || !isClockTime(endTime)) return null;
-  if (validateCalendarVisitWindow(startTime, endTime)) return null;
+  if (validateCalendarVisitWindow(startTime, endTime, workingHours)) return null;
   return { date, startTime, endTime };
 }
