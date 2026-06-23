@@ -1,5 +1,10 @@
 import "server-only";
 import { parseSlotCapacityFromBusiness } from "@/lib/calendar/slot-capacity";
+import {
+  DEFAULT_WORKING_HOURS,
+  parseWorkingHoursFromBusiness,
+  type BusinessWorkingHours,
+} from "@/lib/calendar/working-hours";
 import { assertBusinessActive } from "@/lib/onboarding/business-status";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
@@ -317,6 +322,7 @@ function businessDocument(
     createdByEmail: options.createdByEmail ?? null,
     createdAt: now,
     updatedAt: now,
+    workingHours: DEFAULT_WORKING_HOURS,
   };
 }
 
@@ -346,6 +352,7 @@ export type BusinessProfile = {
   serviceAreas: string[];
   slotCapacityJobs: number;
   slotCapacityInspectionRequests: number;
+  workingHours: BusinessWorkingHours;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -424,6 +431,7 @@ export async function getBusinessProfile(
     slotCapacityJobs: parseSlotCapacityFromBusiness(data).maxJobsPerHour,
     slotCapacityInspectionRequests:
       parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
+    workingHours: parseWorkingHoursFromBusiness(data),
   };
 }
 
@@ -444,6 +452,7 @@ export async function updateBusinessProfile(
     serviceAreas?: string[];
     slotCapacityJobs?: number;
     slotCapacityInspectionRequests?: number;
+    workingHours?: BusinessWorkingHours;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -503,6 +512,10 @@ export async function updateBusinessProfile(
 
   if ("slotCapacityInspectionRequests" in updates) {
     payload.slotCapacityInspectionRequests = updates.slotCapacityInspectionRequests;
+  }
+
+  if ("workingHours" in updates && updates.workingHours) {
+    payload.workingHours = updates.workingHours;
   }
 
   await adminDb.collection("businesses").doc(businessId).update(payload);

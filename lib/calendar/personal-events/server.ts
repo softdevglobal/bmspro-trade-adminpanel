@@ -1,5 +1,6 @@
 import "server-only";
 
+import { loadBusinessWorkingHours } from "@/lib/calendar/slot-occupancy";
 import { validateCalendarVisitWindow } from "@/lib/calendar/visit-window";
 import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
 import { adminDb } from "@/lib/firebase/admin";
@@ -63,9 +64,11 @@ export async function createPersonalCalendarEvent(
   | { ok: true; event: PersonalCalendarEvent }
   | { ok: false; error: string }
 > {
+  const workingHours = await loadBusinessWorkingHours(businessId);
   const windowError = validateCalendarVisitWindow(
     input.startTime,
     input.endTime,
+    workingHours,
   );
   if (windowError) {
     return { ok: false, error: windowError };
@@ -128,9 +131,11 @@ export async function updatePersonalCalendarEvent(
     return { ok: false, status: 404, error: "Event not found." };
   }
 
+  const workingHours = await loadBusinessWorkingHours(businessId);
   const windowError = validateCalendarVisitWindow(
     input.startTime,
     input.endTime,
+    workingHours,
   );
   if (windowError) {
     return { ok: false, status: 400, error: windowError };
