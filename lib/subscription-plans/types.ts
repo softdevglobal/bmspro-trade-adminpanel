@@ -17,6 +17,7 @@ export type SubscriptionPlan = {
   active: boolean;
   hidden: boolean;
   stripePriceId: string | null;
+  stripeProductId: string | null;
   trialDays: number;
   plan_key: string | null;
   billingCycle: BillingCycle;
@@ -40,6 +41,7 @@ export type SubscriptionPlanInput = {
   active?: boolean;
   hidden?: boolean;
   stripePriceId?: string | null;
+  stripeProductId?: string | null;
   trialDays?: number;
   plan_key?: string | null;
   billingCycle?: BillingCycle;

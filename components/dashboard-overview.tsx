@@ -17,9 +17,10 @@ import {
   resolvePlatformTimeZone,
 } from "@/lib/platform/timezone";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
+import { useStripeCheckoutReturn } from "@/lib/stripe/use-stripe-checkout-return";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 const QUICK_ACTIONS = [
   {
@@ -160,6 +161,7 @@ export function DashboardOverview() {
 
 function BusinessDashboardOverview() {
   const profile = useBusinessProfile();
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
   const { bookings, loading: bookingsLoading } = useBookings();
   const { requests, loading: requestsLoading } = useInspectionRequests();
   const { notifications, loading: notificationsLoading, unread } =
@@ -185,9 +187,28 @@ function BusinessDashboardOverview() {
   const businessName = profile?.businessName?.trim() || "your business";
   const greeting = greetingForHour(currentHourInTimeZone(timeZone));
 
+  useStripeCheckoutReturn({
+    onSuccess: (result) => {
+      setCheckoutNotice(
+        result.type === "subscription"
+          ? "Subscription payment confirmed. Your account is active."
+          : "Payment confirmed.",
+      );
+    },
+    onCanceled: () => {
+      setCheckoutNotice("Checkout was canceled. No charges were made.");
+    },
+    onError: (message) => setCheckoutNotice(message),
+  });
+
   return (
     <DashboardShell title="Dashboard" hidePageHeader>
       <div className="space-y-6">
+        {checkoutNotice ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 font-body text-[12px] font-semibold text-emerald-800">
+            {checkoutNotice}
+          </p>
+        ) : null}
         <motion.section
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}

@@ -100,7 +100,41 @@ export type SendSmsInput = {
   message: string;
   /** When set, enforces tenant SMS quota before sending. */
   businessId?: string | null;
+  /** Display name for the sending tenant (resolved from business when omitted). */
+  senderName?: string | null;
+  /** Optional recipient display name. */
+  receiverName?: string | null;
+  /** Short label for why the SMS was sent (e.g. quotation_sent). */
+  source?: string | null;
 };
+
+type SmsLogContext = {
+  businessId: string | null;
+  senderName: string | null;
+  receiverName: string | null;
+  source: string | null;
+  message: string;
+  rawTo: string | null | undefined;
+};
+
+async function recordSmsLog(
+  ctx: SmsLogContext,
+  receiverPhone: string,
+  status: "sent" | "failed" | "skipped",
+  statusDetail: string,
+): Promise<void> {
+  const { appendSmsLog } = await import("@/lib/sms/sms-log-server");
+  await appendSmsLog({
+    businessId: ctx.businessId,
+    senderName: ctx.senderName,
+    receiverPhone,
+    receiverName: ctx.receiverName,
+    message: ctx.message,
+    status,
+    statusDetail,
+    source: ctx.source,
+  });
+}
 
 async function postSmsToGateway(
   recipients: string[],
@@ -149,45 +183,72 @@ async function postSmsToGateway(
  */
 export async function sendSms(input: SendSmsInput): Promise<boolean> {
   const cfg = config();
+  const businessId = input.businessId?.trim() || null;
+  const message = input.message?.trim() ?? "";
+  const logCtx: SmsLogContext = {
+    businessId,
+    senderName: input.senderName ?? null,
+    receiverName: input.receiverName ?? null,
+    source: input.source ?? null,
+    message,
+    rawTo: input.to,
+  };
 
   if (!cfg.apiKey || !cfg.deviceId) {
     console.warn("[sms] skipped — TEXTBEE not configured.", {
       hasApiKey: Boolean(cfg.apiKey),
       hasDeviceId: Boolean(cfg.deviceId),
     });
+    await recordSmsLog(
+      logCtx,
+      input.to?.trim() || "—",
+      "skipped",
+      "gateway_not_configured",
+    );
     return false;
   }
 
   const recipient = toE164(input.to, cfg.defaultCountryCode);
   if (!recipient) {
     console.warn("[sms] skipped — no valid recipient phone number.");
+    await recordSmsLog(
+      logCtx,
+      input.to?.trim() || "—",
+      "skipped",
+      "invalid_recipient",
+    );
     return false;
   }
 
-  const message = input.message?.trim();
   if (!message) {
     console.warn("[sms] skipped — empty message.");
+    await recordSmsLog(logCtx, recipient, "skipped", "empty_message");
     return false;
   }
 
-  const businessId = input.businessId?.trim() || null;
   if (businessId) {
     const reserved = await tryConsumeSmsCredits(businessId, 1);
-    if (!reserved) return false;
+    if (!reserved) {
+      await recordSmsLog(logCtx, recipient, "skipped", "quota_exceeded");
+      return false;
+    }
   }
 
   try {
     const sent = await postSmsToGateway([recipient], message);
     if (!sent) {
       if (businessId) await releaseSmsCredits(businessId, 1);
+      await recordSmsLog(logCtx, recipient, "failed", "gateway_rejected");
       return false;
     }
 
     console.log("[sms] sent OK", { to: recipient, businessId });
+    await recordSmsLog(logCtx, recipient, "sent", "delivered");
     return true;
   } catch (error) {
     if (businessId) await releaseSmsCredits(businessId, 1);
     console.error("[sms] send FAILED", { to: recipient, error });
+    await recordSmsLog(logCtx, recipient, "failed", "gateway_error");
     return false;
   }
 }
@@ -200,13 +261,34 @@ export async function sendBulkSms(
   recipients: Array<string | null | undefined>,
   message: string,
   businessId?: string | null,
+  meta?: {
+    senderName?: string | null;
+    source?: string | null;
+  },
 ): Promise<number> {
   const cfg = config();
+  const text = message?.trim() ?? "";
+  const tenantId = businessId?.trim() || null;
+  const logBase = {
+    businessId: tenantId,
+    senderName: meta?.senderName ?? null,
+    receiverName: null as string | null,
+    source: meta?.source ?? null,
+    message: text,
+  };
+
   if (!cfg.apiKey || !cfg.deviceId) {
     console.warn("[sms] bulk skipped — TEXTBEE not configured.");
+    for (const raw of recipients) {
+      await recordSmsLog(
+        { ...logBase, rawTo: raw },
+        raw?.trim() || "—",
+        "skipped",
+        "gateway_not_configured",
+      );
+    }
     return 0;
   }
-  const text = message?.trim();
   if (!text) return 0;
 
   const normalized = Array.from(
@@ -216,18 +298,45 @@ export async function sendBulkSms(
         .filter((r): r is string => !!r),
     ),
   );
-  if (normalized.length === 0) return 0;
+  if (normalized.length === 0) {
+    for (const raw of recipients) {
+      await recordSmsLog(
+        { ...logBase, rawTo: raw },
+        raw?.trim() || "—",
+        "skipped",
+        "invalid_recipient",
+      );
+    }
+    return 0;
+  }
 
-  const tenantId = businessId?.trim() || null;
   if (tenantId) {
     const reserved = await tryConsumeSmsCredits(tenantId, normalized.length);
-    if (!reserved) return 0;
+    if (!reserved) {
+      for (const phone of normalized) {
+        await recordSmsLog(
+          { ...logBase, rawTo: phone },
+          phone,
+          "skipped",
+          "quota_exceeded",
+        );
+      }
+      return 0;
+    }
   }
 
   try {
     const sent = await postSmsToGateway(normalized, text);
     if (!sent) {
       if (tenantId) await releaseSmsCredits(tenantId, normalized.length);
+      for (const phone of normalized) {
+        await recordSmsLog(
+          { ...logBase, rawTo: phone },
+          phone,
+          "failed",
+          "gateway_rejected",
+        );
+      }
       return 0;
     }
 
@@ -235,10 +344,26 @@ export async function sendBulkSms(
       count: normalized.length,
       businessId: tenantId,
     });
+    for (const phone of normalized) {
+      await recordSmsLog(
+        { ...logBase, rawTo: phone },
+        phone,
+        "sent",
+        "delivered",
+      );
+    }
     return normalized.length;
   } catch (error) {
     if (tenantId) await releaseSmsCredits(tenantId, normalized.length);
     console.error("[sms] bulk send FAILED", { error });
+    for (const phone of normalized) {
+      await recordSmsLog(
+        { ...logBase, rawTo: phone },
+        phone,
+        "failed",
+        "gateway_error",
+      );
+    }
     return 0;
   }
 }

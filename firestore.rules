@@ -415,6 +415,13 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // SMS delivery audit log — written via Admin SDK when messages are sent.
+    match /sms_logs/{logId} {
+      allow read: if isSuperAdmin()
+        || userOwnsBusiness(resource.data.businessId);
+      allow create, update, delete: if false;
+    }
+
     // Staff time-off / leave requests. Staff create their own (pending); owners
     // and the requester read; approvals/rejections happen via the Admin SDK.
     match /leaveRequests/{leaveId} {

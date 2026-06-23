@@ -20,6 +20,7 @@
     "pdfjs-dist": "^6.0.227",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "stripe": "^22.2.2",
     "zeptomail": "^8.0.0"
   },
   "devDependencies": {

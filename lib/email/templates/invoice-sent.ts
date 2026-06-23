@@ -150,6 +150,8 @@ export async function sendInvoiceSentEmail(
     await sendSms({
       to: input.customerPhone,
       businessId: input.businessId,
+      senderName: businessLabel,
+      source: "invoice_sent",
       message: `${businessLabel}: Your invoice ${input.invoiceNo.trim() || ""} for ${serviceTitle} is ready (${amountLabel} ${amount}). We've emailed you the PDF.`,
     });
   }

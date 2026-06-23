@@ -7,15 +7,23 @@ import { countPendingInspectionRequests } from "@/lib/inspection/request-counts"
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import { useSmsBalance } from "@/lib/sms/sms-balance-context";
+import { useTenantSubscription } from "@/lib/subscription/tenant-subscription-context";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 /** Today is /dashboard only — not parent of other /dashboard/* routes. */
-function isNavItemActive(pathname: string, href: string): boolean {
+function isNavItemActive(
+  pathname: string,
+  href: string,
+  exact = false,
+): boolean {
   if (href === "#") return false;
   if (href === "/dashboard") {
     return pathname === "/dashboard";
+  }
+  if (exact) {
+    return pathname === href;
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -32,8 +40,36 @@ type NavItem = {
     href: string;
     label: string;
     icon: string;
+    superAdmin?: boolean;
+    businessOwner?: boolean;
+    /** When true, only an exact path match counts as active (not sub-routes). */
+    exact?: boolean;
   }>;
 };
+
+function filterNavChildren(
+  children: NonNullable<NavItem["children"]>,
+  role: AuthRole | null,
+) {
+  return children.filter((child) => {
+    if (child.superAdmin && role !== "super_admin") return false;
+    if (child.businessOwner && role !== "business_owner") return false;
+    return true;
+  });
+}
+
+function isNavItemVisible(item: NavItem, role: AuthRole | null) {
+  if (item.roles) {
+    return role != null && item.roles.includes(role);
+  }
+  const childItems = item.children ?? [];
+  if (childItems.length > 0) {
+    return filterNavChildren(childItems, role).length > 0;
+  }
+  if (item.superAdmin && role !== "super_admin") return false;
+  if (item.businessOwner && role !== "business_owner") return false;
+  return true;
+}
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Today", icon: "calendar_today" },
@@ -105,8 +141,47 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/sms",
-    label: "SMS Credits",
+    label: "SMS",
     icon: "sms",
+    children: [
+      {
+        href: "/dashboard/sms",
+        label: "SMS Credits",
+        icon: "account_balance_wallet",
+        businessOwner: true,
+        exact: true,
+      },
+      {
+        href: "/dashboard/sms/log",
+        label: "SMS log",
+        icon: "history",
+        businessOwner: true,
+      },
+      {
+        href: "/dashboard/sms-packages",
+        label: "SMS Packages",
+        icon: "inventory_2",
+        superAdmin: true,
+        exact: true,
+      },
+      {
+        href: "/dashboard/sms-packages/usage",
+        label: "Usage & purchases",
+        icon: "assignment",
+        superAdmin: true,
+      },
+      {
+        href: "/dashboard/sms-packages/log",
+        label: "SMS log",
+        icon: "history",
+        superAdmin: true,
+      },
+    ],
+  },
+  {
+    href: "/dashboard/subscription",
+    label: "Subscription",
+    icon: "workspace_premium",
     businessOwner: true,
   },
   {
@@ -119,13 +194,21 @@ const NAV_ITEMS: NavItem[] = [
     href: "/dashboard/packages",
     label: "Packages",
     icon: "inventory_2",
-    superAdmin: true,
-  },
-  {
-    href: "/dashboard/sms-packages",
-    label: "SMS Packages",
-    icon: "sms",
-    superAdmin: true,
+    children: [
+      {
+        href: "/dashboard/packages",
+        label: "Subscription packages",
+        icon: "workspace_premium",
+        superAdmin: true,
+        exact: true,
+      },
+      {
+        href: "/dashboard/packages/usage",
+        label: "Usage & purchases",
+        icon: "assignment",
+        superAdmin: true,
+      },
+    ],
   },
   {
     href: "/dashboard/custom-messages",
@@ -166,6 +249,7 @@ export function Sidebar({
   const { pendingCount: pendingLeaveCount } = useLeaveRequests();
   const { balance: smsBalance, remaining: smsRemaining, isLow: smsIsLow } =
     useSmsBalance();
+  const { accessBlocked: subscriptionAccessBlocked } = useTenantSubscription();
   const brandName = business?.businessName?.trim() || "BMS Pro Trade";
   const brandLogo =
     role === "business_owner" ? (business?.logoUrl ?? null) : null;
@@ -186,9 +270,24 @@ export function Sidebar({
   const showLabels = isExpanded || isMobileOpen;
 
   useEffect(() => {
-    if (pathname.startsWith("/dashboard/team")) {
+    if (
+      pathname.startsWith("/dashboard/team")
+    ) {
       setOpenNavGroups((current) =>
         current.Team ? current : { ...current, Team: true },
+      );
+    }
+    if (
+      pathname.startsWith("/dashboard/sms") ||
+      pathname.startsWith("/dashboard/sms-packages")
+    ) {
+      setOpenNavGroups((current) =>
+        current.SMS ? current : { ...current, SMS: true },
+      );
+    }
+    if (pathname.startsWith("/dashboard/packages")) {
+      setOpenNavGroups((current) =>
+        current.Packages ? current : { ...current, Packages: true },
       );
     }
   }, [pathname]);
@@ -305,14 +404,12 @@ export function Sidebar({
           }`}
         >
           {NAV_ITEMS.filter((item) => {
-            if (item.roles) {
-              return role != null && item.roles.includes(role);
+            if (role === "business_owner" && subscriptionAccessBlocked) {
+              return item.href === "/dashboard/subscription";
             }
-            if (item.superAdmin && role !== "super_admin") return false;
-            if (item.businessOwner && role !== "business_owner") return false;
-            return true;
+            return isNavItemVisible(item, role);
           }).map((item) => {
-            const childItems = item.children ?? [];
+            const childItems = filterNavChildren(item.children ?? [], role);
             const hasChildren = childItems.length > 0;
             const isActive = hasChildren
               ? false
@@ -325,7 +422,8 @@ export function Sidebar({
                   ? pendingLeaveCount
                   : 0;
             const showPendingBadge = badgeCount > 0;
-            const isSmsNav = item.href === "/dashboard/sms";
+            const isSmsNav =
+              item.label === "SMS" && role === "business_owner";
             const showSmsLowWarning =
               isSmsNav && role === "business_owner" && smsIsLow;
             const showSmsCount =
@@ -423,7 +521,11 @@ export function Sidebar({
 
             if (hasChildren) {
               const childLinks = childItems.map((child) => {
-                const childActive = isNavItemActive(pathname, child.href);
+                const childActive = isNavItemActive(
+                  pathname,
+                  child.href,
+                  child.exact === true,
+                );
                 return (
                   <Link
                     key={child.href}
@@ -443,6 +545,11 @@ export function Sidebar({
                     pendingLeaveCount > 0 ? (
                       <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white">
                         {pendingLeaveCount > 99 ? "99+" : pendingLeaveCount}
+                      </span>
+                    ) : null}
+                    {child.href === "/dashboard/sms" && showSmsCount ? (
+                      <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 font-body text-[10px] font-bold tabular-nums text-on-primary">
+                        {smsCountLabel}
                       </span>
                     ) : null}
                   </Link>
@@ -473,7 +580,7 @@ export function Sidebar({
                     <div
                       className={`ml-1 flex flex-col gap-0.5 overflow-hidden border-l border-on-secondary-fixed-variant/30 pl-1 transition-[max-height,opacity] duration-300 ease-in-out ${
                         groupOpen
-                          ? "max-h-44 opacity-100"
+                          ? "max-h-56 opacity-100"
                           : "pointer-events-none max-h-0 opacity-0"
                       }`}
                       aria-hidden={!groupOpen}
@@ -486,7 +593,7 @@ export function Sidebar({
                     <>
                       <button
                         type="button"
-                        aria-label="Close team menu"
+                        aria-label={`Close ${item.label} menu`}
                         className="fixed inset-0 z-40 lg:hidden"
                         onClick={() => setFlyoutGroup(null)}
                       />
@@ -498,6 +605,7 @@ export function Sidebar({
                           const childActive = isNavItemActive(
                             pathname,
                             child.href,
+                            child.exact === true,
                           );
                           return (
                             <Link
@@ -523,6 +631,11 @@ export function Sidebar({
                                   {pendingLeaveCount > 99
                                     ? "99+"
                                     : pendingLeaveCount}
+                                </span>
+                              ) : null}
+                              {child.href === "/dashboard/sms" && showSmsCount ? (
+                                <span className="ml-auto inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 font-body text-[10px] font-bold tabular-nums text-on-primary">
+                                  {smsCountLabel}
                                 </span>
                               ) : null}
                             </Link>

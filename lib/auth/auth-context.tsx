@@ -29,7 +29,11 @@ type AuthContextValue = {
   user: User | null;
   role: AuthRole;
   businessId: string | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    options?: { skipRedirect?: boolean; redirectTo?: string },
+  ) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -263,7 +267,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (
+    email: string,
+    password: string,
+    options?: { skipRedirect?: boolean; redirectTo?: string },
+  ) => {
     clearAuthCache();
     setUser(null);
     setRole(null);
@@ -315,7 +323,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const token = await credential.user.getIdToken();
         void postSessionAudit(token, "login");
       }
-      router.replace("/dashboard");
+      if (!options?.skipRedirect) {
+        router.replace(options?.redirectTo ?? "/dashboard");
+      }
     } catch (error) {
       if (!auth.currentUser) {
         setUser(null);

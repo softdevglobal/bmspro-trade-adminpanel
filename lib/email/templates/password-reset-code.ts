@@ -68,6 +68,8 @@ export async function sendPasswordResetCodeEmail(
     await sendSms({
       to: input.phone,
       businessId: input.businessId,
+      senderName: business,
+      source: "password_reset",
       message: `${input.code} is your BMS Pro Trade${business ? ` (${business})` : ""} password reset code. It expires in 15 minutes.`,
     });
   }

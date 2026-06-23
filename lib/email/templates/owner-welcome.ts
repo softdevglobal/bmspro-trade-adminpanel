@@ -87,6 +87,8 @@ export async function sendOwnerWelcomeEmail(
     await sendSms({
       to: input.phone,
       businessId: input.businessId,
+      senderName: input.businessName,
+      source: "owner_welcome",
       message: input.temporaryPassword
         ? `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in with ${input.email} — check your email for your temporary password.`
         : `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in anytime with ${input.email}.`,

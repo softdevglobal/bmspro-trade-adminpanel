@@ -5,6 +5,7 @@ import {
   deleteSmsPackage,
   countTenantsBySmsPackage,
   listSmsPackages,
+  syncAllUnlinkedSmsPackages,
   updateSmsPackage,
 } from "@/lib/sms-packages/server";
 import type { SmsPackageInput } from "@/lib/sms-packages/types";
@@ -68,12 +69,18 @@ export async function GET(request: Request) {
     );
   }
 
+  await syncAllUnlinkedSmsPackages();
+
   const packages = await listSmsPackages({
     includeInactive: true,
     includeHidden: true,
   });
   const tenantCounts = await countTenantsBySmsPackage();
-  return NextResponse.json({ ok: true, packages, tenantCounts });
+  return NextResponse.json({
+    ok: true,
+    packages,
+    tenantCounts,
+  });
 }
 
 /** Super admin — create an SMS package. */

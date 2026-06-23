@@ -1,6 +1,6 @@
 "use client";
 
-import { CC_DIRECT_CHATS_COLLECTION } from "@/lib/chat/types";
+import { CC_DIRECT_CHATS_COLLECTION, CONVERSATIONS_COLLECTION } from "@/lib/chat/types";
 import { auth, db } from "@/lib/firebase/client";
 import {
   collection,
@@ -62,13 +62,137 @@ type ApiSupportConversation = {
   unreadForCustomer: number;
 };
 
-type ApiSupportMessage = {
-  messageId: string;
-  sender: "customer" | "agent" | "system";
-  senderName: string;
-  message: string;
-  timestamp: number | null;
+type FirestoreSupportConversation = {
+  conversationId: string;
+  status: SupportConversationStatus;
+  agentName: string | null;
+  unreadForCustomer: number;
+  closedBy: "agent" | "customer" | "system" | null;
+  closedAt: number | null;
+  updatedAt: number;
 };
+
+function mapFirestoreSupportConversation(
+  doc: { id: string; data: () => Record<string, unknown> },
+): FirestoreSupportConversation {
+  const data = doc.data();
+  const status = data.status;
+  return {
+    conversationId: doc.id,
+    status:
+      status === "waiting" || status === "connected" || status === "closed"
+        ? status
+        : "waiting",
+    agentName:
+      typeof data.agentName === "string" && data.agentName.trim()
+        ? data.agentName.trim()
+        : null,
+    unreadForCustomer:
+      typeof data.unreadForCustomer === "number" ? data.unreadForCustomer : 0,
+    closedBy:
+      data.closedBy === "agent" ||
+      data.closedBy === "customer" ||
+      data.closedBy === "system"
+        ? data.closedBy
+        : null,
+    closedAt: toMillis(data.closedAt),
+    updatedAt: toMillis(data.updatedAt),
+  };
+}
+
+function resolveOwnerSupportState(
+  docs: Array<{ id: string; data: () => Record<string, unknown> }>,
+  pinnedConversationId: string | null,
+  previousClosedNotice: OwnerClosedNotice | null,
+): {
+  conversation: ApiSupportConversation | null;
+  closedNotice: OwnerClosedNotice | null;
+  closedJustNow: boolean;
+} {
+  const mapped = docs.map(mapFirestoreSupportConversation);
+
+  let conversation: ApiSupportConversation | null = null;
+
+  if (pinnedConversationId) {
+    const pinned = mapped.find((row) => row.conversationId === pinnedConversationId);
+    if (
+      pinned &&
+      (pinned.status === "waiting" || pinned.status === "connected")
+    ) {
+      conversation = {
+        conversationId: pinned.conversationId,
+        status: pinned.status,
+        agentName: pinned.agentName,
+        unreadForCustomer: pinned.unreadForCustomer,
+      };
+    }
+  }
+
+  if (!conversation) {
+    const open = mapped
+      .filter(
+        (row) => row.status === "waiting" || row.status === "connected",
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const connected = open.find((row) => row.status === "connected");
+    const chosen = connected ?? open[0];
+    if (chosen) {
+      conversation = {
+        conversationId: chosen.conversationId,
+        status: chosen.status,
+        agentName: chosen.agentName,
+        unreadForCustomer: chosen.unreadForCustomer,
+      };
+    }
+  }
+
+  if (conversation) {
+    return { conversation, closedNotice: null, closedJustNow: false };
+  }
+
+  const latestAgentClosed = mapped
+    .filter((row) => row.status === "closed" && row.closedBy === "agent")
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+
+  const closedNotice = latestAgentClosed
+    ? {
+        message: latestAgentClosed.agentName
+          ? `Chat closed by ${latestAgentClosed.agentName}`
+          : "Chat closed by agent",
+        agentName: latestAgentClosed.agentName,
+        closedAt: latestAgentClosed.closedAt,
+      }
+    : null;
+
+  const closedJustNow =
+    closedNotice !== null &&
+    closedNotice.closedAt !== previousClosedNotice?.closedAt;
+
+  return { conversation, closedNotice, closedJustNow };
+}
+
+function mapFirestoreSupportMessage(
+  conversationId: string,
+  doc: { id: string; data: () => Record<string, unknown> },
+): UnifiedChatMessage {
+  const data = doc.data();
+  const sender =
+    data.sender === "customer" ||
+    data.sender === "agent" ||
+    data.sender === "system"
+      ? data.sender
+      : "customer";
+  return {
+    id: doc.id,
+    source: "support",
+    threadId: conversationId,
+    text: typeof data.message === "string" ? data.message : "",
+    sender,
+    senderName:
+      typeof data.senderName === "string" ? data.senderName : "Support",
+    timestamp: toMillis(data.timestamp),
+  };
+}
 
 function toMillis(value: unknown): number {
   if (value && typeof value === "object" && "toMillis" in value) {
@@ -99,64 +223,20 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
-async function parseChatJsonResponse<T>(res: Response): Promise<T | null> {
-  const contentType = res.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
-    console.error(
-      `[chat] expected JSON from ${res.url} but got HTTP ${res.status}. If this is 404 HTML, stop and restart the dev server (npm run dev).`,
-    );
-    return null;
+function clearSupportMessages(state: {
+  messages: Map<string, UnifiedChatMessage>;
+}) {
+  for (const key of [...state.messages.keys()]) {
+    if (key.startsWith("support:")) {
+      state.messages.delete(key);
+    }
   }
-  return (await res.json()) as T;
-}
-
-function mapApiSupportMessage(
-  conversationId: string,
-  message: ApiSupportMessage,
-): UnifiedChatMessage {
-  return {
-    id: message.messageId,
-    source: "support",
-    threadId: conversationId,
-    text: message.message,
-    sender: message.sender,
-    senderName: message.senderName,
-    timestamp: message.timestamp ?? Date.now(),
-  };
 }
 
 function clearPanelMessages(state: {
   messages: Map<string, UnifiedChatMessage>;
 }) {
   state.messages.clear();
-}
-
-function replaceSupportMessages(
-  state: {
-    messages: Map<string, UnifiedChatMessage>;
-  },
-  conversationId: string,
-  apiMessages: ApiSupportMessage[],
-  sessionStartedAt: number | null,
-) {
-  clearPanelMessages(state);
-
-  const cutoff =
-    sessionStartedAt !== null ? sessionStartedAt - 1000 : null;
-  const filtered =
-    cutoff === null
-      ? apiMessages
-      : apiMessages.filter(
-          (message) => (message.timestamp ?? 0) >= cutoff,
-        );
-
-  for (const message of filtered) {
-    const unified = mapApiSupportMessage(conversationId, message);
-    state.messages.set(
-      `support:${conversationId}:${unified.id}`,
-      unified,
-    );
-  }
 }
 
 export function subscribeUnifiedWorkshopChat(
@@ -168,9 +248,6 @@ export function subscribeUnifiedWorkshopChat(
 ): UnifiedChatSubscription {
   const unsubs: Unsubscribe[] = [];
   let panelOpen = options.panelOpen;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let refreshInFlight = false;
-  let refreshQueued = false;
   let pinnedSupportConversationId: string | null = null;
   let panelSessionStartedAt: number | null = null;
 
@@ -297,126 +374,141 @@ export function subscribeUnifiedWorkshopChat(
       return;
     }
     detachCcMessageListeners();
-    for (const chatId of state.ccRoomIds) {
-      attachCcMessages(chatId);
+    if (state.preferredCcChatId) {
+      attachCcMessages(state.preferredCcChatId);
     }
   }
 
-  async function refreshSupportFromApi() {
-    if (refreshInFlight) {
-      refreshQueued = true;
-      return;
+  function detachSupportMessageListeners() {
+    for (const [key, unsub] of state.messageUnsubs.entries()) {
+      if (!key.startsWith("support:")) continue;
+      unsub();
+      state.messageUnsubs.delete(key);
     }
-    refreshInFlight = true;
-    try {
-      const headers = await authHeaders();
-      const conversationRes = await fetch("/api/chat/conversations/owner", {
-        headers,
-        cache: "no-store",
-      });
-      const conversationData = await parseChatJsonResponse<{
-        ok?: boolean;
-        conversation?: ApiSupportConversation | null;
-        closedNotice?: OwnerClosedNotice | null;
-        error?: string;
-      }>(conversationRes);
-      if (!conversationData) return;
+    clearSupportMessages(state);
+  }
 
-      if (!conversationRes.ok || !conversationData.ok) {
-        console.error(
-          "[chat] conversation fetch failed:",
-          conversationData.error ?? conversationRes.status,
-        );
-        return;
-      }
+  function attachSupportMessages(conversationId: string) {
+    const key = `support:${conversationId}`;
+    if (state.messageUnsubs.has(key)) return;
 
-      const conversation = conversationData.conversation ?? null;
+    const messagesRef = collection(
+      db,
+      CONVERSATIONS_COLLECTION,
+      conversationId,
+      "messages",
+    );
 
-      if (!conversation?.conversationId) {
-        const nextClosedNotice = conversationData.closedNotice ?? null;
-        const closedJustNow =
-          nextClosedNotice !== null &&
-          nextClosedNotice.closedAt !== state.closedNotice?.closedAt;
-        pinnedSupportConversationId = null;
-        state.supportConversationId = null;
-        state.supportStatus = null;
-        state.supportAgentName = null;
-        state.supportUnread = 0;
-        state.closedNotice = nextClosedNotice;
-        clearPanelMessages(state);
-        if (closedJustNow && panelOpen) {
-          panelSessionStartedAt = Date.now();
+    const unsub = onSnapshot(
+      query(messagesRef, limit(100)),
+      (snap) => {
+        for (const existingKey of [...state.messages.keys()]) {
+          if (existingKey.startsWith(`support:${conversationId}:`)) {
+            state.messages.delete(existingKey);
+          }
+        }
+
+        const sessionCutoff =
+          panelSessionStartedAt !== null
+            ? panelSessionStartedAt - 1000
+            : null;
+
+        const mapped = snap.docs
+          .map((messageDoc) => {
+            const message = mapFirestoreSupportMessage(
+              conversationId,
+              messageDoc,
+            );
+            if (
+              sessionCutoff !== null &&
+              message.timestamp < sessionCutoff
+            ) {
+              return null;
+            }
+            return {
+              key: `support:${conversationId}:${message.id}`,
+              message,
+            };
+          })
+          .filter(
+            (item): item is NonNullable<typeof item> => item !== null,
+          );
+
+        mapped.sort((a, b) => a.message.timestamp - b.message.timestamp);
+        for (const item of mapped) {
+          state.messages.set(item.key, item.message);
         }
         emit();
-        return;
-      }
-
-      state.closedNotice = null;
-      const conversationId = conversation.conversationId;
-      pinnedSupportConversationId = conversationId;
-      state.supportConversationId = conversationId;
-      state.supportStatus = conversation.status;
-      state.supportAgentName = conversation.agentName?.trim() || null;
-      state.supportUnread =
-        typeof conversation.unreadForCustomer === "number"
-          ? conversation.unreadForCustomer
-          : 0;
-
-      if (!panelOpen) {
-        emit();
-        return;
-      }
-
-      const messagesRes = await fetch(
-        `/api/chat/conversations/owner/${encodeURIComponent(conversationId)}/messages?limit=100`,
-        { headers, cache: "no-store" },
-      );
-      const messagesData = await parseChatJsonResponse<{
-        ok?: boolean;
-        messages?: ApiSupportMessage[];
-        error?: string;
-      }>(messagesRes);
-      if (!messagesData) {
-        emit();
-        return;
-      }
-
-      if (!messagesRes.ok || !messagesData.ok || !messagesData.messages) {
-        console.error(
-          "[chat] messages fetch failed:",
-          messagesData.error ?? messagesRes.status,
-        );
-        emit();
-        return;
-      }
-
-      replaceSupportMessages(
-        state,
-        conversationId,
-        messagesData.messages,
-        panelSessionStartedAt,
-      );
-      emit();
-    } catch (error) {
-      console.error("[chat] API refresh failed:", error);
-    } finally {
-      refreshInFlight = false;
-      if (refreshQueued) {
-        refreshQueued = false;
-        void refreshSupportFromApi();
-      }
-    }
-  }
-
-  function schedulePoll() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(
-      () => {
-        void refreshSupportFromApi();
       },
-      panelOpen ? 1500 : 5000,
+      (error) => {
+        console.error("[chat] support messages listener failed:", error);
+      },
     );
+    state.messageUnsubs.set(key, unsub);
   }
+
+  function syncSupportMessageListeners() {
+    if (!panelOpen || !state.supportConversationId) {
+      detachSupportMessageListeners();
+      return;
+    }
+    detachSupportMessageListeners();
+    attachSupportMessages(state.supportConversationId);
+  }
+
+  function applySupportConversationDocs(
+    docs: Array<{ id: string; data: () => Record<string, unknown> }>,
+  ) {
+    const { conversation, closedNotice, closedJustNow } =
+      resolveOwnerSupportState(
+        docs,
+        pinnedSupportConversationId,
+        state.closedNotice,
+      );
+
+    if (!conversation?.conversationId) {
+      pinnedSupportConversationId = null;
+      state.supportConversationId = null;
+      state.supportStatus = null;
+      state.supportAgentName = null;
+      state.supportUnread = 0;
+      state.closedNotice = closedNotice;
+      detachSupportMessageListeners();
+      if (closedJustNow && panelOpen) {
+        panelSessionStartedAt = Date.now();
+      }
+      emit();
+      return;
+    }
+
+    state.closedNotice = null;
+    pinnedSupportConversationId = conversation.conversationId;
+    state.supportConversationId = conversation.conversationId;
+    state.supportStatus = conversation.status;
+    state.supportAgentName = conversation.agentName?.trim() || null;
+    state.supportUnread = conversation.unreadForCustomer;
+    syncSupportMessageListeners();
+    emit();
+  }
+
+  const supportConversationsQuery = query(
+    collection(db, CONVERSATIONS_COLLECTION),
+    where("userId", "==", uid),
+    limit(50),
+  );
+
+  unsubs.push(
+    onSnapshot(
+      supportConversationsQuery,
+      (snap) => {
+        applySupportConversationDocs(snap.docs);
+      },
+      (error) => {
+        console.error("[chat] support conversations listener failed:", error);
+        emit();
+      },
+    ),
+  );
 
   const ccQuery = query(
     collection(db, CC_DIRECT_CHATS_COLLECTION),
@@ -460,9 +552,6 @@ export function subscribeUnifiedWorkshopChat(
     ),
   );
 
-  void refreshSupportFromApi();
-  schedulePoll();
-
   function ensureSupportThread(conversationId: string) {
     pinnedSupportConversationId = conversationId;
     state.supportConversationId = conversationId;
@@ -470,8 +559,9 @@ export function subscribeUnifiedWorkshopChat(
       state.supportStatus = "waiting";
     }
     state.supportAgentName = null;
+    state.closedNotice = null;
+    syncSupportMessageListeners();
     emit();
-    void refreshSupportFromApi();
   }
 
   function ensureCcThread(chatId: string) {
@@ -485,9 +575,9 @@ export function subscribeUnifiedWorkshopChat(
 
   return {
     cleanup: () => {
-      if (pollTimer) clearInterval(pollTimer);
       for (const unsub of unsubs) unsub();
       detachCcMessageListeners();
+      detachSupportMessageListeners();
     },
     ensureSupportThread,
     ensureCcThread,
@@ -497,20 +587,19 @@ export function subscribeUnifiedWorkshopChat(
         panelSessionStartedAt = Date.now();
         clearPanelMessages(state);
         detachCcMessageListeners();
+        syncSupportMessageListeners();
+        syncCcMessageListeners();
       } else {
         panelSessionStartedAt = null;
         clearPanelMessages(state);
         detachCcMessageListeners();
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = null;
+        detachSupportMessageListeners();
       }
-      schedulePoll();
       emit();
-      if (open) {
-        void refreshSupportFromApi();
-      }
     },
-    refresh: refreshSupportFromApi,
+    refresh: async () => {
+      emit();
+    },
   };
 }
 
@@ -570,7 +659,16 @@ export async function sendUnifiedWorkshopChatMessage(
   };
 }
 
+export async function markCcRoomRead(chatId: string): Promise<void> {
+  const headers = await authHeaders();
+  await fetch(`/api/chat/cc-direct/rooms/${encodeURIComponent(chatId)}/read`, {
+    method: "POST",
+    headers,
+  });
+}
+
 export async function markAllCcRoomsRead(ccRoomIds: string[]): Promise<void> {
+  if (ccRoomIds.length === 0) return;
   const headers = await authHeaders();
   await Promise.all(
     ccRoomIds.map((chatId) =>

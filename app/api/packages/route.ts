@@ -4,6 +4,7 @@ import {
   deleteSubscriptionPlan,
   countTenantsByPlan,
   listSubscriptionPlans,
+  syncAllUnlinkedSubscriptionPlans,
   updateSubscriptionPlan,
 } from "@/lib/subscription-plans/server";
 import { enrichPlansWithBundledSms } from "@/lib/sms-packages/server";
@@ -78,13 +79,19 @@ export async function GET(request: Request) {
     );
   }
 
+  await syncAllUnlinkedSubscriptionPlans();
+
   const plans = await listSubscriptionPlans({
     includeInactive: true,
     includeHidden: true,
   });
   const plansWithSms = await enrichPlansWithBundledSms(plans);
   const tenantCounts = await countTenantsByPlan();
-  return NextResponse.json({ ok: true, plans: plansWithSms, tenantCounts });
+  return NextResponse.json({
+    ok: true,
+    plans: plansWithSms,
+    tenantCounts,
+  });
 }
 
 /** Super admin — create a subscription plan. */

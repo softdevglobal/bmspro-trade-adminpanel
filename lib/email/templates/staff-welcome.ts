@@ -79,6 +79,8 @@ export async function sendStaffWelcomeEmail(
     await sendSms({
       to: input.phone,
       businessId: input.businessId,
+      senderName: input.businessName,
+      source: "staff_welcome",
       message: `${input.businessName} added you to their team on BMS Pro Trade as ${input.staffType}. Check your email (${input.email}) for your login details.`,
     });
   }
