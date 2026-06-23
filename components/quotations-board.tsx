@@ -57,6 +57,10 @@ function formatWhen(timestamp: number | null, timeZone?: string | null): string 
   }, timeZone);
 }
 
+function jobBoardHref(bookingId: string): string {
+  return `/dashboard/jobs?job=${encodeURIComponent(bookingId)}`;
+}
+
 type QuotationPreviewMode = "review" | "convert_booking";
 type QuotationFilter =
   | "pending"
@@ -313,7 +317,7 @@ function QuotationCardMenu({
               </span>
             ) : (
               <Link
-                href="/dashboard/jobs"
+                href={jobBoardHref(quotation.bookingId!)}
                 role="menuitem"
                 className={menuItemClass}
                 onClick={() => setOpen(false)}
@@ -894,12 +898,21 @@ function QuotationPreviewContent({
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
               Linked job
             </p>
-            <p className="mt-1 font-mono text-[13px] font-semibold text-primary">
-              {displayBookingCode({
-                id: quotation.bookingId,
-                bookingCode: quotation.bookingCode,
-              })}
-            </p>
+            <Link
+              href={jobBoardHref(quotation.bookingId)}
+              onClick={onClose}
+              className="mt-2 flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2.5 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-surface-container"
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                assignment
+              </span>
+              <span className="font-mono text-[13px] font-semibold text-primary">
+                {displayBookingCode({
+                  id: quotation.bookingId,
+                  bookingCode: quotation.bookingCode,
+                })}
+              </span>
+            </Link>
           </section>
         ) : null}
 
@@ -1038,7 +1051,7 @@ function QuotationPreviewContent({
                     </span>
                   ) : (
                     <Link
-                      href="/dashboard/jobs"
+                      href={jobBoardHref(quotation.bookingId)}
                       onClick={onClose}
                       className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
                     >
