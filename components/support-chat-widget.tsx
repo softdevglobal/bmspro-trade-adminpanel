@@ -93,6 +93,7 @@ export function SupportChatWidget() {
   const [snapshot, setSnapshot] = useState<UnifiedChatSnapshot>({
     messages: [],
     unreadCount: 0,
+    supportUnread: 0,
     preferredCcChatId: null,
     supportConversationId: null,
     supportStatus: null,

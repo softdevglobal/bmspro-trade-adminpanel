@@ -1,6 +1,6 @@
 "use client";
 
-import { customerApp } from "@/lib/firebase/customer-client";
+import { customerDb } from "@/lib/firebase/customer-client";
 import { db as businessDb } from "@/lib/firebase/client";
 import {
   mapNotificationDoc,
@@ -17,7 +17,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getFirestore,
   limit,
   onSnapshot,
   query,
@@ -34,8 +33,6 @@ const MAX_BATCH = 400;
 export const NOTIFICATION_UNREAD_LIMIT = 25;
 /** Full panel listener cap. */
 export const NOTIFICATION_FULL_LIMIT = 50;
-
-const customerDb: Firestore = getFirestore(customerApp);
 
 function firestoreForAudience(audience: NotificationAudience): Firestore {
   return audience === "business" ? businessDb : customerDb;
