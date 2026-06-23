@@ -17,7 +17,7 @@ export function SmsLogBoard({ variant }: SmsLogBoardProps) {
   const [error, setError] = useState<string | null>(null);
 
   const endpoint =
-    variant === "admin" ? "/api/sms/log" : "/api/business/sms/log";
+    variant === "admin" ? "/api/sms/log" : "/api/business/sms-log";
 
   const load = useCallback(async () => {
     if (!user) return;
