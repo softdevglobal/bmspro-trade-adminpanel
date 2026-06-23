@@ -1,6 +1,8 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { syncSmsPackageStripeLink } from "@/lib/stripe/sms-package-prices";
+import { isStripeConfigured } from "@/lib/stripe/config";
 import {
   parseBusinessSmsFields,
   type BusinessSmsBalance,
@@ -59,6 +61,10 @@ function mapSmsPackageDoc(id: string, data: DocumentData): SmsPackage {
       typeof data.stripePriceId === "string" && data.stripePriceId.trim()
         ? data.stripePriceId.trim()
         : null,
+    stripeProductId:
+      typeof data.stripeProductId === "string" && data.stripeProductId.trim()
+        ? data.stripeProductId.trim()
+        : null,
     plan_key:
       typeof data.plan_key === "string" && data.plan_key.trim()
         ? data.plan_key.trim()
@@ -93,6 +99,7 @@ function normaliseSmsPackageInput(
     active: input.active !== false,
     hidden: input.hidden === true,
     stripePriceId: input.stripePriceId?.trim() || null,
+    stripeProductId: input.stripeProductId?.trim() || null,
     plan_key: input.plan_key?.trim() || null,
     description: input.description?.trim() || null,
     updatedAt: FieldValue.serverTimestamp(),
@@ -139,6 +146,79 @@ export async function listSmsPackages(options?: {
   return packages;
 }
 
+async function applySmsPackageStripeLink(
+  packageId: string,
+  input: SmsPackageInput,
+  existing: SmsPackage | null,
+): Promise<SmsPackageInput> {
+  if (input.stripePriceId?.trim()) {
+    return {
+      ...input,
+      stripePriceId: input.stripePriceId.trim(),
+      stripeProductId: input.stripeProductId?.trim() || existing?.stripeProductId || null,
+    };
+  }
+
+  if (!isStripeConfigured()) {
+    return {
+      ...input,
+      stripePriceId: existing?.stripePriceId ?? null,
+      stripeProductId: existing?.stripeProductId ?? null,
+    };
+  }
+
+  const synced = await syncSmsPackageStripeLink({
+    packageId,
+    name: input.name,
+    price: input.price,
+    description: input.description,
+    messageQuota: input.messageQuota,
+    existingStripePriceId: existing?.stripePriceId,
+    existingStripeProductId: existing?.stripeProductId,
+  });
+
+  return {
+    ...input,
+    stripePriceId: synced.stripePriceId,
+    stripeProductId: synced.stripeProductId,
+  };
+}
+
+/** Re-syncs an existing SMS package to Stripe (creates product/price if missing). */
+export async function syncSmsPackageToStripe(
+  packageId: string,
+): Promise<SmsPackage | null> {
+  const existing = await getSmsPackageById(packageId);
+  if (!existing) return null;
+
+  const withStripe = await applySmsPackageStripeLink(
+    packageId,
+    {
+      name: existing.name,
+      price: existing.price,
+      priceLabel: existing.priceLabel,
+      messageQuota: existing.messageQuota,
+      features: existing.features,
+      popular: existing.popular,
+      color: existing.color,
+      image: existing.image,
+      icon: existing.icon,
+      active: existing.active,
+      hidden: existing.hidden,
+      stripePriceId: null,
+      stripeProductId: existing.stripeProductId,
+      plan_key: existing.plan_key,
+      description: existing.description,
+    },
+    existing,
+  );
+
+  const ref = adminDb.collection(SMS_PACKAGES_COLLECTION).doc(packageId);
+  await ref.update(normaliseSmsPackageInput(withStripe));
+  const updated = await ref.get();
+  return mapSmsPackageDoc(packageId, updated.data() ?? {});
+}
+
 export async function getSmsPackageById(
   packageId: string,
 ): Promise<SmsPackage | null> {
@@ -155,6 +235,60 @@ export async function getSmsPackageById(
   return mapSmsPackageDoc(snap.id, snap.data() ?? {});
 }
 
+/** Loads an SMS package and ensures it has a one-time Stripe price for Checkout. */
+export async function resolveSmsPackageForCheckout(
+  packageId: string,
+): Promise<SmsPackage> {
+  const pkg = await getSmsPackageById(packageId.trim());
+  if (!pkg || !pkg.active || pkg.hidden) {
+    throw new Error("SMS package not found or unavailable.");
+  }
+
+  if (pkg.stripePriceId) {
+    return pkg;
+  }
+
+  if (!isStripeConfigured()) {
+    throw new Error(
+      "This SMS package is not linked to Stripe. Ask your administrator to link it in SMS Packages.",
+    );
+  }
+
+  const synced = await syncSmsPackageToStripe(pkg.id);
+  if (!synced?.stripePriceId) {
+    throw new Error(
+      "Could not create a Stripe price for this SMS package. Check STRIPE_SECRET_KEY and package price (min AU$0.50).",
+    );
+  }
+
+  return synced;
+}
+
+/** Links every SMS package missing a Stripe price (best effort). */
+export async function syncAllUnlinkedSmsPackages(): Promise<void> {
+  if (!isStripeConfigured()) return;
+
+  const packages = await listSmsPackages({
+    includeInactive: true,
+    includeHidden: true,
+  });
+
+  await Promise.all(
+    packages
+      .filter((pkg) => !pkg.stripePriceId)
+      .map(async (pkg) => {
+        try {
+          await syncSmsPackageToStripe(pkg.id);
+        } catch (error) {
+          console.warn(
+            `[stripe] Could not sync SMS package ${pkg.id}:`,
+            error,
+          );
+        }
+      }),
+  );
+}
+
 export async function createSmsPackage(
   input: SmsPackageInput,
 ): Promise<SmsPackage> {
@@ -169,8 +303,14 @@ export async function createSmsPackage(
   }
 
   const ref = adminDb.collection(SMS_PACKAGES_COLLECTION).doc();
+  const baseInput: SmsPackageInput = {
+    ...input,
+    name,
+    description: description.value,
+  };
+  const withStripe = await applySmsPackageStripeLink(ref.id, baseInput, null);
   const data = {
-    ...normaliseSmsPackageInput({ ...input, name, description: description.value }),
+    ...normaliseSmsPackageInput(withStripe),
     createdAt: FieldValue.serverTimestamp(),
   };
   await ref.set(data);
@@ -203,6 +343,10 @@ export async function updateSmsPackage(
       input.stripePriceId !== undefined
         ? input.stripePriceId
         : existing.stripePriceId,
+    stripeProductId:
+      input.stripeProductId !== undefined
+        ? input.stripeProductId
+        : existing.stripeProductId,
     plan_key: input.plan_key !== undefined ? input.plan_key : existing.plan_key,
     description:
       input.description !== undefined ? input.description : existing.description,
@@ -214,7 +358,8 @@ export async function updateSmsPackage(
   }
   merged.description = description.value;
 
-  await ref.update(normaliseSmsPackageInput(merged));
+  const withStripe = await applySmsPackageStripeLink(packageId, merged, existing);
+  await ref.update(normaliseSmsPackageInput(withStripe));
   const updated = await ref.get();
   return mapSmsPackageDoc(packageId, updated.data() ?? {});
 }
@@ -287,6 +432,7 @@ function resolveStoredBundleQuota(data: Record<string, unknown>): number {
 export function buildTenantSmsRenewalFields(
   pkg: SmsPackage,
   businessData: Record<string, unknown>,
+  options?: { periodEndMs?: number },
 ): Record<string, unknown> {
   const now = Date.now();
   const previousBundle = resolveStoredBundleQuota(businessData);
@@ -303,6 +449,17 @@ export function buildTenantSmsRenewalFields(
   const newLimit =
     newBundleQuota < 0 ? -1 : Math.max(0, newBundleQuota) + purchasedExtra;
 
+  const periodEnd =
+    typeof options?.periodEndMs === "number" && Number.isFinite(options.periodEndMs)
+      ? options.periodEndMs
+      : typeof businessData.subscriptionPeriodEnd === "number" &&
+          Number.isFinite(businessData.subscriptionPeriodEnd)
+        ? businessData.subscriptionPeriodEnd
+        : typeof businessData.smsBundlePeriodEnd === "number" &&
+            Number.isFinite(businessData.smsBundlePeriodEnd)
+          ? businessData.smsBundlePeriodEnd
+          : null;
+
   return {
     smsPackageId: pkg.id,
     smsPackage: snapshotSmsPackage(pkg),
@@ -311,6 +468,7 @@ export function buildTenantSmsRenewalFields(
     smsBundleQuota: newBundleQuota,
     smsBundleRenewsWithPlan: true,
     smsBundleRenewedAt: now,
+    ...(periodEnd != null ? { smsBundlePeriodEnd: periodEnd } : {}),
   };
 }
 

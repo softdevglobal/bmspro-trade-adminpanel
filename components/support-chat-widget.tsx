@@ -6,7 +6,7 @@ import {
   dispatchSupportChatPanelState,
 } from "@/lib/supportChatEvents";
 import {
-  markAllCcRoomsRead,
+  markCcRoomRead,
   markCustomerConversationRead,
   sendUnifiedWorkshopChatMessage,
   subscribeUnifiedWorkshopChat,
@@ -103,6 +103,8 @@ export function SupportChatWidget() {
   });
   const bottomRef = useRef<HTMLDivElement>(null);
   const subscriptionRef = useRef<UnifiedChatSubscription | null>(null);
+  const markedSupportReadRef = useRef<string | null>(null);
+  const markedCcReadRef = useRef<string | null>(null);
   const eligible = status === "authenticated" && role === "business_owner";
 
   const openChat = useCallback(() => {
@@ -124,7 +126,7 @@ export function SupportChatWidget() {
     if (!eligible || !user) return;
 
     const subscription = subscribeUnifiedWorkshopChat(user.uid, {
-      panelOpen: open,
+      panelOpen: false,
       onUpdate: setSnapshot,
     });
     subscriptionRef.current = subscription;
@@ -133,14 +135,42 @@ export function SupportChatWidget() {
       subscription.cleanup();
       subscriptionRef.current = null;
     };
-  }, [eligible, user]);
+  }, [eligible, user?.uid]);
 
   useEffect(() => {
     subscriptionRef.current?.setPanelOpen(open);
-    if (open) {
-      void subscriptionRef.current?.refresh();
-    }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !user) {
+      markedSupportReadRef.current = null;
+      markedCcReadRef.current = null;
+      return;
+    }
+
+    if (
+      snapshot.supportConversationId &&
+      snapshot.supportUnread > 0 &&
+      markedSupportReadRef.current !== snapshot.supportConversationId
+    ) {
+      markedSupportReadRef.current = snapshot.supportConversationId;
+      void markCustomerConversationRead(snapshot.supportConversationId);
+    }
+
+    if (
+      snapshot.preferredCcChatId &&
+      markedCcReadRef.current !== snapshot.preferredCcChatId
+    ) {
+      markedCcReadRef.current = snapshot.preferredCcChatId;
+      void markCcRoomRead(snapshot.preferredCcChatId);
+    }
+  }, [
+    open,
+    user,
+    snapshot.supportConversationId,
+    snapshot.supportUnread,
+    snapshot.preferredCcChatId,
+  ]);
 
   useEffect(() => {
     function handleOpen() {
@@ -154,24 +184,6 @@ export function SupportChatWidget() {
   useEffect(() => {
     dispatchSupportChatPanelState(open);
   }, [open]);
-
-  useEffect(() => {
-    if (!open || !user) return;
-
-    void (async () => {
-      if (snapshot.ccRoomIds.length > 0) {
-        await markAllCcRoomsRead(snapshot.ccRoomIds);
-      }
-      if (snapshot.supportConversationId) {
-        await markCustomerConversationRead(snapshot.supportConversationId);
-      }
-    })();
-  }, [
-    open,
-    user,
-    snapshot.ccRoomIds,
-    snapshot.supportConversationId,
-  ]);
 
   const chatClosedByAgent =
     snapshot.closedNotice !== null && !snapshot.supportConversationId;
@@ -368,7 +380,6 @@ export function SupportChatWidget() {
         } else {
           subscriptionRef.current?.ensureCcThread(result.threadId);
         }
-        await subscriptionRef.current?.refresh();
       } catch (sendError) {
         setPendingMessages((current) =>
           current.filter((message) => message.id !== pendingId),

@@ -15,6 +15,7 @@ export type SmsPackage = {
   active: boolean;
   hidden: boolean;
   stripePriceId: string | null;
+  stripeProductId: string | null;
   plan_key: string | null;
   description: string | null;
   createdAt: number | null;
@@ -34,6 +35,7 @@ export type SmsPackageInput = {
   active?: boolean;
   hidden?: boolean;
   stripePriceId?: string | null;
+  stripeProductId?: string | null;
   plan_key?: string | null;
   description?: string | null;
 };

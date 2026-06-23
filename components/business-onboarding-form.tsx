@@ -31,6 +31,7 @@ import {
 } from "@/lib/subscription-plans/theme";
 import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
 import { formatMessageQuotaLabel } from "@/lib/sms-packages/helpers";
+import { isStripeCheckoutEnabled } from "@/lib/stripe/public";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -42,6 +43,7 @@ import {
   useState,
 } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
+import { auth } from "@/lib/firebase/client";
 
 type Mode = "self_signup" | "super_admin_create";
 export type OnboardingWizardStep = 1 | 2 | 3;
@@ -510,8 +512,50 @@ export const BusinessOnboardingForm = forwardRef<
       if (mode === "self_signup") {
         const email = form.accountEmail.trim();
         const password = form.password;
+        const planId = form.selectedPlanId;
         try {
-          await login(email, password);
+          const useStripeCheckout =
+            isStripeCheckoutEnabled() && Boolean(planId);
+
+          await login(email, password, { skipRedirect: useStripeCheckout });
+
+          if (useStripeCheckout && planId) {
+            const sessionUser = auth.currentUser;
+            if (!sessionUser) {
+              setErrorMessage(
+                "Signed in but could not start checkout. Open the dashboard to subscribe.",
+              );
+              return;
+            }
+            const token = await sessionUser.getIdToken();
+            const checkoutRes = await fetch(
+              "/api/stripe/checkout/subscription",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ planId }),
+              },
+            );
+            const checkoutData = (await checkoutRes.json()) as {
+              ok?: boolean;
+              url?: string;
+              error?: string;
+            };
+            if (checkoutRes.ok && checkoutData.ok && checkoutData.url) {
+              window.location.href = checkoutData.url;
+              return;
+            }
+            setErrorMessage(
+              checkoutData.error ??
+                "Account created but checkout could not start. Sign in and subscribe from the dashboard.",
+            );
+            router.push("/dashboard");
+            return;
+          }
+
           return;
         } catch {
           setSuccessMessage(

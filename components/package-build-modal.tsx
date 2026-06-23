@@ -140,7 +140,7 @@ export function packageBodyFromForm(form: PackageFormState, id?: string) {
     popular: form.popular,
     active: form.active,
     hidden: form.hidden,
-    stripePriceId: form.stripePriceId.trim() || null,
+    stripePriceId: null,
     color: form.color,
     image: form.image.trim() || "",
     icon: "inventory_2",

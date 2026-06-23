@@ -104,6 +104,8 @@ export async function sendCustomerWelcomeEmail(
     await sendSms({
       to: input.phone,
       businessId: input.businessId,
+      senderName: business,
+      source: "customer_welcome",
       message: input.temporaryPassword
         ? `Welcome to ${business} on BMS Pro Trade. A customer account was created for ${input.email}. Check your email for your login details.`
         : `Welcome to ${business} on BMS Pro Trade. Your customer account for ${input.email} is ready. Check your email for details.`,

@@ -21,6 +21,8 @@ const PAGE_ICONS: Record<string, string> = {
   Tenants: "domain",
   Packages: "inventory_2",
   "Custom messages": "campaign",
+  Subscription: "workspace_premium",
+  "SMS Credits": "sms",
   "Audit logs": "history",
 };
 

@@ -148,6 +148,8 @@ export async function sendInspectionCustomerNotificationEmail(
     await sendSms({
       to: input.customerPhone,
       businessId: input.businessId,
+      senderName: input.businessName,
+      source: "inspection_notification",
       message: smsBody ? `${input.title}. ${smsBody}` : input.title,
     });
   }

@@ -1,6 +1,8 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { syncSubscriptionPlanStripeLink } from "@/lib/stripe/subscription-plan-prices";
+import { isStripeConfigured } from "@/lib/stripe/config";
 import {
   buildTenantSmsRenewalFields,
   resolveSmsPackageForPlan,
@@ -64,6 +66,10 @@ function mapPlanDoc(id: string, data: DocumentData): SubscriptionPlan {
       typeof data.stripePriceId === "string" && data.stripePriceId.trim()
         ? data.stripePriceId.trim()
         : null,
+    stripeProductId:
+      typeof data.stripeProductId === "string" && data.stripeProductId.trim()
+        ? data.stripeProductId.trim()
+        : null,
     trialDays:
       typeof data.trialDays === "number" && Number.isFinite(data.trialDays)
         ? Math.max(0, data.trialDays)
@@ -108,6 +114,7 @@ function normalisePlanInput(input: SubscriptionPlanInput): Record<string, unknow
     active: input.active !== false,
     hidden: input.hidden === true,
     stripePriceId: input.stripePriceId?.trim() || null,
+    stripeProductId: input.stripeProductId?.trim() || null,
     trialDays:
       typeof input.trialDays === "number" && Number.isFinite(input.trialDays)
         ? Math.max(0, input.trialDays)
@@ -180,6 +187,138 @@ export async function getSubscriptionPlanById(
   return mapPlanDoc(snap.id, snap.data() ?? {});
 }
 
+async function applySubscriptionPlanStripeLink(
+  planId: string,
+  input: SubscriptionPlanInput,
+  existing: SubscriptionPlan | null,
+): Promise<SubscriptionPlanInput> {
+  if (input.stripePriceId?.trim()) {
+    return {
+      ...input,
+      stripePriceId: input.stripePriceId.trim(),
+      stripeProductId:
+        input.stripeProductId?.trim() || existing?.stripeProductId || null,
+    };
+  }
+
+  if (!isStripeConfigured()) {
+    return {
+      ...input,
+      stripePriceId: existing?.stripePriceId ?? null,
+      stripeProductId: existing?.stripeProductId ?? null,
+    };
+  }
+
+  const synced = await syncSubscriptionPlanStripeLink({
+    planId,
+    name: input.name,
+    price: input.price,
+    billingCycle: normalizeBillingCycle(input.billingCycle),
+    description: input.description,
+    staff: input.staff,
+    existingStripePriceId: existing?.stripePriceId,
+    existingStripeProductId: existing?.stripeProductId,
+  });
+
+  return {
+    ...input,
+    stripePriceId: synced.stripePriceId,
+    stripeProductId: synced.stripeProductId,
+  };
+}
+
+/** Super-admin action — create or refresh Stripe product/price for a plan. */
+export async function syncSubscriptionPlanToStripe(
+  planId: string,
+): Promise<SubscriptionPlan | null> {
+  const existing = await getSubscriptionPlanById(planId);
+  if (!existing) return null;
+
+  const withStripe = await applySubscriptionPlanStripeLink(
+    planId,
+    {
+      name: existing.name,
+      price: existing.price,
+      priceLabel: existing.priceLabel,
+      staff: existing.staff,
+      features: existing.features,
+      popular: existing.popular,
+      color: existing.color,
+      image: existing.image,
+      icon: existing.icon,
+      active: existing.active,
+      hidden: existing.hidden,
+      stripePriceId: null,
+      stripeProductId: existing.stripeProductId,
+      trialDays: existing.trialDays,
+      plan_key: existing.plan_key,
+      billingCycle: existing.billingCycle,
+      description: existing.description,
+      smsPackageId: existing.smsPackageId,
+    },
+    existing,
+  );
+
+  const ref = adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).doc(planId);
+  await ref.update(normalisePlanInput(withStripe));
+  const updated = await ref.get();
+  return mapPlanDoc(planId, updated.data() ?? {});
+}
+
+/** Ensures a plan has a Stripe recurring price before checkout. */
+export async function resolveSubscriptionPlanForCheckout(
+  planId: string,
+): Promise<SubscriptionPlan> {
+  const plan = await getSubscriptionPlanById(planId.trim());
+  if (!plan || !plan.active) {
+    throw new Error("Subscription plan not found or inactive.");
+  }
+
+  if (plan.stripePriceId) {
+    return plan;
+  }
+
+  if (!isStripeConfigured()) {
+    throw new Error(
+      "This plan is not linked to Stripe. Ask your administrator to link it in Packages.",
+    );
+  }
+
+  const synced = await syncSubscriptionPlanToStripe(plan.id);
+  if (!synced?.stripePriceId) {
+    throw new Error(
+      "Could not create a Stripe price for this plan. Check STRIPE_SECRET_KEY and plan price (min AU$0.50).",
+    );
+  }
+
+  return synced;
+}
+
+/** Links every plan missing a Stripe price (best effort). */
+export async function syncAllUnlinkedSubscriptionPlans(): Promise<void> {
+  if (!isStripeConfigured()) return;
+
+  const plans = await listSubscriptionPlans({
+    includeInactive: true,
+    includeHidden: true,
+  });
+
+  await Promise.all(
+    plans
+      .filter((plan) => !plan.stripePriceId)
+      .map(async (plan) => {
+        try {
+          await syncSubscriptionPlanToStripe(plan.id);
+        } catch (error) {
+          console.warn(
+            `[stripe] Could not sync subscription plan ${plan.id}:`,
+            error,
+          );
+        }
+      }),
+  );
+}
+
 export async function createSubscriptionPlan(
   input: SubscriptionPlanInput,
 ): Promise<SubscriptionPlan> {
@@ -194,8 +333,14 @@ export async function createSubscriptionPlan(
   }
 
   const ref = adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).doc();
+  const baseInput: SubscriptionPlanInput = {
+    ...input,
+    name,
+    description: description.value,
+  };
+  const withStripe = await applySubscriptionPlanStripeLink(ref.id, baseInput, null);
   const data = {
-    ...normalisePlanInput({ ...input, name, description: description.value }),
+    ...normalisePlanInput(withStripe),
     createdAt: FieldValue.serverTimestamp(),
   };
   await ref.set(data);
@@ -228,6 +373,10 @@ export async function updateSubscriptionPlan(
       input.stripePriceId !== undefined
         ? input.stripePriceId
         : existing.stripePriceId,
+    stripeProductId:
+      input.stripeProductId !== undefined
+        ? input.stripeProductId
+        : existing.stripeProductId,
     trialDays: input.trialDays ?? existing.trialDays,
     plan_key: input.plan_key !== undefined ? input.plan_key : existing.plan_key,
     billingCycle: input.billingCycle ?? existing.billingCycle,
@@ -245,7 +394,12 @@ export async function updateSubscriptionPlan(
   }
   merged.description = description.value;
 
-  await ref.update(normalisePlanInput(merged));
+  const withStripe = await applySubscriptionPlanStripeLink(
+    planId,
+    merged,
+    existing,
+  );
+  await ref.update(normalisePlanInput(withStripe));
   const updated = await ref.get();
   return mapPlanDoc(planId, updated.data() ?? {});
 }
@@ -367,7 +521,9 @@ export async function renewTenantSubscription(
   const periodMs = validityDays * 24 * 60 * 60 * 1000;
   const smsPackage = plan ? await resolveSmsPackageForPlan(plan) : null;
   const smsRenewalFields = smsPackage
-    ? buildTenantSmsRenewalFields(smsPackage, data)
+    ? buildTenantSmsRenewalFields(smsPackage, data, {
+        periodEndMs: now + periodMs,
+      })
     : {};
 
   await ref.update({
