@@ -15,6 +15,12 @@ import { isStripeWebhookConfigured } from "@/lib/stripe/config";
 const PROCESSED_INVOICES = "stripe_processed_invoices";
 
 function subscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
+  const parent = invoice.parent;
+  if (parent?.type === "subscription_details") {
+    const sub = parent.subscription_details?.subscription;
+    if (typeof sub === "string" && sub.trim()) return sub.trim();
+  }
+
   const legacy = (
     invoice as Stripe.Invoice & {
       subscription?: string | Stripe.Subscription | null;
@@ -24,12 +30,6 @@ function subscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
   if (legacy && typeof legacy === "object" && "id" in legacy) {
     const id = (legacy as Stripe.Subscription).id;
     if (id?.trim()) return id.trim();
-  }
-
-  const parent = invoice.parent;
-  if (parent?.type === "subscription_details") {
-    const sub = parent.subscription_details?.subscription;
-    if (typeof sub === "string" && sub.trim()) return sub.trim();
   }
 
   return null;

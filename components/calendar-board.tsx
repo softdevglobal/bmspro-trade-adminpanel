@@ -11,6 +11,7 @@ import {
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
+  bookingSlotOnDate,
   bookingTitle,
   buildMonthGridCalendarEvents,
   calendarCardView,
@@ -30,15 +31,18 @@ import {
   type CalendarStatusFilterKey,
 } from "@/lib/calendar/events";
 import {
-  CALENDAR_SESSION_META,
   calendarEventPlacementsForDay,
   calendarEventHourSlots,
+  calendarSessionMeta,
   calendarSlotSelection,
   generateCalendarHourSlots,
   type CalendarHourSlotPlacement,
   type CalendarSlotSelection,
   type CalendarTimeSlot,
 } from "@/lib/calendar/time-slots";
+import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
+import { describeWorkingHoursWindow } from "@/lib/calendar/working-hours";
+import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { usePersonalCalendarEvents } from "@/lib/calendar/use-personal-events";
 import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types";
 import { useCalendarFilterOptions } from "@/lib/calendar/use-calendar-filter-options";
@@ -178,21 +182,19 @@ function formatWeekRange(anchor: Date): string {
   return `${startFmt.format(start)} – ${endFmt.format(end)}`;
 }
 
-const CALENDAR_HOUR_SLOTS = generateCalendarHourSlots();
-
-const CALENDAR_SESSIONS: {
-  session: InspectionTimeRange;
-  slots: CalendarTimeSlot[];
-}[] = [
-  {
-    session: "morning",
-    slots: CALENDAR_HOUR_SLOTS.filter((slot) => slot.session === "morning"),
-  },
-  {
-    session: "afternoon",
-    slots: CALENDAR_HOUR_SLOTS.filter((slot) => slot.session === "afternoon"),
-  },
-];
+function buildCalendarSessions(workingHours: BusinessWorkingHours) {
+  const hourSlots = generateCalendarHourSlots(workingHours);
+  return [
+    {
+      session: "morning" as const,
+      slots: hourSlots.filter((slot) => slot.session === "morning"),
+    },
+    {
+      session: "afternoon" as const,
+      slots: hourSlots.filter((slot) => slot.session === "afternoon"),
+    },
+  ].filter((group) => group.slots.length > 0);
+}
 
 function CalendarHourSlotRow({
   slot,
@@ -282,6 +284,7 @@ function CalendarHourSlotRow({
 function CalendarDayTimeSlots({
   isoDate,
   events,
+  workingHours,
   canAddEvents,
   isBusinessClosed,
   onAddEvent,
@@ -290,12 +293,21 @@ function CalendarDayTimeSlots({
 }: {
   isoDate: string;
   events: CalendarEvent[];
+  workingHours: BusinessWorkingHours;
   canAddEvents: boolean;
   isBusinessClosed?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
   onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
 }) {
+  const calendarSessions = useMemo(
+    () => buildCalendarSessions(workingHours),
+    [workingHours],
+  );
+  const sessionMeta = useMemo(
+    () => calendarSessionMeta(workingHours),
+    [workingHours],
+  );
   const occupancyRefreshKey = useMemo(
     () => events.map((event) => event.key).join("|"),
     [events],
@@ -307,13 +319,16 @@ function CalendarDayTimeSlots({
   } = useCalendarSlotOccupancy(isoDate, occupancyRefreshKey);
 
   const placementsByHour = useMemo(
-    () => calendarEventPlacementsForDay(events),
-    [events],
+    () => calendarEventPlacementsForDay(events, workingHours),
+    [events, workingHours],
   );
 
   const unslottedEvents = useMemo(
-    () => events.filter((event) => calendarEventHourSlots(event).length === 0),
-    [events],
+    () =>
+      events.filter(
+        (event) => calendarEventHourSlots(event, workingHours).length === 0,
+      ),
+    [events, workingHours],
   );
 
   function handleAddEvent(
@@ -343,8 +358,8 @@ function CalendarDayTimeSlots({
           </p>
         </div>
       ) : null}
-      {CALENDAR_SESSIONS.map(({ session, slots }) => {
-        const meta = CALENDAR_SESSION_META[session];
+      {calendarSessions.map(({ session, slots }) => {
+        const meta = sessionMeta[session];
 
         return (
           <section
@@ -682,6 +697,21 @@ function eventTimeLabel(
     );
   }
 
+  if (event.booking) {
+    const daySlot = bookingSlotOnDate(event.booking, date);
+    if (daySlot) {
+      const onPrimaryDay = event.booking.scheduledSlot?.date === date;
+      const window = formatVisitWindow(
+        onPrimaryDay
+          ? event.booking.scheduledStartTime
+          : daySlot.startTime,
+        onPrimaryDay ? event.booking.scheduledEndTime : daySlot.endTime,
+      );
+      if (window) return window;
+      return TIME_RANGE_SHORT_LABELS[daySlot.timeRange];
+    }
+  }
+
   if (!card) return "Time TBC";
 
   const window = formatVisitWindow(
@@ -713,6 +743,11 @@ function eventTimeLabel(
     (slot) => slot.date === date,
   );
   if (adminJobPreferred) {
+    const preferredWindow = formatVisitWindow(
+      adminJobPreferred.startTime,
+      adminJobPreferred.endTime,
+    );
+    if (preferredWindow) return preferredWindow;
     return TIME_RANGE_SHORT_LABELS[adminJobPreferred.timeRange];
   }
 
@@ -722,6 +757,11 @@ function eventTimeLabel(
 export function CalendarBoard() {
   const router = useRouter();
   const { user, role } = useAuth();
+  const { workingHours } = useBusinessWorkingHours();
+  const workingHoursLabel = useMemo(
+    () => describeWorkingHoursWindow(workingHours),
+    [workingHours],
+  );
   const {
     requests,
     loading: requestsLoading,
@@ -1533,7 +1573,7 @@ export function CalendarBoard() {
               <p className="font-body text-[13px] font-semibold text-on-surface-variant">
                 {focusDayEvents.length > 0
                   ? `${focusDayEvents.length} ${focusDayEvents.length === 1 ? "item" : "items"} scheduled`
-                  : "Hourly schedule · 8am to 5pm"}
+                  : `Hourly schedule · ${workingHoursLabel}`}
               </p>
               {isSameDay(focusDate, today) ? (
                 <span className="rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
@@ -1544,6 +1584,7 @@ export function CalendarBoard() {
             <CalendarDayTimeSlots
               isoDate={focusIso}
               events={focusDayEvents}
+              workingHours={workingHours}
               canAddEvents={canAddEvents}
               isBusinessClosed={closedDates.has(focusIso)}
               onAddEvent={openAddEvent}
@@ -1622,6 +1663,7 @@ export function CalendarBoard() {
               <CalendarDayTimeSlots
                 isoDate={selectedIsoDate ?? ""}
                 events={selectedDayEvents}
+                workingHours={workingHours}
                 canAddEvents={canAddEvents}
                 isBusinessClosed={isSelectedDayClosed}
                 onAddEvent={openAddEvent}

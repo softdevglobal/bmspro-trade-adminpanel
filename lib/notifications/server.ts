@@ -540,6 +540,61 @@ export async function notifyCustomerOfStatusChange(
   }
 }
 
+/**
+ * Notify the customer that their already-scheduled inspection visit was moved
+ * to a new date/time (e.g. dragged to another slot on the calendar). Sends the
+ * in-portal alert, email, and SMS.
+ */
+export async function notifyCustomerOfRequestRescheduled(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
+  const headline = requestHeadline(request);
+  const slot = request.scheduledSlot;
+  if (!slot) return;
+
+  const visitWindow = formatVisitWindow(
+    request.scheduledStartTime,
+    request.scheduledEndTime,
+  );
+  const title = `${business} rescheduled your visit`;
+  const body = visitWindow
+    ? `Your visit for ${headline} has been moved to ${slotLabel(slot, timeZone)}, arriving ${visitWindow}.`
+    : `Your visit for ${headline} has been moved to ${slotLabel(slot, timeZone)}. We'll confirm the exact arrival time shortly.`;
+
+  const emailDetails: EmailDetailRow[] = [
+    { label: "Service", value: headline },
+    { label: "New date", value: formatSlotDate(slot.date, timeZone) },
+    { label: "Time of day", value: TIME_RANGE_LABELS[slot.timeRange] },
+  ];
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      requestId: request.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "scheduled",
+      type: "request_scheduled",
+      title,
+      body,
+      emailDetails,
+      emailHighlight: visitWindow ? visitWindow : "To be confirmed by the business",
+      emailHighlightLabel: visitWindow ? "New arrival window" : "Arrival time",
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
 /** In-portal alert when a sent quotation needs accept/reject (email is sent separately). */
 export async function notifyCustomerOfQuotationSent(
   request: InspectionRequestDetail,
@@ -590,7 +645,7 @@ export async function notifyCustomerOfAssignment(
   );
   const emailDetails: EmailDetailRow[] = [
     { label: "Service", value: requestHeadline(request) },
-    { label: "Inspector", value: request.assignedTo.name },
+    { label: "Team member", value: request.assignedTo.name },
   ];
   if (request.scheduledSlot) {
     emailDetails.push({
@@ -616,7 +671,7 @@ export async function notifyCustomerOfAssignment(
       logoUrl: context.logoUrl ?? null,
       status: request.status,
       type: "request_assigned",
-      title: `${business} assigned an inspector`,
+      title: `${request.assignedTo.name} will visit`,
       body: `${request.assignedTo.name} will visit for ${requestHeadline(request)}.`,
       emailDetails,
       emailHighlight: visitWindow ? visitWindow : null,
@@ -697,6 +752,71 @@ export async function notifyCustomerOfJobScheduled(
           ? "To be confirmed by the business"
           : null,
       emailHighlightLabel: visitWindow ? "Arrival window" : "Arrival time",
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Notify the customer that their scheduled job was moved to a new date/time
+ * (e.g. dragged to another slot on the calendar). Sends the in-portal alert,
+ * email, and SMS.
+ */
+export async function notifyCustomerOfJobRescheduled(
+  booking: BookingDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const email = booking.customer.email?.trim();
+  if (!email && !booking.customerId) return;
+
+  const business = context.businessName ?? "The business";
+  const timeZone = context.timezone;
+  const headline = bookingHeadline(booking);
+  const slot = booking.scheduledSlot;
+  if (!slot) return;
+
+  const visitWindow = formatVisitWindow(
+    booking.scheduledStartTime,
+    booking.scheduledEndTime,
+  );
+  const title = `${business} rescheduled your job`;
+  const body = visitWindow
+    ? `Your job (${headline}) has been moved to ${slotLabel(slot, timeZone)}, arriving ${visitWindow}.`
+    : `Your job (${headline}) has been moved to ${slotLabel(slot, timeZone)}. We'll confirm the exact arrival time shortly.`;
+
+  const emailDetails: EmailDetailRow[] = [{ label: "Job", value: headline }];
+  if (booking.bookingCode) {
+    emailDetails.push({ label: "Reference", value: booking.bookingCode });
+  }
+  emailDetails.push({
+    label: "New date",
+    value: formatSlotDate(slot.date, timeZone),
+  });
+  emailDetails.push({
+    label: "Time of day",
+    value: TIME_RANGE_LABELS[slot.timeRange],
+  });
+
+  try {
+    await createNotification({
+      audience: "customer",
+      businessId: booking.businessId,
+      customerId: booking.customerId,
+      customerEmail: booking.customer.email || null,
+      customerPhone: booking.customer.phone || null,
+      customerName: booking.customer.fullName || null,
+      requestId: booking.inspectionRequestId || booking.id,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      logoUrl: context.logoUrl ?? null,
+      status: "scheduled",
+      type: "request_scheduled",
+      title,
+      body,
+      emailDetails,
+      emailHighlight: visitWindow ? visitWindow : "To be confirmed by the business",
+      emailHighlightLabel: visitWindow ? "New arrival window" : "Arrival time",
     });
   } catch {
     /* best-effort */
@@ -927,7 +1047,7 @@ export async function notifyCustomerOfVisitOnTheWay(
 
   const emailDetails: EmailDetailRow[] = [
     { label: "Service", value: headline },
-    { label: "Inspector", value: inspector },
+    { label: "Team member", value: inspector },
   ];
   if (address) {
     emailDetails.push({ label: "Address", value: address });
@@ -1213,6 +1333,34 @@ export async function notifyBusinessOfCustomerAcceptance(
       body: when
         ? `${who} picked ${when}. Set the exact visit time window.`
         : `${who} accepted one of your proposed times. Set the exact visit time window.`,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Notify the business owner that the customer rejected proposed job days. */
+export async function notifyBusinessOfCustomerJobProposalRejection(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const who = request.customer.fullName?.trim() || "The customer";
+  const headline = requestHeadline(request);
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      requestId: request.id,
+      status: request.status,
+      type: "request_created",
+      title: "Customer rejected proposed job days",
+      body: `${who} declined your proposed job days for ${headline}. Propose new days or schedule around their preferences.`,
     });
   } catch {
     /* best-effort */

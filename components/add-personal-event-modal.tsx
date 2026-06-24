@@ -10,6 +10,7 @@ import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
 import { formatSlotDate } from "@/lib/inspection/types";
 import { useCallback, useEffect, useState } from "react";
 
@@ -30,6 +31,7 @@ export function AddPersonalEventModal({
 }: Props) {
   const { user } = useAuth();
   const profile = useBusinessProfile();
+  const { workingHours } = useBusinessWorkingHours();
   const timeZone = profile?.timezone;
   const isEditing = Boolean(editEvent);
   const [title, setTitle] = useState("");
@@ -103,7 +105,11 @@ export function AddPersonalEventModal({
       return;
     }
 
-    const windowError = validateCalendarVisitWindow(startTime, endTime);
+    const windowError = validateCalendarVisitWindow(
+      startTime,
+      endTime,
+      workingHours,
+    );
     if (windowError) {
       setError(windowError);
       return;
@@ -265,9 +271,10 @@ export function AddPersonalEventModal({
             startTime={startTime}
             endTime={endTime}
             disabled={busy}
+            workingHours={workingHours}
             onStartTimeChange={(nextStart) => {
               setStartTime(nextStart);
-              setEndTime(defaultCalendarVisitEnd(nextStart));
+              setEndTime(defaultCalendarVisitEnd(nextStart, workingHours));
             }}
             onEndTimeChange={setEndTime}
           />

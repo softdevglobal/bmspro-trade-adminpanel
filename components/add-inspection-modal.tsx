@@ -11,6 +11,8 @@ import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
+import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import type {
   InspectionRequestType,
   InspectionSlot,
@@ -21,6 +23,7 @@ import {
   formatAddress,
   formatSlotDate,
   formatVisitWindow,
+  isClockTime,
   sortInspectionSlots,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
@@ -94,7 +97,7 @@ const JOB_STEPS = [
   },
   {
     title: "Schedule the job",
-    subtitle: "Pick the date and time for this job on site.",
+    subtitle: "Pick day(s) and hourly slots — one slot equals one hour on site.",
   },
   {
     title: "Contact details",
@@ -162,7 +165,11 @@ type InspectionFormState = {
   customer: { fullName: string; email: string; phone: string };
 };
 
-function computeFieldErrors(form: InspectionFormState): FieldErrors {
+function computeFieldErrors(
+  form: InspectionFormState,
+  workingHours: BusinessWorkingHours,
+  variant: "inspection" | "job" = "inspection",
+): FieldErrors {
   const errors: FieldErrors = {};
 
   if (form.requestType === "existing_service") {
@@ -227,15 +234,20 @@ function computeFieldErrors(form: InspectionFormState): FieldErrors {
     const windowError = validateCalendarVisitWindow(
       form.calendarWindow.startTime,
       form.calendarWindow.endTime,
+      workingHours,
     );
     if (windowError) errors.preferredSlots = windowError;
   } else if (form.preferredSlots.length === 0) {
     errors.preferredSlots = "Pick at least one preferred date.";
   } else {
     for (const slot of form.preferredSlots) {
+      if (variant === "job" && !slotTimeIsSelected(slot)) {
+        errors.preferredSlots = `Pick an hourly slot for ${formatSlotDate(slot.date)}.`;
+        break;
+      }
       const start = slot.startTime ?? "08:00";
-      const end = slot.endTime ?? defaultCalendarVisitEnd(start);
-      const windowError = validateCalendarVisitWindow(start, end);
+      const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+      const windowError = validateCalendarVisitWindow(start, end, workingHours);
       if (windowError) {
         errors.preferredSlots = windowError;
         break;
@@ -413,6 +425,10 @@ function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
   return sortInspectionSlots(slots);
 }
 
+function slotTimeIsSelected(slot: InspectionSlot): boolean {
+  return isClockTime(slot.startTime) && isClockTime(slot.endTime);
+}
+
 function PreferredDayTimeRow({
   slot,
   kind,
@@ -421,11 +437,14 @@ function PreferredDayTimeRow({
 }: {
   slot: InspectionSlot;
   kind: "inspection" | "job";
-  onWindowChange: (startTime: string, endTime: string) => void;
+  onWindowChange: (startTime: string | null, endTime: string | null) => void;
   timeZone?: string | null;
 }) {
-  const startTime = slot.startTime ?? "08:00";
-  const endTime = slot.endTime ?? defaultCalendarVisitEnd(startTime);
+  const startTime =
+    slot.startTime && isClockTime(slot.startTime) ? slot.startTime : null;
+  const endTime =
+    slot.endTime && isClockTime(slot.endTime) ? slot.endTime : null;
+  const isJob = kind === "job";
 
   return (
     <li className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
@@ -435,19 +454,59 @@ function PreferredDayTimeRow({
         </span>
         {formatSlotDate(slot.date, timeZone)}
       </p>
+      {isJob && !slotTimeIsSelected(slot) ? (
+        <p className="mt-2 font-body text-[12px] text-on-surface-variant">
+          No time selected yet — tap an hourly slot below.
+        </p>
+      ) : null}
       <div className="mt-3">
         <AdminDaySchedulePicker
           date={slot.date}
           kind={kind}
           startTime={startTime}
           endTime={endTime}
+          hideTimeRangeFields={isJob}
+          multiHourSlots={isJob}
+          onWindowChange={onWindowChange}
           onStartTimeChange={(nextStart) =>
             onWindowChange(nextStart, defaultCalendarVisitEnd(nextStart))
           }
-          onEndTimeChange={(nextEnd) => onWindowChange(startTime, nextEnd)}
+          onEndTimeChange={(nextEnd) =>
+            onWindowChange(startTime, nextEnd)
+          }
         />
       </div>
     </li>
+  );
+}
+
+function JobScheduleGuidelines({
+  selectedDayCount,
+}: {
+  selectedDayCount: number;
+}) {
+  return (
+    <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+      <p className="flex items-start gap-2 font-body text-[13px] font-semibold text-on-surface">
+        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[18px] text-primary">
+          info
+        </span>
+        How to schedule this job
+      </p>
+      <ul className="mt-2 space-y-1.5 pl-7 font-body text-[12px] leading-relaxed text-on-surface-variant">
+        <li>Each hourly slot is one hour on site — select multiple slots for longer work.</li>
+        <li>You can select more than one day for multi-day jobs.</li>
+        <li>
+          Every selected day appears on the calendar with its own hourly slots.
+        </li>
+      </ul>
+      {selectedDayCount > 1 ? (
+        <p className="mt-2 rounded-lg border border-primary/15 bg-white/70 px-3 py-2 font-body text-[12px] text-primary">
+          {selectedDayCount} days selected — each day will appear on the
+          calendar.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -491,10 +550,12 @@ function InspectionPreview({
   form,
   selectedServiceName,
   timeZone,
+  variant = "inspection",
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
   timeZone?: string | null;
+  variant?: "inspection" | "job";
 }) {
   const jobSummary =
     form.requestType === "existing_service"
@@ -530,7 +591,10 @@ function InspectionPreview({
         <PreviewRow label="Address" value={formatAddress(form.address)} />
       </PreviewSection>
 
-      <PreviewSection title="Preferred visits" icon="event">
+      <PreviewSection
+        title={variant === "job" ? "Schedule" : "Preferred visits"}
+        icon="event"
+      >
         <ul className="space-y-2">
           {sortPreferredSlots(form.preferredSlots).map((slot, index) => (
             <li
@@ -541,6 +605,15 @@ function InspectionPreview({
                 {index + 1}
               </span>
               <span>
+                {variant === "job" && index === 0 ? (
+                  <span className="mr-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                    Day {index + 1}
+                  </span>
+                ) : variant === "job" ? (
+                  <span className="mr-1.5 rounded bg-surface-container px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-on-surface-variant">
+                    Day {index + 1}
+                  </span>
+                ) : null}
                 {formatSlotDate(slot.date, timeZone)} ·{" "}
                 {formatVisitWindow(slot.startTime, slot.endTime) ??
                   TIME_RANGE_LABELS[slot.timeRange]}
@@ -548,6 +621,11 @@ function InspectionPreview({
             </li>
           ))}
         </ul>
+        {variant === "job" && form.preferredSlots.length > 1 ? (
+          <p className="mt-2 font-body text-[11px] text-on-surface-variant">
+            All {form.preferredSlots.length} days will appear on the calendar.
+          </p>
+        ) : null}
       </PreviewSection>
 
       <PreviewSection title="Customer" icon="person">
@@ -595,6 +673,8 @@ function createInitialForm(
           {
             date: window.date,
             timeRange: calendarVisitTimeRange(window.startTime),
+            startTime: window.startTime,
+            endTime: window.endTime,
           },
         ]
       : ([] as InspectionSlot[]),
@@ -623,6 +703,7 @@ export function AddInspectionModal({
       : null);
   const { user } = useAuth();
   const profile = useBusinessProfile();
+  const { workingHours } = useBusinessWorkingHours();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(createInitialForm);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
@@ -735,19 +816,72 @@ export function AddInspectionModal({
   const step2Valid = isAddressComplete(form.address);
 
   const step3Valid = form.calendarWindow
-    ? validateCalendarVisitWindow(
-        form.calendarWindow.startTime,
-        form.calendarWindow.endTime,
-      ) === null
+    ? variant === "job"
+      ? isClockTime(form.calendarWindow.startTime) &&
+        isClockTime(form.calendarWindow.endTime) &&
+        validateCalendarVisitWindow(
+          form.calendarWindow.startTime,
+          form.calendarWindow.endTime,
+          workingHours,
+        ) === null
+      : validateCalendarVisitWindow(
+          form.calendarWindow.startTime,
+          form.calendarWindow.endTime,
+          workingHours,
+        ) === null
     : form.preferredSlots.length > 0 &&
       form.preferredSlots.every((slot) => {
         if (!slot.date.trim()) return false;
+        if (variant === "job" && !slotTimeIsSelected(slot)) return false;
         const start = slot.startTime ?? "08:00";
-        const end = slot.endTime ?? defaultCalendarVisitEnd(start);
-        return validateCalendarVisitWindow(start, end) === null;
+        const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+        return validateCalendarVisitWindow(start, end, workingHours) === null;
       }) &&
       new Set(form.preferredSlots.map((slot) => slot.date)).size ===
         form.preferredSlots.length;
+
+  function updateCalendarWindowTimes(
+    startTime: string | null,
+    endTime: string | null,
+  ) {
+    setForm((prev) => {
+      if (!prev.calendarWindow) return prev;
+      if (!startTime || !endTime) {
+        return {
+          ...prev,
+          calendarWindow: {
+            ...prev.calendarWindow,
+            startTime: "",
+            endTime: "",
+          },
+          preferredSlots: [
+            {
+              date: prev.calendarWindow.date,
+              timeRange: "morning",
+              startTime: null,
+              endTime: null,
+            },
+          ],
+        };
+      }
+      return {
+        ...prev,
+        calendarWindow: {
+          ...prev.calendarWindow,
+          startTime,
+          endTime,
+        },
+        preferredSlots: [
+          {
+            date: prev.calendarWindow.date,
+            timeRange: calendarVisitTimeRange(startTime),
+            startTime,
+            endTime,
+          },
+        ],
+      };
+    });
+  }
 
   function updateCalendarWindow(
     patch: Partial<NonNullable<InspectionFormState["calendarWindow"]>>,
@@ -762,6 +896,8 @@ export function AddInspectionModal({
           {
             date: nextWindow.date,
             timeRange: calendarVisitTimeRange(nextWindow.startTime),
+            startTime: nextWindow.startTime,
+            endTime: nextWindow.endTime,
           },
         ],
       };
@@ -773,7 +909,10 @@ export function AddInspectionModal({
     EMAIL_REGEX.test(form.customer.email.trim()) &&
     form.customer.phone.replace(/\D/g, "").length >= 6;
 
-  const fieldErrors = useMemo(() => computeFieldErrors(form), [form]);
+  const fieldErrors = useMemo(
+    () => computeFieldErrors(form, workingHours, variant),
+    [form, workingHours, variant],
+  );
 
   const showFieldError = useCallback(
     (key: FieldKey) => Boolean(touched[key] && fieldErrors[key]),
@@ -858,18 +997,24 @@ export function AddInspectionModal({
           preferredSlots: prev.preferredSlots.filter((slot) => slot.date !== iso),
         };
       }
-      if (prev.preferredSlots.length >= 3) return prev;
+      if (prev.preferredSlots.length >= (variant === "job" ? 5 : 3)) return prev;
+      const newSlot: InspectionSlot =
+        variant === "job"
+          ? {
+              date: iso,
+              timeRange: "morning",
+              startTime: null,
+              endTime: null,
+            }
+          : {
+              date: iso,
+              timeRange: calendarVisitTimeRange("08:00"),
+              startTime: "08:00",
+              endTime: "09:00",
+            };
       return {
         ...prev,
-        preferredSlots: sortPreferredSlots([
-          ...prev.preferredSlots,
-          {
-            date: iso,
-            timeRange: calendarVisitTimeRange("08:00"),
-            startTime: "08:00",
-            endTime: "09:00",
-          },
-        ]),
+        preferredSlots: sortPreferredSlots([...prev.preferredSlots, newSlot]),
       };
     });
     setError(null);
@@ -877,19 +1022,26 @@ export function AddInspectionModal({
 
   function updateSlotWindow(
     index: number,
-    startTime: string,
-    endTime: string,
+    startTime: string | null,
+    endTime: string | null,
   ) {
     setForm((prev) => ({
       ...prev,
       preferredSlots: prev.preferredSlots.map((slot, idx) =>
         idx === index
-          ? {
-              ...slot,
-              startTime,
-              endTime,
-              timeRange: calendarVisitTimeRange(startTime),
-            }
+          ? startTime && endTime
+            ? {
+                ...slot,
+                startTime,
+                endTime,
+                timeRange: calendarVisitTimeRange(startTime),
+              }
+            : {
+                ...slot,
+                startTime: null,
+                endTime: null,
+                timeRange: "morning",
+              }
           : slot,
       ),
     }));
@@ -954,7 +1106,9 @@ export function AddInspectionModal({
       : {
           preferredSlots: form.preferredSlots.map((slot) => ({
             date: slot.date,
-            timeRange: slot.timeRange,
+            timeRange:
+              slot.timeRange ??
+              calendarVisitTimeRange(slot.startTime ?? "08:00"),
             startTime: slot.startTime ?? "08:00",
             endTime:
               slot.endTime ??
@@ -1094,7 +1248,9 @@ export function AddInspectionModal({
               </h3>
               <p className="mt-2 max-w-sm font-body text-body-md text-on-surface-variant">
                 {variant === "job"
-                  ? "The job is scheduled on your board and calendar. The inspection and quotation steps are already marked complete — issue an invoice after the work is done."
+                  ? form.preferredSlots.length > 1
+                    ? "The job is on your board and all selected days appear on the calendar. Inspection and quotation steps are already complete — issue an invoice after the work is done."
+                    : "The job is scheduled on your board and calendar. The inspection and quotation steps are already marked complete — issue an invoice after the work is done."
                   : "The request is now on your board. You can review it, assign an inspector, and confirm a visit time."}
               </p>
             </div>
@@ -1465,11 +1621,20 @@ export function AddInspectionModal({
                     step={3}
                     title={current.title}
                     hint={
-                      form.calendarWindow
-                        ? "Calendar schedule"
-                        : `${selectedPreferredDates.length} of 3 days`
+                      variant === "job"
+                        ? form.calendarWindow
+                          ? "Calendar schedule"
+                          : `${selectedPreferredDates.length} day${selectedPreferredDates.length === 1 ? "" : "s"}`
+                        : form.calendarWindow
+                          ? "Calendar schedule"
+                          : `${selectedPreferredDates.length} of 3 days`
                     }
                   />
+                  {variant === "job" ? (
+                    <JobScheduleGuidelines
+                      selectedDayCount={selectedPreferredDates.length}
+                    />
+                  ) : null}
                   {fieldErrorMessage("preferredSlots") ? (
                     <FieldFeedback
                       error={fieldErrorMessage("preferredSlots")}
@@ -1488,8 +1653,22 @@ export function AddInspectionModal({
                       <AdminDaySchedulePicker
                         date={form.calendarWindow.date}
                         kind={variant === "job" ? "job" : "inspection"}
-                        startTime={form.calendarWindow.startTime}
-                        endTime={form.calendarWindow.endTime}
+                        startTime={
+                          form.calendarWindow.startTime || null
+                        }
+                        endTime={form.calendarWindow.endTime || null}
+                        hideTimeRangeFields={variant === "job"}
+                        multiHourSlots={variant === "job"}
+                        onWindowChange={(start, end) => {
+                          touchField("preferredSlots");
+                          if (variant === "job") {
+                            updateCalendarWindowTimes(start, end);
+                            return;
+                          }
+                          if (start && end) {
+                            updateCalendarWindow({ startTime: start, endTime: end });
+                          }
+                        }}
                         onStartTimeChange={(startTime) => {
                           touchField("preferredSlots");
                           updateCalendarWindow({
@@ -1509,7 +1688,7 @@ export function AddInspectionModal({
                         <SlotDayPicker
                           mode="multiple"
                           selectedIsos={selectedPreferredDates}
-                          maxSelections={3}
+                          maxSelections={variant === "job" ? 5 : 3}
                           minDate={minDate}
                           dayPage={workingDayPage}
                           onDayPageChange={setWorkingDayPage}
@@ -1517,11 +1696,20 @@ export function AddInspectionModal({
                             touchField("preferredSlots");
                             togglePreferredDay(iso);
                           }}
-                          label="Pick up to 3 days"
+                          label={
+                            variant === "job"
+                              ? "Pick one or more days"
+                              : "Pick up to 3 days"
+                          }
                           dayStripLayout="fit"
                           timeZone={timeZone}
                         />
-                        {selectedPreferredDates.length > 0 ? (
+                        {variant === "job" ? (
+                          <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                            You can select more than one day for multi-day jobs.
+                            Tap a selected day again to remove it.
+                          </p>
+                        ) : selectedPreferredDates.length > 0 ? (
                           <p className="mt-3 font-body text-[12px] text-on-surface-variant">
                             Tap a selected day again to remove it.
                           </p>
@@ -1535,7 +1723,9 @@ export function AddInspectionModal({
                       {selectedPreferredDates.length > 0 ? (
                         <div>
                           <span className={LABEL_CLASS}>
-                            Pick a time for each day
+                            {variant === "job"
+                              ? "Pick hourly slots for each day"
+                              : "Pick a time for each day"}
                           </span>
                           <ul className="mt-2 space-y-3">
                             {sortPreferredSlots(form.preferredSlots).map(
@@ -1570,6 +1760,7 @@ export function AddInspectionModal({
                   form={form}
                   selectedServiceName={selectedService?.name ?? null}
                   timeZone={timeZone}
+                  variant={variant}
                 />
               ) : null}
 

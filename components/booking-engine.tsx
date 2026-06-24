@@ -1350,7 +1350,7 @@ function ServiceBookingFlow({
           </h3>
           <p className="mt-1 font-body text-[14px] leading-snug text-on-surface-variant sm:text-body-md">
             Tell us what you need and pick up to 3 dates that suit you. The
-            team will confirm a visit time and an inspector.
+            team will confirm a visit time and who will visit.
           </p>
         </div>
 
@@ -1483,7 +1483,7 @@ function ServiceBookingFlow({
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Where should the inspector visit?
+            Where should we visit?
           </p>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">

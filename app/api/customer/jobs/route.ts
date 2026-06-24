@@ -19,6 +19,7 @@ import {
   parseInspectionQuotation,
 } from "@/lib/inspection/types";
 import {
+  enrichAssignmentsWithPhotos,
   enrichRequestsWithInvoices,
   enrichRequestsWithJobAssignees,
   type CustomerJobEnrichment,
@@ -168,6 +169,7 @@ function mapBookingDoc(
     customerImageUrls: parseCustomerImageUrls(data.customerImageUrls),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
+    cancelledAt: toMillis(data.cancelledAt),
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
     quotation: parseInspectionQuotation(data.quotation),
@@ -291,9 +293,11 @@ export async function GET(request: Request) {
     docs.set(doc.id, data);
   }
 
-  const requests = await enrichRequestsWithJobAssignees(
-    await enrichRequestsWithInvoices(
-      Array.from(docs.entries()).map(([id, data]) => mapBookingDoc(id, data)),
+  const requests = await enrichAssignmentsWithPhotos(
+    await enrichRequestsWithJobAssignees(
+      await enrichRequestsWithInvoices(
+        Array.from(docs.entries()).map(([id, data]) => mapBookingDoc(id, data)),
+      ),
     ),
   );
 

@@ -22,9 +22,9 @@ type JobPreferredDatesPickerProps = {
   onChange: (slots: InspectionSlot[]) => void;
   timeZone?: string | null;
   disabled?: boolean;
-  /** When true, require exactly 3 days (customer quote acceptance). */
-  requireThree?: boolean;
   label?: string;
+  /** Shown below the day strip (e.g. customer quote acceptance guidance). */
+  helperNote?: string;
 };
 
 export function JobPreferredDatesPicker({
@@ -32,8 +32,8 @@ export function JobPreferredDatesPicker({
   onChange,
   timeZone,
   disabled = false,
-  requireThree = false,
   label = "Pick up to 3 preferred job days",
+  helperNote,
 }: JobPreferredDatesPickerProps) {
   const minDate = todayIso(timeZone);
   const [dayPage, setDayPage] = useState(0);
@@ -41,7 +41,7 @@ export function JobPreferredDatesPicker({
     () => value.map((slot) => slot.date).filter(Boolean),
     [value],
   );
-  const maxSelections = requireThree ? 3 : 3;
+  const maxSelections = 3;
 
   function toggleDay(iso: string) {
     if (disabled) return;
@@ -67,9 +67,7 @@ export function JobPreferredDatesPicker({
     );
   }
 
-  const selectionHint = requireThree
-    ? `${selectedDates.length} of 3 days selected`
-    : `${selectedDates.length} of 3 days`;
+  const selectionHint = `${selectedDates.length} of 3 days selected`;
 
   return (
     <div className="space-y-3">
@@ -87,6 +85,11 @@ export function JobPreferredDatesPicker({
           timeZone={timeZone}
           disabled={disabled}
         />
+        {helperNote ? (
+          <p className="mt-2 rounded-lg border border-amber-200/70 bg-amber-50/90 px-3 py-2 font-body text-[11px] leading-snug text-amber-900/90">
+            {helperNote}
+          </p>
+        ) : null}
         <p className="mt-2 font-body text-[11px] font-semibold text-on-surface-variant">
           {selectionHint}
         </p>
@@ -94,13 +97,11 @@ export function JobPreferredDatesPicker({
           <p className="mt-1 font-body text-[12px] text-on-surface-variant">
             Tap a selected day again to remove it.
           </p>
-        ) : (
+        ) : !helperNote ? (
           <p className="mt-2 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
-            {requireThree
-              ? "Choose exactly 3 days before accepting."
-              : "Choose at least one day."}
+            Choose at least one day.
           </p>
-        )}
+        ) : null}
       </div>
 
       {selectedDates.length > 0 ? (
@@ -141,17 +142,7 @@ export function JobPreferredDatesPicker({
   );
 }
 
-export function isJobPreferredDatesComplete(
-  slots: InspectionSlot[],
-  requireThree: boolean,
-): boolean {
-  if (requireThree) {
-    return (
-      slots.length === 3 &&
-      new Set(slots.map((slot) => slot.date)).size === 3 &&
-      slots.every((slot) => slot.date && slot.timeRange)
-    );
-  }
+export function isJobPreferredDatesComplete(slots: InspectionSlot[]): boolean {
   return (
     slots.length > 0 &&
     new Set(slots.map((slot) => slot.date)).size === slots.length &&

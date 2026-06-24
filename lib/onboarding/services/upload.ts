@@ -259,6 +259,65 @@ export async function uploadBusinessLogo(
   }
 }
 
+/**
+ * Uploads a staff member profile photo to Firebase Storage and returns a public
+ * URL. Owners upload photos for their team; the storage path is scoped by
+ * business and (when known) the staff member's uid. New staff who do not have a
+ * uid yet are stored under a `pending` prefix.
+ */
+export async function uploadStaffAvatar(
+  file: Buffer,
+  contentType: string,
+  options: {
+    businessId: string;
+    staffId?: string | null;
+    filename?: string;
+  },
+): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
+  const resolved = resolveImageContentType(
+    contentType,
+    options.filename ?? "",
+    file,
+  );
+  if (!resolved) {
+    return {
+      ok: false,
+      error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF.",
+    };
+  }
+
+  if (file.length > MAX_BYTES) {
+    return { ok: false, error: "Image must be 5 MB or smaller." };
+  }
+
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const bucket = getStorage().bucket(bucketName);
+  const ext = resolved.split("/")[1]?.replace("jpeg", "jpg") ?? "jpg";
+  const staffPart = options.staffId?.trim() || "pending";
+  const path = `staff-avatars/${options.businessId}/${staffPart}/${Date.now()}-${randomUUID()}.${ext}`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType: resolved,
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, imageUrl };
+  } catch (error) {
+    console.error("uploadStaffAvatar failed:", error);
+    return { ok: false, error: "Could not upload photo." };
+  }
+}
+
 /** Uploads a subscription package marketing image (super-admin catalog). */
 export async function uploadPackageImage(
   file: Buffer,

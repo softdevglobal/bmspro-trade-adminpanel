@@ -66,6 +66,8 @@ export type BookingDetail = {
   scheduledSlot: InspectionSlot | null;
   scheduledStartTime: string | null;
   scheduledEndTime: string | null;
+  /** Extra on-site days beyond `scheduledSlot` (multi-day direct jobs). */
+  additionalJobDays: InspectionSlot[];
   estimatedDurationMinutes: number | null;
   assignedTo: InspectionAssignment | null;
   ownerNote: string | null;

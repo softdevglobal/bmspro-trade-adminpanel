@@ -124,6 +124,8 @@ export type InspectionAssignment = {
   uid: string;
   name: string;
   email: string | null;
+  /** Uploaded profile photo of the assignee, when available. */
+  photoUrl?: string | null;
 };
 
 export type InspectionRequestInput = {
@@ -179,6 +181,8 @@ export type InspectionRequestDetail = {
   customerImageUrls: string[];
   createdAt: number | null;
   updatedAt: number | null;
+  /** Millis when the request was cancelled; null if never cancelled. */
+  cancelledAt: number | null;
   visitStartedAt: number | null;
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */
@@ -391,20 +395,20 @@ export function parseSlotsArray(
   return dedupeSlots(parsed).slice(0, max);
 }
 
-/** Validates job-day preferences (exactly 3 unique dates when accepting a quote). */
+/** Validates job-day preferences (1–3 unique dates when accepting a quote). */
 export function validateJobPreferredSlotsForAcceptance(
   raw: unknown,
   timeZone?: string | null,
 ): { ok: true; value: InspectionSlot[] } | { ok: false; error: string } {
   const slots = parseSlotsArray(raw, 3, timeZone);
-  if (slots.length !== 3) {
+  if (slots.length === 0) {
     return {
       ok: false,
-      error: "Pick exactly 3 preferred job days before accepting.",
+      error: "Pick at least one preferred job day before accepting.",
     };
   }
   const uniqueDates = new Set(slots.map((slot) => slot.date));
-  if (uniqueDates.size !== 3) {
+  if (uniqueDates.size !== slots.length) {
     return {
       ok: false,
       error: "Each preferred job day must be a different date.",
@@ -726,7 +730,7 @@ export function sortInspectionSlots<T extends InspectionSlot>(
 
 export const UNSCHEDULED_SORT_KEY = "9999-12-31T23:59";
 
-/** Sort key for board views: scheduled visit, else earliest preferred slot. */
+/** Sort key for confirmed inspection visits only (not preferred slots). */
 export function inspectionRequestScheduleSortKey(
   request: InspectionRequestDetail,
 ): string {
@@ -736,10 +740,6 @@ export function inspectionRequestScheduleSortKey(
         ? request.scheduledStartTime
         : resolveSlotStartTime(request.scheduledSlot);
     return `${request.scheduledSlot.date}T${start}`;
-  }
-  const [earliest] = sortInspectionSlots(request.preferredSlots);
-  if (earliest?.date) {
-    return `${earliest.date}T${resolveSlotStartTime(earliest)}`;
   }
   return UNSCHEDULED_SORT_KEY;
 }

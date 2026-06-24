@@ -1,6 +1,4 @@
-import { DashboardShell } from "@/components/dashboard-shell";
 import { SmsLogBoard } from "@/components/sms-log-board";
-import { SuperAdminGuard } from "@/components/super-admin-guard";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -8,15 +6,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminSmsLogPage() {
-  return (
-    <DashboardShell
-      title="SMS log"
-      subtitle="Outbound SMS history across all workshops."
-      icon="history"
-    >
-      <SuperAdminGuard>
-        <SmsLogBoard variant="admin" />
-      </SuperAdminGuard>
-    </DashboardShell>
-  );
+  return <SmsLogBoard variant="admin" />;
 }

@@ -11,6 +11,8 @@ import {
 } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 
+import { initBrowserFirestore } from "@/lib/firebase/browser-firestore";
+
 const CUSTOMER_APP_NAME = "customer";
 
 const firebaseConfig = {
@@ -35,3 +37,4 @@ function loadCustomerApp(): FirebaseApp {
 
 export const customerApp: FirebaseApp = loadCustomerApp();
 export const customerAuth: Auth = getAuth(customerApp);
+export const customerDb = initBrowserFirestore(customerApp);

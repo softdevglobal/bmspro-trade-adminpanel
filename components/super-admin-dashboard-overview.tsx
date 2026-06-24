@@ -1,6 +1,5 @@
 "use client";
 
-import { DashboardShell } from "@/components/dashboard-shell";
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
@@ -170,8 +169,7 @@ export function SuperAdminDashboardOverview() {
     "Super Admin";
 
   return (
-    <DashboardShell title="Dashboard" hidePageHeader>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <motion.section
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -390,7 +388,6 @@ export function SuperAdminDashboardOverview() {
             </div>
           </motion.section>
         </div>
-      </div>
-    </DashboardShell>
+    </div>
   );
 }

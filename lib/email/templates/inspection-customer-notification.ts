@@ -22,7 +22,7 @@ const EMAIL_PRESENTATION: Record<
   request_created: { eyebrow: "Request", tone: "brand" },
   request_scheduled: { eyebrow: "Visit confirmed", tone: "success" },
   request_proposed: { eyebrow: "New times proposed", tone: "warning" },
-  request_assigned: { eyebrow: "Inspector assigned", tone: "success" },
+  request_assigned: { eyebrow: "Team member assigned", tone: "success" },
   visit_on_the_way: { eyebrow: "On the way", tone: "brand" },
   booking_on_the_way: { eyebrow: "Job on the way", tone: "brand" },
   request_cancelled: { eyebrow: "Request cancelled", tone: "danger" },

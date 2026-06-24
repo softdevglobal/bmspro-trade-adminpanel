@@ -61,7 +61,7 @@ import {
   canAdminProposeJobDates,
   needsAdminJobDateProposal,
 } from "@/lib/inspection/types";
-import { sortInspectionRequestsBySchedule } from "@/lib/inspection/map-inspection-doc";
+import { sortInspectionRequestsForBoard } from "@/lib/inspection/map-inspection-doc";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
@@ -241,8 +241,8 @@ export function RequestsBoard() {
       filter === "all"
         ? boardRequests
         : boardRequests.filter((req) => req.status === filter);
-    return sortInspectionRequestsBySchedule(list);
-  }, [boardRequests, filter]);
+    return sortInspectionRequestsForBoard(list, bookingById);
+  }, [boardRequests, filter, bookingById]);
 
   const counts = useMemo(() => {
     const map: Record<StatusFilter, number> = {
@@ -504,7 +504,7 @@ function RequestScheduleSummary({
   linkedJob: BookingDetail | null;
   timeZone?: string | null;
 }) {
-  if (request.status === "cancelled") return null;
+  const isCancelled = request.status === "cancelled";
 
   const visitWindow = formatVisitWindow(
     request.scheduledStartTime,
@@ -514,6 +514,23 @@ function RequestScheduleSummary({
     linkedJob && linkedJobIsScheduled(linkedJob)
       ? formatVisitWindow(linkedJob.scheduledStartTime, linkedJob.scheduledEndTime)
       : null;
+
+  // For cancelled requests we still surface the visit that was scheduled
+  // (if any) so the full details up to cancellation remain visible, but we
+  // skip the "not confirmed yet" prompts that only apply to live requests.
+  if (isCancelled) {
+    if (!request.scheduledSlot) return null;
+    return (
+      <ScheduleDatePill
+        category="inspection"
+        prefix="Inspection (cancelled)"
+        slot={request.scheduledSlot}
+        timeZone={timeZone}
+        variant="confirmed"
+        suffix={visitWindow}
+      />
+    );
+  }
 
   return (
     <>
@@ -1938,7 +1955,12 @@ function QuotationSection({
         if (!response.ok || !data.ok) {
           throw new Error(data.error ?? "Could not load quotations.");
         }
-        if (active) setQuotations(data.quotations ?? []);
+        if (active) {
+          const ordered = [...(data.quotations ?? [])].sort(
+            (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
+          );
+          setQuotations(ordered);
+        }
       } catch (err) {
         if (active) {
           setError(
@@ -2602,7 +2624,7 @@ function AdminJobDatesEditor({
 
   async function save() {
     if (!user || !onUpdated) return;
-    if (!isJobPreferredDatesComplete(slots, false)) {
+    if (!isJobPreferredDatesComplete(slots)) {
       setError("Pick at least one job day to propose.");
       return;
     }

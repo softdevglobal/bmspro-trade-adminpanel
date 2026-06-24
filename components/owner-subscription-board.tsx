@@ -21,7 +21,7 @@ import type {
   TenantSubscriptionSnapshot,
 } from "@/lib/subscription-plans/tenant-types";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -468,9 +468,45 @@ function planCardTheme(color: string) {
   return map[id] ?? map.blue;
 }
 
+function formatBillingCycleLabel(cycle: "weekly" | "monthly"): string {
+  return cycle === "monthly" ? "Monthly billing" : "Weekly billing";
+}
+
+function planFeatureItems(plan: AvailablePlanOption): string[] {
+  const items: string[] = [];
+  const sms = plan.bundledSmsPackage;
+  if (sms) {
+    items.push(
+      `${formatMessageQuotaLabel(sms.messageQuota)} SMS included (${sms.name})`,
+    );
+  }
+  items.push(formatRenewalLabel(plan.billingCycle, plan.validityDays));
+  for (const feature of plan.features) {
+    const trimmed = feature.trim();
+    if (!trimmed) continue;
+    if (trimmed === plan.description?.trim()) continue;
+    if (trimmed === plan.priceLabel.trim()) continue;
+    items.push(trimmed);
+  }
+  return items.slice(0, 3);
+}
+
+function sortPlanOptions(
+  plans: AvailablePlanOption[],
+  currentPlanId: string | null | undefined,
+): AvailablePlanOption[] {
+  return [...plans].sort((a, b) => {
+    if (a.id === currentPlanId) return -1;
+    if (b.id === currentPlanId) return 1;
+    if (a.price !== b.price) return a.price - b.price;
+    if (a.staff !== b.staff) return a.staff - b.staff;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 function formatStaffShort(staff: number): string {
   if (staff < 0) return "∞";
-  return String(staff);
+  return staff.toLocaleString();
 }
 
 function PlanChangeCard({
@@ -485,25 +521,13 @@ function PlanChangeCard({
   onChange: () => void;
 }) {
   const theme = planCardTheme(plan.color);
-  const sms = plan.bundledSmsPackage;
+  const featurePreview = planFeatureItems(plan);
   const directionLabel =
     plan.direction === "upgrade"
       ? "Upgrade"
       : plan.direction === "downgrade"
         ? "Downgrade"
-        : "Select plan";
-
-  const featureItems: string[] = [];
-  if (sms) {
-    featureItems.push(
-      `${formatMessageQuotaLabel(sms.messageQuota)} included (${sms.name})`,
-    );
-  }
-  featureItems.push(
-    formatRenewalLabel(plan.billingCycle, plan.validityDays),
-    ...plan.features,
-  );
-  const featurePreview = featureItems.slice(0, 3);
+        : "Select";
 
   return (
     <article className="group relative flex h-full flex-col">
@@ -514,7 +538,7 @@ function PlanChangeCard({
         aria-hidden
       />
       <div
-        className={`relative flex h-full flex-col overflow-hidden rounded-[1.25rem] border bg-white shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] ${
+        className={`relative flex h-full min-h-[420px] flex-col overflow-hidden rounded-[1.25rem] border bg-white shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] ${
           isCurrent
             ? "border-primary/40 ring-2 ring-primary/20"
             : "border-white/60"
@@ -526,65 +550,75 @@ function PlanChangeCard({
         />
 
         <div className="relative flex flex-1 flex-col px-5 pb-5 pt-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${theme.icon}`}
-              >
-                <span className="material-symbols-outlined text-[24px]">
-                  {plan.icon || "inventory_2"}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <h3 className="truncate font-display text-[16px] font-bold tracking-tight text-on-surface">
+          <div className="flex items-start gap-3">
+            <div
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${theme.icon}`}
+            >
+              <span className="material-symbols-outlined text-[22px]">
+                {plan.icon || "inventory_2"}
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="line-clamp-2 break-words font-display text-[15px] font-bold leading-snug tracking-tight text-on-surface">
                   {plan.name}
                 </h3>
-                <p className="mt-0.5 font-mono text-[11px] text-on-surface-variant">
-                  {plan.plan_key || plan.billingCycle.toUpperCase()}
-                </p>
+                {isCurrent ? (
+                  <span className="shrink-0 rounded-full bg-primary px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wide text-on-primary">
+                    Current
+                  </span>
+                ) : plan.popular ? (
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset ${theme.chip}`}
+                  >
+                    Popular
+                  </span>
+                ) : null}
               </div>
+              <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+                {formatBillingCycleLabel(plan.billingCycle)}
+              </p>
             </div>
-            {isCurrent ? (
-              <span className="shrink-0 rounded-full bg-[#1a1d24] px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wide text-white">
-                Current
-              </span>
-            ) : plan.popular ? (
-              <span
-                className={`shrink-0 rounded-full px-2.5 py-1 font-body text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset ${theme.chip}`}
-              >
-                Popular
-              </span>
-            ) : null}
           </div>
 
-          <div className="mt-5">
-            <p className="font-body text-[11px] font-medium uppercase tracking-[0.12em] text-on-surface-variant">
-              Staff
+          <div className="mt-5 border-b border-dashed border-outline-variant/70 pb-4">
+            <p className="font-display text-[28px] font-bold leading-none tracking-tight text-on-surface">
+              {plan.priceLabel}
             </p>
-            <p className="mt-1 font-display text-[42px] font-bold leading-none tracking-tight text-on-surface">
+            <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+              {formatRenewalLabel(plan.billingCycle, plan.validityDays)}
+            </p>
+          </div>
+
+          <div className="mt-4">
+            <p className="font-body text-[11px] font-medium uppercase tracking-[0.12em] text-on-surface-variant">
+              Staff limit
+            </p>
+            <p className="mt-1 font-display text-[36px] font-bold leading-none tracking-tight text-on-surface">
               {formatStaffShort(plan.staff)}
             </p>
             <p className="mt-1 font-body text-[12px] text-on-surface-variant">
               {formatLimitLabel(plan.staff, "staff member", "staff members")}
             </p>
-            {plan.description ? (
-              <p className="mt-2 line-clamp-2 font-body text-[12px] leading-snug text-on-surface-variant">
-                {plan.description}
-              </p>
-            ) : null}
           </div>
 
+          {plan.description ? (
+            <p className="mt-3 line-clamp-2 break-words font-body text-[12px] leading-relaxed text-on-surface-variant">
+              {plan.description}
+            </p>
+          ) : null}
+
           {featurePreview.length > 0 ? (
-            <ul className="mt-4 space-y-2 border-t border-dashed border-outline-variant/70 pt-4">
+            <ul className="mt-4 space-y-2">
               {featurePreview.map((feature) => (
                 <li
                   key={feature}
-                  className="flex items-center gap-2 font-body text-[12px] text-on-surface-variant"
+                  className="flex items-start gap-2 font-body text-[12px] leading-snug text-on-surface-variant"
                 >
                   <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-r ${theme.gradient}`}
+                    className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gradient-to-r ${theme.gradient}`}
                   />
-                  <span className="line-clamp-2">{feature}</span>
+                  <span className="line-clamp-2 break-words">{feature}</span>
                 </li>
               ))}
             </ul>
@@ -596,41 +630,46 @@ function PlanChangeCard({
             </p>
           ) : null}
 
-          {isCurrent ? (
-            <span className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-primary/10 px-4 py-3 font-body text-[13px] font-semibold text-primary">
-              Current plan
-            </span>
-          ) : (
-            <button
-              type="button"
-              disabled={changing || !plan.changeAllowed}
-              onClick={onChange}
-              className="mt-4 inline-flex w-full items-center justify-between gap-3 rounded-xl bg-[#1a1d24] px-4 py-3 font-body text-[13px] font-semibold text-white transition-colors hover:bg-[#2a2f3a] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {changing ? (
-                <span className="inline-flex w-full items-center justify-center gap-1.5">
-                  <span className="material-symbols-outlined animate-spin text-[18px]">
-                    progress_activity
-                  </span>
-                  Processing…
+          <div className="mt-auto pt-5">
+            {isCurrent ? (
+              <span className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 font-body text-[13px] font-semibold text-primary">
+                <span className="material-symbols-outlined text-[18px]">
+                  check_circle
                 </span>
-              ) : (
-                <>
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <span className="material-symbols-outlined shrink-0 text-[18px]">
-                      {plan.direction === "downgrade"
-                        ? "arrow_downward"
-                        : "arrow_upward"}
+                Your current plan
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={changing || !plan.changeAllowed}
+                onClick={onChange}
+                className="inline-flex w-full flex-col items-center justify-center gap-1 rounded-xl bg-[#1a1d24] px-4 py-3 font-body text-[13px] font-semibold text-white transition-colors hover:bg-[#2a2f3a] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {changing ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="material-symbols-outlined animate-spin text-[18px]">
+                      progress_activity
                     </span>
-                    <span className="truncate">{directionLabel}</span>
+                    Processing…
                   </span>
-                  <span className="shrink-0 text-[13px] font-bold tabular-nums">
-                    {plan.priceLabel}
-                  </span>
-                </>
-              )}
-            </button>
-          )}
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[18px]">
+                        {plan.direction === "downgrade"
+                          ? "arrow_downward"
+                          : "arrow_upward"}
+                      </span>
+                      {directionLabel} to this plan
+                    </span>
+                    <span className="text-[11px] font-medium text-white/75">
+                      {plan.priceLabel}
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </article>
@@ -654,6 +693,11 @@ export function OwnerSubscriptionBoard() {
   const [addingPayment, setAddingPayment] = useState(false);
   const [checkoutRedirecting, setCheckoutRedirecting] = useState(false);
   const hasLoadedRef = useRef(false);
+
+  const sortedPlans = useMemo(
+    () => sortPlanOptions(plans, subscription?.planId),
+    [plans, subscription?.planId],
+  );
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -923,8 +967,8 @@ export function OwnerSubscriptionBoard() {
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-          {plans.map((plan) => (
+        <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-2 xl:grid-cols-3">
+          {sortedPlans.map((plan) => (
             <PlanChangeCard
               key={plan.id}
               plan={plan}
@@ -934,7 +978,7 @@ export function OwnerSubscriptionBoard() {
             />
           ))}
         </div>
-        {plans.length === 0 && !loading ? (
+        {sortedPlans.length === 0 && !loading ? (
           <p className="font-body text-[13px] text-on-surface-variant">
             No subscription plans are available right now.
           </p>
