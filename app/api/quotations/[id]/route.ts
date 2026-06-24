@@ -2,10 +2,14 @@ import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   businessRecordQuotationCustomerDecision,
   cancelQuotation,
+  deleteBusinessQuotation,
   getBusinessQuotationById,
   undoCancelQuotation,
   updateDraftQuotation,
 } from "@/lib/quotations/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
+import { logAuditEvent } from "@/lib/audit/server";
+import { displayQuotationCode } from "@/lib/reference-codes";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -312,4 +316,59 @@ export async function PATCH(
     decision,
     request: result.request,
   });
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireBusinessAuthor(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  const { id } = await context.params;
+
+  const ownership = await assertStaffOwnsQuotation(auth, id);
+  if (!ownership.ok) {
+    return NextResponse.json(
+      { ok: false, error: ownership.error },
+      { status: ownership.status },
+    );
+  }
+
+  const result = await deleteBusinessQuotation(auth.businessId, id);
+  if (!result.ok) {
+    return NextResponse.json(
+      { ok: false, error: result.error },
+      { status: result.status },
+    );
+  }
+
+  const quoteCode = displayQuotationCode(result.quotation);
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "quotation",
+    action: "quotation.deleted",
+    actor: {
+      uid: auth.uid,
+      role: actorRoleFromClaim(auth.role),
+      name: null,
+      email: null,
+    },
+    source: "admin_panel",
+    summary: `Quotation ${quoteCode} deleted`,
+    targetId: result.quotation.id,
+    targetLabel: result.quotation.customer.fullName || null,
+    metadata: {
+      quotationCode: result.quotation.quotationCode,
+      deletedInvoice: result.deletedInvoice,
+      status: result.quotation.status,
+    },
+  });
+
+  return NextResponse.json({ ok: true });
 }
