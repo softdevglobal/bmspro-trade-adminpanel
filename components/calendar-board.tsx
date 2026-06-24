@@ -54,6 +54,7 @@ import { useCalendarSlotOccupancy } from "@/lib/calendar/use-calendar-slot-occup
 import { occupancyForHour } from "@/lib/calendar/slot-occupancy-types";
 import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
 import { useBusinessClosures } from "@/lib/calendar/use-business-closures";
+import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import type { BusinessClosure } from "@/lib/calendar/business-closures/types";
 import { MarkBusinessClosureModal } from "@/components/mark-business-closure-modal";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
@@ -204,6 +205,7 @@ function CalendarHourSlotRow({
   capacityLoading,
   canAddEvents,
   closedDay = false,
+  jobsModuleEnabled = true,
   onAddEvent,
   onOpenLink,
   onEditPersonalEvent,
@@ -215,6 +217,7 @@ function CalendarHourSlotRow({
   capacityLoading: boolean;
   canAddEvents: boolean;
   closedDay?: boolean;
+  jobsModuleEnabled?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
   onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
@@ -225,7 +228,10 @@ function CalendarHourSlotRow({
   const timeLabel =
     startLabel && endLabel ? `${startLabel} – ${endLabel}` : slot.startTime;
   const slotFull =
-    !capacityLoading && occupancy != null && occupancy.jobsFull && occupancy.requestsFull;
+    !capacityLoading &&
+    occupancy != null &&
+    occupancy.requestsFull &&
+    (jobsModuleEnabled ? occupancy.jobsFull : true);
 
   return (
     <div className="rounded-lg border border-outline-variant/50 bg-surface-container-lowest/80">
@@ -256,6 +262,7 @@ function CalendarHourSlotRow({
             occupancy={occupancy}
             capacityLoading={capacityLoading}
             closedDay={closedDay}
+            jobsModuleEnabled={jobsModuleEnabled}
             onSelect={onAddEvent}
           />
         ) : null}
@@ -287,6 +294,7 @@ function CalendarDayTimeSlots({
   workingHours,
   canAddEvents,
   isBusinessClosed,
+  jobsModuleEnabled = true,
   onAddEvent,
   onOpenLink,
   onEditPersonalEvent,
@@ -296,6 +304,7 @@ function CalendarDayTimeSlots({
   workingHours: BusinessWorkingHours;
   canAddEvents: boolean;
   isBusinessClosed?: boolean;
+  jobsModuleEnabled?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
   onEditPersonalEvent?: (event: PersonalCalendarEvent) => void;
@@ -337,6 +346,7 @@ function CalendarDayTimeSlots({
   ) {
     if (isBusinessClosed) return;
     const occupancy = occupancyForHour(occupancySlots, selection.startTime);
+    if (kind === "job" && !jobsModuleEnabled) return;
     if (kind === "job" && occupancy?.jobsFull) return;
     if (kind === "inspection" && occupancy?.requestsFull) return;
     onAddEvent(kind, selection);
@@ -393,6 +403,7 @@ function CalendarDayTimeSlots({
                   capacityLoading={capacityLoading}
                   canAddEvents={canAddEvents}
                   closedDay={isBusinessClosed}
+                  jobsModuleEnabled={jobsModuleEnabled}
                   onAddEvent={handleAddEvent}
                   onOpenLink={onOpenLink}
                   onEditPersonalEvent={onEditPersonalEvent}
@@ -757,6 +768,8 @@ function eventTimeLabel(
 export function CalendarBoard() {
   const router = useRouter();
   const { user, role } = useAuth();
+  const { isModuleEnabled } = useBusinessModuleSettings();
+  const jobsModuleEnabled = isModuleEnabled("jobs");
   const { workingHours } = useBusinessWorkingHours();
   const workingHoursLabel = useMemo(
     () => describeWorkingHoursWindow(workingHours),
@@ -991,6 +1004,10 @@ export function CalendarBoard() {
       setEditingPersonalEvent(null);
       setPersonalEventSlot(selection);
       setPersonalEventModalOpen(true);
+      return;
+    }
+
+    if (kind === "job" && !jobsModuleEnabled) {
       return;
     }
 
@@ -1587,6 +1604,7 @@ export function CalendarBoard() {
               workingHours={workingHours}
               canAddEvents={canAddEvents}
               isBusinessClosed={closedDates.has(focusIso)}
+              jobsModuleEnabled={jobsModuleEnabled}
               onAddEvent={openAddEvent}
               onEditPersonalEvent={openEditPersonalEvent}
             />
@@ -1666,6 +1684,7 @@ export function CalendarBoard() {
                 workingHours={workingHours}
                 canAddEvents={canAddEvents}
                 isBusinessClosed={isSelectedDayClosed}
+                jobsModuleEnabled={jobsModuleEnabled}
                 onAddEvent={openAddEvent}
                 onOpenLink={closeBookingDrawer}
                 onEditPersonalEvent={openEditPersonalEvent}

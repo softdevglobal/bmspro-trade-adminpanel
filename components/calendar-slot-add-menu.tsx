@@ -51,9 +51,11 @@ function isOptionDisabled(
   occupancy: HourSlotOccupancy | undefined,
   capacityLoading: boolean,
   closedDay: boolean,
+  jobsModuleEnabled: boolean,
 ): boolean {
   if (closedDay) return true;
   if (kind === "personal") return false;
+  if (kind === "job" && !jobsModuleEnabled) return true;
   if (capacityLoading || !occupancy) return true;
   return kind === "job" ? occupancy.jobsFull : occupancy.requestsFull;
 }
@@ -63,12 +65,14 @@ export function CalendarSlotAddMenu({
   occupancy,
   capacityLoading = false,
   closedDay = false,
+  jobsModuleEnabled = true,
   onSelect,
 }: {
   slot: CalendarSlotSelection;
   occupancy?: HourSlotOccupancy;
   capacityLoading?: boolean;
   closedDay?: boolean;
+  jobsModuleEnabled?: boolean;
   onSelect: (kind: CalendarAddEventKind, slot: CalendarSlotSelection) => void;
 }) {
   const menuId = useId();
@@ -81,7 +85,10 @@ export function CalendarSlotAddMenu({
   const jobsFull = occupancy?.jobsFull === true;
   const requestsFull = occupancy?.requestsFull === true;
   const allScheduledTypesFull =
-    !capacityLoading && occupancy != null && jobsFull && requestsFull;
+    !capacityLoading &&
+    occupancy != null &&
+    requestsFull &&
+    (jobsModuleEnabled ? jobsFull : true);
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) {
@@ -161,7 +168,10 @@ export function CalendarSlotAddMenu({
                 occupancy,
                 capacityLoading,
                 closedDay,
+                jobsModuleEnabled,
               );
+              const moduleDisabled =
+                option.kind === "job" && !jobsModuleEnabled;
 
               return (
                 <button
@@ -193,9 +203,11 @@ export function CalendarSlotAddMenu({
                     <span className="block font-body text-[11px] text-on-surface-variant">
                       {closedDay
                         ? "Business off day"
-                        : disabled && option.kind !== "personal"
-                          ? option.fullHint
-                          : option.hint}
+                        : moduleDisabled
+                          ? "Enable Jobs in Settings"
+                          : disabled && option.kind !== "personal"
+                            ? option.fullHint
+                            : option.hint}
                     </span>
                   </span>
                 </button>
