@@ -5,6 +5,11 @@ import {
   timezoneLabel,
   type TenantDetail,
 } from "@/lib/onboarding/tenant-display";
+import {
+  BUSINESS_MODULE_LABELS,
+  OWNER_TOGGLEABLE_MODULES,
+  type BusinessModuleKey,
+} from "@/lib/business/module-settings";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
@@ -296,6 +301,13 @@ function DrawerPanel({
             )}
           </DetailSection>
 
+          <DetailSection title="Trade modules">
+            <TenantModuleToggles
+              tenant={tenant}
+              onTenantUpdated={onTenantUpdated}
+            />
+          </DetailSection>
+
           <DetailSection title="Account">
             <DetailRow
               label="Source"
@@ -488,6 +500,161 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <dd className="font-body text-[13px] text-on-surface sm:max-w-[58%] sm:text-right">
         {value}
       </dd>
+    </div>
+  );
+}
+
+const MODULE_ICONS: Record<Exclude<BusinessModuleKey, "requests">, string> = {
+  quotations: "request_quote",
+  invoices: "receipt_long",
+  jobs: "assignment",
+};
+
+function TenantModuleToggles({
+  tenant,
+  onTenantUpdated,
+}: {
+  tenant: TenantDetail;
+  onTenantUpdated?: (tenant: TenantDetail) => void;
+}) {
+  const { user } = useAuth();
+  const [modules, setModules] = useState(tenant.enabledModules);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    setModules(tenant.enabledModules);
+    setError(null);
+    setSuccess(false);
+  }, [tenant.id, tenant.enabledModules]);
+
+  const dirty = OWNER_TOGGLEABLE_MODULES.some(
+    (key) => modules[key] !== tenant.enabledModules[key],
+  );
+
+  function toggleModule(
+    key: Exclude<BusinessModuleKey, "requests">,
+    next: boolean,
+  ) {
+    setModules((current) => ({ ...current, [key]: next }));
+    setSuccess(false);
+    setError(null);
+  }
+
+  async function handleSave() {
+    if (!user) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/admin/tenants/${encodeURIComponent(tenant.id)}/modules`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            enabledModules: {
+              quotations: modules.quotations,
+              invoices: modules.invoices,
+              jobs: modules.jobs,
+            },
+          }),
+        },
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        enabledModules?: TenantDetail["enabledModules"];
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not update module settings.");
+      }
+      const nextModules = payload.enabledModules ?? modules;
+      setModules(nextModules);
+      onTenantUpdated?.({ ...tenant, enabledModules: nextModules });
+      setSuccess(true);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not update module settings.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 px-4 py-3">
+      <DetailRow
+        label={BUSINESS_MODULE_LABELS.requests}
+        value="Always on"
+      />
+      {OWNER_TOGGLEABLE_MODULES.map((key) => (
+        <div
+          key={key}
+          className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/70 bg-surface-container-low px-3 py-2.5"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="material-symbols-outlined text-[16px] text-primary">
+              {MODULE_ICONS[key]}
+            </span>
+            <span className="font-body text-[12px] font-semibold text-on-surface">
+              {BUSINESS_MODULE_LABELS[key]}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className={`font-body text-[10px] font-bold uppercase tracking-wide ${
+                modules[key] ? "text-primary" : "text-outline"
+              }`}
+            >
+              {modules[key] ? "On" : "Off"}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={modules[key]}
+              aria-label={`Enable ${BUSINESS_MODULE_LABELS[key]}`}
+              onClick={() => toggleModule(key, !modules[key])}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
+                modules[key] ? "bg-primary" : "bg-outline-variant/80"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all duration-200 ${
+                  modules[key] ? "left-[18px]" : "left-0.5"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {error ? (
+        <p className="rounded-lg border border-error/30 bg-error-container/60 px-3 py-2 font-body text-[11px] text-on-error-container">
+          {error}
+        </p>
+      ) : null}
+      {success ? (
+        <p className="rounded-lg border border-primary/20 bg-primary-fixed/50 px-3 py-2 font-body text-[11px] text-primary">
+          Module settings updated.
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        disabled={saving || !dirty}
+        onClick={() => void handleSave()}
+        className="w-full rounded-lg bg-primary px-3 py-2 font-body text-[12px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {saving ? "Saving…" : "Save module settings"}
+      </button>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { parseBusinessModuleSettings } from "@/lib/business/module-settings";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import type { TenantDetail } from "@/lib/onboarding/tenant-display";
 import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
@@ -86,6 +87,7 @@ function mapTenantDoc(doc: QueryDocumentSnapshot): TenantDetail {
       : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
+    enabledModules: parseBusinessModuleSettings(data),
   };
 }
 

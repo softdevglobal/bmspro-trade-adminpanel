@@ -7,6 +7,10 @@
 
 import { parseSlotCapacityInput } from "@/lib/calendar/slot-capacity";
 import { parseWorkingHoursInput } from "@/lib/calendar/working-hours";
+import {
+  mergeModuleSettings,
+  normalizeModuleSettingsPatch,
+} from "@/lib/business/module-settings";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import {
   getBusinessProfile,
@@ -97,6 +101,12 @@ export async function PATCH(request: Request) {
     slotCapacityJobs?: number;
     slotCapacityInspectionRequests?: number;
     workingHours?: { startTime: string; endTime: string };
+    enabledModules?: {
+      quotations: boolean;
+      invoices: boolean;
+      jobs: boolean;
+      requests: boolean;
+    };
   } = {};
 
   if ("businessName" in raw) {
@@ -308,6 +318,18 @@ export async function PATCH(request: Request) {
       { ok: false, error: "Business not found." },
       { status: 404 },
     );
+  }
+
+  if ("enabledModules" in raw) {
+    const parsed = normalizeModuleSettingsPatch(raw.enabledModules);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error },
+        { status: 400 },
+      );
+    }
+    const merged = mergeModuleSettings(current.enabledModules, parsed.value);
+    updates.enabledModules = merged;
   }
 
   const registeredForGst =

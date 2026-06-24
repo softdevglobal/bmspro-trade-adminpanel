@@ -33,6 +33,11 @@ import {
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
+import {
+  NEW_BUSINESS_MODULE_DEFAULTS,
+  parseBusinessModuleSettings,
+  type BusinessModuleSettings,
+} from "@/lib/business/module-settings";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 /**
@@ -323,6 +328,7 @@ function businessDocument(
     createdAt: now,
     updatedAt: now,
     workingHours: DEFAULT_WORKING_HOURS,
+    enabledModules: { ...NEW_BUSINESS_MODULE_DEFAULTS },
   };
 }
 
@@ -353,6 +359,7 @@ export type BusinessProfile = {
   slotCapacityJobs: number;
   slotCapacityInspectionRequests: number;
   workingHours: BusinessWorkingHours;
+  enabledModules: BusinessModuleSettings;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -432,6 +439,7 @@ export async function getBusinessProfile(
     slotCapacityInspectionRequests:
       parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
     workingHours: parseWorkingHoursFromBusiness(data),
+    enabledModules: parseBusinessModuleSettings(data),
   };
 }
 
@@ -453,6 +461,7 @@ export async function updateBusinessProfile(
     slotCapacityJobs?: number;
     slotCapacityInspectionRequests?: number;
     workingHours?: BusinessWorkingHours;
+    enabledModules?: BusinessModuleSettings;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -518,7 +527,44 @@ export async function updateBusinessProfile(
     payload.workingHours = updates.workingHours;
   }
 
+  if ("enabledModules" in updates && updates.enabledModules) {
+    payload.enabledModules = {
+      requests: true,
+      quotations: updates.enabledModules.quotations,
+      invoices: updates.enabledModules.invoices,
+      jobs: updates.enabledModules.jobs,
+    };
+  }
+
   await adminDb.collection("businesses").doc(businessId).update(payload);
+}
+
+/** Super-admin update of tenant trade module toggles. */
+export async function updateTenantModules(
+  businessId: string,
+  enabledModules: BusinessModuleSettings,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmedId = businessId.trim();
+  if (!trimmedId) {
+    return { ok: false, error: "Tenant id is required." };
+  }
+
+  const snap = await adminDb.collection("businesses").doc(trimmedId).get();
+  if (!snap.exists) {
+    return { ok: false, error: "Tenant not found." };
+  }
+
+  await adminDb.collection("businesses").doc(trimmedId).update({
+    enabledModules: {
+      requests: true,
+      quotations: enabledModules.quotations,
+      invoices: enabledModules.invoices,
+      jobs: enabledModules.jobs,
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return { ok: true };
 }
 
 /** Updates (or clears) the logo on a business document. */

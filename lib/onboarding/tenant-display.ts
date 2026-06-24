@@ -1,4 +1,5 @@
 import { AU_TIMEZONES } from "@/lib/onboarding/types";
+import type { BusinessModuleSettings } from "@/lib/business/module-settings";
 import {
   formatInPlatformTimeZone,
   PLATFORM_TIME_ZONE,
@@ -43,6 +44,7 @@ export type TenantDetail = {
   owner: TenantOwner | null;
   createdAt: number | null;
   updatedAt: number | null;
+  enabledModules: BusinessModuleSettings;
 };
 
 export function timezoneLabel(timezoneId: string | null): string {
