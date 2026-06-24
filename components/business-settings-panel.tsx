@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessModuleSettings } from "@/components/business-module-settings";
 import { BusinessSlotCapacitySettings } from "@/components/business-slot-capacity-settings";
 import { BusinessWorkingHoursSettings } from "@/components/business-working-hours-settings";
 import { BookingLinkCard } from "@/components/booking-link-card";
@@ -14,6 +15,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type { BusinessProfilePlan } from "@/lib/onboarding/server";
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
+import type { BusinessModuleSettings as BusinessModuleSettingsType } from "@/lib/business/module-settings";
 import type { AuTimezone } from "@/lib/onboarding/types";
 import { useEffect, useMemo, useState } from "react";
 
@@ -35,6 +37,7 @@ type ProfileMeta = {
   slotCapacityInspectionRequests: number | null;
   workingHours: BusinessWorkingHours | null;
   serviceAreas: string[];
+  enabledModules: BusinessModuleSettingsType | null;
 };
 
 export function BusinessSettingsPanel() {
@@ -51,6 +54,7 @@ export function BusinessSettingsPanel() {
     slotCapacityInspectionRequests: null,
     workingHours: null,
     serviceAreas: [],
+    enabledModules: null,
   });
   const [form, setForm] = useState<ProfileFormState>({
     businessName: "",
@@ -93,6 +97,7 @@ export function BusinessSettingsPanel() {
             slotCapacityInspectionRequests?: number | null;
             workingHours?: BusinessWorkingHours | null;
             serviceAreas?: string[];
+            enabledModules?: BusinessModuleSettingsType | null;
           };
         };
         if (!response.ok || !payload.ok || !payload.profile || !active) return;
@@ -125,6 +130,7 @@ export function BusinessSettingsPanel() {
                 }
               : null,
           serviceAreas: Array.isArray(p.serviceAreas) ? p.serviceAreas : [],
+          enabledModules: p.enabledModules ?? null,
         });
       } catch {
         /* keep defaults */
@@ -177,11 +183,21 @@ export function BusinessSettingsPanel() {
     setMeta((current) => ({ ...current, serviceAreas }));
   }
 
+  function handleModulesSaved(enabledModules: BusinessModuleSettingsType) {
+    setMeta((current) => ({ ...current, enabledModules }));
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
 
       <BookingLinkCard variant="permanent" />
+
+      <BusinessModuleSettings
+        enabledModules={meta.enabledModules}
+        loading={metaLoading}
+        onSaved={handleModulesSaved}
+      />
 
       <BusinessProfileSettings
         form={form}
