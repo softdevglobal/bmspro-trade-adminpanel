@@ -2600,3 +2600,81 @@ async function sendQuotationCreatedEmail(
     pdfFileName: `${quoteCode || "quotation"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });
 }
+
+/** Permanently removes a quotation, its linked invoice (if any), and request mirrors. */
+export async function deleteBusinessQuotation(
+  businessId: string,
+  quotationId: string,
+): Promise<
+  | { ok: true; quotation: QuotationDetail; deletedInvoice: boolean }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Missing quotation." };
+  }
+
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  const quotationSnap = await quotationRef.get();
+  if (!quotationSnap.exists) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const quotationData = quotationSnap.data() ?? {};
+  if (quotationData.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const quotation = mapQuotationDoc(quotationSnap.id, quotationData);
+  const inspectionRequestId =
+    typeof quotationData.inspectionRequestId === "string"
+      ? quotationData.inspectionRequestId.trim()
+      : "";
+
+  let deletedInvoice = false;
+  const invoiceRef = adminDb.collection("invoices").doc(id);
+  const invoiceSnap = await invoiceRef.get();
+  if (invoiceSnap.exists && invoiceSnap.data()?.businessId === businessId) {
+    await invoiceRef.delete();
+    deletedInvoice = true;
+  }
+
+  await quotationRef.delete();
+
+  if (inspectionRequestId) {
+    try {
+      const requestRef = adminDb.collection(REQUESTS_COLLECTION).doc(inspectionRequestId);
+      const requestSnap = await requestRef.get();
+      if (requestSnap.exists) {
+        const requestData = requestSnap.data() ?? {};
+        if (requestData.businessId === businessId) {
+          const patch: Record<string, unknown> = {
+            updatedAt: FieldValue.serverTimestamp(),
+          };
+          const quotationSummary = requestData.quotation as
+            | { id?: string }
+            | null
+            | undefined;
+          const invoiceSummary = requestData.invoice as
+            | { id?: string }
+            | null
+            | undefined;
+
+          if (quotationSummary?.id === id) {
+            patch.quotation = FieldValue.delete();
+          }
+          if (invoiceSummary?.id === id) {
+            patch.invoice = FieldValue.delete();
+          }
+          if (Object.keys(patch).length > 1) {
+            await requestRef.update(patch);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("[quotation] request cleanup failed:", error);
+    }
+  }
+
+  return { ok: true, quotation, deletedInvoice };
+}

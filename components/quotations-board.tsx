@@ -5,6 +5,7 @@ import {
   canConvertQuotationToBooking,
   ConvertToBookingPanel,
 } from "@/components/convert-to-booking-panel";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
@@ -207,11 +208,13 @@ function QuotationCardMenu({
   onScheduleBooking,
   onCancelQuotation,
   onUndoCancel,
+  onDeleteQuotation,
 }: {
   quotation: QuotationDetail;
   onScheduleBooking: () => void;
   onCancelQuotation: () => void;
   onUndoCancel: () => void;
+  onDeleteQuotation: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -417,6 +420,20 @@ function QuotationCardMenu({
               Undo cancel
             </button>
           ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            className={`${menuItemClass} text-rose-700 hover:bg-rose-50`}
+            onClick={() => {
+              setOpen(false);
+              onDeleteQuotation();
+            }}
+          >
+            <span className="material-symbols-outlined text-[18px] text-rose-600">
+              delete
+            </span>
+            Delete quotation
+          </button>
         </div>
       ) : null}
     </div>
@@ -430,6 +447,7 @@ function QuotationCard({
   onBook,
   onCancel,
   onUndoCancel,
+  onDelete,
   timeZone,
 }: {
   quotation: QuotationDetail;
@@ -438,6 +456,7 @@ function QuotationCard({
   onBook: () => void;
   onCancel: () => void;
   onUndoCancel: () => void;
+  onDelete: () => void;
   timeZone?: string | null;
 }) {
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
@@ -482,6 +501,7 @@ function QuotationCard({
           onScheduleBooking={onBook}
           onCancelQuotation={onCancel}
           onUndoCancel={onUndoCancel}
+          onDeleteQuotation={onDelete}
         />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
@@ -1326,6 +1346,8 @@ export function QuotationsBoard() {
   const [filter, setFilter] = useState<QuotationFilter>("pending");
   const [cancelTarget, setCancelTarget] = useState<QuotationDetail | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<QuotationDetail | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const timeZone = profile?.timezone;
 
   const load = useCallback(async () => {
@@ -1542,6 +1564,42 @@ export function QuotationsBoard() {
     }
   }
 
+  async function confirmDeleteQuotation() {
+    if (!user || !deleteTarget) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/quotations/${encodeURIComponent(deleteTarget.id)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not delete quotation.");
+      }
+      setQuotations((prev) =>
+        prev.filter((entry) => entry.id !== deleteTarget.id),
+      );
+      if (selectedId === deleteTarget.id) {
+        setSelectedId(null);
+        setPreviewMode("review");
+      }
+      setDeleteTarget(null);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Could not delete quotation.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function handleClosePreview() {
     setSelectedId(null);
     setPreviewMode("review");
@@ -1684,6 +1742,7 @@ export function QuotationsBoard() {
                 onBook={() => handleStartConvertBooking(quotation.id)}
                 onCancel={() => setCancelTarget(quotation)}
                 onUndoCancel={() => void handleUndoCancel(quotation)}
+                onDelete={() => setDeleteTarget(quotation)}
                 timeZone={timeZone}
               />
             </li>
@@ -1723,6 +1782,28 @@ export function QuotationsBoard() {
           if (!cancelling) setCancelTarget(null);
         }}
         onConfirm={() => void confirmCancelQuotation()}
+      />
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title="Delete this quotation?"
+        description={
+          deleteTarget
+            ? `${displayQuotationCode(deleteTarget)} for ${
+                deleteTarget.customer.fullName || "this customer"
+              } will be permanently removed${
+                quotationHasInvoice(deleteTarget)
+                  ? ", including its linked invoice"
+                  : ""
+              }. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Yes, delete quotation"
+        cancelLabel="Keep quotation"
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteQuotation()}
+        isLoading={deleting}
       />
     </>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -12,8 +13,7 @@ import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type InvoiceFilter = "due" | "draft" | "paid" | "all";
 
 const BOARD_SHELL_CLASS = "flex min-h-0 flex-1 flex-col";
@@ -82,20 +82,99 @@ function FilterChip({
   );
 }
 
+function InvoiceCardMenu({
+  invoice,
+  onDelete,
+}: {
+  invoice: InvoiceDetail;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const editDraftHref = `/dashboard/invoices?invoice=${encodeURIComponent(
+    invoice.id,
+  )}`;
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  const menuItemClass =
+    "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low";
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative shrink-0"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        aria-label="Invoice actions"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+      >
+        <span className="material-symbols-outlined text-[20px]">more_vert</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
+        >
+          {invoice.status === "draft" ? (
+            <Link
+              href={editDraftHref}
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                edit_square
+              </span>
+              Edit &amp; send draft
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            className={`${menuItemClass} text-rose-700 hover:bg-rose-50`}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            <span className="material-symbols-outlined text-[18px] text-rose-600">
+              delete
+            </span>
+            Delete invoice
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function InvoiceCard({
   invoice,
   isPreviewOpen,
   onOpen,
+  onDelete,
 }: {
   invoice: InvoiceDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
+  onDelete: () => void;
 }) {
-  const editDraftHref = `/dashboard/invoices?invoice=${encodeURIComponent(
-    invoice.id,
-  )}`;
   const displayPhone = formatAuPhoneDisplay(invoice.customer.phone);
-
   return (
     <div
       role="button"
@@ -126,20 +205,8 @@ function InvoiceCard({
             {invoiceStatusLabel(invoice)}
           </span>
         </div>
-        {invoice.status === "draft" ? (
-          <Link
-            href={editDraftHref}
-            onClick={(event) => event.stopPropagation()}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-3 py-1.5 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary/10"
-          >
-            <span className="material-symbols-outlined text-[17px]">
-              edit_square
-            </span>
-            Edit &amp; send
-          </Link>
-        ) : null}
+        <InvoiceCardMenu invoice={invoice} onDelete={onDelete} />
       </div>
-
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
         {invoice.customer.fullName || "Customer"}
       </h4>
@@ -174,14 +241,15 @@ function InvoicePreviewDrawer({
   invoice,
   onClose,
   onInvoiceUpdated,
+  onDelete,
   timeZone,
 }: {
   invoice: InvoiceDetail | null;
   onClose: () => void;
   onInvoiceUpdated: (invoice: InvoiceDetail) => void;
+  onDelete: (invoice: InvoiceDetail) => void;
   timeZone?: string | null;
-}) {
-  const { user } = useAuth();
+}) {  const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
   const [pdfSource, setPdfSource] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -531,8 +599,17 @@ function InvoicePreviewDrawer({
                   {pdfError}
                 </p>
               ) : null}
-              <p className="text-center font-body text-[11px] text-on-surface-variant">
-                Created {formatWhen(invoice.createdAt, timeZone)}
+              <button
+                type="button"
+                onClick={() => onDelete(invoice)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  delete
+                </span>
+                Delete invoice
+              </button>
+              <p className="text-center font-body text-[11px] text-on-surface-variant">                Created {formatWhen(invoice.createdAt, timeZone)}
               </p>
             </footer>
           </motion.aside>
@@ -562,8 +639,9 @@ export function InvoicesBoard() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<InvoiceFilter>("due");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<InvoiceDetail | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const timeZone = profile?.timezone;
-
   const load = useCallback(async () => {
     if (!user) {
       setLoading(false);
@@ -634,8 +712,42 @@ export function InvoicesBoard() {
     [invoices, selectedId],
   );
 
-  if (authStatus === "loading" || loading) {
-    return (
+  async function confirmDeleteInvoice() {
+    if (!user || !deleteTarget) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/invoices/${encodeURIComponent(deleteTarget.id)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not delete invoice.");
+      }
+      setInvoices((current) =>
+        current.filter((invoice) => invoice.id !== deleteTarget.id),
+      );
+      if (selectedId === deleteTarget.id) {
+        setSelectedId(null);
+      }
+      setDeleteTarget(null);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Could not delete invoice.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (authStatus === "loading" || loading) {    return (
       <div className={BOARD_SHELL_CLASS}>
         <div className="space-y-3">
           {[0, 1, 2].map((idx) => (
@@ -776,8 +888,8 @@ export function InvoicesBoard() {
                 invoice={invoice}
                 isPreviewOpen={selectedId === invoice.id}
                 onOpen={() => setSelectedId(invoice.id)}
-              />
-            </li>
+                onDelete={() => setDeleteTarget(invoice)}
+              />            </li>
           ))}
         </ul>
       )}
@@ -786,6 +898,7 @@ export function InvoicesBoard() {
         invoice={selected}
         onClose={() => setSelectedId(null)}
         timeZone={timeZone}
+        onDelete={(invoice) => setDeleteTarget(invoice)}
         onInvoiceUpdated={(updatedInvoice) => {
           setInvoices((current) =>
             current.map((invoice) =>
@@ -796,6 +909,24 @@ export function InvoicesBoard() {
             setFilter("paid");
           }
         }}
+      />
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title="Delete this invoice?"
+        description={
+          deleteTarget
+            ? `${deleteTarget.invoiceCode} for ${
+                deleteTarget.customer.fullName || "this customer"
+              } will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Yes, delete invoice"
+        cancelLabel="Keep invoice"
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteInvoice()}
+        isLoading={deleting}
       />
     </div>
   );

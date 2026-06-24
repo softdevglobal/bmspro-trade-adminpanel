@@ -970,3 +970,49 @@ async function sendInvoiceEmailForDetail(
     timezone: profile?.timezone ?? null,
   });
 }
+
+/** Permanently removes an invoice and clears its mirror on the linked request. */
+export async function deleteBusinessInvoice(
+  businessId: string,
+  invoiceId: string,
+): Promise<
+  | { ok: true; invoice: InvoiceDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = invoiceId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Invoice is required." };
+  }
+
+  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
+  }
+
+  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
+  const requestId = invoice.inspectionRequestId?.trim();
+
+  await docRef.delete();
+
+  if (requestId) {
+    try {
+      const requestRef = adminDb.collection(REQUESTS_COLLECTION).doc(requestId);
+      const requestSnap = await requestRef.get();
+      if (requestSnap.exists) {
+        const requestData = requestSnap.data() ?? {};
+        const summary = requestData.invoice as { id?: string } | null | undefined;
+        if (requestData.businessId === businessId && summary?.id === id) {
+          await requestRef.update({
+            invoice: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error("[invoice] request cleanup failed:", error);
+    }
+  }
+
+  return { ok: true, invoice };
+}
