@@ -33,6 +33,7 @@ import {
   notifyCustomerOfAssignment,
   notifyCustomerOfNewRequest,
   notifyCustomerOfJobScheduled,
+  notifyCustomerOfRequestRescheduled,
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
@@ -304,6 +305,13 @@ export async function applyOwnerAction(
     updatedAt: FieldValue.serverTimestamp(),
   };
 
+  // An "accept" on an already-scheduled visit is a reschedule (e.g. the visit
+  // was dragged to a new slot on the calendar), not a first-time confirmation.
+  const isReschedule =
+    action.type === "accept" &&
+    current.status === "scheduled" &&
+    !!current.scheduledSlot;
+
   if (action.type === "accept") {
     if (await isBusinessClosedOnDate(businessId, action.slot.date)) {
       return {
@@ -512,6 +520,8 @@ export async function applyOwnerAction(
         },
       });
     }
+  } else if (isReschedule && request.status === "scheduled") {
+    await notifyCustomerOfRequestRescheduled(request, summary);
   } else {
     await notifyCustomerOfStatusChange(request, request.status, summary);
   }
