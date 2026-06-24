@@ -2,6 +2,9 @@
 
 import { AdminDaySchedulePicker } from "@/components/admin-day-schedule-picker";
 import {
+  defaultCalendarVisitEnd,
+} from "@/components/calendar-visit-time-range";
+import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import {
@@ -380,11 +383,22 @@ export function ConvertToBookingPanel({
           <AdminDaySchedulePicker
             date={slot.date}
             kind="job"
-            startTime={startTime}
-            endTime={endTime}
+            startTime={startTime || null}
+            endTime={endTime || null}
             disabled={submitting}
-            onStartTimeChange={setStartTime}
-            onEndTimeChange={setEndTime}
+            hideTimeRangeFields
+            multiHourSlots
+            onWindowChange={(start, end) => {
+              setStartTime(start ?? "");
+              setEndTime(end ?? "");
+            }}
+            onStartTimeChange={(nextStart) => {
+              setStartTime(nextStart);
+              setEndTime(defaultCalendarVisitEnd(nextStart));
+            }}
+            onEndTimeChange={(nextEnd) => {
+              setEndTime(nextEnd);
+            }}
           />
         </div>
       ) : null}

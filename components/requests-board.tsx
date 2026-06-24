@@ -2607,7 +2607,7 @@ function AdminJobDatesEditor({
 
   async function save() {
     if (!user || !onUpdated) return;
-    if (!isJobPreferredDatesComplete(slots, false)) {
+    if (!isJobPreferredDatesComplete(slots)) {
       setError("Pick at least one job day to propose.");
       return;
     }

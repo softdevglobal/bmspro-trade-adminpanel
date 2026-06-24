@@ -391,20 +391,20 @@ export function parseSlotsArray(
   return dedupeSlots(parsed).slice(0, max);
 }
 
-/** Validates job-day preferences (exactly 3 unique dates when accepting a quote). */
+/** Validates job-day preferences (1–3 unique dates when accepting a quote). */
 export function validateJobPreferredSlotsForAcceptance(
   raw: unknown,
   timeZone?: string | null,
 ): { ok: true; value: InspectionSlot[] } | { ok: false; error: string } {
   const slots = parseSlotsArray(raw, 3, timeZone);
-  if (slots.length !== 3) {
+  if (slots.length === 0) {
     return {
       ok: false,
-      error: "Pick exactly 3 preferred job days before accepting.",
+      error: "Pick at least one preferred job day before accepting.",
     };
   }
   const uniqueDates = new Set(slots.map((slot) => slot.date));
-  if (uniqueDates.size !== 3) {
+  if (uniqueDates.size !== slots.length) {
     return {
       ok: false,
       error: "Each preferred job day must be a different date.",
