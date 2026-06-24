@@ -5,6 +5,7 @@ import { BusinessWorkingHoursSettings } from "@/components/business-working-hour
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { BusinessGstSettings } from "@/components/business-gst-settings";
 import { BusinessProfileSettings } from "@/components/business-profile-settings";
+import { BusinessServiceAreasSettings } from "@/components/business-service-areas-settings";
 import { BusinessSecuritySettings } from "@/components/business-security-settings";
 import { BusinessTermsSettings } from "@/components/business-terms-settings";
 import { BusinessTimezoneSettings } from "@/components/business-timezone-settings";
@@ -33,6 +34,7 @@ type ProfileMeta = {
   slotCapacityJobs: number | null;
   slotCapacityInspectionRequests: number | null;
   workingHours: BusinessWorkingHours | null;
+  serviceAreas: string[];
 };
 
 export function BusinessSettingsPanel() {
@@ -48,6 +50,7 @@ export function BusinessSettingsPanel() {
     slotCapacityJobs: null,
     slotCapacityInspectionRequests: null,
     workingHours: null,
+    serviceAreas: [],
   });
   const [form, setForm] = useState<ProfileFormState>({
     businessName: "",
@@ -89,6 +92,7 @@ export function BusinessSettingsPanel() {
             slotCapacityJobs?: number | null;
             slotCapacityInspectionRequests?: number | null;
             workingHours?: BusinessWorkingHours | null;
+            serviceAreas?: string[];
           };
         };
         if (!response.ok || !payload.ok || !payload.profile || !active) return;
@@ -120,6 +124,7 @@ export function BusinessSettingsPanel() {
                   endTime: p.workingHours.endTime,
                 }
               : null,
+          serviceAreas: Array.isArray(p.serviceAreas) ? p.serviceAreas : [],
         });
       } catch {
         /* keep defaults */
@@ -168,6 +173,10 @@ export function BusinessSettingsPanel() {
     setMeta((current) => ({ ...current, workingHours }));
   }
 
+  function handleServiceAreasSaved(serviceAreas: string[]) {
+    setMeta((current) => ({ ...current, serviceAreas }));
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
@@ -179,6 +188,12 @@ export function BusinessSettingsPanel() {
         loading={metaLoading}
         onFormChange={setForm}
         onSaved={handleProfileSaved}
+      />
+
+      <BusinessServiceAreasSettings
+        serviceAreas={meta.serviceAreas}
+        loading={metaLoading}
+        onSaved={handleServiceAreasSaved}
       />
 
       <BusinessTimezoneSettings

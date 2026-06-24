@@ -49,7 +49,21 @@ function parseSlot(raw: unknown): InspectionSlot | null {
   const date = typeof item.date === "string" ? item.date : null;
   const timeRange = item.timeRange;
   if (!date || !isTimeRange(timeRange)) return null;
-  return { date, timeRange };
+  const startTime = isClockTime(item.startTime) ? item.startTime : undefined;
+  const endTime = isClockTime(item.endTime) ? item.endTime : undefined;
+  return {
+    date,
+    timeRange,
+    ...(startTime ? { startTime } : {}),
+    ...(endTime ? { endTime } : {}),
+  };
+}
+
+function parseAdditionalJobDays(raw: unknown): InspectionSlot[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => parseSlot(entry))
+    .filter((slot): slot is InspectionSlot => slot !== null);
 }
 
 function parseAssignment(raw: unknown): InspectionAssignment | null {
@@ -139,6 +153,7 @@ export function mapBookingDoc(
     scheduledEndTime: isClockTime(data.scheduledEndTime)
       ? data.scheduledEndTime
       : null,
+    additionalJobDays: parseAdditionalJobDays(data.additionalJobDays),
     estimatedDurationMinutes:
       typeof data.estimatedDurationMinutes === "number" &&
       Number.isFinite(data.estimatedDurationMinutes) &&
@@ -159,6 +174,40 @@ export function mapBookingDoc(
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
+}
+
+export type BookingScheduleDay = {
+  date: string;
+  slot: InspectionSlot;
+  startTime: string | null;
+  endTime: string | null;
+};
+
+/** Primary scheduled day plus any additional on-site days for multi-day jobs. */
+export function bookingScheduleDays(booking: BookingDetail): BookingScheduleDay[] {
+  const days: BookingScheduleDay[] = [];
+
+  if (booking.scheduledSlot?.date) {
+    days.push({
+      date: booking.scheduledSlot.date,
+      slot: booking.scheduledSlot,
+      startTime: booking.scheduledStartTime,
+      endTime: booking.scheduledEndTime,
+    });
+  }
+
+  for (const slot of booking.additionalJobDays) {
+    if (!slot.date?.trim()) continue;
+    if (days.some((day) => day.date === slot.date)) continue;
+    days.push({
+      date: slot.date,
+      slot,
+      startTime: slot.startTime ?? null,
+      endTime: slot.endTime ?? null,
+    });
+  }
+
+  return days.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function sortBookingsNewestFirst(records: BookingDetail[]): BookingDetail[] {

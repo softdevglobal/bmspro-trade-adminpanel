@@ -54,15 +54,16 @@ export function BookingsProvider({ children }: { children: ReactNode }) {
   const [snapshot, setSnapshot] = useState<BookingsSnapshot | null>(null);
   const [snapshotError, setSnapshotError] = useState<BookingsError | null>(null);
 
-  const enabled =
+  const feedEnabled =
     role === "business_owner" &&
     Boolean(businessId) &&
     Boolean(user) &&
-    needsBookingsFeed(pathname) &&
-    pageVisible;
+    needsBookingsFeed(pathname);
+
+  const listenerEnabled = feedEnabled && pageVisible;
 
   useEffect(() => {
-    if (!enabled || !businessId) {
+    if (!listenerEnabled || !businessId) {
       return;
     }
 
@@ -81,22 +82,23 @@ export function BookingsProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, [enabled, businessId]);
+  }, [listenerEnabled, businessId]);
 
   const activeSnapshot =
-    enabled && snapshot?.businessId === businessId ? snapshot : null;
+    snapshot?.businessId === businessId ? snapshot : null;
   const activeError =
-    enabled && snapshotError?.businessId === businessId
+    feedEnabled && snapshotError?.businessId === businessId
       ? snapshotError.message
       : null;
 
   const value = useMemo(
     () => ({
       bookings: activeSnapshot?.bookings ?? [],
-      loading: enabled && !activeSnapshot && !activeError,
+      loading:
+        feedEnabled && pageVisible && !activeSnapshot && !activeError,
       error: activeError,
     }),
-    [activeSnapshot, activeError, enabled],
+    [activeSnapshot, activeError, feedEnabled, pageVisible],
   );
 
   return (

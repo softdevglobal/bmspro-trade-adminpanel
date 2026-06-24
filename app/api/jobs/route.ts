@@ -8,6 +8,7 @@ import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   parseInspectionRequestInput,
+  sortInspectionSlots,
   timeRangeFromStartTime,
   type InspectionSlot,
 } from "@/lib/inspection/types";
@@ -66,8 +67,12 @@ function deriveScheduleFromPreferredSlots(
   slot: InspectionSlot;
   startTime: string;
   endTime: string;
+  additionalJobDays: InspectionSlot[];
 } | null {
-  const first = slots.find((entry) => entry.date?.trim());
+  const sorted = sortInspectionSlots(
+    slots.filter((entry) => entry.date?.trim()),
+  );
+  const first = sorted[0];
   if (!first?.date?.trim()) return null;
   const startTime = first.startTime?.trim() || "08:00";
   const endTime = first.endTime?.trim() || "09:00";
@@ -80,6 +85,12 @@ function deriveScheduleFromPreferredSlots(
       startTime,
       endTime,
     },
+    additionalJobDays: sorted.slice(1).map((entry) => ({
+      date: entry.date,
+      timeRange: entry.timeRange ?? timeRangeFromStartTime(entry.startTime ?? "08:00"),
+      startTime: entry.startTime?.trim() || "08:00",
+      endTime: entry.endTime?.trim() || "09:00",
+    })),
   };
 }
 
@@ -91,6 +102,7 @@ function resolveJobSchedule(
   slot: InspectionSlot;
   startTime: string;
   endTime: string;
+  additionalJobDays: InspectionSlot[];
 } | null {
   const calendar = parseCalendarScheduleInput(
     payload.calendarSchedule,
@@ -106,6 +118,7 @@ function resolveJobSchedule(
       },
       startTime: calendar.startTime,
       endTime: calendar.endTime,
+      additionalJobDays: [],
     };
   }
   return deriveScheduleFromPreferredSlots(preferredSlots);
@@ -214,6 +227,7 @@ export async function POST(request: Request) {
       slot: jobSchedule.slot,
       startTime: jobSchedule.startTime,
       endTime: jobSchedule.endTime,
+      additionalJobDays: jobSchedule.additionalJobDays,
       estimatedDurationMinutes,
       note: note || null,
       instructionDescription: instructionDescription || null,

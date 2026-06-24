@@ -1,6 +1,5 @@
 import { BusinessOwnerGuard } from "@/components/business-owner-guard";
 import { JobsBoard } from "@/components/jobs-board";
-import { DashboardShell } from "@/components/dashboard-shell";
 
 type JobsPageSearchParams = {
   job?: string | string[];
@@ -22,13 +21,8 @@ export default async function JobsPage({
   const initialJobId = readInitialJobId(await searchParams);
 
   return (
-    <DashboardShell
-      title="Jobs"
-      subtitle="Scheduled jobs from the normal request flow, or added directly when work is already agreed."
-    >
-      <BusinessOwnerGuard>
-        <JobsBoard initialJobId={initialJobId} />
-      </BusinessOwnerGuard>
-    </DashboardShell>
+    <BusinessOwnerGuard>
+      <JobsBoard initialJobId={initialJobId} />
+    </BusinessOwnerGuard>
   );
 }

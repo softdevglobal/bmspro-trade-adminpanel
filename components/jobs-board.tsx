@@ -8,13 +8,21 @@ import {
   BOOKING_STATUS_TONE,
 } from "@/lib/bookings/types";
 import type { BookingDetail, BookingStatus } from "@/lib/bookings/types";
-import { sortBookingsBySchedule } from "@/lib/bookings/map-booking-doc";
+import {
+  bookingScheduleDays,
+  sortBookingsBySchedule,
+} from "@/lib/bookings/map-booking-doc";
+import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
+import { bookingForCalendar } from "@/lib/calendar/events";
+import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   formatAddress,
   formatSlotDate,
   formatVisitWindow,
+  isClockTime,
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
+  type InspectionRequestDetail,
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
@@ -194,12 +202,14 @@ function BookingPreviewDrawer({
   onClose,
   onUpdated,
   timeZone,
+  requestsById,
 }: {
   booking: BookingDetail | null;
   staff: StaffSummary[];
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
   timeZone?: string | null;
+  requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
   const open = booking !== null;
   useRegisterRightDrawer(open, "lg");
@@ -234,6 +244,7 @@ function BookingPreviewDrawer({
               onClose={onClose}
               onUpdated={onUpdated}
               timeZone={timeZone}
+              requestsById={requestsById}
             />
           </motion.aside>
         </motion.div>
@@ -417,13 +428,23 @@ function BookingPreviewContent({
   onClose,
   onUpdated,
   timeZone,
+  requestsById,
 }: {
   booking: BookingDetail;
   staff: StaffSummary[];
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
   timeZone?: string | null;
+  requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
+  const displayBooking = useMemo(
+    () => bookingForCalendar(booking, requestsById),
+    [booking, requestsById],
+  );
+  const scheduleDays = useMemo(
+    () => bookingScheduleDays(displayBooking),
+    [displayBooking],
+  );
   const { user } = useAuth();
   const [mode, setMode] = useState<PreviewMode>("review");
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
@@ -432,11 +453,6 @@ function BookingPreviewContent({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const title = bookingTitle(booking);
-  const visitWindow = formatVisitWindow(
-    booking.scheduledStartTime,
-    booking.scheduledEndTime,
-  );
-  const estimate = formatEstimatedMinutes(booking.estimatedDurationMinutes);
   const displayPhone = formatAuPhoneDisplay(booking.customer.phone);
   const phoneHref = formatAuPhoneTelHref(booking.customer.phone);
   const emailHref = booking.customer.email
@@ -616,35 +632,76 @@ function BookingPreviewContent({
           </section>
         )}
 
-        {booking.scheduledSlot ? (
+        {scheduleDays.length > 0 ? (
           <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
               Schedule
+              {scheduleDays.length > 1
+                ? ` · ${scheduleDays.length} days`
+                : null}
             </p>
-            <div className="mt-2 rounded-xl border border-primary/20 bg-surface-container-lowest p-3">
-              <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold text-on-surface">
-                <span className="material-symbols-outlined text-[16px] text-primary">
-                  event
-                </span>
-                {formatSlotDate(booking.scheduledSlot.date, timeZone)} ·{" "}
-                {TIME_RANGE_LABELS[booking.scheduledSlot.timeRange]}
-              </p>
-              {visitWindow ? (
-                <p className="mt-2 flex items-center gap-1.5 font-body text-[12px] font-semibold text-emerald-800">
-                  <span className="material-symbols-outlined text-[14px] text-emerald-700">
-                    schedule
-                  </span>
-                  {visitWindow}
-                </p>
-              ) : null}
-              {estimate ? (
-                <p className="mt-2 flex items-center gap-1.5 font-body text-[12px] text-on-surface-variant">
-                  <span className="material-symbols-outlined text-[14px] text-primary">
-                    timelapse
-                  </span>
-                  Estimated {estimate} on site
-                </p>
-              ) : null}
+            <div className="mt-2 space-y-2">
+              {scheduleDays.map((day, index) => {
+                const dayWindow = formatVisitWindow(day.startTime, day.endTime);
+                const dayEstimate =
+                  isClockTime(day.startTime) && isClockTime(day.endTime)
+                    ? formatEstimatedMinutes(
+                        estimateMinutesFromTimeRange(
+                          day.startTime,
+                          day.endTime,
+                        ),
+                      )
+                    : index === 0
+                      ? formatEstimatedMinutes(
+                          booking.estimatedDurationMinutes,
+                        )
+                      : null;
+
+                return (
+                  <div
+                    key={day.date}
+                    className="rounded-xl border border-primary/20 bg-surface-container-lowest p-3"
+                  >
+                    {scheduleDays.length > 1 ? (
+                      <p className="font-body text-[10px] font-bold uppercase tracking-wider text-primary">
+                        Day {index + 1}
+                      </p>
+                    ) : null}
+                    <p
+                      className={`flex items-center gap-1.5 font-body text-[13px] font-semibold text-on-surface ${
+                        scheduleDays.length > 1 ? "mt-1" : ""
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-primary">
+                        event
+                      </span>
+                      {formatSlotDate(day.date, timeZone)}
+                      {dayWindow ? null : (
+                        <>
+                          {" · "}
+                          {TIME_RANGE_LABELS[day.slot.timeRange]}
+                        </>
+                      )}
+                    </p>
+                    {dayWindow ? (
+                      <p className="mt-2 flex items-center gap-1.5 font-body text-[12px] font-semibold text-emerald-800">
+                        <span className="material-symbols-outlined text-[14px] text-emerald-700">
+                          schedule
+                        </span>
+                        {dayWindow}
+                      </p>
+                    ) : null}
+                    {dayEstimate ? (
+                      <p className="mt-2 flex items-center gap-1.5 font-body text-[12px] text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[14px] text-primary">
+                          timelapse
+                        </span>
+                        Estimated {dayEstimate} on site
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           </section>
         ) : null}
@@ -874,7 +931,12 @@ export function JobsBoard({
   const { status: authStatus } = useAuth();
   const profile = useBusinessProfile();
   const { bookings, loading, error } = useBookings();
+  const { requests } = useInspectionRequests();
   const { staff } = useBusinessStaffSummary();
+  const requestsById = useMemo(
+    () => new Map(requests.map((request) => [request.id, request])),
+    [requests],
+  );
   const [selectedId, setSelectedId] = useState<string | null>(initialJobId);
   const [filter, setFilter] = useState<JobsFilter>("active");
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -939,27 +1001,45 @@ export function JobsBoard({
     setSelectedId(null);
   }
 
+  const addJobModal = (
+    <AddInspectionModal
+      open={addModalOpen}
+      variant="job"
+      onClose={() => setAddModalOpen(false)}
+      onCreated={(jobId) => {
+        setAddModalOpen(false);
+        if (jobId) setSelectedId(jobId);
+      }}
+    />
+  );
+
   if (authStatus === "loading" || loading) {
     return (
-      <div className="space-y-3">
-        {[0, 1].map((idx) => (
-          <div
-            key={idx}
-            className="h-28 animate-pulse rounded-xl border border-outline-variant/40 bg-surface-container-lowest"
-          />
-        ))}
-      </div>
+      <>
+        <div className="space-y-3">
+          {[0, 1].map((idx) => (
+            <div
+              key={idx}
+              className="h-28 animate-pulse rounded-xl border border-outline-variant/40 bg-surface-container-lowest"
+            />
+          ))}
+        </div>
+        {addJobModal}
+      </>
     );
   }
 
   if (error) {
     return (
-      <div
-        role="alert"
-        className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
-      >
-        {error}
-      </div>
+      <>
+        <div
+          role="alert"
+          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
+        >
+          {error}
+        </div>
+        {addJobModal}
+      </>
     );
   }
 
@@ -1000,15 +1080,7 @@ export function JobsBoard({
             Add job
           </button>
         </div>
-        <AddInspectionModal
-          open={addModalOpen}
-          variant="job"
-          onClose={() => setAddModalOpen(false)}
-          onCreated={(jobId) => {
-            setAddModalOpen(false);
-            if (jobId) setSelectedId(jobId);
-          }}
-        />
+        {addJobModal}
       </>
     );
   }
@@ -1099,17 +1171,10 @@ export function JobsBoard({
         onClose={() => setSelectedId(null)}
         onUpdated={handleBookingUpdated}
         timeZone={timeZone}
+        requestsById={requestsById}
       />
 
-      <AddInspectionModal
-        open={addModalOpen}
-        variant="job"
-        onClose={() => setAddModalOpen(false)}
-        onCreated={(jobId) => {
-          setAddModalOpen(false);
-          if (jobId) setSelectedId(jobId);
-        }}
-      />
+      {addJobModal}
     </>
   );
 }

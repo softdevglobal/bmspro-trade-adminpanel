@@ -1,5 +1,6 @@
 import { AuthGuard } from "@/components/auth-guard";
 import { DashboardDataProviders } from "@/components/dashboard-data-providers";
+import { DashboardLayoutShell } from "@/components/dashboard-layout-shell";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -13,7 +14,9 @@ export default function DashboardLayout({
 }) {
   return (
     <AuthGuard>
-      <DashboardDataProviders>{children}</DashboardDataProviders>
+      <DashboardDataProviders>
+        <DashboardLayoutShell>{children}</DashboardLayoutShell>
+      </DashboardDataProviders>
     </AuthGuard>
   );
 }

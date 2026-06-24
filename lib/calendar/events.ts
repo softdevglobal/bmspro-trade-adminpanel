@@ -10,6 +10,7 @@ import {
   TIME_RANGES,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
+  type InspectionSlot,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 
@@ -119,7 +120,52 @@ export function datesForBookingOnCalendar(booking: BookingDetail): string[] {
   ) {
     return [];
   }
-  return booking.scheduledSlot?.date ? [booking.scheduledSlot.date] : [];
+
+  const dates: string[] = [];
+  if (booking.scheduledSlot?.date) {
+    dates.push(booking.scheduledSlot.date);
+  }
+  for (const slot of booking.additionalJobDays) {
+    if (slot.date && !dates.includes(slot.date)) {
+      dates.push(slot.date);
+    }
+  }
+  return dates.sort();
+}
+
+export function bookingSlotOnDate(
+  booking: BookingDetail,
+  date: string,
+): InspectionSlot | null {
+  if (booking.scheduledSlot?.date === date) {
+    return booking.scheduledSlot;
+  }
+  return booking.additionalJobDays.find((slot) => slot.date === date) ?? null;
+}
+
+export function resolveBookingAdditionalJobDays(
+  booking: BookingDetail,
+  requestsById?: ReadonlyMap<string, InspectionRequestDetail>,
+): InspectionSlot[] {
+  if (booking.additionalJobDays.length > 0) {
+    return booking.additionalJobDays;
+  }
+  const request = requestsById?.get(booking.inspectionRequestId);
+  return request?.adminJobPreferredSlots ?? [];
+}
+
+export function bookingForCalendar(
+  booking: BookingDetail,
+  requestsById?: ReadonlyMap<string, InspectionRequestDetail>,
+): BookingDetail {
+  const additionalJobDays = resolveBookingAdditionalJobDays(
+    booking,
+    requestsById,
+  );
+  if (additionalJobDays === booking.additionalJobDays) {
+    return booking;
+  }
+  return { ...booking, additionalJobDays };
 }
 
 export function bookingTitle(booking: BookingDetail): string {
@@ -176,7 +222,7 @@ export function calendarCardView(event: CalendarEvent): CalendarCardView | null 
       ownerProposedSlots: [],
       preferredSlots: [],
       jobPreferredSlots: [],
-      adminJobPreferredSlots: [],
+      adminJobPreferredSlots: booking.additionalJobDays,
       jobProposedSlots: [],
       customerAcceptedJobSlot: null,
       openHref: `/dashboard/jobs?job=${encodeURIComponent(booking.id)}`,
@@ -382,6 +428,7 @@ export function buildBookingCalendarEvents(
   bookings: BookingDetail[],
   filters: CalendarFilters,
   sourceFilter?: CalendarSource,
+  requestsById?: ReadonlyMap<string, InspectionRequestDetail>,
 ): CalendarEvent[] {
   const source: CalendarSource = "jobs";
   if (sourceFilter && sourceFilter !== source) return [];
@@ -389,18 +436,19 @@ export function buildBookingCalendarEvents(
   const events: CalendarEvent[] = [];
 
   for (const booking of bookings) {
-    if (!matchesBookingCalendarFilters(booking, filters)) continue;
+    const calendarBooking = bookingForCalendar(booking, requestsById);
+    if (!matchesBookingCalendarFilters(calendarBooking, filters)) continue;
 
-    const dates = datesForBookingOnCalendar(booking);
+    const dates = datesForBookingOnCalendar(calendarBooking);
     if (dates.length === 0) continue;
 
-    const dotColor = dotColorForCalendarSource(source, booking.status);
+    const dotColor = dotColorForCalendarSource(source, calendarBooking.status);
 
     for (const date of dates) {
       events.push({
-        key: `${source}-${booking.id}-${date}`,
-        requestId: booking.id,
-        booking,
+        key: `${source}-${calendarBooking.id}-${date}`,
+        requestId: calendarBooking.id,
+        booking: calendarBooking,
         date,
         source,
         dotColor,
@@ -426,9 +474,10 @@ export function buildMonthGridCalendarEvents(
   bookings: BookingDetail[] = [],
   personalEvents: PersonalCalendarEvent[] = [],
 ): CalendarEvent[] {
+  const requestsById = new Map(requests.map((request) => [request.id, request]));
   return [
     ...buildInspectionCalendarEvents(requests, filters),
-    ...buildBookingCalendarEvents(bookings, filters),
+    ...buildBookingCalendarEvents(bookings, filters, undefined, requestsById),
     ...buildPersonalCalendarEvents(personalEvents),
   ];
 }
@@ -461,7 +510,11 @@ export function groupEventsByDate(
 export function calendarEventTimeRange(
   event: CalendarEvent,
 ): InspectionTimeRange | null {
-  const slot = event.booking?.scheduledSlot ?? event.request?.scheduledSlot;
+  if (event.booking) {
+    const slot = bookingSlotOnDate(event.booking, event.date);
+    return slot?.timeRange ?? null;
+  }
+  const slot = event.request?.scheduledSlot;
   if (!slot || slot.date !== event.date) return null;
   return slot.timeRange;
 }

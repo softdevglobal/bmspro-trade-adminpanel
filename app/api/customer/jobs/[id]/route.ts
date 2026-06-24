@@ -1,5 +1,9 @@
 import { authenticateCustomerRequest } from "@/lib/customer/server";
-import { customerAcceptProposedSlot } from "@/lib/inspection/server";
+import {
+  customerAcceptJobProposedSlot,
+  customerAcceptProposedSlot,
+  customerRejectJobProposedSlots,
+} from "@/lib/inspection/server";
 import {
   isTimeRange,
   type InspectionSlot,
@@ -46,6 +50,11 @@ export async function PATCH(
 
   const payload = (body ?? {}) as Record<string, unknown>;
   const action = typeof payload.action === "string" ? payload.action : "";
+  const identity = {
+    customerId: auth.customer.uid,
+    customerEmail: auth.customer.email,
+    businessId: auth.customer.businessId,
+  };
 
   if (action === "quotation_decision") {
     const decision = payload.decision;
@@ -75,11 +84,7 @@ export async function PATCH(
 
     const result = await customerDecideQuotation(
       id,
-      {
-        customerId: auth.customer.uid,
-        customerEmail: auth.customer.email,
-        businessId: auth.customer.businessId,
-      },
+      identity,
       decision,
       jobPreferredSlots,
     );
@@ -92,66 +97,55 @@ export async function PATCH(
     return NextResponse.json({ ok: true, decision });
   }
 
-  if (action !== "accept_proposed") {
-    if (action === "accept_job_proposed") {
-      const slot = parseSlot(payload.slot);
-      if (!slot) {
-        return NextResponse.json(
-          { ok: false, error: "Choose a valid proposed job day." },
-          { status: 400 },
-        );
-      }
-      const { customerAcceptJobProposedSlot } = await import(
-        "@/lib/inspection/server"
+  if (action === "reject_job_proposed") {
+    const result = await customerRejectJobProposedSlots(id, identity);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
       );
-      const result = await customerAcceptJobProposedSlot(
-        id,
-        {
-          customerId: auth.customer.uid,
-          customerEmail: auth.customer.email,
-          businessId: auth.customer.businessId,
-        },
-        slot,
-      );
-      if (!result.ok) {
-        return NextResponse.json(
-          { ok: false, error: result.error },
-          { status: result.status },
-        );
-      }
-      return NextResponse.json({ ok: true, request: result.request });
     }
-
-    return NextResponse.json(
-      { ok: false, error: "Unsupported action." },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: true, request: result.request });
   }
 
-  const slot = parseSlot(payload.slot);
-  if (!slot) {
-    return NextResponse.json(
-      { ok: false, error: "Choose a valid proposed time." },
-      { status: 400 },
-    );
+  if (action === "accept_job_proposed") {
+    const slot = parseSlot(payload.slot);
+    if (!slot) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid proposed job day." },
+        { status: 400 },
+      );
+    }
+    const result = await customerAcceptJobProposedSlot(id, identity, slot);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
   }
 
-  const result = await customerAcceptProposedSlot(
-    id,
-    {
-      customerId: auth.customer.uid,
-      customerEmail: auth.customer.email,
-      businessId: auth.customer.businessId,
-    },
-    slot,
+  if (action === "accept_proposed") {
+    const slot = parseSlot(payload.slot);
+    if (!slot) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid proposed time." },
+        { status: 400 },
+      );
+    }
+    const result = await customerAcceptProposedSlot(id, identity, slot);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
+  return NextResponse.json(
+    { ok: false, error: "Unsupported action." },
+    { status: 400 },
   );
-
-  if (!result.ok) {
-    return NextResponse.json(
-      { ok: false, error: result.error },
-      { status: result.status },
-    );
-  }
-
-  return NextResponse.json({ ok: true, request: result.request });
 }

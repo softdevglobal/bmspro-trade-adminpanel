@@ -34,22 +34,106 @@ function slotStatusLabel(
   return `${slot.requestCount}/${slot.maxRequests} requests`;
 }
 
+function clockFromMinutes(totalMinutes: number): string {
+  const hour = Math.floor(totalMinutes / 60);
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function handleSingleHourlySlotClick(
+  slotStartTime: string,
+  onStartTimeChange: (value: string) => void,
+  onEndTimeChange: (value: string) => void,
+): void {
+  const slotEndTime = defaultCalendarVisitEnd(slotStartTime);
+  onStartTimeChange(slotStartTime);
+  onEndTimeChange(slotEndTime);
+}
+
+/** Toggle consecutive hourly blocks; supports extend, shrink from edges, and clear. */
+function handleMultiHourSlotClick(
+  slotStartTime: string,
+  startTime: string | null,
+  endTime: string | null,
+  onWindowChange: (startTime: string | null, endTime: string | null) => void,
+): void {
+  const slotMin = parseClockMinutes(slotStartTime);
+  if (slotMin == null) return;
+
+  const slotEndMin = slotMin + 60;
+  const startMin = startTime ? parseClockMinutes(startTime) : null;
+  const endMin = endTime ? parseClockMinutes(endTime) : null;
+
+  const isInRange =
+    startMin != null &&
+    endMin != null &&
+    slotMin >= startMin &&
+    slotMin < endMin;
+
+  if (!isInRange) {
+    if (startMin == null || endMin == null) {
+      onWindowChange(slotStartTime, clockFromMinutes(slotEndMin));
+      return;
+    }
+
+    if (slotMin === endMin) {
+      onWindowChange(startTime, clockFromMinutes(endMin + 60));
+      return;
+    }
+
+    if (slotEndMin === startMin) {
+      onWindowChange(clockFromMinutes(startMin - 60), endTime);
+      return;
+    }
+
+    onWindowChange(slotStartTime, clockFromMinutes(slotEndMin));
+    return;
+  }
+
+  const span = endMin! - startMin!;
+
+  if (span === 60) {
+    onWindowChange(null, null);
+    return;
+  }
+
+  if (slotMin === startMin) {
+    onWindowChange(clockFromMinutes(startMin + 60), endTime);
+    return;
+  }
+
+  if (slotEndMin === endMin) {
+    onWindowChange(startTime, clockFromMinutes(endMin - 60));
+    return;
+  }
+
+  onWindowChange(startTime, clockFromMinutes(slotMin));
+}
+
 export function AdminDaySchedulePicker({
   date,
   kind,
   startTime,
   endTime,
   disabled = false,
+  hideTimeRangeFields = false,
+  multiHourSlots = false,
   onStartTimeChange,
   onEndTimeChange,
+  onWindowChange,
 }: {
   date: string;
   kind: AdminScheduleKind;
-  startTime: string;
-  endTime: string;
+  startTime: string | null;
+  endTime: string | null;
   disabled?: boolean;
+  /** Jobs: pick hourly blocks only (no manual start/end dropdowns). */
+  hideTimeRangeFields?: boolean;
+  /** Jobs: tap consecutive hourly slots; tap again to remove from the range. */
+  multiHourSlots?: boolean;
   onStartTimeChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
+  /** Atomic start/end update — required for multi-hour job slot picking. */
+  onWindowChange?: (startTime: string | null, endTime: string | null) => void;
 }) {
   const { user } = useAuth();
   const { workingHours } = useBusinessWorkingHours();
@@ -129,6 +213,7 @@ export function AdminDaySchedulePicker({
   const pickerDisabled = disabled || isBusinessClosed;
 
   const rangeError = useMemo(() => {
+    if (!startTime || !endTime) return null;
     const windowError = validateCalendarVisitWindow(
       startTime,
       endTime,
@@ -155,6 +240,7 @@ export function AdminDaySchedulePicker({
   }, [startTime, endTime, slots, kind, workingHours]);
 
   const selectedHours = useMemo(() => {
+    if (!startTime || !endTime) return new Set<string>();
     const startMin = parseClockMinutes(startTime);
     const endMin = parseClockMinutes(endTime);
     if (startMin == null || endMin == null) return new Set<string>();
@@ -168,6 +254,37 @@ export function AdminDaySchedulePicker({
     }
     return selected;
   }, [startTime, endTime, slots]);
+
+  const selectedDurationLabel = useMemo(() => {
+    if (!startTime || !endTime) return null;
+    const startMin = parseClockMinutes(startTime);
+    const endMin = parseClockMinutes(endTime);
+    if (startMin == null || endMin == null || endMin <= startMin) return null;
+    const hours = (endMin - startMin) / 60;
+    const startLabel = formatClockTime(startTime);
+    const endLabel = formatClockTime(endTime);
+    if (!startLabel || !endLabel) return null;
+    const hourWord = hours === 1 ? "hour" : "hours";
+    return `${hours} ${hourWord} selected (${startLabel} – ${endLabel})`;
+  }, [startTime, endTime]);
+
+  function handleSlotClick(slotStartTime: string) {
+    if (multiHourSlots && onWindowChange) {
+      handleMultiHourSlotClick(
+        slotStartTime,
+        startTime,
+        endTime,
+        onWindowChange,
+      );
+      return;
+    }
+
+    handleSingleHourlySlotClick(
+      slotStartTime,
+      onStartTimeChange,
+      onEndTimeChange,
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -200,10 +317,7 @@ export function AdminDaySchedulePicker({
                   key={slot.startTime}
                   type="button"
                   disabled={pickerDisabled || full}
-                  onClick={() => {
-                    onStartTimeChange(slot.startTime);
-                    onEndTimeChange(defaultCalendarVisitEnd(slot.startTime));
-                  }}
+                  onClick={() => handleSlotClick(slot.startTime)}
                   className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
                     pickerDisabled || full
                       ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-60"
@@ -231,16 +345,29 @@ export function AdminDaySchedulePicker({
             })}
           </div>
         )}
+        {hideTimeRangeFields ? (
+          <p className="mt-2 font-body text-[12px] leading-relaxed text-on-surface-variant">
+            Each slot is one hour on site. Tap adjacent slots to add more time,
+            or tap a selected slot again to remove it.
+          </p>
+        ) : null}
+        {hideTimeRangeFields && selectedDurationLabel ? (
+          <p className="mt-1 font-body text-[12px] font-semibold text-primary">
+            {selectedDurationLabel}
+          </p>
+        ) : null}
       </div>
 
-      <CalendarVisitTimeRangeFields
-        startTime={startTime}
-        endTime={endTime}
-        disabled={pickerDisabled}
-        workingHours={workingHours}
-        onStartTimeChange={onStartTimeChange}
-        onEndTimeChange={onEndTimeChange}
-      />
+      {!hideTimeRangeFields ? (
+        <CalendarVisitTimeRangeFields
+          startTime={startTime ?? "08:00"}
+          endTime={endTime ?? "09:00"}
+          disabled={pickerDisabled}
+          workingHours={workingHours}
+          onStartTimeChange={onStartTimeChange}
+          onEndTimeChange={onEndTimeChange}
+        />
+      ) : null}
 
       {rangeError ? (
         <p className="rounded-xl border border-error/30 bg-error-container/60 px-3 py-2 font-body text-[12px] text-on-error-container">

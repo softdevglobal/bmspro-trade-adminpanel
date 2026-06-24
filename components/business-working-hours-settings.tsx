@@ -107,7 +107,6 @@ export function BusinessWorkingHoursSettings({
           </span>
           <input
             type="time"
-            step={3600}
             value={startTime}
             disabled={loading || saving}
             onChange={(event) => setStartTime(event.target.value)}
@@ -120,7 +119,6 @@ export function BusinessWorkingHoursSettings({
           </span>
           <input
             type="time"
-            step={3600}
             value={endTime}
             disabled={loading || saving}
             onChange={(event) => setEndTime(event.target.value)}

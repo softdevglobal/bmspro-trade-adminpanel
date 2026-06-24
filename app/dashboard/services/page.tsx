@@ -10,7 +10,6 @@
 
 "use client";
 
-import { DashboardShell } from "@/components/dashboard-shell";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import {
   ServiceDetailDrawer,
@@ -1170,16 +1169,7 @@ export default function ServicesPage() {
   }
 
   return (
-    <DashboardShell
-      title="Services"
-      subtitle={
-        isSuperAdmin
-          ? "Create and manage service templates that business owners can use."
-          : ownerBusinessType
-            ? `Select a template or create custom services for your ${ownerBusinessType} business.`
-            : "Select a template or create custom services with tasks for your business."
-      }
-    >
+    <>
       <div className="flex flex-col gap-4">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           {!isSuperAdmin ? (
@@ -1441,6 +1431,6 @@ export default function ServicesPage() {
         onCancel={cancelDelete}
         onConfirm={() => void confirmDelete()}
       />
-    </DashboardShell>
+    </>
   );
 }
