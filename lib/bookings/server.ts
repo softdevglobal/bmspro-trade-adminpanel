@@ -39,6 +39,7 @@ import {
   notifyCustomerOfBookingOnTheWay,
   notifyCustomerOfJobCompleted,
   notifyCustomerOfJobScheduled,
+  notifyCustomerOfJobRescheduled,
 } from "@/lib/notifications/server";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -413,9 +414,15 @@ export async function updateBusinessBookingSchedule(
   });
 
   const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+
+  // Tell the customer (in-portal + email + SMS) that their job moved.
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfJobRescheduled(booking, summary);
+
   return {
     ok: true,
-    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+    booking,
   };
 }
 

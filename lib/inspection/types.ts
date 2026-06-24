@@ -124,6 +124,8 @@ export type InspectionAssignment = {
   uid: string;
   name: string;
   email: string | null;
+  /** Uploaded profile photo of the assignee, when available. */
+  photoUrl?: string | null;
 };
 
 export type InspectionRequestInput = {
@@ -179,6 +181,8 @@ export type InspectionRequestDetail = {
   customerImageUrls: string[];
   createdAt: number | null;
   updatedAt: number | null;
+  /** Millis when the request was cancelled; null if never cancelled. */
+  cancelledAt: number | null;
   visitStartedAt: number | null;
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */

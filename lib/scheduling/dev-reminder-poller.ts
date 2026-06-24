@@ -12,10 +12,6 @@ export function startDevScheduleReminderPoller(): void {
   if (started) return;
   started = true;
 
-  console.info(
-    "[schedule-reminders] Dev poller active — checks every 5 min. Set SCHEDULE_REMINDER_DEV_POLL=false to disable.",
-  );
-
   const tick = async () => {
     try {
       const result = await runScheduleReminders();

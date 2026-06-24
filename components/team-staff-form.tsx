@@ -9,7 +9,7 @@ import {
 import { useAuth } from "@/lib/auth/auth-context";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const STEPS = ["Details", "Role & schedule", "Review"] as const;
 
@@ -38,6 +38,7 @@ type StaffFormState = {
   staffType: string;
   availability: DayAvailability[];
   canget_qutaion: boolean;
+  photoUrl: string | null;
 };
 
 type StaffStatus = "active" | "suspended";
@@ -50,6 +51,7 @@ type StaffMember = {
   staffType: string;
   availability: DayAvailability[];
   canget_qutaion: boolean;
+  photoUrl: string | null;
   status: StaffStatus;
   createdAt: string | null;
 };
@@ -72,6 +74,7 @@ function emptyForm(): StaffFormState {
     staffType: "",
     availability: defaultAvailability(),
     canget_qutaion: false,
+    photoUrl: null,
   };
 }
 
@@ -97,6 +100,7 @@ export function TeamStaffForm() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [search, setSearch] = useState("");
   const [showDetailsErrors, setShowDetailsErrors] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   const canSubmit = useMemo(
     () => staffFormValidationError(form) === null,
@@ -136,6 +140,54 @@ export function TeamStaffForm() {
     setError(null);
   }
 
+  async function uploadStaffPhoto(file: File) {
+    if (!user) {
+      setError("Please sign in again before uploading a photo.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Photo must be 5 MB or smaller.");
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const formData = new FormData();
+      formData.append("file", file);
+      if (setupMode === "edit" && editTarget) {
+        formData.append("staffId", editTarget.id);
+      }
+      const response = await fetch("/api/uploads/staff-avatar", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        imageUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.ok || !data.imageUrl) {
+        throw new Error(data.error || "Could not upload photo.");
+      }
+      setForm((current) => ({ ...current, photoUrl: data.imageUrl ?? null }));
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Could not upload photo.",
+      );
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  }
+
+  function removeStaffPhoto() {
+    setForm((current) => ({ ...current, photoUrl: null }));
+  }
+
   function toggleOffDay(day: WeekDayId) {
     setForm((current) => ({
       ...current,
@@ -169,6 +221,7 @@ export function TeamStaffForm() {
       staffType: member.staffType,
       availability: normalizeAvailability(member.availability),
       canget_qutaion: member.canget_qutaion,
+      photoUrl: member.photoUrl ?? null,
     });
     setCurrentStep(1);
     setError(null);
@@ -216,6 +269,7 @@ export function TeamStaffForm() {
         (data.staff ?? []).map((member) => ({
           ...member,
           canget_qutaion: member.canget_qutaion === true,
+          photoUrl: member.photoUrl ?? null,
         })),
       );
     } catch (loadError) {
@@ -299,6 +353,7 @@ export function TeamStaffForm() {
             serviceAreas: [],
           })),
           canget_qutaion: form.canget_qutaion,
+          photoUrl: form.photoUrl ?? "",
         }),
       });
       const data = (await response.json()) as {
@@ -472,10 +527,13 @@ export function TeamStaffForm() {
               currentStep={currentStep}
               form={form}
               showDetailsErrors={showDetailsErrors}
+              isUploadingPhoto={isUploadingPhoto}
               onUpdateField={updateField}
               onStaffTypeChange={updateStaffType}
               onCanGetQuotationChange={updateCanGetQuotation}
               onToggleOffDay={toggleOffDay}
+              onPhotoSelected={uploadStaffPhoto}
+              onPhotoRemoved={removeStaffPhoto}
             />
           </form>
         </StaffSetupModal>
@@ -539,18 +597,24 @@ function StaffSetupStepContent({
   currentStep,
   form,
   showDetailsErrors,
+  isUploadingPhoto,
   onUpdateField,
   onStaffTypeChange,
   onCanGetQuotationChange,
   onToggleOffDay,
+  onPhotoSelected,
+  onPhotoRemoved,
 }: {
   currentStep: number;
   form: StaffFormState;
   showDetailsErrors: boolean;
+  isUploadingPhoto: boolean;
   onUpdateField: (field: "fullName" | "phone" | "email", value: string) => void;
   onStaffTypeChange: (staffType: string) => void;
   onCanGetQuotationChange: (value: boolean) => void;
   onToggleOffDay: (day: WeekDayId) => void;
+  onPhotoSelected: (file: File) => void;
+  onPhotoRemoved: () => void;
 }) {
   if (currentStep === 1) {
     const fieldErrors = getDetailsFieldErrors(form);
@@ -569,6 +633,13 @@ function StaffSetupStepContent({
           title="Personal information"
           subtitle="These details are saved to the users table."
         >
+          <StaffPhotoField
+            photoUrl={form.photoUrl}
+            uploading={isUploadingPhoto}
+            seed={form.email || form.fullName}
+            onSelect={onPhotoSelected}
+            onRemove={onPhotoRemoved}
+          />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <TextField
               label="Full Name"
@@ -1864,8 +1935,100 @@ function StaffStatusConfirmModal({
 }
 
 function avatarUrlFor(member: StaffMember) {
+  const photo = member.photoUrl?.trim();
+  if (photo && (photo.startsWith("http://") || photo.startsWith("https://"))) {
+    return photo;
+  }
   const seed = encodeURIComponent(member.id || member.email || member.fullName);
   return `https://api.dicebear.com/9.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
+function staffPhotoPreviewUrl(photoUrl: string | null, seed: string) {
+  const photo = photoUrl?.trim();
+  if (photo && (photo.startsWith("http://") || photo.startsWith("https://"))) {
+    return photo;
+  }
+  const safeSeed = encodeURIComponent(seed.trim() || "staff");
+  return `https://api.dicebear.com/9.x/notionists/svg?seed=${safeSeed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
+function StaffPhotoField({
+  photoUrl,
+  uploading,
+  seed,
+  onSelect,
+  onRemove,
+}: {
+  photoUrl: string | null;
+  uploading: boolean;
+  seed: string;
+  onSelect: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const hasPhoto = Boolean(photoUrl?.trim());
+
+  return (
+    <div className="mb-4 flex items-center gap-4 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={staffPhotoPreviewUrl(photoUrl, seed)}
+        alt="Staff profile photo"
+        className="h-16 w-16 shrink-0 rounded-full border-2 border-white bg-white object-cover shadow-sm ring-1 ring-outline-variant/30"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="font-body text-[13px] font-semibold leading-snug text-on-surface">
+          Profile photo
+          <span className="ml-1 font-normal text-on-surface-variant">
+            (optional)
+          </span>
+        </p>
+        <p className="mt-0.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+          Shown across the team page, mobile app, and to customers so they know
+          who is coming.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-1.5 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span className="material-symbols-outlined text-[16px]">
+              {uploading ? "progress_activity" : "photo_camera"}
+            </span>
+            {uploading
+              ? "Uploading…"
+              : hasPhoto
+                ? "Change photo"
+                : "Upload photo"}
+          </button>
+          {hasPhoto ? (
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={onRemove}
+              className="inline-flex items-center gap-1 rounded-lg border border-outline-variant/70 bg-white px-3 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-[16px]">delete</span>
+              Remove
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onSelect(file);
+          event.target.value = "";
+        }}
+      />
+    </div>
+  );
 }
 
 function formatDate(value: string | null) {

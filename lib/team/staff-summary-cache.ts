@@ -6,6 +6,8 @@ export type StaffSummary = {
   email: string;
   staffType: string;
   canget_qutaion: boolean;
+  /** Uploaded profile photo URL, or null when none has been set. */
+  photoUrl?: string | null;
   /** Weekday ids (e.g. `sunday`) when this staff member is not working. */
   offDays: string[];
 };

@@ -173,3 +173,65 @@ export async function enrichRequestsWithJobAssignees<
     };
   });
 }
+
+/** Reads a staff/owner profile photo from the various legacy user doc fields. */
+function userPhotoUrl(data: Record<string, unknown> | undefined): string | null {
+  if (!data) return null;
+  for (const key of ["photoUrl", "photoURL", "avatarUrl"]) {
+    const value = data[key];
+    if (
+      typeof value === "string" &&
+      (value.trim().startsWith("http://") ||
+        value.trim().startsWith("https://"))
+    ) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Attaches the uploaded profile photo of each assignee (`assignedTo` and
+ * `jobAssignedTo`) so the customer portal can show who is coming. Photos are
+ * read from the assignee's user document.
+ */
+export async function enrichAssignmentsWithPhotos<
+  T extends {
+    assignedTo: InspectionAssignment | null;
+    jobAssignedTo?: InspectionAssignment | null;
+  },
+>(requests: T[]): Promise<T[]> {
+  const uids = new Set<string>();
+  for (const request of requests) {
+    if (request.assignedTo?.uid) uids.add(request.assignedTo.uid);
+    if (request.jobAssignedTo?.uid) uids.add(request.jobAssignedTo.uid);
+  }
+  if (uids.size === 0) return requests;
+
+  const ids = Array.from(uids);
+  const photoByUid = new Map<string, string | null>();
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    const refs = chunk.map((id) => adminDb.collection("users").doc(id));
+    const snaps = await adminDb.getAll(...refs);
+    for (const snap of snaps) {
+      photoByUid.set(snap.id, snap.exists ? userPhotoUrl(snap.data()) : null);
+    }
+  }
+
+  const withPhoto = (
+    assignment: InspectionAssignment | null | undefined,
+  ): InspectionAssignment | null => {
+    if (!assignment) return assignment ?? null;
+    const photoUrl = photoByUid.get(assignment.uid) ?? null;
+    return { ...assignment, photoUrl };
+  };
+
+  return requests.map((request) => ({
+    ...request,
+    assignedTo: withPhoto(request.assignedTo),
+    ...(request.jobAssignedTo !== undefined
+      ? { jobAssignedTo: withPhoto(request.jobAssignedTo) }
+      : {}),
+  }));
+}
