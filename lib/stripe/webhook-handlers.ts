@@ -21,8 +21,11 @@ function subscriptionIdFromInvoice(invoice: Stripe.Invoice): string | null {
     if (typeof sub === "string" && sub.trim()) return sub.trim();
   }
 
-  const legacy = (invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null })
-    .subscription;
+  const legacy = (
+    invoice as Stripe.Invoice & {
+      subscription?: string | Stripe.Subscription | null;
+    }
+  ).subscription;
   if (typeof legacy === "string" && legacy.trim()) return legacy.trim();
   if (legacy && typeof legacy === "object" && "id" in legacy) {
     const id = (legacy as Stripe.Subscription).id;

@@ -43,6 +43,18 @@ export async function syncSmsPackageStripeLink(
   const stripe = getStripe();
   let productId = input.existingStripeProductId?.trim() || null;
 
+  if (!productId) {
+    try {
+      const search = await stripe.products.search({
+        query: `metadata['smsPackageId']:'${input.packageId}' AND active:'true'`,
+        limit: 1,
+      });
+      productId = search.data[0]?.id ?? null;
+    } catch {
+      productId = null;
+    }
+  }
+
   if (!productId && input.existingStripePriceId) {
     try {
       const existingPrice = await stripe.prices.retrieve(input.existingStripePriceId);

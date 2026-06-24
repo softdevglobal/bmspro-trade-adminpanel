@@ -62,9 +62,7 @@ export type SmsPackageFormState = {
   popular: boolean;
   active: boolean;
   hidden: boolean;
-  stripePriceId: string;
   color: PlanThemeId;
-  image: string;
 };
 
 export const EMPTY_SMS_PACKAGE_FORM: SmsPackageFormState = {
@@ -80,9 +78,7 @@ export const EMPTY_SMS_PACKAGE_FORM: SmsPackageFormState = {
   popular: false,
   active: true,
   hidden: false,
-  stripePriceId: "",
   color: "teal",
-  image: "",
 };
 
 export function smsPackageFormFromPlan(pkg: SmsPackage): SmsPackageFormState {
@@ -98,9 +94,7 @@ export function smsPackageFormFromPlan(pkg: SmsPackage): SmsPackageFormState {
     popular: pkg.popular,
     active: pkg.active,
     hidden: pkg.hidden,
-    stripePriceId: pkg.stripePriceId ?? "",
     color: (pkg.color as PlanThemeId) || "teal",
-    image: pkg.image ?? "",
   };
 }
 
@@ -131,9 +125,7 @@ export function smsPackageBodyFromForm(form: SmsPackageFormState, id?: string) {
     popular: form.popular,
     active: form.active,
     hidden: form.hidden,
-    stripePriceId: null,
     color: form.color,
-    image: form.image.trim() || "",
     icon: "sms",
   };
 }

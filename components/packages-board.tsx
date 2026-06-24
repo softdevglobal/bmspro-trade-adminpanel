@@ -8,6 +8,7 @@ import {
   validatePackageForm,
   type PackageFormState,
 } from "@/components/package-build-modal";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatBillingNote } from "@/lib/subscription-plans/helpers";
@@ -54,18 +55,9 @@ function PlanShowcaseCard({
             </span>
           ) : null}
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 shadow-inner">
-            {plan.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={plan.image}
-                alt=""
-                className="h-full w-full rounded-2xl object-cover"
-              />
-            ) : (
-              <span className="material-symbols-outlined text-[30px]">
-                {plan.icon || "inventory_2"}
-              </span>
-            )}
+            <span className="material-symbols-outlined text-[30px]">
+              {plan.icon || "inventory_2"}
+            </span>
           </div>
           <h3 className="mt-5 font-display text-[18px] font-bold leading-tight">
             {plan.name}
@@ -202,6 +194,8 @@ export function PackagesBoard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<PackageFormState>(EMPTY_PACKAGE_FORM);
   const [saving, setSaving] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -292,15 +286,10 @@ export function PackagesBoard() {
     }
   }
 
-  async function handleDelete(planId: string) {
-    if (!user) return;
-    if (
-      !window.confirm(
-        "Delete this package? Existing tenants keep their current plan.",
-      )
-    ) {
-      return;
-    }
+  async function confirmDelete() {
+    if (!user || !deleteTargetId) return;
+    const planId = deleteTargetId;
+    setDeleting(true);
     setError(null);
     try {
       const token = await user.getIdToken();
@@ -313,12 +302,20 @@ export function PackagesBoard() {
         setError(data.error ?? "Could not delete package.");
         return;
       }
+      setDeleteTargetId(null);
       if (modalOpen && editingId === planId) setModalOpen(false);
       await load();
     } catch {
       setError("Could not delete package.");
+    } finally {
+      setDeleting(false);
     }
   }
+
+  const deleteTargetName =
+    plans.find((plan) => plan.id === deleteTargetId)?.name?.trim() ||
+    form.name.trim() ||
+    "this package";
 
   return (
     <div className="space-y-8">
@@ -396,10 +393,22 @@ export function PackagesBoard() {
         onSave={() => void handleSave()}
         onFormChange={setForm}
         onDelete={
-          editingId
-            ? () => void handleDelete(editingId)
-            : undefined
+          editingId ? () => setDeleteTargetId(editingId) : undefined
         }
+      />
+
+      <DeleteConfirmModal
+        open={deleteTargetId !== null}
+        stacked
+        title="Delete subscription package?"
+        description={`Delete "${deleteTargetName}"? Existing tenants keep their current plan.`}
+        confirmLabel="Yes, delete"
+        cancelLabel="No, cancel"
+        isLoading={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteTargetId(null);
+        }}
+        onConfirm={() => void confirmDelete()}
       />
     </div>
   );
