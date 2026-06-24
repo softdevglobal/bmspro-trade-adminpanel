@@ -1,7 +1,11 @@
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { isStripeConfigured } from "@/lib/stripe/config";
 import { createSubscriptionCheckoutSession } from "@/lib/stripe/checkout";
-import { assessPlanChange } from "@/lib/subscription-plans/tenant-subscription";
+import { isTrialCalendarActive } from "@/lib/subscription-plans/access";
+import {
+  assessPlanChange,
+  getTenantSubscriptionSnapshot,
+} from "@/lib/subscription-plans/tenant-subscription";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -71,6 +75,18 @@ export async function POST(request: Request) {
         error:
           changeCheck.assessment.blockReason ??
           "This plan change is not allowed.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const snapshot = await getTenantSubscriptionSnapshot(auth.businessId);
+  if (snapshot && isTrialCalendarActive(snapshot)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "No payment is required during your free trial. You can subscribe after the trial ends.",
       },
       { status: 400 },
     );

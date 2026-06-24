@@ -22,7 +22,7 @@ import {
   type SubscriptionPlan,
   type SubscriptionPlanInput,
 } from "@/lib/subscription-plans/types";
-import { FieldValue, type DocumentData } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
 
 function toMillis(value: unknown): number | null {
   if (value && typeof value === "object" && "toMillis" in value) {
@@ -451,8 +451,8 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
       hasFreeTrial: hasTrial,
       ...(hasTrial
         ? {
-            trial_start: now,
-            trial_end: trialEnd,
+            trial_start: Timestamp.fromMillis(now),
+            trial_end: Timestamp.fromMillis(trialEnd),
           }
         : {}),
       subscriptionPeriodStart: now,
@@ -471,8 +471,8 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
       hasFreeTrial: hasTrial,
       ...(hasTrial
         ? {
-            trial_start: now,
-            trial_end: trialEnd,
+            trial_start: Timestamp.fromMillis(now),
+            trial_end: Timestamp.fromMillis(trialEnd),
           }
         : {}),
     },
@@ -534,6 +534,15 @@ export async function renewTenantSubscription(
     ...smsRenewalFields,
     updatedAt: FieldValue.serverTimestamp(),
   });
+
+  const ownerUid = typeof data.ownerUid === "string" ? data.ownerUid : null;
+  if (ownerUid) {
+    await adminDb.collection("users").doc(ownerUid).update({
+      billing_status: "active",
+      accountStatus: "active",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
 }
 
 /** Count businesses on each subscription plan (by planId or legacy plan.id). */
