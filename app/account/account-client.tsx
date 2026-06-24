@@ -1246,6 +1246,7 @@ function BookingCard({
     useState<InspectionSlot | null>(null);
   const [accepting, setAccepting] = useState(false);
   const [acceptingJob, setAcceptingJob] = useState(false);
+  const [rejectingJob, setRejectingJob] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<"accepted" | "rejected" | null>(
     null,
@@ -1303,6 +1304,40 @@ function BookingCard({
       );
     } finally {
       setAcceptingJob(false);
+    }
+  }
+
+  async function rejectJobProposed() {
+    setRejectingJob(true);
+    setAcceptError(null);
+    try {
+      const idToken = await getIdToken();
+      const slugQuery = booking.bookingSlug
+        ? `?bookingSlug=${encodeURIComponent(booking.bookingSlug)}`
+        : "";
+      const response = await fetch(`/api/customer/jobs/${booking.id}${slugQuery}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ action: "reject_job_proposed" }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not reject these job days.");
+      }
+      setSelectedJobProposed(null);
+      onChanged();
+    } catch (err) {
+      setAcceptError(
+        err instanceof Error ? err.message : "Could not reject these job days.",
+      );
+    } finally {
+      setRejectingJob(false);
     }
   }
 
@@ -2021,7 +2056,7 @@ function BookingCard({
                       >
                         <ProposedSlotPicker
                           slots={booking.jobProposedSlots}
-                          disabled={acceptingJob}
+                          disabled={acceptingJob || rejectingJob}
                           selected={selectedJobProposed}
                           timeZone={timeZone}
                           onSelect={setSelectedJobProposed}
@@ -2031,21 +2066,44 @@ function BookingCard({
                             {acceptError}
                           </p>
                         ) : null}
-                        <button
-                          type="button"
-                          disabled={acceptingJob || !selectedJobProposed}
-                          onClick={() => void acceptJobProposed()}
-                          className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">
+                        <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
+                          <button
+                            type="button"
+                            disabled={
+                              acceptingJob ||
+                              rejectingJob ||
+                              !selectedJobProposed
+                            }
+                            onClick={() => void acceptJobProposed()}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 font-body text-[13px] font-bold text-white shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">
+                              {acceptingJob
+                                ? "progress_activity"
+                                : "event_available"}
+                            </span>
                             {acceptingJob
-                              ? "progress_activity"
-                              : "event_available"}
-                          </span>
-                          {acceptingJob
-                            ? "Confirming…"
-                            : "Accept this job day"}
-                        </button>
+                              ? "Confirming…"
+                              : "Accept this job day"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={acceptingJob || rejectingJob}
+                            onClick={() => void rejectJobProposed()}
+                            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white py-2.5 font-body text-[13px] font-bold text-rose-600 shadow-sm transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span
+                              className={`material-symbols-outlined text-[18px] ${
+                                rejectingJob ? "animate-spin" : ""
+                              }`}
+                            >
+                              {rejectingJob ? "progress_activity" : "cancel"}
+                            </span>
+                            {rejectingJob
+                              ? "Rejecting…"
+                              : "Reject proposed job days"}
+                          </button>
+                        </div>
                       </ScheduleSubsection>
                     ) : null}
 

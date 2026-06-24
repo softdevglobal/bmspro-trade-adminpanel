@@ -726,7 +726,7 @@ export function sortInspectionSlots<T extends InspectionSlot>(
 
 export const UNSCHEDULED_SORT_KEY = "9999-12-31T23:59";
 
-/** Sort key for board views: scheduled visit, else earliest preferred slot. */
+/** Sort key for confirmed inspection visits only (not preferred slots). */
 export function inspectionRequestScheduleSortKey(
   request: InspectionRequestDetail,
 ): string {
@@ -736,10 +736,6 @@ export function inspectionRequestScheduleSortKey(
         ? request.scheduledStartTime
         : resolveSlotStartTime(request.scheduledSlot);
     return `${request.scheduledSlot.date}T${start}`;
-  }
-  const [earliest] = sortInspectionSlots(request.preferredSlots);
-  if (earliest?.date) {
-    return `${earliest.date}T${resolveSlotStartTime(earliest)}`;
   }
   return UNSCHEDULED_SORT_KEY;
 }

@@ -1,6 +1,10 @@
 import "server-only";
 
-import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
+import { bookingForCalendar } from "@/lib/calendar/events";
+import {
+  bookingScheduleDays,
+  mapBookingDoc,
+} from "@/lib/bookings/map-booking-doc";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import {
   DEFAULT_SLOT_CAPACITY,
@@ -141,6 +145,13 @@ function buildHourSlotOccupancyForDate(
   const windows: { jobs: number; requests: number; personal: number }[] =
     slotDefs.map(() => ({ jobs: 0, requests: 0, personal: 0 }));
 
+  const requestsById = new Map(
+    requestsSnap.docs.map((doc) => [
+      doc.id,
+      mapInspectionDoc(doc.id, doc.data() ?? {}),
+    ]),
+  );
+
   for (const doc of requestsSnap.docs) {
     const request = mapInspectionDoc(doc.id, doc.data() ?? {});
     if (request.status !== "scheduled") continue;
@@ -165,22 +176,25 @@ function buildHourSlotOccupancyForDate(
   for (const doc of jobsSnap.docs) {
     const booking = mapBookingDoc(doc.id, doc.data() ?? {});
     if (booking.status !== "scheduled" && booking.status !== "ongoing") continue;
-    const slot = booking.scheduledSlot;
-    if (!slot?.date) continue;
-    const defaults = defaultWindowForTimeRange(slot.timeRange);
-    const window = eventWindowMinutes(
-      date,
-      slot.date,
-      booking.scheduledStartTime,
-      booking.scheduledEndTime,
-      defaults.start,
-      defaults.end,
-    );
-    if (!window) continue;
-    windows.forEach((bucket, index) => {
-      const slotStartMin = startHour * 60 + index * 60;
-      if (overlapsHourBucket(window, slotStartMin)) bucket.jobs += 1;
-    });
+
+    const calendarBooking = bookingForCalendar(booking, requestsById);
+    for (const day of bookingScheduleDays(calendarBooking)) {
+      if (day.date !== date) continue;
+      const defaults = defaultWindowForTimeRange(day.slot.timeRange);
+      const window = eventWindowMinutes(
+        date,
+        day.date,
+        day.startTime,
+        day.endTime,
+        defaults.start,
+        defaults.end,
+      );
+      if (!window) continue;
+      windows.forEach((bucket, index) => {
+        const slotStartMin = startHour * 60 + index * 60;
+        if (overlapsHourBucket(window, slotStartMin)) bucket.jobs += 1;
+      });
+    }
   }
 
   for (const event of personalEvents) {

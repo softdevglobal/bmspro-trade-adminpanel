@@ -1,4 +1,5 @@
 import type { CalendarEvent } from "@/lib/calendar/events";
+import { bookingSlotOnDate } from "@/lib/calendar/events";
 import {
   DEFAULT_WORKING_HOURS,
   resolveCalendarSlotBounds,
@@ -142,7 +143,43 @@ export function calendarEventWindowMinutes(
     return { startMin, endMin };
   }
 
-  const record = event.booking ?? event.request;
+  if (event.booking) {
+    const booking = event.booking;
+    const slot = bookingSlotOnDate(booking, event.date);
+    if (!slot) return null;
+
+    const { startMin: gridStart, endMin: gridEnd } =
+      calendarSlotBoundsMinutes(workingHours);
+
+    const onPrimaryDay = booking.scheduledSlot?.date === event.date;
+    let startMin = parseClockMinutes(
+      onPrimaryDay ? booking.scheduledStartTime : slot.startTime,
+    );
+    let endMin = parseClockMinutes(
+      onPrimaryDay ? booking.scheduledEndTime : slot.endTime,
+    );
+
+    if (startMin == null && endMin == null) {
+      const defaults = DEFAULT_EVENT_WINDOW[slot.timeRange];
+      startMin = parseClockMinutes(defaults.startTime);
+      endMin = parseClockMinutes(defaults.endTime);
+    } else if (startMin != null && endMin == null) {
+      endMin = startMin + 60;
+    } else if (startMin == null && endMin != null) {
+      startMin = endMin - 60;
+    }
+
+    if (startMin == null || endMin == null) return null;
+    if (endMin <= startMin) endMin = startMin + 60;
+
+    startMin = Math.max(startMin, gridStart);
+    endMin = Math.min(endMin, gridEnd);
+    if (endMin <= startMin) return null;
+
+    return { startMin, endMin };
+  }
+
+  const record = event.request;
   if (!record) return null;
 
   const slot = record.scheduledSlot;

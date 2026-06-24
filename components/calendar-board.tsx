@@ -11,6 +11,7 @@ import {
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
+  bookingSlotOnDate,
   bookingTitle,
   buildMonthGridCalendarEvents,
   calendarCardView,
@@ -696,6 +697,21 @@ function eventTimeLabel(
     );
   }
 
+  if (event.booking) {
+    const daySlot = bookingSlotOnDate(event.booking, date);
+    if (daySlot) {
+      const onPrimaryDay = event.booking.scheduledSlot?.date === date;
+      const window = formatVisitWindow(
+        onPrimaryDay
+          ? event.booking.scheduledStartTime
+          : daySlot.startTime,
+        onPrimaryDay ? event.booking.scheduledEndTime : daySlot.endTime,
+      );
+      if (window) return window;
+      return TIME_RANGE_SHORT_LABELS[daySlot.timeRange];
+    }
+  }
+
   if (!card) return "Time TBC";
 
   const window = formatVisitWindow(
@@ -727,6 +743,11 @@ function eventTimeLabel(
     (slot) => slot.date === date,
   );
   if (adminJobPreferred) {
+    const preferredWindow = formatVisitWindow(
+      adminJobPreferred.startTime,
+      adminJobPreferred.endTime,
+    );
+    if (preferredWindow) return preferredWindow;
     return TIME_RANGE_SHORT_LABELS[adminJobPreferred.timeRange];
   }
 

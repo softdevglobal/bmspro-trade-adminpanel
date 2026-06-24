@@ -918,3 +918,85 @@ export async function customerAcceptJobProposedSlot(
 
   return { ok: true, request };
 }
+
+/** Customer declines all admin-proposed job days. */
+export async function customerRejectJobProposedSlots(
+  id: string,
+  identity: CustomerOwnershipIdentity,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const snap = await getRequestDocument(id);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+  const ref = snap.ref;
+  const current = mapInspectionDoc(snap.id, snap.data() ?? {});
+
+  if (!customerOwnsRequestRecord(current, identity)) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (!current.quotation || current.quotation.customerDecision !== "accepted") {
+    return {
+      ok: false,
+      status: 400,
+      error: "There are no proposed job days to reject right now.",
+    };
+  }
+  if (current.bookingId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This job has already been scheduled.",
+    };
+  }
+  if (current.jobProposedSlots.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "There are no proposed job days to reject right now.",
+    };
+  }
+
+  await ref.update({
+    jobProposedSlots: [],
+    adminJobPreferredSlots: [],
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const after = await ref.get();
+  const request = mapInspectionDoc(ref.id, after.data() ?? {});
+
+  try {
+    const { notifyBusinessOfCustomerJobProposalRejection } = await import(
+      "@/lib/notifications/server"
+    );
+    const summary = await loadBusinessSummary(request.businessId);
+    await notifyBusinessOfCustomerJobProposalRejection(request, summary);
+  } catch (error) {
+    console.error("customer job date rejection notification failed:", error);
+  }
+
+  await logAuditEvent({
+    businessId: request.businessId,
+    category: "booking",
+    action: "booking.job_date_rejected",
+    actor: {
+      uid: identity.customerId,
+      role: "customer",
+      name: request.customer.fullName || null,
+      email: identity.customerEmail || request.customer.email || null,
+    },
+    source: "customer_portal",
+    summary: `Customer rejected proposed job days for ${request.requestCode ?? id}`,
+    targetId: id,
+    targetLabel: request.serviceName || request.customer.fullName || null,
+    metadata: {
+      requestCode: request.requestCode ?? null,
+    },
+  });
+
+  return { ok: true, request };
+}

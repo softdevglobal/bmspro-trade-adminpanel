@@ -1,17 +1,41 @@
 "use client";
 
+import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { useAuth } from "@/lib/auth/auth-context";
+import { useBookings } from "@/lib/bookings/use-bookings";
+import type { BookingDetail } from "@/lib/bookings/types";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import {
+  CUSTOMER_WORK_STATUS_LABELS,
+  customerWorkInvoiceSummary,
+  isCustomerWorkFullyComplete,
+  resolveCustomerWorkStatus,
+  type CustomerWorkContext,
+  type CustomerWorkDisplayStatus,
+} from "@/lib/customer/work-status";
+import type { InvoiceDetail } from "@/lib/invoices/types";
+import {
+  BOOKING_STATUS_LABELS,
+  BOOKING_STATUS_TONE,
+} from "@/lib/bookings/types";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
-  STATUS_LABELS,
+  TIME_RANGE_LABELS,
   formatAddress,
+  formatSlotDate,
+  formatVisitWindow,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
 } from "@/lib/inspection/types";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
+import {
+  displayBookingCode,
+  displayQuotationCode,
+} from "@/lib/reference-codes";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type CustomerSummary = {
   id: string;
@@ -30,6 +54,12 @@ const STATUS_TONE: Record<InspectionRequestStatus, string> = {
   awaiting_decision: "bg-orange-50 text-orange-800 border-orange-200",
   cancelled: "bg-stone-100 text-stone-600 border-stone-200",
   completed: "bg-sky-50 text-sky-700 border-sky-200",
+};
+
+const WORK_STATUS_TONE: Record<CustomerWorkDisplayStatus, string> = {
+  ...STATUS_TONE,
+  pending_payment: "bg-amber-50 text-amber-800 border-amber-200",
+  job_completed: "bg-sky-50 text-sky-700 border-sky-200",
 };
 
 function customerKey(request: InspectionRequestDetail): string {
@@ -102,10 +132,257 @@ function requestTitle(request: InspectionRequestDetail): string {
   return request.customRequest?.title ?? "Custom quotation";
 }
 
+function formatAud(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+type JourneyStep = {
+  id: string;
+  icon: string;
+  title: string;
+  detail: string | null;
+  badge: string | null;
+  badgeTone: string | null;
+  done: boolean;
+};
+
+function buildJourneySteps(
+  ctx: CustomerWorkContext,
+  timeZone: string | null | undefined,
+): JourneyStep[] {
+  const { request, booking } = ctx;
+  const workStatus = resolveCustomerWorkStatus(ctx);
+  const invoiceSummary = customerWorkInvoiceSummary(ctx);
+  const jobStatus = booking?.status ?? request.bookingStatus ?? null;
+  const steps: JourneyStep[] = [];
+
+  steps.push({
+    id: "request",
+    icon: "assignment",
+    title: "Request submitted",
+    detail: requestTitle(request),
+    badge: CUSTOMER_WORK_STATUS_LABELS[workStatus],
+    badgeTone: WORK_STATUS_TONE[workStatus],
+    done: true,
+  });
+
+  const inspectionComplete =
+    request.status === "completed" ||
+    request.status === "awaiting_decision" ||
+    !!request.visitEndedAt;
+  const inspectionScheduled = !!request.scheduledSlot;
+
+  if (inspectionScheduled || inspectionComplete || request.status === "scheduled") {
+    const visitWindow = formatVisitWindow(
+      request.scheduledStartTime,
+      request.scheduledEndTime,
+    );
+    const slotLabel = request.scheduledSlot
+      ? `${formatSlotDate(request.scheduledSlot.date, timeZone)} · ${TIME_RANGE_LABELS[request.scheduledSlot.timeRange]}`
+      : null;
+
+    steps.push({
+      id: "inspection",
+      icon: inspectionComplete ? "task_alt" : "event_available",
+      title: inspectionComplete
+        ? "Inspection completed"
+        : inspectionScheduled
+          ? "Inspection scheduled"
+          : "Inspection pending",
+      detail: [slotLabel, visitWindow].filter(Boolean).join(" · ") || null,
+      badge: inspectionComplete
+        ? "Completed"
+        : inspectionScheduled
+          ? "Scheduled"
+          : "Pending",
+      badgeTone: inspectionComplete
+        ? STATUS_TONE.completed
+        : inspectionScheduled
+          ? STATUS_TONE.scheduled
+          : STATUS_TONE.pending,
+      done: inspectionComplete,
+    });
+  }
+
+  if (request.quotation) {
+    const decision = request.quotation.customerDecision;
+    const quotationTitle =
+      decision === "accepted"
+        ? "Quotation accepted"
+        : decision === "rejected"
+          ? "Quotation rejected"
+          : request.quotation.status === "sent"
+            ? "Quotation sent"
+            : "Quotation created";
+
+    steps.push({
+      id: "quotation",
+      icon: "request_quote",
+      title: quotationTitle,
+      detail: [
+        displayQuotationCode(request.quotation),
+        formatAud(request.quotation.finalPriceAud),
+      ]
+        .filter((part) => part && part !== "—")
+        .join(" · "),
+      badge:
+        decision === "accepted"
+          ? "Accepted"
+          : decision === "rejected"
+            ? "Rejected"
+            : request.quotation.status === "sent"
+              ? "Awaiting customer"
+              : request.quotation.status ?? null,
+      badgeTone:
+        decision === "accepted"
+          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+          : decision === "rejected"
+            ? "bg-stone-100 text-stone-600 border-stone-200"
+            : "bg-violet-50 text-violet-700 border-violet-200",
+      done: decision === "accepted" || decision === "rejected",
+    });
+  }
+
+  if (request.bookingId || jobStatus) {
+    const jobDone = jobStatus === "completed";
+    steps.push({
+      id: "job",
+      icon: "handyman",
+      title: jobDone ? "Job completed" : "Job booked",
+      detail: request.bookingCode
+        ? displayBookingCode({
+            id: request.bookingId ?? "",
+            bookingCode: request.bookingCode,
+          })
+        : null,
+      badge: jobStatus ? BOOKING_STATUS_LABELS[jobStatus] : null,
+      badgeTone: jobStatus ? BOOKING_STATUS_TONE[jobStatus] : null,
+      done: jobDone,
+    });
+  }
+
+  if (invoiceSummary) {
+    const paid = invoiceSummary.status === "paid";
+    steps.push({
+      id: "invoice",
+      icon: paid ? "check_circle" : "receipt_long",
+      title: paid ? "Work completed" : "Invoice issued",
+      detail: [
+        paid ? "Invoice paid" : null,
+        invoiceSummary.invoiceCode,
+        formatAud(invoiceSummary.finalPriceAud),
+      ]
+        .filter((part) => part && part !== "—")
+        .join(" · "),
+      badge: paid
+        ? "Completed"
+        : invoiceSummary.status === "sent"
+          ? "Payment pending"
+          : invoiceSummary.status,
+      badgeTone: paid
+        ? STATUS_TONE.completed
+        : "bg-amber-50 text-amber-800 border-amber-200",
+      done: paid,
+    });
+  }
+
+  return steps;
+}
+
+function resolveDetailLink(ctx: CustomerWorkContext): {
+  href: string;
+  label: string;
+  icon: string;
+} {
+  const { request } = ctx;
+  const jobStatus = ctx.booking?.status ?? request.bookingStatus ?? null;
+
+  if (request.bookingId) {
+    return {
+      href: `/dashboard/jobs?job=${encodeURIComponent(request.bookingId)}`,
+      label: isCustomerWorkFullyComplete(ctx)
+        ? "Open completed job"
+        : jobStatus === "completed"
+          ? "Open job — awaiting payment"
+          : "Open job",
+      icon: "handyman",
+    };
+  }
+  return {
+    href: `/dashboard/requests?request=${encodeURIComponent(request.id)}`,
+    label: "Open request",
+    icon: "assignment",
+  };
+}
+
+function buildWorkContext(
+  request: InspectionRequestDetail,
+  bookingById: ReadonlyMap<string, BookingDetail>,
+  invoiceByRequestId: ReadonlyMap<string, InvoiceDetail>,
+): CustomerWorkContext {
+  const bookingId = request.bookingId?.trim();
+  return {
+    request,
+    booking: bookingId ? bookingById.get(bookingId) ?? null : null,
+    invoice: invoiceByRequestId.get(request.id) ?? null,
+  };
+}
+
 export function CustomersBoard() {
+  const { user } = useAuth();
   const { requests, loading, error } = useInspectionRequests();
+  const { bookings } = useBookings();
+  const [invoices, setInvoices] = useState<InvoiceDetail[]>([]);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const loadInvoices = useCallback(async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/invoices", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        invoices?: InvoiceDetail[];
+      };
+      if (response.ok && data.ok) {
+        setInvoices(data.invoices ?? []);
+      }
+    } catch {
+      // Keep request-mirrored invoice data when the invoice list cannot load.
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadInvoices();
+  }, [loadInvoices]);
+
+  useEffect(() => {
+    if (selectedId) {
+      void loadInvoices();
+    }
+  }, [selectedId, loadInvoices]);
+
+  const bookingById = useMemo(
+    () => new Map(bookings.map((booking) => [booking.id, booking])),
+    [bookings],
+  );
+  const invoiceByRequestId = useMemo(
+    () =>
+      new Map(
+        invoices.map((invoice) => [invoice.inspectionRequestId, invoice] as const),
+      ),
+    [invoices],
+  );
 
   const customers = useMemo(
     () => buildCustomerSummaries(requests),
@@ -209,6 +486,8 @@ export function CustomersBoard() {
 
       <CustomerPreviewDrawer
         customer={selected}
+        bookingById={bookingById}
+        invoiceByRequestId={invoiceByRequestId}
         onClose={() => setSelectedId(null)}
       />
     </>
@@ -275,9 +554,13 @@ function CustomerRow({
 
 function CustomerPreviewDrawer({
   customer,
+  bookingById,
+  invoiceByRequestId,
   onClose,
 }: {
   customer: CustomerSummary | null;
+  bookingById: ReadonlyMap<string, BookingDetail>;
+  invoiceByRequestId: ReadonlyMap<string, InvoiceDetail>;
   onClose: () => void;
 }) {
   const open = customer !== null;
@@ -306,7 +589,12 @@ function CustomerPreviewDrawer({
             onClick={(e) => e.stopPropagation()}
             className="absolute inset-y-0 right-0 flex h-full w-[calc(100%-1.25rem)] max-w-full flex-col overflow-hidden rounded-l-2xl border border-y-0 border-r-0 border-l border-outline-variant bg-surface-container-lowest shadow-2xl will-change-transform sm:max-w-[520px]"
           >
-            <CustomerPreviewContent customer={customer} onClose={onClose} />
+            <CustomerPreviewContent
+              customer={customer}
+              bookingById={bookingById}
+              invoiceByRequestId={invoiceByRequestId}
+              onClose={onClose}
+            />
           </motion.aside>
         </motion.div>
       ) : null}
@@ -316,11 +604,18 @@ function CustomerPreviewDrawer({
 
 function CustomerPreviewContent({
   customer,
+  bookingById,
+  invoiceByRequestId,
   onClose,
 }: {
   customer: CustomerSummary;
+  bookingById: ReadonlyMap<string, BookingDetail>;
+  invoiceByRequestId: ReadonlyMap<string, InvoiceDetail>;
   onClose: () => void;
 }) {
+  const profile = useBusinessProfile();
+  const timeZone = profile?.timezone ?? null;
+  const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null);
   const sortedRequests = [...customer.requests].sort(
     (a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0),
   );
@@ -380,36 +675,142 @@ function CustomerPreviewContent({
 
         <div className="px-4 py-4 sm:px-5">
           <h4 className="mb-3 font-body text-[13px] font-bold uppercase tracking-wider text-on-surface-variant">
-            Requests
+            Work history
           </h4>
 
           <ul className="space-y-2">
-            {sortedRequests.map((request) => (
-              <li key={request.id}>
-                <Link
-                  href={`/dashboard/requests?request=${request.id}`}
-                  onClick={onClose}
-                  className="block rounded-xl border border-outline-variant/60 bg-white p-3 transition-colors hover:border-primary/30 hover:bg-primary/[0.02]"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-flex rounded-full border px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider ${STATUS_TONE[request.status]}`}
+            {sortedRequests.map((request) => {
+              const expanded = expandedRequestId === request.id;
+              const workCtx = buildWorkContext(
+                request,
+                bookingById,
+                invoiceByRequestId,
+              );
+              const journeySteps = buildJourneySteps(workCtx, timeZone);
+              const detailLink = resolveDetailLink(workCtx);
+              const workStatus = resolveCustomerWorkStatus(workCtx);
+
+              return (
+                <li key={request.id}>
+                  <div
+                    className={`overflow-hidden rounded-xl border bg-white transition-colors ${
+                      expanded
+                        ? "border-primary/30 ring-1 ring-primary/10"
+                        : "border-outline-variant/60"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedRequestId((current) =>
+                          current === request.id ? null : request.id,
+                        )
+                      }
+                      className="block w-full p-3 text-left transition-colors hover:bg-primary/[0.02]"
                     >
-                      {STATUS_LABELS[request.status]}
-                    </span>
-                    <span className="font-body text-[11px] text-on-surface-variant">
-                      {formatWhen(request.createdAt ?? 0)}
-                    </span>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider ${WORK_STATUS_TONE[workStatus]}`}
+                            >
+                              {CUSTOMER_WORK_STATUS_LABELS[workStatus]}
+                            </span>
+                            <span className="font-body text-[11px] text-on-surface-variant">
+                              {formatWhen(request.createdAt ?? 0)}
+                            </span>
+                          </div>
+                          <p className="mt-2 font-body text-[14px] font-semibold text-on-surface">
+                            {requestTitle(request)}
+                          </p>
+                          <p className="mt-0.5 line-clamp-2 font-body text-[12px] text-on-surface-variant">
+                            {formatAddress(request.address)}
+                          </p>
+                          <p className="mt-2">
+                            <InspectionRequestCode request={request} />
+                          </p>
+                        </div>
+                        <span
+                          className={`material-symbols-outlined shrink-0 text-[22px] text-on-surface-variant transition-transform ${
+                            expanded ? "rotate-90 text-primary" : ""
+                          }`}
+                          aria-hidden
+                        >
+                          chevron_right
+                        </span>
+                      </div>
+                    </button>
+
+                    {expanded ? (
+                      <div className="border-t border-outline-variant/60 bg-surface-container-low/40 px-3 py-3">
+                        <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                          Full journey
+                        </p>
+                        <ol className="mt-3 space-y-0">
+                          {journeySteps.map((step, index) => (
+                            <li key={step.id} className="flex gap-3">
+                              <div className="flex flex-col items-center">
+                                <span
+                                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${
+                                    step.done
+                                      ? "border-primary/30 bg-primary/10 text-primary"
+                                      : "border-outline-variant/70 bg-surface-container-lowest text-on-surface-variant"
+                                  }`}
+                                >
+                                  <span className="material-symbols-outlined text-[16px]">
+                                    {step.icon}
+                                  </span>
+                                </span>
+                                {index < journeySteps.length - 1 ? (
+                                  <span
+                                    className={`my-1 w-px flex-1 min-h-[20px] ${
+                                      step.done ? "bg-primary/25" : "bg-outline-variant/50"
+                                    }`}
+                                    aria-hidden
+                                  />
+                                ) : null}
+                              </div>
+                              <div className="min-w-0 flex-1 pb-4">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-body text-[13px] font-semibold text-on-surface">
+                                    {step.title}
+                                  </p>
+                                  {step.badge ? (
+                                    <span
+                                      className={`inline-flex rounded-full border px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider ${
+                                        step.badgeTone ?? STATUS_TONE.pending
+                                      }`}
+                                    >
+                                      {step.badge}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {step.detail ? (
+                                  <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                                    {step.detail}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+
+                        <Link
+                          href={detailLink.href}
+                          onClick={onClose}
+                          className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/25 bg-primary/5 px-4 py-2.5 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-primary/10"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">
+                            {detailLink.icon}
+                          </span>
+                          {detailLink.label}
+                        </Link>
+                      </div>
+                    ) : null}
                   </div>
-                  <p className="mt-2 font-body text-[14px] font-semibold text-on-surface">
-                    {requestTitle(request)}
-                  </p>
-                  <p className="mt-0.5 line-clamp-2 font-body text-[12px] text-on-surface-variant">
-                    {formatAddress(request.address)}
-                  </p>
-                </Link>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>

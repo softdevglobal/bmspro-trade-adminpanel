@@ -20,6 +20,13 @@ export function customerPendingActionBookings(
     if (bookingSlug && booking.bookingSlug !== bookingSlug) return false;
     if (booking.status === "owner_proposed") return true;
     if (
+      booking.jobProposedSlots.length > 0 &&
+      !booking.bookingId &&
+      booking.quotation?.customerDecision === "accepted"
+    ) {
+      return true;
+    }
+    if (
       booking.status === "awaiting_decision" &&
       booking.quotation?.status === "sent" &&
       !booking.quotation.customerDecision
