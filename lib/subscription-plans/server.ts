@@ -7,7 +7,6 @@ import {
   buildTenantSmsRenewalFields,
   resolveSmsPackageForPlan,
 } from "@/lib/sms-packages/server";
-import { DEFAULT_SUBSCRIPTION_PLAN_SEEDS } from "@/lib/subscription-plans/defaults";
 import {
   formatBillingNote,
   formatPeriodLabel,
@@ -128,35 +127,10 @@ function normalisePlanInput(input: SubscriptionPlanInput): Record<string, unknow
   };
 }
 
-/** Seeds default plans when the catalog is empty. */
-export async function ensureDefaultSubscriptionPlans(): Promise<void> {
-  const snap = await adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).limit(1).get();
-  if (!snap.empty) return;
-
-  const { ensureDefaultSmsPackages } = await import("@/lib/sms-packages/server");
-  await ensureDefaultSmsPackages();
-
-  const batch = adminDb.batch();
-  const now = FieldValue.serverTimestamp();
-
-  for (const seed of DEFAULT_SUBSCRIPTION_PLAN_SEEDS) {
-    const ref = adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).doc(seed.id);
-    batch.set(ref, {
-      ...normalisePlanInput(seed.input),
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  await batch.commit();
-}
-
 export async function listSubscriptionPlans(options?: {
   includeInactive?: boolean;
   includeHidden?: boolean;
 }): Promise<SubscriptionPlan[]> {
-  await ensureDefaultSubscriptionPlans();
-
   const snap = await adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).get();
   let plans = snap.docs.map((doc) => mapPlanDoc(doc.id, doc.data() ?? {}));
 
@@ -176,8 +150,6 @@ export async function getSubscriptionPlanById(
 ): Promise<SubscriptionPlan | null> {
   const trimmed = planId.trim();
   if (!trimmed) return null;
-
-  await ensureDefaultSubscriptionPlans();
 
   const snap = await adminDb
     .collection(SUBSCRIPTION_PLANS_COLLECTION)
@@ -485,7 +457,7 @@ export function planBillingNote(plan: SubscriptionPlan): string {
 
 /**
  * Advances the subscription billing period and re-grants bundled SMS from the plan.
- * Call from Stripe/webhook renewal handlers.
+ * Call from Stripe Checkout confirm or webhook renewal handlers.
  */
 export async function renewTenantSubscription(
   businessId: string,
