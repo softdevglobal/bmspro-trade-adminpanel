@@ -449,7 +449,7 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
       accountStatus,
       trialDays: plan.trialDays,
       hasFreeTrial: hasTrial,
-      ...(hasTrial
+      ...(hasTrial && trialEnd != null
         ? {
             trial_start: Timestamp.fromMillis(now),
             trial_end: Timestamp.fromMillis(trialEnd),
@@ -469,7 +469,7 @@ export function buildTenantSubscriptionFields(plan: SubscriptionPlan): {
       accountStatus,
       trialDays: plan.trialDays,
       hasFreeTrial: hasTrial,
-      ...(hasTrial
+      ...(hasTrial && trialEnd != null
         ? {
             trial_start: Timestamp.fromMillis(now),
             trial_end: Timestamp.fromMillis(trialEnd),

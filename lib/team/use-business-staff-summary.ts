@@ -59,6 +59,7 @@ export function useBusinessStaffSummary(): {
             staffType?: string;
             status?: string;
             canget_qutaion?: boolean;
+            photoUrl?: string | null;
             offDays?: string[];
           }[];
         };
@@ -71,6 +72,7 @@ export function useBusinessStaffSummary(): {
             email: member.email,
             staffType: member.staffType?.trim() || "Team member",
             canget_qutaion: member.canget_qutaion === true,
+            photoUrl: member.photoUrl ?? null,
             offDays: Array.isArray(member.offDays) ? member.offDays : [],
           }));
         setStaff(next);

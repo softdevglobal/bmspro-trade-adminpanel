@@ -23,6 +23,7 @@ import {
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 
 export const runtime = "nodejs";
 
@@ -333,5 +334,17 @@ export async function PATCH(request: Request) {
 
   await updateBusinessProfile(auth.businessId, updates);
   const profile = await getBusinessProfile(auth.businessId);
+
+  if (profile && "serviceAreas" in updates) {
+    const slug = profile.bookingSlug?.trim();
+    if (slug) {
+      revalidatePath(`/booknow/${slug}`);
+    }
+    const path = profile.bookingPath?.trim();
+    if (path && path.startsWith("/")) {
+      revalidatePath(path);
+    }
+  }
+
   return NextResponse.json({ ok: true, profile });
 }

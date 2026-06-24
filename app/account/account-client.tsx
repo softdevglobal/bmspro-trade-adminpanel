@@ -1060,6 +1060,10 @@ function ProposedSlotPicker({
 }
 
 function inspectorAvatarUrl(assigned: InspectionAssignment): string {
+  const photo = assigned.photoUrl?.trim();
+  if (photo && (photo.startsWith("http://") || photo.startsWith("https://"))) {
+    return photo;
+  }
   const seed = encodeURIComponent(
     assigned.uid || assigned.email || assigned.name,
   );
@@ -1203,7 +1207,7 @@ function ConfirmedVisitHighlight({
                   ? "Business owner"
                   : isJob
                     ? "Assigned technician"
-                    : "Assigned inspector"}
+                    : "Team member"}
                 {assignedTo.email ? ` · ${assignedTo.email}` : ""}
               </p>
             </div>
@@ -1218,7 +1222,7 @@ function ConfirmedVisitHighlight({
             </span>
             {isJob
               ? "A team member will be assigned before your job."
-              : "An inspector will be assigned before your visit."}
+              : "A team member will be assigned before your visit."}
           </p>
         )}
       </div>

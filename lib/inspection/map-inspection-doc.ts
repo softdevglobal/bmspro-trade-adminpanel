@@ -157,6 +157,7 @@ export function mapInspectionDoc(
     customerImageUrls: parseCustomerImageUrls(data.customerImageUrls),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
+    cancelledAt: toMillis(data.cancelledAt),
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
     quotation: parseInspectionQuotation(data.quotation),

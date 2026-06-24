@@ -33,6 +33,7 @@ import {
   notifyCustomerOfAssignment,
   notifyCustomerOfNewRequest,
   notifyCustomerOfJobScheduled,
+  notifyCustomerOfRequestRescheduled,
   notifyCustomerOfStatusChange,
   notifyCustomerOfVisitOnTheWay,
 } from "@/lib/notifications/server";
@@ -304,6 +305,13 @@ export async function applyOwnerAction(
     updatedAt: FieldValue.serverTimestamp(),
   };
 
+  // An "accept" on an already-scheduled visit is a reschedule (e.g. the visit
+  // was dragged to a new slot on the calendar), not a first-time confirmation.
+  const isReschedule =
+    action.type === "accept" &&
+    current.status === "scheduled" &&
+    !!current.scheduledSlot;
+
   if (action.type === "accept") {
     if (await isBusinessClosedOnDate(businessId, action.slot.date)) {
       return {
@@ -374,8 +382,12 @@ export async function applyOwnerAction(
     updates.assignedTo = action.assignment;
   } else if (action.type === "cancel") {
     updates.status = "cancelled" satisfies InspectionRequestStatus;
-    updates.scheduledStartTime = null;
-    updates.scheduledEndTime = null;
+    // Keep the scheduled slot/time window and all other request data so the
+    // customer (and their full details up to the point of cancellation) stay
+    // viewable in the customer section. Cancelled requests are already
+    // excluded from slot occupancy and the calendar, so preserving these
+    // values does not block new scheduling.
+    updates.cancelledAt = FieldValue.serverTimestamp();
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "complete") {
     return {
@@ -508,6 +520,8 @@ export async function applyOwnerAction(
         },
       });
     }
+  } else if (isReschedule && request.status === "scheduled") {
+    await notifyCustomerOfRequestRescheduled(request, summary);
   } else {
     await notifyCustomerOfStatusChange(request, request.status, summary);
   }
