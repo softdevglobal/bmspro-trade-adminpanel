@@ -504,7 +504,7 @@ function RequestScheduleSummary({
   linkedJob: BookingDetail | null;
   timeZone?: string | null;
 }) {
-  if (request.status === "cancelled") return null;
+  const isCancelled = request.status === "cancelled";
 
   const visitWindow = formatVisitWindow(
     request.scheduledStartTime,
@@ -514,6 +514,23 @@ function RequestScheduleSummary({
     linkedJob && linkedJobIsScheduled(linkedJob)
       ? formatVisitWindow(linkedJob.scheduledStartTime, linkedJob.scheduledEndTime)
       : null;
+
+  // For cancelled requests we still surface the visit that was scheduled
+  // (if any) so the full details up to cancellation remain visible, but we
+  // skip the "not confirmed yet" prompts that only apply to live requests.
+  if (isCancelled) {
+    if (!request.scheduledSlot) return null;
+    return (
+      <ScheduleDatePill
+        category="inspection"
+        prefix="Inspection (cancelled)"
+        slot={request.scheduledSlot}
+        timeZone={timeZone}
+        variant="confirmed"
+        suffix={visitWindow}
+      />
+    );
+  }
 
   return (
     <>

@@ -179,6 +179,8 @@ export type InspectionRequestDetail = {
   customerImageUrls: string[];
   createdAt: number | null;
   updatedAt: number | null;
+  /** Millis when the request was cancelled; null if never cancelled. */
+  cancelledAt: number | null;
   visitStartedAt: number | null;
   visitEndedAt: number | null;
   /** Summary mirrored from quotations when a quote is sent. */

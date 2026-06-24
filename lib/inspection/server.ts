@@ -374,8 +374,12 @@ export async function applyOwnerAction(
     updates.assignedTo = action.assignment;
   } else if (action.type === "cancel") {
     updates.status = "cancelled" satisfies InspectionRequestStatus;
-    updates.scheduledStartTime = null;
-    updates.scheduledEndTime = null;
+    // Keep the scheduled slot/time window and all other request data so the
+    // customer (and their full details up to the point of cancellation) stay
+    // viewable in the customer section. Cancelled requests are already
+    // excluded from slot occupancy and the calendar, so preserving these
+    // values does not block new scheduling.
+    updates.cancelledAt = FieldValue.serverTimestamp();
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "complete") {
     return {

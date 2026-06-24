@@ -407,6 +407,21 @@ function CustomerPreviewContent({
                   <p className="mt-0.5 line-clamp-2 font-body text-[12px] text-on-surface-variant">
                     {formatAddress(request.address)}
                   </p>
+                  {request.status === "cancelled" ? (
+                    <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
+                      <p className="font-body text-[11px] font-bold uppercase tracking-wider text-stone-600">
+                        Cancelled
+                        {request.cancelledAt
+                          ? ` · ${formatWhen(request.cancelledAt)}`
+                          : ""}
+                      </p>
+                      {request.ownerNote ? (
+                        <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                          {request.ownerNote}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </Link>
               </li>
             ))}
