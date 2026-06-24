@@ -51,9 +51,10 @@ function isOptionDisabled(
   occupancy: HourSlotOccupancy | undefined,
   capacityLoading: boolean,
   closedDay: boolean,
+  pastSlot: boolean,
   jobsModuleEnabled: boolean,
 ): boolean {
-  if (closedDay) return true;
+  if (closedDay || pastSlot) return true;
   if (kind === "personal") return false;
   if (kind === "job" && !jobsModuleEnabled) return true;
   if (capacityLoading || !occupancy) return true;
@@ -65,6 +66,7 @@ export function CalendarSlotAddMenu({
   occupancy,
   capacityLoading = false,
   closedDay = false,
+  pastSlot = false,
   jobsModuleEnabled = true,
   onSelect,
 }: {
@@ -72,6 +74,7 @@ export function CalendarSlotAddMenu({
   occupancy?: HourSlotOccupancy;
   capacityLoading?: boolean;
   closedDay?: boolean;
+  pastSlot?: boolean;
   jobsModuleEnabled?: boolean;
   onSelect: (kind: CalendarAddEventKind, slot: CalendarSlotSelection) => void;
 }) {
@@ -84,6 +87,7 @@ export function CalendarSlotAddMenu({
 
   const jobsFull = occupancy?.jobsFull === true;
   const requestsFull = occupancy?.requestsFull === true;
+  const menuBlocked = closedDay || pastSlot;
   const allScheduledTypesFull =
     !capacityLoading &&
     occupancy != null &&
@@ -168,6 +172,7 @@ export function CalendarSlotAddMenu({
                 occupancy,
                 capacityLoading,
                 closedDay,
+                pastSlot,
                 jobsModuleEnabled,
               );
               const moduleDisabled =
@@ -203,11 +208,13 @@ export function CalendarSlotAddMenu({
                     <span className="block font-body text-[11px] text-on-surface-variant">
                       {closedDay
                         ? "Business off day"
-                        : moduleDisabled
-                          ? "Enable Jobs in Settings"
-                          : disabled && option.kind !== "personal"
-                            ? option.fullHint
-                            : option.hint}
+                        : pastSlot
+                          ? "This hour has passed"
+                          : moduleDisabled
+                            ? "Enable Jobs in Settings"
+                            : disabled && option.kind !== "personal"
+                              ? option.fullHint
+                              : option.hint}
                     </span>
                   </span>
                 </button>
@@ -226,14 +233,20 @@ export function CalendarSlotAddMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-controls={menuId}
-        disabled={closedDay}
-        title={closedDay ? "Business off day" : undefined}
+        disabled={menuBlocked}
+        title={
+          closedDay
+            ? "Business off day"
+            : pastSlot
+              ? "This hour has passed"
+              : undefined
+        }
         onClick={() => {
-          if (closedDay) return;
+          if (menuBlocked) return;
           setOpen((current) => !current);
         }}
         className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 font-body text-[11px] font-semibold transition-colors ${
-          closedDay
+          menuBlocked
             ? "cursor-not-allowed border-outline-variant/60 bg-stone-100 text-outline-variant opacity-60"
             : "border-dashed border-primary/40 bg-primary/5 text-primary hover:border-primary hover:bg-primary/10"
         }`}

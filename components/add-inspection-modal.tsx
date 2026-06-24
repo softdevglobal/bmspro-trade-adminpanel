@@ -467,6 +467,7 @@ function PreferredDayTimeRow({
           endTime={endTime}
           hideTimeRangeFields={isJob}
           multiHourSlots={isJob}
+          timeZone={timeZone}
           onWindowChange={onWindowChange}
           onStartTimeChange={(nextStart) =>
             onWindowChange(nextStart, defaultCalendarVisitEnd(nextStart))
@@ -1659,6 +1660,7 @@ export function AddInspectionModal({
                         endTime={form.calendarWindow.endTime || null}
                         hideTimeRangeFields={variant === "job"}
                         multiHourSlots={variant === "job"}
+                        timeZone={timeZone}
                         onWindowChange={(start, end) => {
                           touchField("preferredSlots");
                           if (variant === "job") {

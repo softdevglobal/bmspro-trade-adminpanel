@@ -2982,6 +2982,7 @@ function ScheduledVisitSection({
               startTime={inlineVisitTime.startTime}
               endTime={inlineVisitTime.endTime}
               disabled={inlineVisitTime.disabled}
+              timeZone={timeZone}
               onStartTimeChange={inlineVisitTime.onStartTimeChange}
               onEndTimeChange={inlineVisitTime.onEndTimeChange}
             />
@@ -3139,6 +3140,7 @@ function SetTimeForm({
               startTime={startTime}
               endTime={endTime}
               disabled={disabled}
+              timeZone={timeZone}
               onStartTimeChange={onStartTimeChange}
               onEndTimeChange={onEndTimeChange}
             />
@@ -3329,6 +3331,7 @@ function AcceptForm({
             startTime={startTime}
             endTime={endTime}
             disabled={disabled}
+            timeZone={timeZone}
             onStartTimeChange={onStartTimeChange}
             onEndTimeChange={onEndTimeChange}
           />
@@ -3450,6 +3453,7 @@ function ProposeSlotOption({
               defaultCalendarVisitEnd(slot.startTime ?? "08:00")
             }
             disabled={disabled}
+            timeZone={timeZone}
             onStartTimeChange={(start) => {
               onPatch({
                 startTime: start,

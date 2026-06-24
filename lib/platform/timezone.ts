@@ -35,6 +35,41 @@ export function platformTodayIso(
   return `${read("year")}-${read("month")}-${read("day")}`;
 }
 
+/** Minutes since midnight in the business/platform timezone (0–1439). */
+export function currentClockMinutesInTimeZone(
+  value = new Date(),
+  timeZone?: string | null,
+): number {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: resolvePlatformTimeZone(timeZone),
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(value);
+
+  const hour = Number.parseInt(
+    parts.find((part) => part.type === "hour")?.value ?? "",
+    10,
+  );
+  const minute = Number.parseInt(
+    parts.find((part) => part.type === "minute")?.value ?? "",
+    10,
+  );
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    const fallback = value instanceof Date ? value : new Date(value);
+    return fallback.getHours() * 60 + fallback.getMinutes();
+  }
+  return hour * 60 + minute;
+}
+
+export function isIsoDateBeforeToday(
+  iso: string,
+  timeZone?: string | null,
+  now = new Date(),
+): boolean {
+  return iso < platformTodayIso(now, timeZone);
+}
+
 export function formatIsoDateInPlatformTimeZone(
   iso: string,
   options: Intl.DateTimeFormatOptions,

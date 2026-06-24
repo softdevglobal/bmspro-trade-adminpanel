@@ -345,7 +345,7 @@ export function BookingMonthCalendar({
                 comboBlocked
                   ? blockedDayHint
                   : past
-                    ? "Choose the inspection day or later"
+                    ? "Past dates cannot be selected"
                     : undefined
               }
               onClick={() => {
@@ -493,7 +493,7 @@ export function SlotDayPicker({
             : dayBlocked
               ? blockedDayHint
               : tooEarly
-                ? "Choose the inspection day or later"
+                ? "Past dates cannot be selected"
                 : undefined
         }
         onClick={() => {
