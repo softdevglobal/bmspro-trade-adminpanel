@@ -17,7 +17,7 @@ export const DEFAULT_WORKING_HOURS: BusinessWorkingHours = {
   endTime: "17:00",
 };
 
-const MIN_START_HOUR = 5;
+const MIN_START_HOUR = 0;
 const MAX_END_HOUR = 23;
 
 function normaliseHourTime(value: string): string | null {
@@ -91,12 +91,6 @@ export function validateWorkingHours(
   const startHour = startMin / 60;
   const endHour = endMin / 60;
 
-  if (startHour < MIN_START_HOUR) {
-    return {
-      ok: false,
-      error: `Start time must be ${formatClockTime(`${String(MIN_START_HOUR).padStart(2, "0")}:00`)} or later.`,
-    };
-  }
   if (endHour > MAX_END_HOUR) {
     return {
       ok: false,
