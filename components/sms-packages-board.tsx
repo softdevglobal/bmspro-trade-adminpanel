@@ -8,6 +8,7 @@ import {
   validateSmsPackageForm,
   type SmsPackageFormState,
 } from "@/components/sms-package-build-modal";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatMessageQuotaLabel } from "@/lib/sms-packages/helpers";
@@ -288,6 +289,8 @@ export function SmsPackagesBoard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<SmsPackageFormState>(EMPTY_SMS_PACKAGE_FORM);
   const [saving, setSaving] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -368,15 +371,10 @@ export function SmsPackagesBoard() {
     }
   }
 
-  async function handleDelete(packageId: string) {
-    if (!user) return;
-    if (
-      !window.confirm(
-        "Delete this SMS package? Existing tenants keep their current SMS allocation.",
-      )
-    ) {
-      return;
-    }
+  async function confirmDelete() {
+    if (!user || !deleteTargetId) return;
+    const packageId = deleteTargetId;
+    setDeleting(true);
     setError(null);
     try {
       const token = await user.getIdToken();
@@ -389,12 +387,20 @@ export function SmsPackagesBoard() {
         setError(data.error ?? "Could not delete SMS package.");
         return;
       }
+      setDeleteTargetId(null);
       if (modalOpen && editingId === packageId) setModalOpen(false);
       await load();
     } catch {
       setError("Could not delete SMS package.");
+    } finally {
+      setDeleting(false);
     }
   }
+
+  const deleteTargetName =
+    packages.find((pkg) => pkg.id === deleteTargetId)?.name?.trim() ||
+    form.name.trim() ||
+    "this SMS package";
 
   return (
     <div className="space-y-8">
@@ -464,7 +470,21 @@ export function SmsPackagesBoard() {
         onClose={() => setModalOpen(false)}
         onSave={() => void handleSave()}
         onFormChange={setForm}
-        onDelete={editingId ? () => void handleDelete(editingId) : undefined}
+        onDelete={editingId ? () => setDeleteTargetId(editingId) : undefined}
+      />
+
+      <DeleteConfirmModal
+        open={deleteTargetId !== null}
+        stacked
+        title="Delete SMS package?"
+        description={`Delete "${deleteTargetName}"? Existing tenants keep their current SMS allocation.`}
+        confirmLabel="Yes, delete"
+        cancelLabel="No, cancel"
+        isLoading={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteTargetId(null);
+        }}
+        onConfirm={() => void confirmDelete()}
       />
     </div>
   );

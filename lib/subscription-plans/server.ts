@@ -23,6 +23,11 @@ import {
 } from "@/lib/subscription-plans/types";
 import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
 
+const REMOVE_STRIPE_CATALOG_FIELDS = {
+  stripePriceId: FieldValue.delete(),
+  stripeProductId: FieldValue.delete(),
+} as const;
+
 function toMillis(value: unknown): number | null {
   if (value && typeof value === "object" && "toMillis" in value) {
     const fn = (value as { toMillis?: () => number }).toMillis;
@@ -57,18 +62,11 @@ function mapPlanDoc(id: string, data: DocumentData): SubscriptionPlan {
       : [],
     popular: data.popular === true,
     color: normalizePlanThemeId(data.color),
-    image: typeof data.image === "string" ? data.image : "",
     icon: typeof data.icon === "string" ? data.icon : "inventory_2",
     active: data.active !== false,
     hidden: data.hidden === true,
-    stripePriceId:
-      typeof data.stripePriceId === "string" && data.stripePriceId.trim()
-        ? data.stripePriceId.trim()
-        : null,
-    stripeProductId:
-      typeof data.stripeProductId === "string" && data.stripeProductId.trim()
-        ? data.stripeProductId.trim()
-        : null,
+    stripePriceId: null,
+    stripeProductId: null,
     trialDays:
       typeof data.trialDays === "number" && Number.isFinite(data.trialDays)
         ? Math.max(0, data.trialDays)
@@ -108,12 +106,9 @@ function normalisePlanInput(input: SubscriptionPlanInput): Record<string, unknow
       : [],
     popular: input.popular === true,
     color: normalizePlanThemeId(input.color),
-    image: input.image?.trim() || "",
     icon: input.icon?.trim() || "inventory_2",
     active: input.active !== false,
     hidden: input.hidden === true,
-    stripePriceId: input.stripePriceId?.trim() || null,
-    stripeProductId: input.stripeProductId?.trim() || null,
     trialDays:
       typeof input.trialDays === "number" && Number.isFinite(input.trialDays)
         ? Math.max(0, input.trialDays)
@@ -162,79 +157,58 @@ export async function getSubscriptionPlanById(
 async function applySubscriptionPlanStripeLink(
   planId: string,
   input: SubscriptionPlanInput,
-  existing: SubscriptionPlan | null,
-): Promise<SubscriptionPlanInput> {
-  if (input.stripePriceId?.trim()) {
-    return {
-      ...input,
-      stripePriceId: input.stripePriceId.trim(),
-      stripeProductId:
-        input.stripeProductId?.trim() || existing?.stripeProductId || null,
-    };
-  }
-
+): Promise<{ stripePriceId: string; stripeProductId: string }> {
   if (!isStripeConfigured()) {
-    return {
-      ...input,
-      stripePriceId: existing?.stripePriceId ?? null,
-      stripeProductId: existing?.stripeProductId ?? null,
-    };
+    throw new Error("Stripe is not configured. Set STRIPE_SECRET_KEY in .env.local.");
   }
 
-  const synced = await syncSubscriptionPlanStripeLink({
+  return syncSubscriptionPlanStripeLink({
     planId,
     name: input.name,
     price: input.price,
     billingCycle: normalizeBillingCycle(input.billingCycle),
     description: input.description,
     staff: input.staff,
-    existingStripePriceId: existing?.stripePriceId,
-    existingStripeProductId: existing?.stripeProductId,
   });
+}
 
+function withRuntimeStripeIds(
+  plan: SubscriptionPlan,
+  stripe: { stripePriceId: string; stripeProductId: string },
+): SubscriptionPlan {
   return {
-    ...input,
-    stripePriceId: synced.stripePriceId,
-    stripeProductId: synced.stripeProductId,
+    ...plan,
+    stripePriceId: stripe.stripePriceId,
+    stripeProductId: stripe.stripeProductId,
   };
 }
 
-/** Super-admin action — create or refresh Stripe product/price for a plan. */
+/** Super-admin action — create or refresh Stripe product/price for a plan (not stored in Firestore). */
 export async function syncSubscriptionPlanToStripe(
   planId: string,
 ): Promise<SubscriptionPlan | null> {
   const existing = await getSubscriptionPlanById(planId);
   if (!existing) return null;
 
-  const withStripe = await applySubscriptionPlanStripeLink(
-    planId,
-    {
-      name: existing.name,
-      price: existing.price,
-      priceLabel: existing.priceLabel,
-      staff: existing.staff,
-      features: existing.features,
-      popular: existing.popular,
-      color: existing.color,
-      image: existing.image,
-      icon: existing.icon,
-      active: existing.active,
-      hidden: existing.hidden,
-      stripePriceId: null,
-      stripeProductId: existing.stripeProductId,
-      trialDays: existing.trialDays,
-      plan_key: existing.plan_key,
-      billingCycle: existing.billingCycle,
-      description: existing.description,
-      smsPackageId: existing.smsPackageId,
-    },
-    existing,
-  );
+  const stripe = await applySubscriptionPlanStripeLink(planId, {
+    name: existing.name,
+    price: existing.price,
+    priceLabel: existing.priceLabel,
+    staff: existing.staff,
+    features: existing.features,
+    popular: existing.popular,
+    color: existing.color,
+    icon: existing.icon,
+    active: existing.active,
+    hidden: existing.hidden,
+    trialDays: existing.trialDays,
+    plan_key: existing.plan_key,
+    billingCycle: existing.billingCycle,
+    description: existing.description,
+    smsPackageId: existing.smsPackageId,
+  });
 
-  const ref = adminDb.collection(SUBSCRIPTION_PLANS_COLLECTION).doc(planId);
-  await ref.update(normalisePlanInput(withStripe));
-  const updated = await ref.get();
-  return mapPlanDoc(planId, updated.data() ?? {});
+  return withRuntimeStripeIds(existing, stripe);
 }
 
 /** Ensures a plan has a Stripe recurring price before checkout. */
@@ -246,24 +220,31 @@ export async function resolveSubscriptionPlanForCheckout(
     throw new Error("Subscription plan not found or inactive.");
   }
 
-  if (plan.stripePriceId) {
-    return plan;
-  }
-
   if (!isStripeConfigured()) {
     throw new Error(
       "This plan is not linked to Stripe. Ask your administrator to link it in Packages.",
     );
   }
 
-  const synced = await syncSubscriptionPlanToStripe(plan.id);
-  if (!synced?.stripePriceId) {
-    throw new Error(
-      "Could not create a Stripe price for this plan. Check STRIPE_SECRET_KEY and plan price (min AU$0.50).",
-    );
-  }
+  const stripe = await applySubscriptionPlanStripeLink(plan.id, {
+    name: plan.name,
+    price: plan.price,
+    priceLabel: plan.priceLabel,
+    staff: plan.staff,
+    features: plan.features,
+    popular: plan.popular,
+    color: plan.color,
+    icon: plan.icon,
+    active: plan.active,
+    hidden: plan.hidden,
+    trialDays: plan.trialDays,
+    plan_key: plan.plan_key,
+    billingCycle: plan.billingCycle,
+    description: plan.description,
+    smsPackageId: plan.smsPackageId,
+  });
 
-  return synced;
+  return withRuntimeStripeIds(plan, stripe);
 }
 
 /** Links every plan missing a Stripe price (best effort). */
@@ -310,9 +291,8 @@ export async function createSubscriptionPlan(
     name,
     description: description.value,
   };
-  const withStripe = await applySubscriptionPlanStripeLink(ref.id, baseInput, null);
   const data = {
-    ...normalisePlanInput(withStripe),
+    ...normalisePlanInput(baseInput),
     createdAt: FieldValue.serverTimestamp(),
   };
   await ref.set(data);
@@ -337,18 +317,9 @@ export async function updateSubscriptionPlan(
     features: input.features ?? existing.features,
     popular: input.popular ?? existing.popular,
     color: input.color ?? existing.color,
-    image: input.image ?? existing.image,
     icon: input.icon ?? existing.icon,
     active: input.active ?? existing.active,
     hidden: input.hidden ?? existing.hidden,
-    stripePriceId:
-      input.stripePriceId !== undefined
-        ? input.stripePriceId
-        : existing.stripePriceId,
-    stripeProductId:
-      input.stripeProductId !== undefined
-        ? input.stripeProductId
-        : existing.stripeProductId,
     trialDays: input.trialDays ?? existing.trialDays,
     plan_key: input.plan_key !== undefined ? input.plan_key : existing.plan_key,
     billingCycle: input.billingCycle ?? existing.billingCycle,
@@ -366,12 +337,10 @@ export async function updateSubscriptionPlan(
   }
   merged.description = description.value;
 
-  const withStripe = await applySubscriptionPlanStripeLink(
-    planId,
-    merged,
-    existing,
-  );
-  await ref.update(normalisePlanInput(withStripe));
+  await ref.update({
+    ...normalisePlanInput(merged),
+    ...REMOVE_STRIPE_CATALOG_FIELDS,
+  });
   const updated = await ref.get();
   return mapPlanDoc(planId, updated.data() ?? {});
 }

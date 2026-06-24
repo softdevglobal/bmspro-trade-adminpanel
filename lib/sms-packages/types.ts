@@ -10,7 +10,6 @@ export type SmsPackage = {
   features: string[];
   popular: boolean;
   color: string;
-  image: string;
   icon: string;
   active: boolean;
   hidden: boolean;
@@ -30,12 +29,9 @@ export type SmsPackageInput = {
   features?: string[];
   popular?: boolean;
   color?: string;
-  image?: string;
   icon?: string;
   active?: boolean;
   hidden?: boolean;
-  stripePriceId?: string | null;
-  stripeProductId?: string | null;
   plan_key?: string | null;
   description?: string | null;
 };
