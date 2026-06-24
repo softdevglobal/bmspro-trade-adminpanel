@@ -1060,6 +1060,10 @@ function ProposedSlotPicker({
 }
 
 function inspectorAvatarUrl(assigned: InspectionAssignment): string {
+  const photo = assigned.photoUrl?.trim();
+  if (photo && (photo.startsWith("http://") || photo.startsWith("https://"))) {
+    return photo;
+  }
   const seed = encodeURIComponent(
     assigned.uid || assigned.email || assigned.name,
   );

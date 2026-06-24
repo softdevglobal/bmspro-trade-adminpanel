@@ -38,6 +38,7 @@ type StaffPayload = {
   staffType: string;
   availability: DayAvailability[];
   canget_qutaion: boolean;
+  photoUrl: string | null;
 };
 
 type StaffUpdatePayload = StaffPayload & {
@@ -106,6 +107,27 @@ function sanitizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** Accepts only http(s) photo URLs; an empty string clears the photo (null). */
+function sanitizePhotoUrl(value: unknown): string | null {
+  const trimmed = sanitizeString(value);
+  if (!trimmed) return null;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  return null;
+}
+
+/** Reads a staff photo URL from the various legacy field names on a user doc. */
+function staffPhotoUrl(data: Record<string, unknown> | undefined): string | null {
+  if (!data) return null;
+  return (
+    sanitizePhotoUrl(data.photoUrl) ??
+    sanitizePhotoUrl(data.photoURL) ??
+    sanitizePhotoUrl(data.avatarUrl) ??
+    null
+  );
+}
+
 function sanitizeStringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
@@ -148,6 +170,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   const staffType = sanitizeString(input.staffType);
   const availability = parseAvailability(input.availability, allowedServiceAreas);
   const canget_qutaion = input.canget_qutaion === true;
+  const photoUrl = sanitizePhotoUrl(input.photoUrl);
 
   if (!fullName) {
     return { ok: false, error: "Full name is required." };
@@ -184,6 +207,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
       staffType,
       availability: normalizedAvailability,
       canget_qutaion,
+      photoUrl,
     },
   };
 }
@@ -397,6 +421,8 @@ export async function POST(request: Request) {
       staffType: parsed.value.staffType,
       availability: parsed.value.availability,
       canget_qutaion: parsed.value.canget_qutaion,
+      photoUrl: parsed.value.photoUrl,
+      avatarUrl: parsed.value.photoUrl,
       status: "active",
       isActive: true,
       mustChangePassword: true,
@@ -405,6 +431,14 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     });
+
+    if (parsed.value.photoUrl) {
+      try {
+        await adminAuth.updateUser(authUid, { photoURL: parsed.value.photoUrl });
+      } catch {
+        /* photo on the auth record is best-effort */
+      }
+    }
 
     let welcomeEmailSent = false;
     try {
@@ -501,6 +535,7 @@ export async function GET(request: Request) {
         role: sanitizeString(data.role),
         staffType: staffType(data.staffType, data.skills),
         canget_qutaion: data.canget_qutaion === true,
+        photoUrl: staffPhotoUrl(data),
         availability,
         offDays: offDayIdsFromAvailability(data.availability),
         status: staffStatus(data.status),
@@ -517,6 +552,7 @@ export async function GET(request: Request) {
       phone: member.phone,
       staffType: member.staffType,
       canget_qutaion: member.canget_qutaion,
+      photoUrl: member.photoUrl,
       availability: member.availability,
       offDays: member.offDays,
       status: member.status,
@@ -672,6 +708,11 @@ export async function PATCH(request: Request) {
     }
   }
 
+  const includesPhoto =
+    body !== null &&
+    typeof body === "object" &&
+    "photoUrl" in (body as Record<string, unknown>);
+
   await owned.ref.update({
     email: parsed.value.email,
     fullName: parsed.value.fullName,
@@ -679,8 +720,21 @@ export async function PATCH(request: Request) {
     staffType: parsed.value.staffType,
     availability: parsed.value.availability,
     canget_qutaion: parsed.value.canget_qutaion,
+    ...(includesPhoto
+      ? { photoUrl: parsed.value.photoUrl, avatarUrl: parsed.value.photoUrl }
+      : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
+
+  if (includesPhoto) {
+    try {
+      await adminAuth.updateUser(parsed.value.id, {
+        photoURL: parsed.value.photoUrl ?? undefined,
+      });
+    } catch {
+      /* photo on the auth record is best-effort */
+    }
+  }
 
   await logAuditEvent({
     businessId: auth.businessId,

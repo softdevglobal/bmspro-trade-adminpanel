@@ -124,6 +124,8 @@ export type InspectionAssignment = {
   uid: string;
   name: string;
   email: string | null;
+  /** Uploaded profile photo of the assignee, when available. */
+  photoUrl?: string | null;
 };
 
 export type InspectionRequestInput = {
