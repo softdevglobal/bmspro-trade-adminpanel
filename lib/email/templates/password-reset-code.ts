@@ -35,8 +35,8 @@ export async function sendPasswordResetCodeEmail(
 ): Promise<boolean> {
   const business = input.businessName?.trim() || null;
   const body = business
-    ? `Use the 6-digit code below to reset your BMS Pro Trade admin password for ${business}. This code expires in 15 minutes.`
-    : "Use the 6-digit code below to reset your BMS Pro Trade admin password. This code expires in 15 minutes.";
+    ? `Use the 6-digit code below to reset your BMS Pro Trade admin password for ${business}. This code expires in 2 minutes.`
+    : "Use the 6-digit code below to reset your BMS Pro Trade admin password. This code expires in 2 minutes.";
 
   const html = renderEmail({
     eyebrow: "Password reset",
@@ -70,7 +70,7 @@ export async function sendPasswordResetCodeEmail(
       businessId: input.businessId,
       senderName: business,
       source: "password_reset",
-      message: `${input.code} is your BMS Pro Trade${business ? ` (${business})` : ""} password reset code. It expires in 15 minutes.`,
+      message: `${input.code} is your BMS Pro Trade${business ? ` (${business})` : ""} password reset code. It expires in 2 minutes.`,
     });
   }
 

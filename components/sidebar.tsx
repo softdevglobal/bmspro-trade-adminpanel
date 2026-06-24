@@ -582,15 +582,8 @@ export function Sidebar({
                     {inner}
                   </button>
 
-                  {showLabels ? (
-                    <div
-                      className={`ml-1 flex flex-col gap-0.5 overflow-hidden border-l border-on-secondary-fixed-variant/30 pl-1 transition-[max-height,opacity] duration-300 ease-in-out ${
-                        groupOpen
-                          ? "max-h-56 opacity-100"
-                          : "pointer-events-none max-h-0 opacity-0"
-                      }`}
-                      aria-hidden={!groupOpen}
-                    >
+                  {showLabels && groupOpen ? (
+                    <div className="ml-1 flex flex-col gap-0.5 border-l border-on-secondary-fixed-variant/30 pl-1">
                       {childLinks}
                     </div>
                   ) : null}

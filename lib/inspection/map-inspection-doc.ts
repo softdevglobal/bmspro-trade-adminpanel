@@ -1,3 +1,5 @@
+import { bookingScheduleSortKey } from "@/lib/bookings/map-booking-doc";
+import type { BookingDetail } from "@/lib/bookings/types";
 import { parseBookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
@@ -195,17 +197,52 @@ export function sortInspectionRequestsNewestFirst(
   return [...records].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
+/** Confirmed inspection visit, else a scheduled job, else unscheduled. */
+export function requestBoardScheduleSortKey(
+  request: InspectionRequestDetail,
+  linkedJob?: BookingDetail | null,
+): string {
+  const inspectionKey = inspectionRequestScheduleSortKey(request);
+  if (inspectionKey !== UNSCHEDULED_SORT_KEY) return inspectionKey;
+  if (linkedJob) {
+    const jobKey = bookingScheduleSortKey(linkedJob);
+    if (jobKey !== UNSCHEDULED_SORT_KEY) return jobKey;
+  }
+  return UNSCHEDULED_SORT_KEY;
+}
+
+/**
+ * Requests board order:
+ * - Unscheduled (new arrivals): newest first, ignoring preferred slot times.
+ * - Scheduled inspections/jobs: chronological visit time.
+ */
+export function sortInspectionRequestsForBoard(
+  records: InspectionRequestDetail[],
+  jobById?: ReadonlyMap<string, BookingDetail>,
+): InspectionRequestDetail[] {
+  return [...records].sort((a, b) => {
+    const keyA = requestBoardScheduleSortKey(
+      a,
+      a.bookingId ? jobById?.get(a.bookingId) : undefined,
+    );
+    const keyB = requestBoardScheduleSortKey(
+      b,
+      b.bookingId ? jobById?.get(b.bookingId) : undefined,
+    );
+    const scheduledA = keyA !== UNSCHEDULED_SORT_KEY;
+    const scheduledB = keyB !== UNSCHEDULED_SORT_KEY;
+    if (!scheduledA && !scheduledB) {
+      return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+    }
+    if (scheduledA && scheduledB) return keyA.localeCompare(keyB);
+    if (!scheduledA) return -1;
+    return 1;
+  });
+}
+
+/** @deprecated Use sortInspectionRequestsForBoard */
 export function sortInspectionRequestsBySchedule(
   records: InspectionRequestDetail[],
 ): InspectionRequestDetail[] {
-  return [...records].sort((a, b) => {
-    const keyA = inspectionRequestScheduleSortKey(a);
-    const keyB = inspectionRequestScheduleSortKey(b);
-    const scheduledA = keyA !== UNSCHEDULED_SORT_KEY;
-    const scheduledB = keyB !== UNSCHEDULED_SORT_KEY;
-    if (scheduledA && scheduledB) return keyA.localeCompare(keyB);
-    if (scheduledA) return -1;
-    if (scheduledB) return 1;
-    return (b.createdAt ?? 0) - (a.createdAt ?? 0);
-  });
+  return sortInspectionRequestsForBoard(records);
 }

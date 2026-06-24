@@ -1219,6 +1219,34 @@ export async function notifyBusinessOfCustomerAcceptance(
   }
 }
 
+/** Notify the business owner that the customer rejected proposed job days. */
+export async function notifyBusinessOfCustomerJobProposalRejection(
+  request: InspectionRequestDetail,
+  context: CustomerNotifyContext = {},
+): Promise<void> {
+  const who = request.customer.fullName?.trim() || "The customer";
+  const headline = requestHeadline(request);
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: request.businessId,
+      customerId: request.customerId,
+      customerEmail: request.customer.email || null,
+      customerPhone: request.customer.phone || null,
+      customerName: request.customer.fullName || null,
+      bookingSlug: context.bookingSlug ?? null,
+      businessName: context.businessName ?? null,
+      requestId: request.id,
+      status: request.status,
+      type: "request_created",
+      title: "Customer rejected proposed job days",
+      body: `${who} declined your proposed job days for ${headline}. Propose new days or schedule around their preferences.`,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 function sortNewestFirst(records: NotificationRecord[]): NotificationRecord[] {
   return records.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }

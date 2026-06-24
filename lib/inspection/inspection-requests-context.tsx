@@ -49,15 +49,16 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
   const [snapshotError, setSnapshotError] =
     useState<InspectionRequestsError | null>(null);
 
-  const enabled =
+  const feedEnabled =
     role === "business_owner" &&
     Boolean(businessId) &&
     Boolean(user) &&
-    needsInspectionFeed(pathname) &&
-    pageVisible;
+    needsInspectionFeed(pathname);
+
+  const listenerEnabled = feedEnabled && pageVisible;
 
   useEffect(() => {
-    if (!enabled || !businessId) {
+    if (!listenerEnabled || !businessId) {
       return;
     }
 
@@ -76,22 +77,23 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
     );
 
     return unsubscribe;
-  }, [enabled, businessId]);
+  }, [listenerEnabled, businessId]);
 
   const activeSnapshot =
-    enabled && snapshot?.businessId === businessId ? snapshot : null;
+    snapshot?.businessId === businessId ? snapshot : null;
   const activeError =
-    enabled && snapshotError?.businessId === businessId
+    feedEnabled && snapshotError?.businessId === businessId
       ? snapshotError.message
       : null;
 
   const value = useMemo(
     () => ({
       requests: activeSnapshot?.requests ?? [],
-      loading: enabled && !activeSnapshot && !activeError,
+      loading:
+        feedEnabled && pageVisible && !activeSnapshot && !activeError,
       error: activeError,
     }),
-    [activeSnapshot, activeError, enabled],
+    [activeSnapshot, activeError, feedEnabled, pageVisible],
   );
 
   return (

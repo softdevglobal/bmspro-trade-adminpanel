@@ -1,7 +1,6 @@
 "use client";
 
 import { BookingLinkCard } from "@/components/booking-link-card";
-import { DashboardShell } from "@/components/dashboard-shell";
 import { SuperAdminDashboardOverview } from "@/components/super-admin-dashboard-overview";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
@@ -202,8 +201,7 @@ function BusinessDashboardOverview() {
   });
 
   return (
-    <DashboardShell title="Dashboard" hidePageHeader>
-      <div className="space-y-6">
+    <div className="space-y-6">
         {checkoutNotice ? (
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 font-body text-[12px] font-semibold text-emerald-800">
             {checkoutNotice}
@@ -516,7 +514,6 @@ function BusinessDashboardOverview() {
             </motion.section>
           </div>
         </div>
-      </div>
-    </DashboardShell>
+    </div>
   );
 }
