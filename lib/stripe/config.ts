@@ -5,6 +5,13 @@ export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
 }
 
+/** True when Stripe webhook signature verification is configured. */
+export function isStripeWebhookConfigured(): boolean {
+  return (
+    isStripeConfigured() && Boolean(process.env.STRIPE_WEBHOOK_SECRET?.trim())
+  );
+}
+
 /** Public site URL for Checkout success/cancel redirects. */
 export function getAppBaseUrl(): string {
   const url =
