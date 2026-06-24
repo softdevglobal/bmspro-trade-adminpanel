@@ -5,7 +5,6 @@ import {
   deleteSmsPackage,
   countTenantsBySmsPackage,
   listSmsPackages,
-  syncAllUnlinkedSmsPackages,
   updateSmsPackage,
 } from "@/lib/sms-packages/server";
 import type { SmsPackageInput } from "@/lib/sms-packages/types";
@@ -47,12 +46,9 @@ function parseSmsPackageBody(
         : [],
       popular: raw.popular === true,
       color: typeof raw.color === "string" ? raw.color : undefined,
-      image: typeof raw.image === "string" ? raw.image : undefined,
       icon: typeof raw.icon === "string" ? raw.icon : undefined,
       active: raw.active !== false,
       hidden: raw.hidden === true,
-      stripePriceId:
-        typeof raw.stripePriceId === "string" ? raw.stripePriceId : null,
       plan_key: typeof raw.plan_key === "string" ? raw.plan_key : null,
       description: description.value,
     },
@@ -68,8 +64,6 @@ export async function GET(request: Request) {
       { status: auth.status },
     );
   }
-
-  await syncAllUnlinkedSmsPackages();
 
   const packages = await listSmsPackages({
     includeInactive: true,

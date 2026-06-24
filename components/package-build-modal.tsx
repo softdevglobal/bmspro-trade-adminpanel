@@ -1,9 +1,7 @@
 "use client";
 
-import { readJsonResponse } from "@/lib/api/read-json-response";
 import { PlanBuildWizardShell, PLAN_WIZARD_FIELD_CLASS, PLAN_WIZARD_TEXTAREA_CLASS } from "@/components/plan-build-wizard-shell";
 import { PackageWizardStepIntro } from "@/components/package-wizard-step-intro";
-import { useAuth } from "@/lib/auth/auth-context";
 import { validatePlanDescription } from "@/lib/subscription-plans/helpers";
 import {
   PLAN_THEME_OPTIONS,
@@ -31,7 +29,7 @@ const PACKAGE_STEP_META: Record<PackageStep, { title: string; subtitle: string }
   },
   3: {
     title: "Features & appearance",
-    subtitle: "Feature list, theme colour, and package image.",
+    subtitle: "Feature list and theme colour.",
   },
   4: {
     title: "Review & preview",
@@ -62,9 +60,7 @@ export type PackageFormState = {
   popular: boolean;
   active: boolean;
   hidden: boolean;
-  stripePriceId: string;
   color: PlanThemeId;
-  image: string;
   smsPackageId: string;
 };
 
@@ -83,9 +79,7 @@ export const EMPTY_PACKAGE_FORM: PackageFormState = {
   popular: false,
   active: true,
   hidden: false,
-  stripePriceId: "",
   color: "blue",
-  image: "",
   smsPackageId: "",
 };
 
@@ -104,9 +98,7 @@ export function packageFormFromPlan(plan: SubscriptionPlan): PackageFormState {
     popular: plan.popular,
     active: plan.active,
     hidden: plan.hidden,
-    stripePriceId: plan.stripePriceId ?? "",
     color: (plan.color as PlanThemeId) || "blue",
-    image: plan.image ?? "",
     smsPackageId: plan.smsPackageId ?? "",
   };
 }
@@ -140,9 +132,7 @@ export function packageBodyFromForm(form: PackageFormState, id?: string) {
     popular: form.popular,
     active: form.active,
     hidden: form.hidden,
-    stripePriceId: null,
     color: form.color,
-    image: form.image.trim() || "",
     icon: "inventory_2",
     smsPackageId: form.smsPackageId.trim() || null,
   };
@@ -186,11 +176,8 @@ export function PackageBuildModal({
   onFormChange,
   onDelete,
 }: Props) {
-  const { user } = useAuth();
   const [step, setStep] = useState<PackageStep>(1);
   const [stepError, setStepError] = useState<string | null>(null);
-  const [imageUploading, setImageUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -217,32 +204,6 @@ export function PackageBuildModal({
   );
 
   if (!open) return null;
-
-  async function handleImageUpload(file: File) {
-    if (!user) return;
-    setImageUploading(true);
-    setUploadError(null);
-    try {
-      const token = await user!.getIdToken();
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/uploads/package-image", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body,
-      });
-      const data = await readJsonResponse<{ ok?: boolean; imageUrl?: string; error?: string }>(res);
-      if (!res.ok || !data.ok || !data.imageUrl) {
-        setUploadError(data.error ?? "Could not upload image.");
-        return;
-      }
-      onFormChange({ ...form, image: data.imageUrl });
-    } catch {
-      setUploadError("Could not upload image.");
-    } finally {
-      setImageUploading(false);
-    }
-  }
 
   function set<K extends keyof PackageFormState>(key: K, value: PackageFormState[K]) {
     onFormChange({ ...form, [key]: value });
@@ -435,7 +396,7 @@ export function PackageBuildModal({
               onChange={(e) => set("smsPackageId", e.target.value)}
               className={PLAN_WIZARD_FIELD_CLASS}
             >
-              <option value="">No SMS package (use default)</option>
+              <option value="">No bundled SMS package</option>
               {smsPackages.map((pkg) => (
                 <option key={pkg.id} value={pkg.id}>
                   {pkg.name} — {pkg.priceLabel}
@@ -477,47 +438,6 @@ export function PackageBuildModal({
                   aria-label={opt.label}
                 />
               ))}
-            </div>
-          </div>
-          <div>
-            <FieldLabel>Package image</FieldLabel>
-            <div className="mt-2 rounded-lg border border-dashed border-outline-variant bg-surface-container-low p-4">
-              {form.image ? (
-                <div className="flex flex-col items-center gap-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={form.image} alt="Package" className="max-h-24 rounded-lg object-contain" />
-                  <button
-                    type="button"
-                    onClick={() => set("image", "")}
-                    className="font-body text-[12px] font-semibold text-error"
-                  >
-                    Remove image
-                  </button>
-                </div>
-              ) : (
-                <label className="flex cursor-pointer flex-col items-center gap-2 py-4">
-                  <span className="material-symbols-outlined text-[32px] text-outline">
-                    {imageUploading ? "progress_activity" : "image"}
-                  </span>
-                  <span className="font-body text-[13px] font-semibold text-on-surface">
-                    {imageUploading ? "Uploading…" : "Upload package image"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    disabled={imageUploading}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void handleImageUpload(file);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-              )}
-              {uploadError ? (
-                <p className="mt-2 text-center font-body text-[11px] text-error">{uploadError}</p>
-              ) : null}
             </div>
           </div>
         </div>
@@ -572,12 +492,7 @@ export function PackageBuildModal({
                   </span>
                 ) : null}
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20">
-                  {form.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={form.image} alt="" className="h-full w-full rounded-xl object-cover" />
-                  ) : (
-                    <span className="material-symbols-outlined text-[26px]">inventory_2</span>
-                  )}
+                  <span className="material-symbols-outlined text-[26px]">inventory_2</span>
                 </div>
                 <p className="mt-4 font-display text-[16px] font-bold leading-tight">
                   {form.name.trim() || "Package name"}

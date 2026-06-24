@@ -12,7 +12,6 @@ export type SubscriptionPlan = {
   features: string[];
   popular: boolean;
   color: string;
-  image: string;
   icon: string;
   active: boolean;
   hidden: boolean;
@@ -36,12 +35,9 @@ export type SubscriptionPlanInput = {
   features?: string[];
   popular?: boolean;
   color?: string;
-  image?: string;
   icon?: string;
   active?: boolean;
   hidden?: boolean;
-  stripePriceId?: string | null;
-  stripeProductId?: string | null;
   trialDays?: number;
   plan_key?: string | null;
   billingCycle?: BillingCycle;
