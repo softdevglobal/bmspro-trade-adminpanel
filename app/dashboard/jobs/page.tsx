@@ -1,5 +1,6 @@
 import { BusinessOwnerGuard } from "@/components/business-owner-guard";
 import { JobsBoard } from "@/components/jobs-board";
+import { ModuleAccessGuard } from "@/components/module-access-guard";
 
 type JobsPageSearchParams = {
   job?: string | string[];
@@ -22,7 +23,9 @@ export default async function JobsPage({
 
   return (
     <BusinessOwnerGuard>
-      <JobsBoard initialJobId={initialJobId} />
+      <ModuleAccessGuard module="jobs">
+        <JobsBoard initialJobId={initialJobId} />
+      </ModuleAccessGuard>
     </BusinessOwnerGuard>
   );
 }
