@@ -15,6 +15,7 @@ import {
   formatRenewalLabel,
   type PlanThemeId,
 } from "@/lib/subscription-plans/theme";
+import { isTrialCalendarActive, isTrialEndedRequiringPayment } from "@/lib/subscription-plans/access";
 import type {
   AvailablePlanOption,
   TenantSubscriptionSnapshot,
@@ -102,6 +103,8 @@ function SubscriptionRenewalBanner({
     subscription.smsBundlePeriodEnd ?? subscription.subscriptionPeriodEnd;
 
   if (subscription.accessBlocked) {
+    const trialEnded = isTrialEndedRequiringPayment(subscription);
+
     return (
       <section className="overflow-hidden rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white shadow-sm">
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
@@ -114,14 +117,14 @@ function SubscriptionRenewalBanner({
               </span>
               <div>
                 <h2 className="font-display text-[18px] font-bold text-on-surface sm:text-[20px]">
-                  Subscription ended
+                  {trialEnded ? "Free trial ended" : "Subscription ended"}
                 </h2>
                 <p className="mt-1 font-body text-[13px] text-on-surface-variant">
-                  {subscription.subscriptionPeriodEnd
-                    ? `Your subscription period ended on ${formatLongDate(subscription.subscriptionPeriodEnd)}.`
-                    : "Your subscription period has ended."}{" "}
-                  Renew or add payment to restore access to your workshop
-                  dashboard.
+                  {trialEnded
+                    ? `Your trial ended on ${formatLongDate(subscription.trialEnd)}. Pay and renew to restore access to your workshop dashboard.`
+                    : subscription.subscriptionPeriodEnd
+                      ? `Your subscription period ended on ${formatLongDate(subscription.subscriptionPeriodEnd)}. Renew to restore access.`
+                      : "Your subscription period has ended. Renew to restore access."}
                 </p>
                 {subscription.planName ? (
                   <p className="mt-2 font-body text-[12px] text-on-surface-variant">
@@ -173,7 +176,7 @@ function SubscriptionRenewalBanner({
                 <span className="material-symbols-outlined text-[18px]">
                   {addingPayment ? "progress_activity" : "credit_card"}
                 </span>
-                {addingPayment ? "Starting…" : "Add payment & renew"}
+                {addingPayment ? "Starting…" : "Pay & renew"}
               </button>
             )
           ) : null}
@@ -182,7 +185,10 @@ function SubscriptionRenewalBanner({
     );
   }
 
-  if (subscription.isTrialing) {
+  if (
+    subscription.isTrialing &&
+    isTrialCalendarActive({ trialEnd: subscription.trialEnd })
+  ) {
     const { totalDays, daysLeft, percent } = trialProgress(subscription);
 
     return (
@@ -209,23 +215,15 @@ function SubscriptionRenewalBanner({
                 info
               </span>
               <div className="font-body text-[12px] leading-relaxed text-sky-950">
-                <p className="font-semibold">
-                  Enjoying your free trial? Add payment details anytime!
-                </p>
+                <p className="font-semibold">No payment required during your trial</p>
                 <p className="mt-1 text-sky-900/90">
-                  You can add your payment details early to ensure uninterrupted
-                  access after your trial ends. You won&apos;t be charged until
-                  your trial period is over.
+                  Use the full dashboard until{" "}
+                  {formatLongDate(subscription.trialEnd)}. After your trial ends,
+                  you&apos;ll be asked to pay and renew through Stripe to keep
+                  access.
                 </p>
               </div>
             </div>
-
-            {subscription.stripeSubscriptionId ? (
-              <p className="mt-3 font-body text-[12px] font-semibold text-emerald-800">
-                Payment details saved — you won&apos;t be charged until your trial
-                ends.
-              </p>
-            ) : null}
 
             {bundled ? (
               <div className="mt-4 rounded-xl border border-teal-200/80 bg-teal-50/70 px-3 py-2.5">
@@ -243,33 +241,6 @@ function SubscriptionRenewalBanner({
               </div>
             ) : null}
           </div>
-
-          {stripeEnabled && isStripeCheckoutEnabled() ? (
-            subscription.stripeSubscriptionId ? (
-              <button
-                type="button"
-                onClick={onManagePayment}
-                className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-outline-variant bg-white px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface hover:bg-surface-container-low"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  credit_card
-                </span>
-                Manage payment
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={addingPayment}
-                onClick={onAddPayment}
-                className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-xl bg-[#1a1d24] px-5 py-3 font-body text-[13px] font-semibold text-white shadow-sm transition-colors hover:bg-[#2a2f3a] disabled:opacity-60"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {addingPayment ? "progress_activity" : "credit_card"}
-                </span>
-                {addingPayment ? "Starting…" : "Add Payment Details"}
-              </button>
-            )
-          ) : null}
         </div>
 
         <div className="border-t border-outline-variant/60 bg-white px-5 py-4 sm:px-6">
@@ -722,7 +693,7 @@ export function OwnerSubscriptionBoard() {
 
   useStripeCheckoutReturn({
     onSuccess: () => {
-      setNotice("Subscription updated successfully.");
+      setNotice("Subscription renewed successfully. Welcome back!");
       void load();
       void refreshSubscriptionAccess();
     },

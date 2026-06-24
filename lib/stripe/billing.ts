@@ -4,14 +4,10 @@ import { FieldValue } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
 import {
-  buildTenantSmsRenewalFields,
-  resolveSmsPackageForPlan,
-} from "@/lib/sms-packages/server";
-import {
-  getSubscriptionPlanById,
   renewTenantSubscription,
 } from "@/lib/subscription-plans/server";
 import { applyPlanChangeToTenant } from "@/lib/subscription-plans/tenant-subscription";
+import { isTrialCalendarActive } from "@/lib/subscription-plans/access";
 
 function resolveStoredPlanId(data: Record<string, unknown>): string | null {
   if (typeof data.planId === "string" && data.planId.trim()) {
@@ -24,7 +20,16 @@ function resolveStoredPlanId(data: Record<string, unknown>): string | null {
   return null;
 }
 
-/** Activates a tenant after the first successful subscription Checkout payment. */
+function toMillis(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value && typeof value === "object" && "toMillis" in value) {
+    const fn = (value as { toMillis?: () => number }).toMillis;
+    if (typeof fn === "function") return fn.call(value);
+  }
+  return null;
+}
+
+/** Activates a tenant after subscription Checkout (first payment or post-trial renew). */
 export async function activateTenantSubscription(input: {
   businessId: string;
   stripeCustomerId: string;
@@ -41,48 +46,32 @@ export async function activateTenantSubscription(input: {
   const ownerUid = typeof data.ownerUid === "string" ? data.ownerUid : null;
   const storedPlanId = resolveStoredPlanId(data);
   const targetPlanId = input.planId?.trim() || storedPlanId;
-  const isTrialing =
-    data.billing_status === "trialing" || data.accountStatus === "active_trial";
   const samePlan = Boolean(targetPlanId && targetPlanId === storedPlanId);
+  const trialEnd = toMillis(data.trial_end);
+
+  if (isTrialCalendarActive({ trialEnd })) {
+    throw new Error(
+      "Payment is only required after your free trial ends. You still have trial access.",
+    );
+  }
 
   if (targetPlanId && !samePlan) {
     await applyPlanChangeToTenant(input.businessId, targetPlanId);
-  } else if (targetPlanId && samePlan && !isTrialing) {
-    const plan = await getSubscriptionPlanById(targetPlanId);
-    if (plan) {
-      const now = Date.now();
-      const periodMs = plan.validityDays * 24 * 60 * 60 * 1000;
-      const smsPackage = await resolveSmsPackageForPlan(plan);
-      const smsFields = smsPackage
-        ? buildTenantSmsRenewalFields(smsPackage, data, {
-            periodEndMs: now + periodMs,
-          })
-        : {};
-      if (Object.keys(smsFields).length > 0) {
-        await ref.update({
-          ...smsFields,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      }
-    }
+  } else {
+    await renewTenantSubscription(input.businessId);
   }
 
-  const businessUpdate: Record<string, unknown> = {
+  await ref.update({
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
+    billing_status: "active",
+    accountStatus: "active",
+    status: "active",
+    isActive: true,
     updatedAt: FieldValue.serverTimestamp(),
-  };
+  });
 
-  if (!isTrialing) {
-    businessUpdate.billing_status = "active";
-    businessUpdate.accountStatus = "active";
-    businessUpdate.status = "active";
-    businessUpdate.isActive = true;
-  }
-
-  await ref.update(businessUpdate);
-
-  if (ownerUid && !isTrialing) {
+  if (ownerUid) {
     await adminDb.collection("users").doc(ownerUid).update({
       billing_status: "active",
       accountStatus: "active",

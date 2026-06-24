@@ -2,14 +2,36 @@ import type { TenantSubscriptionSnapshot } from "@/lib/subscription-plans/tenant
 
 type SubscriptionAccessInput = Pick<
   TenantSubscriptionSnapshot,
-  | "isTrialing"
   | "trialEnd"
+  | "trialDays"
+  | "hasFreeTrial"
   | "subscriptionPeriodEnd"
-  | "stripeSubscriptionId"
   | "billingStatus"
   | "accountStatus"
-  | "needsPaymentDetails"
 >;
+
+/** True while the calendar free-trial window (trial_end) has not passed. */
+export function isTrialCalendarActive(
+  subscription: Pick<TenantSubscriptionSnapshot, "trialEnd">,
+): boolean {
+  const now = Date.now();
+  return Boolean(subscription.trialEnd && subscription.trialEnd > now);
+}
+
+/** True when this tenant had a free trial and the trial window is over. */
+export function isTrialEndedRequiringPayment(
+  subscription: Pick<
+    TenantSubscriptionSnapshot,
+    "trialEnd" | "trialDays" | "hasFreeTrial"
+  >,
+): boolean {
+  if (isTrialCalendarActive(subscription)) return false;
+  return (
+    subscription.hasFreeTrial ||
+    subscription.trialDays > 0 ||
+    Boolean(subscription.trialEnd)
+  );
+}
 
 /** True when the tenant may not use the dashboard until subscription is renewed. */
 export function isTenantSubscriptionAccessBlocked(
@@ -17,33 +39,18 @@ export function isTenantSubscriptionAccessBlocked(
 ): boolean {
   const now = Date.now();
 
-  if (subscription.isTrialing && subscription.trialEnd && subscription.trialEnd > now) {
+  // Free trial — full access, no payment required.
+  if (isTrialCalendarActive(subscription)) {
     return false;
   }
 
+  // Paid subscription with a valid billing period.
   if (
+    subscription.billingStatus === "active" &&
     subscription.subscriptionPeriodEnd &&
-    subscription.subscriptionPeriodEnd > now &&
-    (subscription.billingStatus === "active" ||
-      subscription.billingStatus === "trialing" ||
-      Boolean(subscription.stripeSubscriptionId))
+    subscription.subscriptionPeriodEnd > now
   ) {
     return false;
-  }
-
-  if (
-    subscription.subscriptionPeriodEnd &&
-    subscription.subscriptionPeriodEnd <= now
-  ) {
-    return true;
-  }
-
-  if (
-    subscription.trialEnd &&
-    subscription.trialEnd <= now &&
-    !subscription.stripeSubscriptionId
-  ) {
-    return true;
   }
 
   if (
@@ -53,19 +60,30 @@ export function isTenantSubscriptionAccessBlocked(
     return true;
   }
 
+  // Trial calendar ended — must pay and renew via Stripe.
   if (
-    !subscription.stripeSubscriptionId &&
-    (subscription.needsPaymentDetails ||
-      subscription.accountStatus === "pending_payment" ||
-      subscription.billingStatus === "pending")
+    isTrialEndedRequiringPayment({
+      trialEnd: subscription.trialEnd,
+      trialDays: subscription.trialDays ?? 0,
+      hasFreeTrial: subscription.hasFreeTrial ?? false,
+    })
   ) {
-    const trialOver = !subscription.trialEnd || subscription.trialEnd <= now;
-    const periodOver =
-      !subscription.subscriptionPeriodEnd ||
-      subscription.subscriptionPeriodEnd <= now;
-    if (trialOver && periodOver) {
-      return true;
-    }
+    return true;
+  }
+
+  // No trial on plan — must complete first payment before dashboard access.
+  if (
+    subscription.billingStatus !== "active" &&
+    subscription.accountStatus !== "active"
+  ) {
+    return true;
+  }
+
+  if (
+    subscription.subscriptionPeriodEnd &&
+    subscription.subscriptionPeriodEnd <= now
+  ) {
+    return true;
   }
 
   return false;
