@@ -1207,7 +1207,7 @@ function ConfirmedVisitHighlight({
                   ? "Business owner"
                   : isJob
                     ? "Assigned technician"
-                    : "Assigned inspector"}
+                    : "Team member"}
                 {assignedTo.email ? ` · ${assignedTo.email}` : ""}
               </p>
             </div>
@@ -1222,7 +1222,7 @@ function ConfirmedVisitHighlight({
             </span>
             {isJob
               ? "A team member will be assigned before your job."
-              : "An inspector will be assigned before your visit."}
+              : "A team member will be assigned before your visit."}
           </p>
         )}
       </div>

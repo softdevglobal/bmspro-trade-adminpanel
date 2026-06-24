@@ -590,7 +590,7 @@ export async function notifyCustomerOfAssignment(
   );
   const emailDetails: EmailDetailRow[] = [
     { label: "Service", value: requestHeadline(request) },
-    { label: "Inspector", value: request.assignedTo.name },
+    { label: "Team member", value: request.assignedTo.name },
   ];
   if (request.scheduledSlot) {
     emailDetails.push({
@@ -616,7 +616,7 @@ export async function notifyCustomerOfAssignment(
       logoUrl: context.logoUrl ?? null,
       status: request.status,
       type: "request_assigned",
-      title: `${business} assigned an inspector`,
+      title: `${request.assignedTo.name} will visit`,
       body: `${request.assignedTo.name} will visit for ${requestHeadline(request)}.`,
       emailDetails,
       emailHighlight: visitWindow ? visitWindow : null,
@@ -927,7 +927,7 @@ export async function notifyCustomerOfVisitOnTheWay(
 
   const emailDetails: EmailDetailRow[] = [
     { label: "Service", value: headline },
-    { label: "Inspector", value: inspector },
+    { label: "Team member", value: inspector },
   ];
   if (address) {
     emailDetails.push({ label: "Address", value: address });
