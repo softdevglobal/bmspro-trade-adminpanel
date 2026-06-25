@@ -388,6 +388,7 @@ export function ConvertToBookingPanel({
             disabled={submitting}
             hideTimeRangeFields
             multiHourSlots
+            timeZone={timeZone}
             onWindowChange={(start, end) => {
               setStartTime(start ?? "");
               setEndTime(end ?? "");

@@ -55,6 +55,14 @@ import { occupancyForHour } from "@/lib/calendar/slot-occupancy-types";
 import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
 import { useBusinessClosures } from "@/lib/calendar/use-business-closures";
 import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import {
+  isPastCalendarDate,
+  isPastHourSlot,
+  PAST_DAY_HINT,
+  PAST_HOUR_SLOT_HINT,
+} from "@/lib/calendar/past-scheduling";
+import { platformTodayIso } from "@/lib/platform/timezone";
 import type { BusinessClosure } from "@/lib/calendar/business-closures/types";
 import { MarkBusinessClosureModal } from "@/components/mark-business-closure-modal";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
@@ -205,6 +213,7 @@ function CalendarHourSlotRow({
   capacityLoading,
   canAddEvents,
   closedDay = false,
+  pastSlot = false,
   jobsModuleEnabled = true,
   onAddEvent,
   onOpenLink,
@@ -217,6 +226,7 @@ function CalendarHourSlotRow({
   capacityLoading: boolean;
   canAddEvents: boolean;
   closedDay?: boolean;
+  pastSlot?: boolean;
   jobsModuleEnabled?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
@@ -232,9 +242,12 @@ function CalendarHourSlotRow({
     occupancy != null &&
     occupancy.requestsFull &&
     (jobsModuleEnabled ? occupancy.jobsFull : true);
-
   return (
-    <div className="rounded-lg border border-outline-variant/50 bg-surface-container-lowest/80">
+    <div
+      className={`rounded-lg border border-outline-variant/50 bg-surface-container-lowest/80${
+        pastSlot ? " opacity-60" : ""
+      }`}
+    >
       <div className="relative z-10 flex items-center justify-between gap-3 border-b border-outline-variant/40 bg-surface-container-lowest/80 px-3 py-2">
         <div className="min-w-0">
           <p className="font-numeric text-[13px] font-bold text-on-surface">
@@ -247,6 +260,10 @@ function CalendarHourSlotRow({
               {slotFull ? (
                 <span className="ml-1 font-semibold uppercase text-error">
                   · Full
+                </span>
+              ) : pastSlot ? (
+                <span className="ml-1 font-semibold uppercase text-outline">
+                  · Past
                 </span>
               ) : null}
             </p>
@@ -262,6 +279,7 @@ function CalendarHourSlotRow({
             occupancy={occupancy}
             capacityLoading={capacityLoading}
             closedDay={closedDay}
+            pastSlot={pastSlot}
             jobsModuleEnabled={jobsModuleEnabled}
             onSelect={onAddEvent}
           />
@@ -280,7 +298,7 @@ function CalendarHourSlotRow({
           </div>
         ) : (
           <p className="font-body text-[12px] text-on-surface-variant">
-            Available
+            {pastSlot ? PAST_HOUR_SLOT_HINT : "Available"}
           </p>
         )}
       </div>
@@ -294,6 +312,7 @@ function CalendarDayTimeSlots({
   workingHours,
   canAddEvents,
   isBusinessClosed,
+  timeZone,
   jobsModuleEnabled = true,
   onAddEvent,
   onOpenLink,
@@ -304,6 +323,7 @@ function CalendarDayTimeSlots({
   workingHours: BusinessWorkingHours;
   canAddEvents: boolean;
   isBusinessClosed?: boolean;
+  timeZone?: string | null;
   jobsModuleEnabled?: boolean;
   onAddEvent: (kind: CalendarAddEventKind, selection: CalendarSlotSelection) => void;
   onOpenLink?: () => void;
@@ -345,6 +365,7 @@ function CalendarDayTimeSlots({
     selection: CalendarSlotSelection,
   ) {
     if (isBusinessClosed) return;
+    if (isPastHourSlot(selection.date, selection.startTime, timeZone)) return;
     const occupancy = occupancyForHour(occupancySlots, selection.startTime);
     if (kind === "job" && !jobsModuleEnabled) return;
     if (kind === "job" && occupancy?.jobsFull) return;
@@ -403,6 +424,7 @@ function CalendarDayTimeSlots({
                   capacityLoading={capacityLoading}
                   canAddEvents={canAddEvents}
                   closedDay={isBusinessClosed}
+                  pastSlot={isPastHourSlot(isoDate, slot.startTime, timeZone)}
                   jobsModuleEnabled={jobsModuleEnabled}
                   onAddEvent={handleAddEvent}
                   onOpenLink={onOpenLink}
@@ -768,6 +790,8 @@ function eventTimeLabel(
 export function CalendarBoard() {
   const router = useRouter();
   const { user, role } = useAuth();
+  const profile = useBusinessProfile();
+  const timeZone = profile?.timezone;
   const { isModuleEnabled } = useBusinessModuleSettings();
   const jobsModuleEnabled = isModuleEnabled("jobs");
   const { workingHours } = useBusinessWorkingHours();
@@ -790,8 +814,11 @@ export function CalendarBoard() {
     reload: reloadPersonalEvents,
   } = usePersonalCalendarEvents();
   const { staff, loading: staffLoading } = useBusinessStaffSummary();
-  const today = useMemo(() => normalizeDate(new Date()), []);
-  const todayIso = useMemo(() => toIsoDateLocal(today), [today]);
+  const today = useMemo(() => {
+    const iso = platformTodayIso(new Date(), timeZone);
+    return new Date(`${iso}T12:00:00`);
+  }, [timeZone]);
+  const todayIso = useMemo(() => platformTodayIso(new Date(), timeZone), [timeZone]);
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(today));
   const [focusDate, setFocusDate] = useState(() => today);
   const [viewTab, setViewTab] = useState<(typeof VIEW_TABS)[number]>("Month");
@@ -949,6 +976,7 @@ export function CalendarBoard() {
   }, [bookingDrawerOpen, filterDrawerOpen]);
 
   function openDayByIso(isoDate: string) {
+    if (isPastCalendarDate(isoDate, timeZone)) return;
     setSelectedIsoDate(isoDate);
     setBookingDrawerOpen(true);
   }
@@ -975,6 +1003,7 @@ export function CalendarBoard() {
   function navigatePeriod(direction: -1 | 1) {
     if (viewTab === "Today") {
       const next = addDays(focusDate, direction);
+      if (direction < 0 && toIsoDateLocal(next) < todayIso) return;
       setFocusDate(next);
       setViewMonth(startOfMonth(next));
       return;
@@ -997,6 +1026,12 @@ export function CalendarBoard() {
     selection: CalendarSlotSelection,
   ) {
     if (closedDates.has(selection.date)) {
+      return;
+    }
+    if (isPastCalendarDate(selection.date, timeZone)) {
+      return;
+    }
+    if (isPastHourSlot(selection.date, selection.startTime, timeZone)) {
       return;
     }
 
@@ -1291,6 +1326,7 @@ export function CalendarBoard() {
               const isoDate = isoDateFromParts(viewMonth, day);
               const cellDate = new Date(`${isoDate}T12:00:00`);
               const isTodayCell = isSameDay(cellDate, today);
+              const isPastDay = isPastCalendarDate(isoDate, timeZone);
               const dayEvents = monthEventsByDate[isoDate] ?? [];
               const isClosedDay = closedDates.has(isoDate);
 
@@ -1298,8 +1334,14 @@ export function CalendarBoard() {
                 <button
                   key={day}
                   type="button"
+                  disabled={isPastDay}
+                  title={isPastDay ? PAST_DAY_HINT : undefined}
                   onClick={() => openDay(day)}
-                  className={`group flex min-h-[88px] cursor-pointer flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors hover:bg-surface-container-low active:scale-[0.99] sm:min-h-[120px] sm:p-3 ${
+                  className={`group flex min-h-[88px] flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors sm:min-h-[120px] sm:p-3 ${
+                    isPastDay
+                      ? "cursor-not-allowed bg-surface/40 opacity-55"
+                      : "cursor-pointer hover:bg-surface-container-low active:scale-[0.99]"
+                  } ${
                     isClosedDay
                       ? isTodayCell
                         ? `${CLOSED_DAY_MONTH_CELL_CLASS} ring-2 ring-amber-400`
@@ -1358,6 +1400,7 @@ export function CalendarBoard() {
               {weekDays.map((day) => {
                 const isoDate = toIsoDateLocal(day);
                 const isTodayCell = isSameDay(day, today);
+                const isPastDay = isPastCalendarDate(isoDate, timeZone);
                 const isClosedDay = closedDates.has(isoDate);
                 const dayEvents = monthEventsByDate[isoDate] ?? [];
 
@@ -1369,17 +1412,26 @@ export function CalendarBoard() {
                         ? CLOSED_DAY_WEEK_SURFACE_CLASS
                         : isTodayCell
                           ? "bg-primary/[0.04]"
-                          : ""
+                          : isPastDay
+                            ? "bg-surface/40 opacity-70"
+                            : ""
                     }
                   >
                     <button
                       type="button"
+                      disabled={isPastDay}
+                      title={isPastDay ? PAST_DAY_HINT : undefined}
                       onClick={() => {
+                        if (isPastDay) return;
                         setFocusDate(day);
                         openDayByIso(isoDate);
                       }}
-                      className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-container-low ${
-                        isClosedDay ? "active:bg-amber-100" : ""
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left ${
+                        isPastDay
+                          ? "cursor-not-allowed"
+                          : `active:bg-surface-container-low ${
+                              isClosedDay ? "active:bg-amber-100" : ""
+                            }`
                       }`}
                     >
                       <div className="flex min-w-0 items-center gap-3">
@@ -1450,17 +1502,25 @@ export function CalendarBoard() {
                   const isoDate = toIsoDateLocal(day);
                   const isTodayCell = isSameDay(day, today);
                   const isFocusDay = isSameDay(day, focusDate);
+                  const isPastDay = isPastCalendarDate(isoDate, timeZone);
                   const isClosedDay = closedDates.has(isoDate);
 
                   return (
                     <button
                       key={`week-head-${isoDate}`}
                       type="button"
+                      disabled={isPastDay}
+                      title={isPastDay ? PAST_DAY_HINT : undefined}
                       onClick={() => {
+                        if (isPastDay) return;
                         setFocusDate(day);
                         openDayByIso(isoDate);
                       }}
-                      className={`flex h-14 items-center justify-between gap-1 border-r border-outline-variant px-2 text-left transition-colors hover:bg-surface-container-low last:border-r-0 sm:px-3 ${
+                      className={`flex h-14 items-center justify-between gap-1 border-r border-outline-variant px-2 text-left transition-colors last:border-r-0 sm:px-3 ${
+                        isPastDay
+                          ? "cursor-not-allowed bg-surface/40 opacity-60"
+                          : "hover:bg-surface-container-low"
+                      } ${
                         isClosedDay
                           ? CLOSED_DAY_WEEK_HEADER_CLASS
                           : isTodayCell
@@ -1604,6 +1664,7 @@ export function CalendarBoard() {
               workingHours={workingHours}
               canAddEvents={canAddEvents}
               isBusinessClosed={closedDates.has(focusIso)}
+              timeZone={timeZone}
               jobsModuleEnabled={jobsModuleEnabled}
               onAddEvent={openAddEvent}
               onEditPersonalEvent={openEditPersonalEvent}
@@ -1684,6 +1745,7 @@ export function CalendarBoard() {
                 workingHours={workingHours}
                 canAddEvents={canAddEvents}
                 isBusinessClosed={isSelectedDayClosed}
+                timeZone={timeZone}
                 jobsModuleEnabled={jobsModuleEnabled}
                 onAddEvent={openAddEvent}
                 onOpenLink={closeBookingDrawer}
