@@ -8,6 +8,7 @@ import {
   type BusinessModuleKey,
   type BusinessModuleSettings,
 } from "@/lib/business/module-settings";
+import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -39,6 +40,7 @@ export function BusinessModuleSettings({
   onSaved,
 }: Props) {
   const { user } = useAuth();
+  const { applyModules } = useBusinessModuleSettings();
   const [modules, setModules] = useState<BusinessModuleSettings>({
     requests: true,
     quotations: false,
@@ -95,6 +97,7 @@ export function BusinessModuleSettings({
       }
       const nextModules = payload.profile?.enabledModules ?? modules;
       setModules(nextModules);
+      applyModules(nextModules);
       onSaved?.(nextModules);
       setSuccess(true);
     } catch (err) {

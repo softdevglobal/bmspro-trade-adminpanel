@@ -792,8 +792,8 @@ export function CalendarBoard() {
   const { user, role } = useAuth();
   const profile = useBusinessProfile();
   const timeZone = profile?.timezone;
-  const { isModuleEnabled } = useBusinessModuleSettings();
-  const jobsModuleEnabled = isModuleEnabled("jobs");
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
   const { workingHours } = useBusinessWorkingHours();
   const workingHoursLabel = useMemo(
     () => describeWorkingHoursWindow(workingHours),

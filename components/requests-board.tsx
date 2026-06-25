@@ -37,6 +37,7 @@ import {
   type BookingStatus,
 } from "@/lib/bookings/types";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
@@ -199,6 +200,8 @@ function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
 
 export function RequestsBoard() {
   const { status: authStatus } = useAuth();
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
   const profile = useBusinessProfile();
   const {
     requests,
@@ -267,14 +270,8 @@ export function RequestsBoard() {
     const fromUrl = params.get("request");
     const action = params.get("action");
     if (fromUrl) setPendingOpenId(fromUrl);
-    if (action === "schedule-job") {
-      setPendingDrawerMode("convert_booking");
-    }
     if (action === "awaiting-decision") {
       setPendingDrawerMode("awaiting_decision");
-    }
-    if (action === "propose-job-dates") {
-      setPendingDrawerMode("propose_job_dates");
     }
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<string>).detail;
@@ -284,6 +281,23 @@ export function RequestsBoard() {
     return () =>
       window.removeEventListener("bmspt:open-inspection-request", handler);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("action");
+    if (!jobsModuleEnabled) {
+      if (action === "schedule-job" || action === "propose-job-dates") {
+        setPendingDrawerMode(null);
+      }
+      return;
+    }
+    if (action === "schedule-job") {
+      setPendingDrawerMode("convert_booking");
+    }
+    if (action === "propose-job-dates") {
+      setPendingDrawerMode("propose_job_dates");
+    }
+  }, [jobsModuleEnabled]);
 
   useEffect(() => {
     if (!pendingOpenId) return;
@@ -394,6 +408,7 @@ export function RequestsBoard() {
                   setSelectedId(req.id);
                 }}
                 onCreateBooking={() => {
+                  if (!jobsModuleEnabled) return;
                   setDrawerOpenMode("convert_booking");
                   setSelectedId(req.id);
                 }}
@@ -579,6 +594,8 @@ function RequestCard({
   onAwaitingDecision: () => void;
 }) {
   const timeZone = useRequestsTimeZone();
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
   const serviceTitle =
     request.requestType === "existing_service"
       ? request.serviceName ?? "Existing service"
@@ -612,7 +629,9 @@ function RequestCard({
   );
   const displayPhone = formatAuPhoneDisplay(request.customer.phone);
   const showPostQuoteActions =
-    canFollowUpAfterQuotation(request) && !cardQuotationAwaitingCustomer;
+    jobsModuleEnabled &&
+    canFollowUpAfterQuotation(request) &&
+    !cardQuotationAwaitingCustomer;
   const hasLinkedBooking = Boolean(request.bookingId);
 
   return (
@@ -919,6 +938,9 @@ function DrawerReviewFooter({
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
   const timeZone = useRequestsTimeZone();
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
+  const quotationsModuleEnabled = canUseModule("quotations");
   const [pdfOpen, setPdfOpen] = useState(false);
   const followUp = canFollowUpAfterQuotation(request);
   const quotationAwaitingCustomer = Boolean(
@@ -1018,7 +1040,7 @@ function DrawerReviewFooter({
                 </div>
               </div>
             ) : null}
-            {quotationAccepted && awaitingCustomerJobDays ? (
+            {quotationAccepted && awaitingCustomerJobDays && jobsModuleEnabled ? (
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
                 <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-600">
                   hourglass_top
@@ -1029,7 +1051,7 @@ function DrawerReviewFooter({
                 </p>
               </div>
             ) : null}
-            {quotationAccepted && needsJobDateProposal ? (
+            {quotationAccepted && needsJobDateProposal && jobsModuleEnabled ? (
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
                 <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-600">
                   edit_calendar
@@ -1052,7 +1074,7 @@ function DrawerReviewFooter({
                 </p>
               </div>
             ) : null}
-            {canProposeJobDates ? (
+            {canProposeJobDates && jobsModuleEnabled ? (
               <DrawerFooterAction
                 icon="edit_calendar"
                 label={
@@ -1065,17 +1087,19 @@ function DrawerReviewFooter({
                 disabled={submitting}
               />
             ) : null}
-            <DrawerFooterAction
-              icon="assignment"
-              label="Create job"
-              variant={canProposeJobDates ? "secondary" : "primary"}
-              onClick={onCreateBooking}
-              disabled={
-                submitting ||
-                quotationAwaitingCustomer ||
-                awaitingCustomerJobDays
-              }
-            />
+            {jobsModuleEnabled ? (
+              <DrawerFooterAction
+                icon="assignment"
+                label="Create job"
+                variant={canProposeJobDates ? "secondary" : "primary"}
+                onClick={onCreateBooking}
+                disabled={
+                  submitting ||
+                  quotationAwaitingCustomer ||
+                  awaitingCustomerJobDays
+                }
+              />
+            ) : null}
             {request.status === "completed" ? (
               <DrawerFooterAction
                 icon="pending_actions"
@@ -1100,6 +1124,7 @@ function DrawerReviewFooter({
   // quotation exists yet — let the owner create one for this visit. This
   // covers visits run by staff who cannot create quotations themselves.
   const needsOwnerQuotation =
+    quotationsModuleEnabled &&
     !request.quotation &&
     request.status !== "cancelled" &&
     request.status !== "pending" &&
@@ -1141,7 +1166,7 @@ function DrawerReviewFooter({
                   icon="task_alt"
                   label="Visit complete and create quotation"
                   onClick={onComplete}
-                  disabled={submitting}
+                  disabled={submitting || !quotationsModuleEnabled}
                 />
               </div>
             </>
@@ -1271,6 +1296,9 @@ function DetailDrawerContent({
 }) {
   const { user } = useAuth();
   const router = useRouter();
+  const { canUseModule, modulesReady } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
+  const quotationsModuleEnabled = canUseModule("quotations");
   const timeZone = useRequestsTimeZone();
   const [mode, setMode] = useState<DrawerMode>(initialMode ?? "review");
   const [submitting, setSubmitting] = useState(false);
@@ -1315,17 +1343,29 @@ function DetailDrawerContent({
   ]);
 
   useEffect(() => {
+    if (!modulesReady) return;
     if (!initialMode || initialMode === "review") return;
     if (
       initialMode === "convert_booking" &&
-      !canFollowUpAfterQuotation(request)
+      (!canFollowUpAfterQuotation(request) || !jobsModuleEnabled)
     ) {
+      onInitialModeConsumed();
+      return;
+    }
+    if (initialMode === "propose_job_dates" && !jobsModuleEnabled) {
       onInitialModeConsumed();
       return;
     }
     setMode(initialMode);
     onInitialModeConsumed();
-  }, [initialMode, onInitialModeConsumed]);
+  }, [initialMode, jobsModuleEnabled, modulesReady, onInitialModeConsumed, request]);
+
+  useEffect(() => {
+    if (!modulesReady || jobsModuleEnabled) return;
+    if (mode === "convert_booking" || mode === "propose_job_dates") {
+      setMode("review");
+    }
+  }, [jobsModuleEnabled, modulesReady, mode]);
 
   const hasVisitWindow =
     !!request.scheduledStartTime || !!request.scheduledEndTime;
@@ -1376,6 +1416,7 @@ function DetailDrawerContent({
   }
 
   function openCreateQuotation() {
+    if (!quotationsModuleEnabled) return;
     if (request.quotation) {
       router.push("/dashboard/quotations");
       return;
@@ -1460,6 +1501,12 @@ function DetailDrawerContent({
 
   function openAction(nextMode: Exclude<DrawerMode, "review">) {
     setActionError(null);
+    if (nextMode === "convert_booking" && !jobsModuleEnabled) {
+      return;
+    }
+    if (nextMode === "propose_job_dates" && !jobsModuleEnabled) {
+      return;
+    }
     if (
       nextMode === "convert_booking" &&
       !canFollowUpAfterQuotation(request)
@@ -1499,7 +1546,7 @@ function DetailDrawerContent({
       <header className="flex shrink-0 items-start justify-between gap-2 border-b border-outline-variant/40 px-4 py-2.5 sm:px-5 sm:py-3">
         <div className="min-w-0">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {inBookingMode ? "Create job" : "Request"}
+            {inBookingMode && jobsModuleEnabled ? "Create job" : "Request"}
           </p>
           <p className="mt-0.5">
             <InspectionRequestCode
@@ -1538,7 +1585,7 @@ function DetailDrawerContent({
         ref={scrollRef}
         className="min-w-0 flex-1 space-y-2.5 overflow-y-auto overflow-x-hidden px-4 py-3 sm:space-y-3 sm:px-5"
       >
-        {inBookingMode ? (
+        {inBookingMode && jobsModuleEnabled ? (
           <ConvertToBookingPanel
             inspectionRequestId={request.id}
             minBookingDate={bookingMinDateFromRequest(request, timeZone)}
@@ -1714,7 +1761,7 @@ function DetailDrawerContent({
           />
         ) : null}
 
-        {mode === "propose_job_dates" ? (
+        {mode === "propose_job_dates" && jobsModuleEnabled ? (
           <ProposeForm
             title="Propose job days to customer"
             description="Suggest up to 3 alternative days when the customer's preferred job dates do not work. They will be notified to pick one."
@@ -2818,11 +2865,14 @@ function SlotsOverview({
   inlineVisitTime?: InlineVisitTimeControl;
 }) {
   const timeZone = useRequestsTimeZone();
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
   const showJobSection =
-    Boolean(request.quotation?.customerDecision === "accepted" && !request.bookingId) ||
+    jobsModuleEnabled &&
+    (Boolean(request.quotation?.customerDecision === "accepted" && !request.bookingId) ||
     request.jobPreferredSlots.length > 0 ||
     request.jobProposedSlots.length > 0 ||
-    Boolean(request.customerAcceptedJobSlot);
+    Boolean(request.customerAcceptedJobSlot));
 
   const hasInspectionSection =
     request.preferredSlots.length > 0 ||
