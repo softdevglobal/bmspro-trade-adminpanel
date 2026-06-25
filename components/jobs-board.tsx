@@ -199,6 +199,8 @@ function BookingCard({
 function BookingPreviewDrawer({
   booking,
   staff,
+  staffLoading,
+  onReloadStaff,
   onClose,
   onUpdated,
   timeZone,
@@ -206,6 +208,8 @@ function BookingPreviewDrawer({
 }: {
   booking: BookingDetail | null;
   staff: StaffSummary[];
+  staffLoading: boolean;
+  onReloadStaff: () => Promise<void>;
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
   timeZone?: string | null;
@@ -241,6 +245,8 @@ function BookingPreviewDrawer({
               key={booking.id}
               booking={booking}
               staff={staff}
+              staffLoading={staffLoading}
+              onReloadStaff={onReloadStaff}
               onClose={onClose}
               onUpdated={onUpdated}
               timeZone={timeZone}
@@ -255,6 +261,7 @@ function BookingPreviewDrawer({
 
 function BookingAssignForm({
   staff,
+  staffLoading = false,
   assignTo,
   staffId,
   disabled,
@@ -268,6 +275,7 @@ function BookingAssignForm({
   onSubmit,
 }: {
   staff: StaffSummary[];
+  staffLoading?: boolean;
   assignTo: "owner" | "staff" | null;
   staffId: string;
   disabled: boolean;
@@ -380,7 +388,14 @@ function BookingAssignForm({
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Choose a team member
           </p>
-          {staff.length === 0 ? (
+          {staffLoading ? (
+            <p className="mt-2 flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
+              <span className="material-symbols-outlined animate-spin text-[18px] text-primary">
+                progress_activity
+              </span>
+              Loading team members…
+            </p>
+          ) : staff.length === 0 ? (
             <p className="mt-2 rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
               No active staff members yet. Add team members from the Team
               page.
@@ -425,6 +440,8 @@ function BookingAssignForm({
 function BookingPreviewContent({
   booking,
   staff,
+  staffLoading,
+  onReloadStaff,
   onClose,
   onUpdated,
   timeZone,
@@ -432,6 +449,8 @@ function BookingPreviewContent({
 }: {
   booking: BookingDetail;
   staff: StaffSummary[];
+  staffLoading: boolean;
+  onReloadStaff: () => Promise<void>;
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
   timeZone?: string | null;
@@ -451,6 +470,12 @@ function BookingPreviewContent({
   const [staffId, setStaffId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mode === "assign") {
+      void onReloadStaff();
+    }
+  }, [mode, onReloadStaff]);
 
   const title = bookingTitle(booking);
   const displayPhone = formatAuPhoneDisplay(booking.customer.phone);
@@ -550,6 +575,7 @@ function BookingPreviewContent({
         {mode === "assign" ? (
           <BookingAssignForm
             staff={staff}
+            staffLoading={staffLoading}
             assignTo={assignTo}
             staffId={staffId}
             disabled={submitting}
@@ -932,7 +958,8 @@ export function JobsBoard({
   const profile = useBusinessProfile();
   const { bookings, loading, error } = useBookings();
   const { requests } = useInspectionRequests();
-  const { staff } = useBusinessStaffSummary();
+  const { staff, loading: staffLoading, reload: reloadStaff } =
+    useBusinessStaffSummary();
   const requestsById = useMemo(
     () => new Map(requests.map((request) => [request.id, request])),
     [requests],
@@ -1168,6 +1195,8 @@ export function JobsBoard({
       <BookingPreviewDrawer
         booking={selected}
         staff={staff}
+        staffLoading={staffLoading}
+        onReloadStaff={reloadStaff}
         onClose={() => setSelectedId(null)}
         onUpdated={handleBookingUpdated}
         timeZone={timeZone}

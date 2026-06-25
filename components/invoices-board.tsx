@@ -6,6 +6,8 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import { formatAddress } from "@/lib/inspection/types";
+import { fetchAdminInvoicePdfBytes } from "@/lib/pdf/fetch-admin-document-pdf";
+import { printPdfBytes } from "@/lib/pdf/print-pdf";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
@@ -253,6 +255,7 @@ function InvoicePreviewDrawer({
   const [pdfOpen, setPdfOpen] = useState(false);
   const [pdfSource, setPdfSource] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [printLoading, setPrintLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [markPaidLoading, setMarkPaidLoading] = useState(false);
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
@@ -277,36 +280,22 @@ function InvoicePreviewDrawer({
     setPdfError(null);
   }
 
+  async function fetchInvoicePdfBytes(): Promise<Uint8Array> {
+    if (!invoice || !user) {
+      throw new Error("Could not open invoice PDF.");
+    }
+    return fetchAdminInvoicePdfBytes(user, invoice.id);
+  }
+
   async function openPdf() {
-    if (!invoice) return;
+    if (!invoice || !user) return;
     setPdfError(null);
-
-    if (invoice.pdfUrl) {
-      setPdfSource(invoice.pdfUrl);
-      setPdfOpen(true);
-      return;
-    }
-
-    if (!user) {
-      setPdfError("Could not open invoice PDF.");
-      return;
-    }
-
     setPdfLoading(true);
     try {
-      const token = await user.getIdToken();
-      const response = await fetch(
-        `/api/invoices/pdf?quotationId=${encodeURIComponent(invoice.id)}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        },
+      const bytes = await fetchInvoicePdfBytes();
+      setPdfSource(
+        URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })),
       );
-      if (!response.ok) {
-        throw new Error("Could not load invoice PDF.");
-      }
-      const blob = await response.blob();
-      setPdfSource(URL.createObjectURL(blob));
       setPdfOpen(true);
     } catch (error) {
       setPdfError(
@@ -314,6 +303,22 @@ function InvoicePreviewDrawer({
       );
     } finally {
       setPdfLoading(false);
+    }
+  }
+
+  async function printInvoice() {
+    if (!invoice || !user) return;
+    setPdfError(null);
+    setPrintLoading(true);
+    try {
+      const bytes = await fetchInvoicePdfBytes();
+      await printPdfBytes(bytes);
+    } catch (error) {
+      setPdfError(
+        error instanceof Error ? error.message : "Could not print invoice PDF.",
+      );
+    } finally {
+      setPrintLoading(false);
     }
   }
 
@@ -576,21 +581,38 @@ function InvoicePreviewDrawer({
                   {markPaidError}
                 </p>
               ) : null}
-              <button
-                type="button"
-                onClick={() => void openPdf()}
-                disabled={pdfLoading}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span
-                  className={`material-symbols-outlined text-[20px] ${
-                    pdfLoading ? "animate-spin" : ""
-                  }`}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void openPdf()}
+                  disabled={pdfLoading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {pdfLoading ? "progress_activity" : "picture_as_pdf"}
-                </span>
-                {pdfLoading ? "Loading PDF…" : "View invoice PDF"}
-              </button>
+                  <span
+                    className={`material-symbols-outlined text-[20px] ${
+                      pdfLoading ? "animate-spin" : ""
+                    }`}
+                  >
+                    {pdfLoading ? "progress_activity" : "picture_as_pdf"}
+                  </span>
+                  {pdfLoading ? "Loading PDF…" : "View invoice PDF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void printInvoice()}
+                  disabled={printLoading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span
+                    className={`material-symbols-outlined text-[20px] ${
+                      printLoading ? "animate-spin" : ""
+                    }`}
+                  >
+                    {printLoading ? "progress_activity" : "print"}
+                  </span>
+                  {printLoading ? "Preparing…" : "Print invoice"}
+                </button>
+              </div>
               {pdfError ? (
                 <p
                   role="alert"
@@ -616,15 +638,16 @@ function InvoicePreviewDrawer({
         </motion.div>
       ) : null}
 
-      {pdfSource ? (
+      {pdfOpen && invoice && user ? (
         <QuotationPdfViewerModal
           open={pdfOpen}
           onClose={closePdf}
-          pdfUrl={pdfSource}
-          title={`Invoice — ${invoice?.invoiceCode ?? "Invoice"}`}
-          downloadFilename={`${(invoice?.invoiceCode ?? "invoice")
+          pdfUrl={pdfSource ?? ""}
+          title={`Invoice — ${invoice.invoiceCode ?? "Invoice"}`}
+          downloadFilename={`${(invoice.invoiceCode ?? "invoice")
             .replace(/[^a-z0-9.\-]+/gi, "-")
             .toLowerCase()}.pdf`}
+          loadPdfBytes={() => fetchAdminInvoicePdfBytes(user, invoice.id)}
         />
       ) : null}
     </AnimatePresence>
