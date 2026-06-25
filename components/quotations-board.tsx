@@ -11,6 +11,7 @@ import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-deci
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
@@ -92,7 +93,7 @@ function quotationFilterLabel(filter: QuotationFilter): string {
 }
 
 const disabledActionClass =
-  "inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 px-4 py-3 font-body text-[14px] font-semibold text-on-surface-variant opacity-50";
+  "flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 px-4 py-3 font-body text-[14px] font-semibold text-on-surface-variant opacity-50";
 
 const disabledMenuItemClass =
   "flex w-full cursor-not-allowed items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface-variant opacity-50";
@@ -218,7 +219,11 @@ function QuotationCardMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const canSchedule = canConvertQuotationToBooking(quotation);
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
+  const invoicesModuleEnabled = canUseModule("invoices");
+  const canSchedule =
+    jobsModuleEnabled && canConvertQuotationToBooking(quotation);
   const hasBooking = Boolean(quotation.bookingId);
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
@@ -232,7 +237,10 @@ function QuotationCardMenu({
   const editDraftHref = `/dashboard/quotations/new?quotationId=${encodeURIComponent(quotation.id)}`;
   const isCancelled = quotation.status === "cancelled";
   const canIssueInvoice =
-    quotation.status === "sent" && !hasInvoice && !awaitingCustomer;
+    invoicesModuleEnabled &&
+    quotation.status === "sent" &&
+    !hasInvoice &&
+    !awaitingCustomer;
 
   useEffect(() => {
     if (!open) return;
@@ -459,10 +467,14 @@ function QuotationCard({
   onDelete: () => void;
   timeZone?: string | null;
 }) {
+  const { canUseModule } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
   const hasInvoice = quotationHasInvoice(quotation);
   const showFollowUpActions =
-    canConvertQuotationToBooking(quotation) && !awaitingCustomer;
+    jobsModuleEnabled &&
+    canConvertQuotationToBooking(quotation) &&
+    !awaitingCustomer;
   const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
   const displayPhone = formatAuPhoneDisplay(quotation.customer.phone);
 
@@ -642,6 +654,9 @@ function QuotationPreviewContent({
   timeZone?: string | null;
 }) {
   const { user } = useAuth();
+  const { canUseModule, modulesReady } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
+  const invoicesModuleEnabled = canUseModule("invoices");
   const [pdfOpen, setPdfOpen] = useState(false);
   const [invoicePdfOpen, setInvoicePdfOpen] = useState(false);
   const [invoicePdfSource, setInvoicePdfSource] = useState<string | null>(null);
@@ -656,7 +671,10 @@ function QuotationPreviewContent({
     .replace(/[^a-z0-9.\-]+/gi, "-")
     .toLowerCase()}.pdf`;
 
-  const canConvert = canConvertQuotationToBooking(quotation);
+  const canConvert =
+    jobsModuleEnabled && canConvertQuotationToBooking(quotation);
+  const showJobFooterAction =
+    Boolean(quotation.bookingId) || canConvert;
   const hasInvoice = quotationHasInvoice(quotation);
   const jobLocked = quotationJobActionsLocked(quotation);
   const awaitingCustomer = quotationAwaitingCustomerAcceptance(quotation);
@@ -736,7 +754,7 @@ function QuotationPreviewContent({
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-outline-variant/60 px-4 py-4 sm:px-5">
         <div className="min-w-0 flex-1">
           <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {previewMode === "convert_booking"
+            {previewMode === "convert_booking" && jobsModuleEnabled
               ? "Create job"
               : "Quotation preview"}
           </p>
@@ -769,7 +787,7 @@ function QuotationPreviewContent({
       </header>
 
       <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3 sm:space-y-3 sm:px-5">
-        {previewMode === "convert_booking" ? (
+        {previewMode === "convert_booking" && jobsModuleEnabled ? (
           <ConvertToBookingPanel
             inspectionRequestId={quotation.inspectionRequestId}
             minBookingDate={bookingMinDateFromInspection(
@@ -967,6 +985,7 @@ function QuotationPreviewContent({
         </section>
 
         {previewMode === "review" &&
+        jobsModuleEnabled &&
         linkedInspection &&
         quotation.customerDecision === "accepted" &&
         !quotation.bookingId &&
@@ -1056,8 +1075,12 @@ function QuotationPreviewContent({
                 </div>
               </div>
             ) : null}
-            {quotation.status === "sent" ? (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {quotation.status === "sent" && modulesReady ? (
+              <div
+                className={`grid grid-cols-1 gap-2${
+                  showJobFooterAction ? " sm:grid-cols-2" : ""
+                }`}
+              >
                 {quotation.bookingId ? (
                   jobLocked ? (
                     <span
@@ -1073,7 +1096,7 @@ function QuotationPreviewContent({
                     <Link
                       href={jobBoardHref(quotation.bookingId)}
                       onClick={onClose}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
                     >
                       <span className="material-symbols-outlined text-[20px]">
                         assignment
@@ -1096,7 +1119,7 @@ function QuotationPreviewContent({
                       if (jobLocked || awaitingCustomer) return;
                       onPreviewModeChange("convert_booking");
                     }}
-                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-body text-[14px] font-semibold transition-colors ${
+                    className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 font-body text-[14px] font-semibold transition-colors ${
                       jobLocked || awaitingCustomer
                         ? "cursor-not-allowed bg-primary/40 text-on-primary/70"
                         : "bg-primary text-on-primary hover:bg-primary/90"
@@ -1108,13 +1131,15 @@ function QuotationPreviewContent({
                     Schedule job
                   </button>
                 ) : null}
-                {hasInvoice || awaitingCustomer ? (
+                {hasInvoice || awaitingCustomer || !invoicesModuleEnabled ? (
                   <span
                     className={disabledActionClass}
                     title={
-                      hasInvoice
-                        ? "Invoice already issued for this quotation"
-                        : awaitingCustomerTitle
+                      !invoicesModuleEnabled
+                        ? "Invoices are not activated for your business"
+                        : hasInvoice
+                          ? "Invoice already issued for this quotation"
+                          : awaitingCustomerTitle
                     }
                   >
                     <span className="material-symbols-outlined text-[20px]">
@@ -1126,7 +1151,7 @@ function QuotationPreviewContent({
                   <Link
                     href={`/dashboard/invoices?quotation=${encodeURIComponent(quotation.id)}`}
                     onClick={onClose}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
                   >
                     <span className="material-symbols-outlined text-[20px]">
                       receipt_long
@@ -1335,6 +1360,8 @@ function CancelQuotationConfirmModal({
 
 export function QuotationsBoard() {
   const { user, status: authStatus } = useAuth();
+  const { canUseModule, modulesReady } = useBusinessModuleSettings();
+  const jobsModuleEnabled = canUseModule("jobs");
   const profile = useBusinessProfile();
   const { requests: inspectionRequests } = useInspectionRequests();
   const [quotations, setQuotations] = useState<QuotationDetail[]>([]);
@@ -1388,6 +1415,13 @@ export function QuotationsBoard() {
     });
     return () => cancelAnimationFrame(frame);
   }, [load]);
+
+  useEffect(() => {
+    if (!modulesReady) return;
+    if (!jobsModuleEnabled && previewMode === "convert_booking") {
+      setPreviewMode("review");
+    }
+  }, [jobsModuleEnabled, modulesReady, previewMode]);
 
   const selected = useMemo(
     () => quotations.find((quotation) => quotation.id === selectedId) ?? null,
@@ -1451,6 +1485,7 @@ export function QuotationsBoard() {
   }
 
   function handleStartConvertBooking(id: string) {
+    if (!jobsModuleEnabled) return;
     setSelectedId(id);
     setPreviewMode("convert_booking");
   }
