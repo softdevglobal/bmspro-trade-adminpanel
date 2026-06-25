@@ -36,6 +36,11 @@ import {
   quotationJobActionsLocked,
 } from "@/lib/quotations/actions";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
+import {
+  fetchAdminInvoicePdfBytes,
+  fetchAdminQuotationPdfBytes,
+} from "@/lib/pdf/fetch-admin-document-pdf";
+import { printPdfBytes } from "@/lib/pdf/print-pdf";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
@@ -661,6 +666,8 @@ function QuotationPreviewContent({
   const [invoicePdfOpen, setInvoicePdfOpen] = useState(false);
   const [invoicePdfSource, setInvoicePdfSource] = useState<string | null>(null);
   const [invoicePdfLoading, setInvoicePdfLoading] = useState(false);
+  const [quotationPrintLoading, setQuotationPrintLoading] = useState(false);
+  const [invoicePrintLoading, setInvoicePrintLoading] = useState(false);
   const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null);
   const title = quotation.serviceTitle || "Quotation";
   const downloadFilename = `quotation-${title
@@ -710,33 +717,30 @@ function QuotationPreviewContent({
     setInvoicePdfError(null);
   }
 
+  async function fetchInvoicePdfBytes(): Promise<Uint8Array> {
+    if (!user) {
+      throw new Error("Could not open invoice PDF.");
+    }
+    return fetchAdminInvoicePdfBytes(user, quotation.id);
+  }
+
   async function openInvoicePdf() {
-    setInvoicePdfError(null);
-    if (quotation.invoicePdfUrl) {
-      setInvoicePdfSource(quotation.invoicePdfUrl);
-      setInvoicePdfOpen(true);
+    if (!user) {
+      setInvoicePdfError("Could not open invoice PDF.");
       return;
     }
-    if (!user || !quotation.invoiceId) {
+    if (!hasInvoice) {
       setInvoicePdfError("Could not open invoice PDF.");
       return;
     }
 
+    setInvoicePdfError(null);
     setInvoicePdfLoading(true);
     try {
-      const token = await user.getIdToken();
-      const response = await fetch(
-        `/api/invoices/pdf?quotationId=${encodeURIComponent(quotation.id)}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-        },
+      const bytes = await fetchInvoicePdfBytes();
+      setInvoicePdfSource(
+        URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })),
       );
-      if (!response.ok) {
-        throw new Error("Could not load invoice PDF.");
-      }
-      const blob = await response.blob();
-      setInvoicePdfSource(URL.createObjectURL(blob));
       setInvoicePdfOpen(true);
     } catch (error) {
       setInvoicePdfError(
@@ -746,6 +750,42 @@ function QuotationPreviewContent({
       );
     } finally {
       setInvoicePdfLoading(false);
+    }
+  }
+
+  async function printQuotationPdf() {
+    if (!user || !quotation.pdfUrl) return;
+    setInvoicePdfError(null);
+    setQuotationPrintLoading(true);
+    try {
+      const bytes = await fetchAdminQuotationPdfBytes(user, quotation.id);
+      await printPdfBytes(bytes);
+    } catch (error) {
+      setInvoicePdfError(
+        error instanceof Error
+          ? error.message
+          : "Could not print quotation PDF.",
+      );
+    } finally {
+      setQuotationPrintLoading(false);
+    }
+  }
+
+  async function printInvoicePdf() {
+    if (!user || !hasInvoice) return;
+    setInvoicePdfError(null);
+    setInvoicePrintLoading(true);
+    try {
+      const bytes = await fetchInvoicePdfBytes();
+      await printPdfBytes(bytes);
+    } catch (error) {
+      setInvoicePdfError(
+        error instanceof Error
+          ? error.message
+          : "Could not print invoice PDF.",
+      );
+    } finally {
+      setInvoicePrintLoading(false);
     }
   }
 
@@ -1163,41 +1203,69 @@ function QuotationPreviewContent({
             ) : null}
 
             {quotation.pdfUrl || hasInvoice ? (
-              <div
-                className={`grid gap-2 ${
-                  quotation.pdfUrl && hasInvoice
-                    ? "grid-cols-1 sm:grid-cols-2"
-                    : "grid-cols-1"
-                }`}
-              >
+              <div className="space-y-2">
                 {quotation.pdfUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => setPdfOpen(true)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
-                  >
-                    <span className="material-symbols-outlined text-[20px]">
-                      picture_as_pdf
-                    </span>
-                    View quotation PDF
-                  </button>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setPdfOpen(true)}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">
+                        picture_as_pdf
+                      </span>
+                      View quotation PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void printQuotationPdf()}
+                      disabled={quotationPrintLoading}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-[20px] ${
+                          quotationPrintLoading ? "animate-spin" : ""
+                        }`}
+                      >
+                        {quotationPrintLoading ? "progress_activity" : "print"}
+                      </span>
+                      {quotationPrintLoading ? "Preparing…" : "Print quotation"}
+                    </button>
+                  </div>
                 ) : null}
                 {hasInvoice ? (
-                  <button
-                    type="button"
-                    onClick={() => void openInvoicePdf()}
-                    disabled={invoicePdfLoading}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <span
-                      className={`material-symbols-outlined text-[20px] ${
-                        invoicePdfLoading ? "animate-spin" : ""
-                      }`}
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => void openInvoicePdf()}
+                      disabled={invoicePdfLoading}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-900 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {invoicePdfLoading ? "progress_activity" : "receipt_long"}
-                    </span>
-                    {invoicePdfLoading ? "Loading invoice…" : "View invoice PDF"}
-                  </button>
+                      <span
+                        className={`material-symbols-outlined text-[20px] ${
+                          invoicePdfLoading ? "animate-spin" : ""
+                        }`}
+                      >
+                        {invoicePdfLoading ? "progress_activity" : "receipt_long"}
+                      </span>
+                      {invoicePdfLoading ? "Loading invoice…" : "View invoice PDF"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void printInvoicePdf()}
+                      disabled={invoicePrintLoading}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-[20px] ${
+                          invoicePrintLoading ? "animate-spin" : ""
+                        }`}
+                      >
+                        {invoicePrintLoading ? "progress_activity" : "print"}
+                      </span>
+                      {invoicePrintLoading ? "Preparing…" : "Print invoice"}
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ) : null}
@@ -1227,22 +1295,24 @@ function QuotationPreviewContent({
         ) : null}
       </div>
 
-      {quotation.pdfUrl ? (
+      {quotation.pdfUrl && user ? (
         <QuotationPdfViewerModal
           open={pdfOpen}
           onClose={() => setPdfOpen(false)}
           pdfUrl={quotation.pdfUrl}
           title={title}
           downloadFilename={downloadFilename}
+          loadPdfBytes={() => fetchAdminQuotationPdfBytes(user, quotation.id)}
         />
       ) : null}
-      {invoicePdfSource ? (
+      {invoicePdfOpen && user && hasInvoice ? (
         <QuotationPdfViewerModal
           open={invoicePdfOpen}
           onClose={closeInvoicePdf}
-          pdfUrl={invoicePdfSource}
+          pdfUrl={invoicePdfSource ?? quotation.invoicePdfUrl ?? ""}
           title={`Invoice — ${quotation.invoiceCode ?? title}`}
           downloadFilename={invoiceDownloadFilename}
+          loadPdfBytes={() => fetchAdminInvoicePdfBytes(user, quotation.id)}
         />
       ) : null}
     </div>

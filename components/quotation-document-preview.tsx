@@ -1,5 +1,6 @@
 "use client";
 
+import { PRINT_DOCUMENT_ROOT } from "@/lib/pdf/print-document-preview";
 import {
   formatQuoteMoney,
   formatQuoteDate,
@@ -44,6 +45,7 @@ export function QuotationDocumentPreview({
 
   return (
     <div
+      {...{ [PRINT_DOCUMENT_ROOT]: true }}
       className={`relative mx-auto w-full max-w-[720px] overflow-hidden font-body text-[13px] leading-relaxed text-[#1e2430] shadow-[0_8px_32px_rgba(11,51,160,0.12)] ring-1 ring-[#d0dae8] ${className}`}
     >
       {/* Pearl page surface — no side rail, no white card overlay */}

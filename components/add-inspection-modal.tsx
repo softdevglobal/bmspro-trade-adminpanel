@@ -8,11 +8,13 @@ import {
   validateCalendarVisitWindow,
 } from "@/components/calendar-visit-time-range";
 import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
+import { JobAssignPicker } from "@/components/job-assign-picker";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
+import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import type {
   InspectionRequestType,
   InspectionSlot,
@@ -102,6 +104,10 @@ const JOB_STEPS = [
   {
     title: "Contact details",
     subtitle: "Customer contact info for the visit and follow-up.",
+  },
+  {
+    title: "Assign team",
+    subtitle: "Choose who will run this job, or assign later from the Jobs board.",
   },
   {
     title: "Review & create",
@@ -552,11 +558,15 @@ function InspectionPreview({
   selectedServiceName,
   timeZone,
   variant = "inspection",
+  assignTo = null,
+  staffName = null,
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
   timeZone?: string | null;
   variant?: "inspection" | "job";
+  assignTo?: "owner" | "staff" | null;
+  staffName?: string | null;
 }) {
   const jobSummary =
     form.requestType === "existing_service"
@@ -565,7 +575,10 @@ function InspectionPreview({
 
   return (
     <div className="space-y-4">
-      <StepHeader step={5} title="Review & create" />
+      <StepHeader
+        step={variant === "job" ? 6 : 5}
+        title="Review & create"
+      />
 
       <PreviewSection title="Job details" icon="handyman">
         <PreviewRow
@@ -628,6 +641,21 @@ function InspectionPreview({
           </p>
         ) : null}
       </PreviewSection>
+
+      {variant === "job" ? (
+        <PreviewSection title="Assignment" icon="groups">
+          <PreviewRow
+            label="Assigned to"
+            value={
+              assignTo === "owner"
+                ? "You (business owner)"
+                : assignTo === "staff"
+                  ? staffName ?? "Selected team member"
+                  : "Unassigned — assign later from Jobs"
+            }
+          />
+        </PreviewSection>
+      ) : null}
 
       <PreviewSection title="Customer" icon="person">
         <PreviewRow label="Name" value={form.customer.fullName.trim()} />
@@ -704,9 +732,13 @@ export function AddInspectionModal({
       : null);
   const { user } = useAuth();
   const profile = useBusinessProfile();
+  const { staff, loading: staffLoading, reload: reloadStaff } =
+    useBusinessStaffSummary();
   const { workingHours } = useBusinessWorkingHours();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(createInitialForm);
+  const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
+  const [staffId, setStaffId] = useState("");
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -737,6 +769,8 @@ export function AddInspectionModal({
     ) => {
       setStep(1);
       setForm(createInitialForm(calendarWindow ?? null, modalVariant));
+      setAssignTo(null);
+      setStaffId("");
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -807,6 +841,11 @@ export function AddInspectionModal({
       cancelled = true;
     };
   }, [open, user]);
+
+  useEffect(() => {
+    if (!open || variant !== "job") return;
+    void reloadStaff();
+  }, [open, variant, reloadStaff]);
 
   const step1Valid =
     form.requestType === "existing_service"
@@ -910,6 +949,37 @@ export function AddInspectionModal({
     EMAIL_REGEX.test(form.customer.email.trim()) &&
     form.customer.phone.replace(/\D/g, "").length >= 6;
 
+  const step5Valid =
+    variant !== "job" ||
+    assignTo !== "staff" ||
+    (staffId.trim().length > 0 && staff.some((member) => member.id === staffId));
+
+  const assignmentSchedule = useMemo(() => {
+    if (form.calendarWindow?.date) {
+      return {
+        date: form.calendarWindow.date,
+        startTime: form.calendarWindow.startTime || null,
+        endTime: form.calendarWindow.endTime || null,
+      };
+    }
+    const first = sortInspectionSlots(form.preferredSlots)[0];
+    if (!first?.date) {
+      return { date: null, startTime: null, endTime: null };
+    }
+    return {
+      date: first.date,
+      startTime: first.startTime ?? null,
+      endTime: first.endTime ?? null,
+    };
+  }, [form.calendarWindow, form.preferredSlots]);
+
+  const selectedStaffName = useMemo(() => {
+    if (assignTo !== "staff" || !staffId) return null;
+    return staff.find((member) => member.id === staffId)?.fullName ?? null;
+  }, [assignTo, staff, staffId]);
+
+  const reviewStep = variant === "job" ? 6 : 5;
+
   const fieldErrors = useMemo(
     () => computeFieldErrors(form, workingHours, variant),
     [form, workingHours, variant],
@@ -962,7 +1032,9 @@ export function AddInspectionModal({
     (step === 1 && step1Valid) ||
     (step === 2 && step2Valid) ||
     (step === 3 && step3Valid) ||
-    (step === 4 && step4Valid);
+    (step === 4 && step4Valid) ||
+    (variant === "job" && step === 5 && step5Valid) ||
+    step === reviewStep;
 
   function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
     setForm((prev) => ({
@@ -1065,9 +1137,13 @@ export function AddInspectionModal({
               fieldErrors.postcode
             : step === 3
               ? fieldErrors.preferredSlots
-              : fieldErrors.fullName ??
-                fieldErrors.email ??
-                fieldErrors.phone;
+              : step === 4
+                ? fieldErrors.fullName ??
+                  fieldErrors.email ??
+                  fieldErrors.phone
+                : variant === "job" && step === 5 && assignTo === "staff" && !staffId
+                  ? "Choose a team member to assign."
+                  : null;
       setError(
         stepError ?? "Please fix the highlighted fields before continuing.",
       );
@@ -1141,16 +1217,29 @@ export function AddInspectionModal({
       budgetAud: form.budgetAud.trim() || null,
     };
 
+    const isJob = variant === "job";
+    const jobBody =
+      isJob && assignTo
+        ? {
+            assignTo,
+            ...(assignTo === "staff" ? { staffId } : {}),
+          }
+        : isJob
+          ? { assignTo: "none" }
+          : {};
+
     try {
       const token = await user.getIdToken();
-      const isJob = variant === "job";
       const response = await fetch(isJob ? "/api/jobs" : "/api/requests", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(sharedBody),
+        body: JSON.stringify({
+          ...sharedBody,
+          ...jobBody,
+        }),
       });
 
       const payload = (await response.json()) as {
@@ -1757,12 +1846,14 @@ export function AddInspectionModal({
                 </div>
               ) : null}
 
-              {step === 5 ? (
+              {step === reviewStep ? (
                 <InspectionPreview
                   form={form}
                   selectedServiceName={selectedService?.name ?? null}
                   timeZone={timeZone}
                   variant={variant}
+                  assignTo={variant === "job" ? assignTo : null}
+                  staffName={selectedStaffName}
                 />
               ) : null}
 
@@ -1834,6 +1925,26 @@ export function AddInspectionModal({
                       />
                     </label>
                   </div>
+                </div>
+              ) : null}
+
+              {variant === "job" && step === 5 ? (
+                <div className="space-y-4">
+                  <StepHeader step={5} title={current.title} hint="Optional" />
+                  <JobAssignPicker
+                    staff={staff}
+                    staffLoading={staffLoading}
+                    assignTo={assignTo}
+                    staffId={staffId}
+                    disabled={submitting}
+                    assignmentDate={assignmentSchedule.date}
+                    startTime={assignmentSchedule.startTime}
+                    endTime={assignmentSchedule.endTime}
+                    timeZone={timeZone}
+                    showUnassigned
+                    onAssignToChange={setAssignTo}
+                    onStaffIdChange={setStaffId}
+                  />
                 </div>
               ) : null}
             </>

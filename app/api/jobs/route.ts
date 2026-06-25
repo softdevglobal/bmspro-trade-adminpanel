@@ -1,6 +1,7 @@
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import { createDirectJob, listBusinessBookings } from "@/lib/bookings/server";
+import { resolveJobAssignmentFromPayload } from "@/lib/bookings/resolve-job-assignment";
 import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
 import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
 import { parseWorkingHoursFromBusiness } from "@/lib/calendar/working-hours";
@@ -213,6 +214,26 @@ export async function POST(request: Request) {
         .filter(Boolean)
     : undefined;
 
+  const assignTo =
+    typeof payload.assignTo === "string" ? payload.assignTo : "";
+  const assignmentResult = await resolveJobAssignmentFromPayload({
+    businessId: auth.businessId,
+    ownerUid: auth.uid,
+    ownerEmail: auth.email,
+    assignTo,
+    staffId:
+      typeof payload.staffId === "string" ? payload.staffId : undefined,
+    scheduledDate: jobSchedule.slot.date,
+    scheduledStartTime: jobSchedule.startTime,
+    scheduledEndTime: jobSchedule.endTime,
+  });
+  if (!assignmentResult.ok) {
+    return NextResponse.json(
+      { ok: false, error: assignmentResult.error },
+      { status: assignmentResult.status },
+    );
+  }
+
   const result = await createDirectJob(
     auth.businessId,
     auth.uid,
@@ -232,7 +253,7 @@ export async function POST(request: Request) {
       note: note || null,
       instructionDescription: instructionDescription || null,
       instructionTasks,
-      assignedTo: null,
+      assignedTo: assignmentResult.assignment,
     },
     {
       actor: {

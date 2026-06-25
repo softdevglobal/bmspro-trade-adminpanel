@@ -1,6 +1,7 @@
 "use client";
 
 import { PdfCanvasViewer } from "@/components/pdf-canvas-viewer";
+import { printPdfBytes } from "@/lib/pdf/print-pdf";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -25,6 +26,7 @@ export function QuotationPdfViewerModal({
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,6 +99,18 @@ export function QuotationPdfViewerModal({
     }
   }
 
+  async function printPdf() {
+    setPrinting(true);
+    try {
+      const bytes = (pdfData ?? (await fetchPdfData())).slice();
+      await printPdfBytes(bytes);
+    } catch {
+      setError("Could not print this PDF. Try downloading it instead.");
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   async function openInNewTab() {
     try {
       const bytes = (pdfData ?? (await fetchPdfData())).slice();
@@ -136,6 +150,23 @@ export function QuotationPdfViewerModal({
           >
             {title}
           </h2>
+          <button
+            type="button"
+            onClick={() => void printPdf()}
+            disabled={printing || loading}
+            className="inline-flex items-center gap-1 rounded-lg border border-outline-variant bg-surface-container-lowest px-2.5 py-2 font-body text-[12px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60 sm:gap-1.5 sm:px-3"
+          >
+            <span
+              className={`material-symbols-outlined text-[18px] ${
+                printing ? "animate-spin" : ""
+              }`}
+            >
+              {printing ? "progress_activity" : "print"}
+            </span>
+            <span className="hidden sm:inline">
+              {printing ? "Printing…" : "Print"}
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => void openInNewTab()}
@@ -185,6 +216,13 @@ export function QuotationPdfViewerModal({
                   className="rounded-xl bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary"
                 >
                   Open PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void printPdf()}
+                  className="rounded-xl border border-outline-variant px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface"
+                >
+                  Print
                 </button>
                 <button
                   type="button"
