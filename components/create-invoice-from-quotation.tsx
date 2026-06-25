@@ -14,6 +14,7 @@ import { MonthCalendarField } from "@/components/month-calendar-field";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { printDocumentPreview } from "@/lib/pdf/print-document-preview";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -1905,9 +1906,19 @@ export function CreateInvoiceFromQuotation({
           </div>
         ) : tab === "preview" ? (
           <div className="mx-auto max-w-[760px] space-y-3 pb-8">
-            <p className="text-center font-body text-[12px] text-on-surface-variant">
-              This preview matches the invoice your customer will receive.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-body text-[12px] text-on-surface-variant">
+                This preview matches the invoice your customer will receive.
+              </p>
+              <button
+                type="button"
+                onClick={() => printDocumentPreview()}
+                className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container"
+              >
+                <span className="material-symbols-outlined text-[18px]">print</span>
+                Print
+              </button>
+            </div>
             <QuotationDocumentPreview
               document={previewDocument}
               kind="invoice"

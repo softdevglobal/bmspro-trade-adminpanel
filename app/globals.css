@@ -124,3 +124,24 @@ body {
 .material-symbols-filled {
   font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
 }
+
+@media print {
+  body[data-printing-document="true"] * {
+    visibility: hidden;
+  }
+
+  body[data-printing-document="true"] [data-print-document-root],
+  body[data-printing-document="true"] [data-print-document-root] * {
+    visibility: visible;
+  }
+
+  body[data-printing-document="true"] [data-print-document-root] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+}

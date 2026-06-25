@@ -32,7 +32,7 @@ export function useBusinessStaffSummary(): {
 
       if (!force) {
         const cached = readStaffSummaryCache(businessId);
-        if (cached) {
+        if (cached !== null && cached.length > 0) {
           setStaff(
             cached.map((member) => ({
               ...member,

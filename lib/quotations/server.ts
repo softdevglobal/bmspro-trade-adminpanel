@@ -2283,6 +2283,100 @@ export async function getBusinessQuotationById(
   return enriched ?? null;
 }
 
+/** Returns quotation PDF bytes for viewing, printing, or download. */
+export async function getBusinessQuotationPdf(
+  businessId: string,
+  quotationId: string,
+): Promise<
+  | { ok: true; pdfBytes: Buffer; fileName: string }
+  | { ok: false; status: number; error: string }
+> {
+  const quotation = await getBusinessQuotationById(businessId, quotationId);
+  if (!quotation) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const pdfUrl = quotation.pdfUrl?.trim();
+  if (pdfUrl) {
+    try {
+      const response = await fetch(pdfUrl);
+      if (response.ok) {
+        const pdfBytes = Buffer.from(await response.arrayBuffer());
+        if (pdfBytes.length) {
+          const code = quotation.quotationCode?.trim() || "quotation";
+          return {
+            ok: true,
+            pdfBytes,
+            fileName: `${code}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
+          };
+        }
+      }
+    } catch (error) {
+      console.error("[quotation] stored PDF fetch failed:", error);
+    }
+  }
+
+  const businessBranding = await loadQuotationBusinessBranding(businessId);
+  let inspectionRequestCode: string | null = null;
+  const requestId = quotation.inspectionRequestId?.trim();
+  if (requestId) {
+    try {
+      const requestSnap = await adminDb
+        .collection(REQUESTS_COLLECTION)
+        .doc(requestId)
+        .get();
+      if (requestSnap.exists) {
+        const requestData = requestSnap.data() ?? {};
+        inspectionRequestCode =
+          typeof requestData.requestCode === "string"
+            ? requestData.requestCode
+            : null;
+      }
+    } catch (error) {
+      console.error("[quotation] request lookup failed:", error);
+    }
+  }
+
+  try {
+    const { generateQuotationPdf } = await import("@/lib/quotations/pdf");
+    const pdfBytes = await generateQuotationPdf(quotation, {
+      businessName: businessBranding.businessName,
+      logoUrl: businessBranding.logoUrl,
+      businessAddress: businessBranding.businessAddress,
+      businessEmail: businessBranding.businessEmail,
+      businessPhone: businessBranding.businessPhone,
+      bookingSlug: businessBranding.bookingSlug,
+      bookingPath: businessBranding.bookingPath,
+      abn: businessBranding.abn,
+      registeredForGst: businessBranding.registeredForGst,
+      gstPercentage: businessBranding.gstPercentage,
+      timezone: businessBranding.timezone,
+      inspectionRequestCode,
+    });
+    if (!pdfBytes?.length) {
+      return {
+        ok: false,
+        status: 500,
+        error: "Could not generate quotation PDF.",
+      };
+    }
+
+    const code = quotation.quotationCode?.trim() || "quotation";
+    return {
+      ok: true,
+      pdfBytes,
+      fileName: `${code}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
+    };
+  } catch (error) {
+    console.error("[quotation] PDF generation failed:", error);
+    return {
+      ok: false,
+      status: 500,
+      error: "Could not generate quotation PDF.",
+    };
+  }
+}
+
 /** Lists all quotations for a business (newest first). */
 export async function listBusinessQuotations(
   businessId: string,
