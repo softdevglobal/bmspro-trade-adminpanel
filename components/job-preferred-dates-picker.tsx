@@ -5,6 +5,10 @@ import {
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import {
+  isPastTimeRangeSession,
+  PAST_SESSION_HINT,
+} from "@/lib/calendar/past-scheduling";
+import {
   TIME_RANGE_LABELS,
   formatSlotDate,
   sortInspectionSlots,
@@ -117,11 +121,17 @@ export function JobPreferredDatesPicker({
               <div className="mt-2 flex flex-wrap gap-2">
                 {(["morning", "afternoon"] as const).map((range) => {
                   const active = slot.timeRange === range;
+                  const sessionPast = isPastTimeRangeSession(
+                    slot.date,
+                    range,
+                    timeZone,
+                  );
                   return (
                     <button
                       key={range}
                       type="button"
-                      disabled={disabled}
+                      disabled={disabled || sessionPast}
+                      title={sessionPast ? PAST_SESSION_HINT : undefined}
                       onClick={() => updateTimeRange(slot.date, range)}
                       className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 font-body text-[12px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                         active

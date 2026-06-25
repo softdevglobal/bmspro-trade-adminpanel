@@ -20,6 +20,7 @@ import { parseClockMinutes } from "@/lib/leave/clock";
 import { leaveOverlapsDay } from "@/lib/leave/conflicts";
 import { listBusinessLeaveRequests } from "@/lib/leave/server";
 import type { LeaveRequestRecord } from "@/lib/leave/types";
+import { pastUnavailableSlots } from "@/lib/calendar/past-scheduling";
 import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
 import {
@@ -256,6 +257,7 @@ export async function computeUnavailableSlots(
       listBusinessClosuresInRange(businessId, fromDate, toDate),
     ]);
   return mergeUnavailableSlots([
+    ...pastUnavailableSlots(fromDate, toDate, timeZone),
     ...teamUnavailable,
     ...capacityUnavailable,
     ...closureUnavailableSlots(businessClosures),

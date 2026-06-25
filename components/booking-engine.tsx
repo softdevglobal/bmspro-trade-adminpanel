@@ -34,6 +34,10 @@ import {
   formatAddress,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
+import {
+  isPastTimeRangeSession,
+  PAST_SESSION_HINT,
+} from "@/lib/calendar/past-scheduling";
 import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   isValidAuLocalPhone,
@@ -781,8 +785,10 @@ function addDaysIso(iso: string, days: number): string {
 function firstAvailableTimeRange(
   date: string,
   blockedCombos: Set<string>,
+  timeZone?: string | null,
 ): SlotTimeRange | null {
   for (const range of TIME_RANGES) {
+    if (isPastTimeRangeSession(date, range, timeZone)) continue;
     if (!blockedCombos.has(slotComboKey(date, range))) {
       return range;
     }
@@ -796,27 +802,37 @@ function DayTimePicker({
   onTimeChange,
   blockedCombos,
   availabilityReady = true,
+  timeZone,
 }: {
   date: string;
   timeRange: SlotTimeRange;
   onTimeChange: (timeRange: SlotTimeRange) => void;
   blockedCombos?: Set<string>;
   availabilityReady?: boolean;
+  timeZone?: string | null;
 }) {
   useEffect(() => {
     if (!availabilityReady || !date || !blockedCombos) return;
-    if (!blockedCombos.has(slotComboKey(date, timeRange))) return;
-    const fallback = firstAvailableTimeRange(date, blockedCombos);
+    if (
+      !blockedCombos.has(slotComboKey(date, timeRange)) &&
+      !isPastTimeRangeSession(date, timeRange, timeZone)
+    ) {
+      return;
+    }
+    const fallback = firstAvailableTimeRange(date, blockedCombos, timeZone);
     if (fallback) onTimeChange(fallback);
-  }, [availabilityReady, date, timeRange, blockedCombos, onTimeChange]);
+  }, [availabilityReady, date, timeRange, blockedCombos, onTimeChange, timeZone]);
 
   return (
     <div className="mt-2 grid grid-cols-2 gap-2">
       {TIME_RANGE_OPTIONS.map((option) => {
+        const sessionPast = Boolean(
+          date && isPastTimeRangeSession(date, option.id, timeZone),
+        );
         const comboBlocked = Boolean(
           availabilityReady &&
             date &&
-            blockedCombos?.has(slotComboKey(date, option.id)),
+            (blockedCombos?.has(slotComboKey(date, option.id)) || sessionPast),
         );
         const checked = !comboBlocked && timeRange === option.id;
         return (
@@ -825,7 +841,11 @@ function DayTimePicker({
             key={option.id}
             disabled={!availabilityReady || comboBlocked}
             title={
-              comboBlocked ? BLOCKED_SESSION_HINT : undefined
+              comboBlocked
+                ? sessionPast
+                  ? PAST_SESSION_HINT
+                  : BLOCKED_SESSION_HINT
+                : undefined
             }
             onClick={() => {
               if (!comboBlocked) onTimeChange(option.id);
@@ -992,6 +1012,9 @@ function ServiceBookingFlow({
       .size === preferredSlots.length &&
     preferredSlots.every(
       (slot) => !blockedCombos.has(slotComboKey(slot.date, slot.timeRange)),
+    ) &&
+    preferredSlots.every(
+      (slot) => !isPastTimeRangeSession(slot.date, slot.timeRange, timeZone),
     );
 
   useEffect(() => {
@@ -1050,10 +1073,13 @@ function ServiceBookingFlow({
           changed = true;
           return [];
         }
-        if (!blockedCombos.has(slotComboKey(slot.date, slot.timeRange))) {
+        if (
+          !blockedCombos.has(slotComboKey(slot.date, slot.timeRange)) &&
+          !isPastTimeRangeSession(slot.date, slot.timeRange, timeZone)
+        ) {
           return [slot];
         }
-        const fallback = firstAvailableTimeRange(slot.date, blockedCombos);
+        const fallback = firstAvailableTimeRange(slot.date, blockedCombos, timeZone);
         if (!fallback) {
           changed = true;
           return [];
@@ -1063,7 +1089,7 @@ function ServiceBookingFlow({
       });
       return changed ? next : prev;
     });
-  }, [availabilityReady, blockedCombos]);
+  }, [availabilityReady, blockedCombos, timeZone]);
 
   const customerValid =
     customer.fullName.trim().length >= 2 &&
@@ -1160,7 +1186,7 @@ function ServiceBookingFlow({
         blockedDay = true;
         return prev;
       }
-      const timeRange = firstAvailableTimeRange(iso, blockedCombos);
+      const timeRange = firstAvailableTimeRange(iso, blockedCombos, timeZone);
       if (!timeRange) {
         blockedDay = true;
         return prev;
@@ -1632,6 +1658,7 @@ function ServiceBookingFlow({
                         timeRange={slot.timeRange}
                         blockedCombos={blockedCombos}
                         availabilityReady={availabilityReady}
+                        timeZone={timeZone}
                         onTimeChange={(timeRange) =>
                           updateSlot(slotIndex, "timeRange", timeRange)
                         }

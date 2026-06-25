@@ -8,6 +8,10 @@ import {
 import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
+import {
+  isPastHourSlot,
+  PAST_HOUR_SLOT_HINT,
+} from "@/lib/calendar/past-scheduling";
 import { formatClockTime } from "@/lib/inspection/types";
 import { parseClockMinutes } from "@/lib/leave/clock";
 import { useEffect, useMemo, useState } from "react";
@@ -117,6 +121,7 @@ export function AdminDaySchedulePicker({
   disabled = false,
   hideTimeRangeFields = false,
   multiHourSlots = false,
+  timeZone,
   onStartTimeChange,
   onEndTimeChange,
   onWindowChange,
@@ -130,6 +135,7 @@ export function AdminDaySchedulePicker({
   hideTimeRangeFields?: boolean;
   /** Jobs: tap consecutive hourly slots; tap again to remove from the range. */
   multiHourSlots?: boolean;
+  timeZone?: string | null;
   onStartTimeChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
   /** Atomic start/end update — required for multi-hour job slot picking. */
@@ -269,6 +275,7 @@ export function AdminDaySchedulePicker({
   }, [startTime, endTime]);
 
   function handleSlotClick(slotStartTime: string) {
+    if (isPastHourSlot(date, slotStartTime, timeZone)) return;
     if (multiHourSlots && onWindowChange) {
       handleMultiHourSlotClick(
         slotStartTime,
@@ -308,18 +315,21 @@ export function AdminDaySchedulePicker({
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {slots.map((slot) => {
               const full = kind === "job" ? slot.jobsFull : slot.requestsFull;
+              const past = isPastHourSlot(date, slot.startTime, timeZone);
               const selected = selectedHours.has(slot.startTime);
               const startLabel = formatClockTime(slot.startTime);
               const endLabel = formatClockTime(slot.endTime);
+              const slotDisabled = pickerDisabled || full || past;
 
               return (
                 <button
                   key={slot.startTime}
                   type="button"
-                  disabled={pickerDisabled || full}
+                  disabled={slotDisabled}
+                  title={past ? PAST_HOUR_SLOT_HINT : undefined}
                   onClick={() => handleSlotClick(slot.startTime)}
                   className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                    pickerDisabled || full
+                    slotDisabled
                       ? "cursor-not-allowed border-stone-100 bg-stone-50 opacity-60"
                       : selected
                         ? "border-primary bg-primary/10 ring-1 ring-primary/25"
@@ -335,7 +345,11 @@ export function AdminDaySchedulePicker({
                       ? ` · ${slot.personalCount} personal`
                       : ""}
                   </p>
-                  {full ? (
+                  {past ? (
+                    <p className="mt-0.5 font-body text-[10px] font-semibold uppercase text-outline">
+                      Past
+                    </p>
+                  ) : full ? (
                     <p className="mt-0.5 font-body text-[10px] font-semibold uppercase text-error">
                       Full
                     </p>
