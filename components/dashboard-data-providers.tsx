@@ -1,6 +1,7 @@
 "use client";
 
 import { BusinessProfileProvider } from "@/lib/business/business-profile-context";
+import { BusinessModuleSettingsProvider } from "@/lib/business/use-business-module-settings";
 import { BookingsProvider } from "@/lib/bookings/bookings-context";
 import { InspectionRequestsProvider } from "@/lib/inspection/inspection-requests-context";
 import { LeaveRequestsProvider } from "@/lib/leave/leave-requests-context";
@@ -15,7 +16,8 @@ import type { ReactNode } from "react";
 export function DashboardDataProviders({ children }: { children: ReactNode }) {
   return (
     <BusinessProfileProvider>
-      <InspectionRequestsProvider>
+      <BusinessModuleSettingsProvider>
+        <InspectionRequestsProvider>
         <LeaveRequestsProvider>
           <SmsBalanceProvider>
             <TenantSubscriptionProvider>
@@ -31,6 +33,7 @@ export function DashboardDataProviders({ children }: { children: ReactNode }) {
           </SmsBalanceProvider>
         </LeaveRequestsProvider>
       </InspectionRequestsProvider>
+      </BusinessModuleSettingsProvider>
     </BusinessProfileProvider>
   );
 }
