@@ -39,7 +39,6 @@ import {
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import type { QuotationDetail } from "@/lib/quotations/types";
-import { iconForBusinessType } from "@/lib/onboarding/types";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { platformTodayIso } from "@/lib/platform/timezone";
 import Link from "next/link";
@@ -307,58 +306,6 @@ function SectionLink({
   );
 }
 
-function RequestTypeCard({
-  icon,
-  label,
-  description,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  icon: string;
-  label: string;
-  description: string;
-  selected: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={disabled ? undefined : onSelect}
-      disabled={disabled}
-      className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
-        selected
-          ? "border-primary bg-surface-container-lowest shadow-sm ring-1 ring-primary/20"
-          : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
-      }`}
-    >
-      <span
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-          selected
-            ? "bg-primary text-on-primary"
-            : "bg-primary/10 text-primary"
-        }`}
-      >
-        <span className="material-symbols-outlined text-[20px]">{icon}</span>
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-body text-[14px] font-semibold text-on-surface">
-          {label}
-        </span>
-        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
-          {description}
-        </span>
-      </span>
-      {selected ? (
-        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
-          check_circle
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
 export function CreateQuotationPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -392,7 +339,7 @@ export function CreateQuotationPage() {
   const [customServiceTitle, setCustomServiceTitle] = useState("");
   const [customServiceDescription, setCustomServiceDescription] = useState("");
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
+  const [, setServicesLoading] = useState(false);
 
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [catalogSuggestField, setCatalogSuggestField] = useState<
@@ -505,19 +452,12 @@ export function CreateQuotationPage() {
     setAddress({ ...EMPTY_ADDRESS, ...request.address });
     setCustomerSearch(request.customer.fullName ?? "");
     setClientOpen(false);
-    if (request.requestType === "existing_service" && request.serviceId) {
-      setRequestType("existing_service");
-      setSelectedServiceId(request.serviceId);
-      setCustomServiceTitle("");
-      setCustomServiceDescription("");
-    } else {
-      setRequestType("custom_quote");
-      setSelectedServiceId(null);
-      setCustomServiceTitle(
-        request.customRequest?.title ?? request.serviceName ?? "",
-      );
-      setCustomServiceDescription(request.customRequest?.description ?? "");
-    }
+    setRequestType("custom_quote");
+    setSelectedServiceId(null);
+    setCustomServiceTitle(
+      request.customRequest?.title ?? request.serviceName ?? "",
+    );
+    setCustomServiceDescription(request.customRequest?.description ?? "");
     setRequestPickerOpen(false);
     setRequestSearch("");
     setError(null);
@@ -568,29 +508,19 @@ export function CreateQuotationPage() {
         const linkedRequest = requests.find(
           (request) => request.id === quotation.inspectionRequestId,
         );
-        if (
-          linkedRequest?.requestType === "existing_service" &&
-          linkedRequest.serviceId
-        ) {
-          setRequestType("existing_service");
-          setSelectedServiceId(linkedRequest.serviceId);
-          setCustomServiceTitle("");
-          setCustomServiceDescription("");
-        } else {
-          setRequestType("custom_quote");
-          setSelectedServiceId(null);
-          setCustomServiceTitle(
-            quotation.serviceTitle ??
-              linkedRequest?.customRequest?.title ??
-              linkedRequest?.serviceName ??
-              "",
-          );
-          setCustomServiceDescription(
-            quotation.serviceDescription ??
-              linkedRequest?.customRequest?.description ??
-              "",
-          );
-        }
+        setRequestType("custom_quote");
+        setSelectedServiceId(null);
+        setCustomServiceTitle(
+          quotation.serviceTitle ??
+            linkedRequest?.customRequest?.title ??
+            linkedRequest?.serviceName ??
+            "",
+        );
+        setCustomServiceDescription(
+          quotation.serviceDescription ??
+            linkedRequest?.customRequest?.description ??
+            "",
+        );
         setLineItems(
           quotation.lineItems.map((item, index) =>
             savedLineItemFromQuotation(item, index),
@@ -895,18 +825,6 @@ export function CreateQuotationPage() {
         };
         if (servicesRes.ok && servicesData.ok && servicesData.services) {
           setServices(servicesData.services);
-          const params = new URLSearchParams(window.location.search);
-          const editingDraft =
-            params.get("quotationId")?.trim() ||
-            params.get("draftId")?.trim() ||
-            params.get("requestId")?.trim() ||
-            params.get("inspectionRequestId")?.trim();
-          if (
-            servicesData.services.some((service) => service.isActive) &&
-            !editingDraft
-          ) {
-            setRequestType("existing_service");
-          }
         }
         setServicesLoading(false);
       } catch {
@@ -1795,144 +1713,46 @@ export function CreateQuotationPage() {
               {/* Service */}
               <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                 <h2 className="font-body text-[15px] font-semibold text-on-surface">
-                  Service
+                  Job details
                 </h2>
                 <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                  Choose an existing service or describe a custom job — same as
-                  an request.
+                  Describe the work for this quotation.
                 </p>
-                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <RequestTypeCard
-                    icon="format_list_bulleted"
-                    label="Existing service"
-                    description="Pick from the services this business offers."
-                    selected={requestType === "existing_service"}
-                    disabled={servicesLoading || activeServices.length === 0}
-                    onSelect={() => {
-                      setRequestType("existing_service");
-                      setError(null);
-                    }}
-                  />
-                  <RequestTypeCard
-                    icon="request_quote"
-                    label="Custom quote"
-                    description="Describe the work for this quotation."
-                    selected={requestType === "custom_quote"}
-                    onSelect={() => {
-                      setRequestType("custom_quote");
-                      setError(null);
-                    }}
-                  />
-                </div>
 
-                {requestType === "existing_service" ? (
-                  activeServices.length > 0 ? (
-                    <ul className="mt-3 overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
-                      {activeServices.map((service, index) => {
-                        const selected = selectedServiceId === service.id;
-                        return (
-                          <li
-                            key={service.id}
-                            className={
-                              index > 0
-                                ? "border-t border-outline-variant/40"
-                                : ""
-                            }
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedServiceId(
-                                  selectedServiceId === service.id
-                                    ? null
-                                    : service.id,
-                                );
-                                setError(null);
-                              }}
-                              className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
-                                selected
-                                  ? "bg-primary/5"
-                                  : "hover:bg-surface-container"
-                              }`}
-                            >
-                              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
-                                {service.imageUrl ? (
-                                  <img
-                                    src={service.imageUrl}
-                                    alt=""
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center">
-                                    <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
-                                      {iconForBusinessType(service.businessType)}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                              <span className="min-w-0 flex-1">
-                                <span className="block font-body text-[14px] font-semibold text-on-surface">
-                                  {service.name}
-                                </span>
-                                <span className="font-body text-[12px] text-on-surface-variant">
-                                  {service.businessType}
-                                </span>
-                              </span>
-                              {selected ? (
-                                <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
-                                  check_circle
-                                </span>
-                              ) : null}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : servicesLoading ? (
-                    <p className="mt-3 font-body text-[13px] text-on-surface-variant">
-                      Loading services…
+                <div className="mt-3 grid gap-3">
+                  <label className="block">
+                    <span className={LABEL_CLASS}>Job title</span>
+                    <input
+                      type="text"
+                      value={customServiceTitle}
+                      onChange={(e) => {
+                        setCustomServiceTitle(e.target.value);
+                        setError(null);
+                      }}
+                      placeholder="e.g. Replace kitchen tap and check leak"
+                      className={INPUT_CLASS}
+                      maxLength={120}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={LABEL_CLASS}>What needs doing?</span>
+                    <textarea
+                      value={customServiceDescription}
+                      onChange={(e) => {
+                        setCustomServiceDescription(e.target.value);
+                        setError(null);
+                      }}
+                      rows={4}
+                      placeholder="Tell us the scope, materials involved, urgency, etc."
+                      className={`${INPUT_CLASS} resize-y`}
+                      maxLength={1500}
+                    />
+                    <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+                      At least 10 characters (
+                      {customServiceDescription.trim().length}/10).
                     </p>
-                  ) : (
-                    <p className="mt-3 font-body text-[13px] text-on-surface-variant">
-                      No active services yet — use a custom quote instead.
-                    </p>
-                  )
-                ) : (
-                  <div className="mt-3 grid gap-3">
-                    <label className="block">
-                      <span className={LABEL_CLASS}>Job title</span>
-                      <input
-                        type="text"
-                        value={customServiceTitle}
-                        onChange={(e) => {
-                          setCustomServiceTitle(e.target.value);
-                          setError(null);
-                        }}
-                        placeholder="e.g. Replace kitchen tap and check leak"
-                        className={INPUT_CLASS}
-                        maxLength={120}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={LABEL_CLASS}>What needs doing?</span>
-                      <textarea
-                        value={customServiceDescription}
-                        onChange={(e) => {
-                          setCustomServiceDescription(e.target.value);
-                          setError(null);
-                        }}
-                        rows={4}
-                        placeholder="Tell us the scope, materials involved, urgency, etc."
-                        className={`${INPUT_CLASS} resize-y`}
-                        maxLength={1500}
-                      />
-                      <p className="mt-1 font-body text-[11px] text-on-surface-variant">
-                        At least 10 characters (
-                        {customServiceDescription.trim().length}/10).
-                      </p>
-                    </label>
-                  </div>
-                )}
+                  </label>
+                </div>
               </section>
 
               {/* Items */}
