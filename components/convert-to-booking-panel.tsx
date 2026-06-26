@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import {
+  endClockFromEstimate,
   estimateMinutesFromTimeRange,
   minutesBetweenClockTimes,
 } from "@/lib/bookings/job-estimate";
@@ -411,7 +412,14 @@ export function ConvertToBookingPanel({
         <JobEstimateSelect
           value={estimatedMinutes}
           disabled={submitting}
-          onChange={setEstimatedMinutes}
+          onChange={(minutes) => {
+            setEstimatedMinutes(minutes);
+            // Extend the scheduled window so the matching hourly slots light up
+            // (e.g. "3 hours" from 08:00 selects 8–9, 9–10, 10–11).
+            if (startTime) {
+              setEndTime(endClockFromEstimate(startTime, minutes));
+            }
+          }}
         />
       </label>
 

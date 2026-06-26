@@ -795,16 +795,6 @@ export function CreateInvoiceFromQuotation({
         setTab("create");
         return;
       }
-      if (
-        !address.street.trim() ||
-        !address.suburb.trim() ||
-        !address.state.trim() ||
-        !address.postcode.trim()
-      ) {
-        setError("Enter a complete service address.");
-        setTab("create");
-        return;
-      }
     }
     if (andSend && !customerEmail.trim()) {
       setError("Add a customer email before sending.");
@@ -1343,7 +1333,9 @@ export function CreateInvoiceFromQuotation({
                   {directMode ? (
                     <>
                       <label className="block sm:col-span-2">
-                        <span className={LABEL_CLASS}>Street address</span>
+                        <span className={LABEL_CLASS}>
+                          Street address (optional)
+                        </span>
                         <input
                           type="text"
                           value={address.street}

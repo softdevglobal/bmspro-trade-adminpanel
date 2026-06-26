@@ -46,3 +46,20 @@ export function estimateMinutesFromTimeRange(
 ): number {
   return minutesBetweenClockTimes(start, end) ?? fallback;
 }
+
+function clockFromMinutes(totalMinutes: number): string {
+  const clamped = Math.max(0, Math.min(totalMinutes, 23 * 60 + 59));
+  const hour = Math.floor(clamped / 60);
+  const minute = clamped % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/**
+ * End time for a job that starts at [start] and runs for [minutes]. Used so
+ * picking a duration (e.g. "3 hours") extends the scheduled window and lights
+ * up the matching hourly slots (08:00 → 11:00 covers 8–9, 9–10, 10–11).
+ */
+export function endClockFromEstimate(start: string, minutes: number): string {
+  if (!isClockTime(start)) return start;
+  return clockFromMinutes(minutesFromMidnight(start) + minutes);
+}

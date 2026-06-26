@@ -9,7 +9,7 @@ import {
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 
-export const PAST_DAY_HINT = "Past dates cannot be selected";
+export const PAST_DAY_HINT = "Past date — view only, new bookings disabled";
 export const PAST_SESSION_HINT = "This time has already passed";
 export const PAST_HOUR_SLOT_HINT = "This hour has already passed";
 

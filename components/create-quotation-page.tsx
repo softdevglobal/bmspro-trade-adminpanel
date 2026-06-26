@@ -1061,7 +1061,6 @@ export function CreateQuotationPage() {
     if (customer.phone.replace(/\D/g, "").length < 6) {
       return "Enter a valid client mobile number.";
     }
-    if (address.street.trim().length < 3) return "Enter a complete address.";
     if (requestType === "existing_service") {
       if (!selectedServiceId) return "Select a service from the list.";
     } else {
@@ -1076,7 +1075,6 @@ export function CreateQuotationPage() {
     return null;
   }, [
     customer,
-    address,
     lineItems,
     requestType,
     selectedServiceId,
@@ -1644,7 +1642,7 @@ export function CreateQuotationPage() {
                   </div>
 
                   <div className="mt-4 border-t border-outline-variant/40 pt-4">
-                    <p className={LABEL_CLASS}>Bill to</p>
+                    <p className={LABEL_CLASS}>Bill to (optional)</p>
                     <div className="mt-2 grid gap-3 sm:grid-cols-2">
                       <label className="block sm:col-span-2">
                         <span className={LABEL_CLASS}>Street</span>
