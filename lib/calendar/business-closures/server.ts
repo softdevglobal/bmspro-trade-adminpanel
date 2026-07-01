@@ -12,6 +12,10 @@ import {
   type ClosureConflictItem,
 } from "@/lib/calendar/business-closures/types";
 import { adminDb } from "@/lib/firebase/admin";
+import {
+  isIsoDateBeforeToday,
+  PLATFORM_TIME_ZONE,
+} from "@/lib/platform/timezone";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import {
   formatVisitWindow,
@@ -25,6 +29,16 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
 function isIsoDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+async function resolveBusinessTimeZone(businessId: string): Promise<string> {
+  try {
+    const snap = await adminDb.collection("businesses").doc(businessId).get();
+    const tz = snap.data()?.timezone;
+    return typeof tz === "string" && tz.trim() ? tz.trim() : PLATFORM_TIME_ZONE;
+  } catch {
+    return PLATFORM_TIME_ZONE;
+  }
 }
 
 function closureDocId(businessId: string, date: string): string {
@@ -202,6 +216,15 @@ export async function createBusinessClosure(
 > {
   if (!isIsoDate(input.date)) {
     return { ok: false, status: 400, error: "Enter a valid date." };
+  }
+
+  const timeZone = await resolveBusinessTimeZone(businessId);
+  if (isIsoDateBeforeToday(input.date, timeZone)) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Past dates cannot be marked as business off days.",
+    };
   }
 
   const existing = await getBusinessClosure(businessId, input.date);
