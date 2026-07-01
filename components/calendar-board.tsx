@@ -879,6 +879,7 @@ export function CalendarBoard() {
     : "";
 
   function openClosureModal(isoDate: string) {
+    if (isPastCalendarDate(isoDate, timeZone)) return;
     setClosureModalDate(isoDate);
     setClosureModalOpen(true);
   }
@@ -930,6 +931,10 @@ export function CalendarBoard() {
   const unassignedCount = stats[1]?.value ?? 0;
 
   const focusIso = useMemo(() => toIsoDateLocal(focusDate), [focusDate]);
+  const isFocusDayPast = isPastCalendarDate(focusIso, timeZone);
+  const isSelectedDayPast = selectedIsoDate
+    ? isPastCalendarDate(selectedIsoDate, timeZone)
+    : false;
 
   const selectedDayEvents = selectedIsoDate
     ? (monthEventsByDate[selectedIsoDate] ?? [])
@@ -1600,7 +1605,7 @@ export function CalendarBoard() {
                     you are open again.
                   </p>
                 </div>
-                {canAddEvents ? (
+                {canAddEvents && !isFocusDayPast ? (
                   <button
                     type="button"
                     onClick={() => openClosureModal(focusIso)}
@@ -1613,7 +1618,7 @@ export function CalendarBoard() {
                   </button>
                 ) : null}
               </div>
-            ) : canAddEvents ? (
+            ) : canAddEvents && !isFocusDayPast ? (
               <div className="mb-4 flex justify-end">
                 <button
                   type="button"
@@ -1691,7 +1696,7 @@ export function CalendarBoard() {
                     ? `${selectedDayEvents.length} ${selectedDayEvents.length === 1 ? "item" : "items"} on this day`
                     : "Nothing scheduled on this day"}
               </p>
-              {canAddEvents && selectedIsoDate ? (
+              {canAddEvents && selectedIsoDate && !isSelectedDayPast ? (
                 <button
                   type="button"
                   onClick={() => openClosureModal(selectedIsoDate)}
