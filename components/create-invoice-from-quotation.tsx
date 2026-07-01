@@ -28,7 +28,6 @@ import {
   type InspectionRequestType,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
-import { iconForBusinessType } from "@/lib/onboarding/types";
 import { platformTodayIso } from "@/lib/platform/timezone";
 import {
   buildQuotationDocumentDeposit,
@@ -50,58 +49,6 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Tab = "create" | "preview" | "send";
-
-function RequestTypeCard({
-  icon,
-  label,
-  description,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  icon: string;
-  label: string;
-  description: string;
-  selected: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={disabled ? undefined : onSelect}
-      disabled={disabled}
-      className={`flex w-full min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
-        selected
-          ? "border-primary bg-surface-container-lowest shadow-sm ring-1 ring-primary/20"
-          : "border-outline-variant/60 bg-surface-container-lowest hover:border-primary/40"
-      }`}
-    >
-      <span
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-          selected
-            ? "bg-primary text-on-primary"
-            : "bg-primary/10 text-primary"
-        }`}
-      >
-        <span className="material-symbols-outlined text-[20px]">{icon}</span>
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-body text-[14px] font-semibold text-on-surface">
-          {label}
-        </span>
-        <span className="mt-0.5 block font-body text-[12px] text-on-surface-variant">
-          {description}
-        </span>
-      </span>
-      {selected ? (
-        <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
-          check_circle
-        </span>
-      ) : null}
-    </button>
-  );
-}
 
 function SaveSpinner({ label }: { label: string }) {
   return (
@@ -308,7 +255,7 @@ export function CreateInvoiceFromQuotation({
   const [customServiceTitle, setCustomServiceTitle] = useState("");
   const [customServiceDescription, setCustomServiceDescription] = useState("");
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
+  const [, setServicesLoading] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -569,13 +516,6 @@ export function CreateInvoiceFromQuotation({
         };
         if (servicesRes.ok && servicesData.ok && servicesData.services) {
           setServices(servicesData.services);
-          const active = servicesData.services.filter(
-            (service) => service.isActive,
-          );
-          if (direct && !isEditingDraftInvoice && active.length > 0) {
-            setRequestType("existing_service");
-            setSelectedServiceId(active[0]?.id ?? null);
-          }
         }
         setServicesLoading(false);
       }
@@ -852,16 +792,6 @@ export function CreateInvoiceFromQuotation({
       }
       if (customerPhone.replace(/\D/g, "").length < 6) {
         setError("Enter a valid customer mobile number.");
-        setTab("create");
-        return;
-      }
-      if (
-        !address.street.trim() ||
-        !address.suburb.trim() ||
-        !address.state.trim() ||
-        !address.postcode.trim()
-      ) {
-        setError("Enter a complete service address.");
         setTab("create");
         return;
       }
@@ -1284,145 +1214,42 @@ export function CreateInvoiceFromQuotation({
               {directMode ? (
                 <section className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                   <h2 className="font-body text-[15px] font-semibold text-on-surface">
-                    Job
+                    Job details
                   </h2>
                   <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                    Choose an existing service or describe a custom job for this
-                    invoice.
+                    Describe the work for this invoice.
                   </p>
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <RequestTypeCard
-                      icon="format_list_bulleted"
-                      label="Our service"
-                      description="Pick from the services this business offers."
-                      selected={requestType === "existing_service"}
-                      disabled={servicesLoading || activeServices.length === 0}
-                      onSelect={() => {
-                        setRequestType("existing_service");
-                        setSelectedServiceId((current) => {
-                          if (current) return current;
-                          return activeServices[0]?.id ?? null;
-                        });
-                        setError(null);
-                      }}
-                    />
-                    <RequestTypeCard
-                      icon="request_quote"
-                      label="Custom service"
-                      description="Describe the work for this invoice."
-                      selected={requestType === "custom_quote"}
-                      onSelect={() => {
-                        setRequestType("custom_quote");
-                        setSelectedServiceId(null);
-                        setError(null);
-                      }}
-                    />
-                  </div>
 
-                  {requestType === "existing_service" ? (
-                    activeServices.length > 0 ? (
-                      <ul className="mt-3 overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
-                        {activeServices.map((service, index) => {
-                          const selected = selectedServiceId === service.id;
-                          return (
-                            <li
-                              key={service.id}
-                              className={
-                                index > 0
-                                  ? "border-t border-outline-variant/40"
-                                  : ""
-                              }
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedServiceId(
-                                    selectedServiceId === service.id
-                                      ? null
-                                      : service.id,
-                                  );
-                                  setError(null);
-                                }}
-                                className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
-                                  selected
-                                    ? "bg-primary/5"
-                                    : "hover:bg-surface-container"
-                                }`}
-                              >
-                                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
-                                  {service.imageUrl ? (
-                                    <img
-                                      src={service.imageUrl}
-                                      alt=""
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center">
-                                      <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
-                                        {iconForBusinessType(service.businessType)}
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                                <span className="min-w-0 flex-1">
-                                  <span className="block font-body text-[14px] font-semibold text-on-surface">
-                                    {service.name}
-                                  </span>
-                                  <span className="font-body text-[12px] text-on-surface-variant">
-                                    {service.businessType}
-                                  </span>
-                                </span>
-                                {selected ? (
-                                  <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[20px] text-primary">
-                                    check_circle
-                                  </span>
-                                ) : null}
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : servicesLoading ? (
-                      <p className="mt-3 font-body text-[13px] text-on-surface-variant">
-                        Loading services…
-                      </p>
-                    ) : (
-                      <p className="mt-3 font-body text-[13px] text-on-surface-variant">
-                        No active services yet — use a custom service instead.
-                      </p>
-                    )
-                  ) : (
-                    <div className="mt-3 grid gap-3">
-                      <label className="block">
-                        <span className={LABEL_CLASS}>Job title</span>
-                        <input
-                          type="text"
-                          value={customServiceTitle}
-                          onChange={(e) => {
-                            setCustomServiceTitle(e.target.value);
-                            setError(null);
-                          }}
-                          placeholder="e.g. Replace kitchen tap and check leak"
-                          className={INPUT_CLASS}
-                          maxLength={120}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className={LABEL_CLASS}>Description</span>
-                        <textarea
-                          value={customServiceDescription}
-                          onChange={(e) => {
-                            setCustomServiceDescription(e.target.value);
-                            setError(null);
-                          }}
-                          rows={4}
-                          placeholder="Scope of work, access notes, materials…"
-                          className={`${INPUT_CLASS} resize-y`}
-                          maxLength={2000}
-                        />
-                      </label>
-                    </div>
-                  )}
+                  <div className="mt-3 grid gap-3">
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Job title</span>
+                      <input
+                        type="text"
+                        value={customServiceTitle}
+                        onChange={(e) => {
+                          setCustomServiceTitle(e.target.value);
+                          setError(null);
+                        }}
+                        placeholder="e.g. Replace kitchen tap and check leak"
+                        className={INPUT_CLASS}
+                        maxLength={120}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className={LABEL_CLASS}>Description</span>
+                      <textarea
+                        value={customServiceDescription}
+                        onChange={(e) => {
+                          setCustomServiceDescription(e.target.value);
+                          setError(null);
+                        }}
+                        rows={4}
+                        placeholder="Scope of work, access notes, materials…"
+                        className={`${INPUT_CLASS} resize-y`}
+                        maxLength={2000}
+                      />
+                    </label>
+                  </div>
 
                   <p className="mt-3 font-body text-[12px] text-on-surface-variant">
                     A completed request, quotation, and job are saved with this
@@ -1506,7 +1333,9 @@ export function CreateInvoiceFromQuotation({
                   {directMode ? (
                     <>
                       <label className="block sm:col-span-2">
-                        <span className={LABEL_CLASS}>Street address</span>
+                        <span className={LABEL_CLASS}>
+                          Street address (optional)
+                        </span>
                         <input
                           type="text"
                           value={address.street}

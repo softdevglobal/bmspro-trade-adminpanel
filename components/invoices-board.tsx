@@ -7,7 +7,7 @@ import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import { formatAddress } from "@/lib/inspection/types";
 import { fetchAdminInvoicePdfBytes } from "@/lib/pdf/fetch-admin-document-pdf";
-import { printPdfBytes } from "@/lib/pdf/print-pdf";
+import { pdfBytesToObjectUrl, printPdfBytes } from "@/lib/pdf/print-pdf";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
@@ -293,9 +293,7 @@ function InvoicePreviewDrawer({
     setPdfLoading(true);
     try {
       const bytes = await fetchInvoicePdfBytes();
-      setPdfSource(
-        URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })),
-      );
+      setPdfSource(pdfBytesToObjectUrl(bytes));
       setPdfOpen(true);
     } catch (error) {
       setPdfError(

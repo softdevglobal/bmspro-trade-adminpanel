@@ -40,7 +40,7 @@ import {
   fetchAdminInvoicePdfBytes,
   fetchAdminQuotationPdfBytes,
 } from "@/lib/pdf/fetch-admin-document-pdf";
-import { printPdfBytes } from "@/lib/pdf/print-pdf";
+import { pdfBytesToObjectUrl, printPdfBytes } from "@/lib/pdf/print-pdf";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
@@ -738,9 +738,7 @@ function QuotationPreviewContent({
     setInvoicePdfLoading(true);
     try {
       const bytes = await fetchInvoicePdfBytes();
-      setInvoicePdfSource(
-        URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })),
-      );
+      setInvoicePdfSource(pdfBytesToObjectUrl(bytes));
       setInvoicePdfOpen(true);
     } catch (error) {
       setInvoicePdfError(

@@ -59,7 +59,6 @@ import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
   isPastCalendarDate,
   isPastHourSlot,
-  PAST_DAY_HINT,
   PAST_HOUR_SLOT_HINT,
 } from "@/lib/calendar/past-scheduling";
 import { platformTodayIso } from "@/lib/platform/timezone";
@@ -880,6 +879,7 @@ export function CalendarBoard() {
     : "";
 
   function openClosureModal(isoDate: string) {
+    if (isPastCalendarDate(isoDate, timeZone)) return;
     setClosureModalDate(isoDate);
     setClosureModalOpen(true);
   }
@@ -931,6 +931,10 @@ export function CalendarBoard() {
   const unassignedCount = stats[1]?.value ?? 0;
 
   const focusIso = useMemo(() => toIsoDateLocal(focusDate), [focusDate]);
+  const isFocusDayPast = isPastCalendarDate(focusIso, timeZone);
+  const isSelectedDayPast = selectedIsoDate
+    ? isPastCalendarDate(selectedIsoDate, timeZone)
+    : false;
 
   const selectedDayEvents = selectedIsoDate
     ? (monthEventsByDate[selectedIsoDate] ?? [])
@@ -976,7 +980,6 @@ export function CalendarBoard() {
   }, [bookingDrawerOpen, filterDrawerOpen]);
 
   function openDayByIso(isoDate: string) {
-    if (isPastCalendarDate(isoDate, timeZone)) return;
     setSelectedIsoDate(isoDate);
     setBookingDrawerOpen(true);
   }
@@ -1003,7 +1006,6 @@ export function CalendarBoard() {
   function navigatePeriod(direction: -1 | 1) {
     if (viewTab === "Today") {
       const next = addDays(focusDate, direction);
-      if (direction < 0 && toIsoDateLocal(next) < todayIso) return;
       setFocusDate(next);
       setViewMonth(startOfMonth(next));
       return;
@@ -1334,13 +1336,9 @@ export function CalendarBoard() {
                 <button
                   key={day}
                   type="button"
-                  disabled={isPastDay}
-                  title={isPastDay ? PAST_DAY_HINT : undefined}
                   onClick={() => openDay(day)}
-                  className={`group flex min-h-[88px] flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors sm:min-h-[120px] sm:p-3 ${
-                    isPastDay
-                      ? "cursor-not-allowed bg-surface/40 opacity-55"
-                      : "cursor-pointer hover:bg-surface-container-low active:scale-[0.99]"
+                  className={`group flex min-h-[88px] flex-col justify-between border-b border-r border-outline-variant p-2 text-left transition-colors sm:min-h-[120px] sm:p-3 cursor-pointer hover:bg-surface-container-low active:scale-[0.99] ${
+                    isPastDay ? "opacity-80" : ""
                   } ${
                     isClosedDay
                       ? isTodayCell
@@ -1419,20 +1417,13 @@ export function CalendarBoard() {
                   >
                     <button
                       type="button"
-                      disabled={isPastDay}
-                      title={isPastDay ? PAST_DAY_HINT : undefined}
                       onClick={() => {
-                        if (isPastDay) return;
                         setFocusDate(day);
                         openDayByIso(isoDate);
                       }}
-                      className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left ${
-                        isPastDay
-                          ? "cursor-not-allowed"
-                          : `active:bg-surface-container-low ${
-                              isClosedDay ? "active:bg-amber-100" : ""
-                            }`
-                      }`}
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-container-low ${
+                        isPastDay ? "opacity-80" : ""
+                      } ${isClosedDay ? "active:bg-amber-100" : ""}`}
                     >
                       <div className="flex min-w-0 items-center gap-3">
                         <span
@@ -1509,17 +1500,12 @@ export function CalendarBoard() {
                     <button
                       key={`week-head-${isoDate}`}
                       type="button"
-                      disabled={isPastDay}
-                      title={isPastDay ? PAST_DAY_HINT : undefined}
                       onClick={() => {
-                        if (isPastDay) return;
                         setFocusDate(day);
                         openDayByIso(isoDate);
                       }}
-                      className={`flex h-14 items-center justify-between gap-1 border-r border-outline-variant px-2 text-left transition-colors last:border-r-0 sm:px-3 ${
-                        isPastDay
-                          ? "cursor-not-allowed bg-surface/40 opacity-60"
-                          : "hover:bg-surface-container-low"
+                      className={`flex h-14 items-center justify-between gap-1 border-r border-outline-variant px-2 text-left transition-colors last:border-r-0 hover:bg-surface-container-low sm:px-3 ${
+                        isPastDay ? "opacity-80" : ""
                       } ${
                         isClosedDay
                           ? CLOSED_DAY_WEEK_HEADER_CLASS
@@ -1619,7 +1605,7 @@ export function CalendarBoard() {
                     you are open again.
                   </p>
                 </div>
-                {canAddEvents ? (
+                {canAddEvents && !isFocusDayPast ? (
                   <button
                     type="button"
                     onClick={() => openClosureModal(focusIso)}
@@ -1632,7 +1618,7 @@ export function CalendarBoard() {
                   </button>
                 ) : null}
               </div>
-            ) : canAddEvents ? (
+            ) : canAddEvents && !isFocusDayPast ? (
               <div className="mb-4 flex justify-end">
                 <button
                   type="button"
@@ -1710,7 +1696,7 @@ export function CalendarBoard() {
                     ? `${selectedDayEvents.length} ${selectedDayEvents.length === 1 ? "item" : "items"} on this day`
                     : "Nothing scheduled on this day"}
               </p>
-              {canAddEvents && selectedIsoDate ? (
+              {canAddEvents && selectedIsoDate && !isSelectedDayPast ? (
                 <button
                   type="button"
                   onClick={() => openClosureModal(selectedIsoDate)}

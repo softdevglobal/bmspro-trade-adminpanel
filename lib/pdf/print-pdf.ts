@@ -1,9 +1,17 @@
 const PRINT_IFRAME_CLEANUP_MS = 60_000;
 
+/** Uint8Array from fetch may use ArrayBufferLike; slice() yields a Blob-safe copy. */
+export function pdfBytesToBlob(bytes: Uint8Array): Blob {
+  return new Blob([bytes.slice()], { type: "application/pdf" });
+}
+
+export function pdfBytesToObjectUrl(bytes: Uint8Array): string {
+  return URL.createObjectURL(pdfBytesToBlob(bytes));
+}
+
 /** Opens the browser print dialog for a PDF byte array. */
 export async function printPdfBytes(bytes: Uint8Array): Promise<void> {
-  const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
+  const url = pdfBytesToObjectUrl(bytes);
 
   await new Promise<void>((resolve, reject) => {
     const iframe = document.createElement("iframe");
