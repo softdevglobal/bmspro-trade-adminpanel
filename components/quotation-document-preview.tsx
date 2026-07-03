@@ -280,7 +280,7 @@ export function QuotationDocumentPreview({
                   </span>
                 </div>
                 <div className="flex justify-end gap-10 pr-1 text-[#6b7280]">
-                  <span>Line discounts</span>
+                  <span>Item discount</span>
                   <span className="font-numeric font-medium">
                     −{formatQuoteMoney(lineDiscountTotalAud)}
                   </span>
@@ -325,7 +325,7 @@ export function QuotationDocumentPreview({
                   </span>
                 </div>
                 <div className="flex justify-between gap-4 text-[#6b7280]">
-                  <span>Line discounts</span>
+                  <span>Item discount</span>
                   <span className="font-numeric font-medium text-[#1e2430]">
                     −{formatQuoteMoney(lineDiscountTotalAud)}
                   </span>

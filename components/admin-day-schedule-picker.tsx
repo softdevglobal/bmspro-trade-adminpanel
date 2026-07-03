@@ -142,7 +142,8 @@ export function AdminDaySchedulePicker({
   onWindowChange?: (startTime: string | null, endTime: string | null) => void;
 }) {
   const { user } = useAuth();
-  const { workingHours } = useBusinessWorkingHours();
+  const { workingHours, loading: workingHoursLoading } =
+    useBusinessWorkingHours();
   const [slots, setSlots] = useState<HourSlotOccupancy[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -219,7 +220,7 @@ export function AdminDaySchedulePicker({
   const pickerDisabled = disabled || isBusinessClosed;
 
   const rangeError = useMemo(() => {
-    if (!startTime || !endTime) return null;
+    if (workingHoursLoading || !startTime || !endTime) return null;
     const windowError = validateCalendarVisitWindow(
       startTime,
       endTime,
@@ -243,7 +244,7 @@ export function AdminDaySchedulePicker({
       }
     }
     return null;
-  }, [startTime, endTime, slots, kind, workingHours]);
+  }, [startTime, endTime, slots, kind, workingHours, workingHoursLoading]);
 
   const selectedHours = useMemo(() => {
     if (!startTime || !endTime) return new Set<string>();
@@ -376,7 +377,7 @@ export function AdminDaySchedulePicker({
         <CalendarVisitTimeRangeFields
           startTime={startTime ?? "08:00"}
           endTime={endTime ?? "09:00"}
-          disabled={pickerDisabled}
+          disabled={pickerDisabled || workingHoursLoading}
           workingHours={workingHours}
           onStartTimeChange={onStartTimeChange}
           onEndTimeChange={onEndTimeChange}

@@ -859,7 +859,7 @@ export async function generateDocumentPdf(
     if (hasLineDiscounts) {
       drawPanelRow("Items subtotal", formatQuoteMoney(itemsGrossSubtotalAud));
       drawPanelRow(
-        "Line discounts",
+        "Item discount",
         `-${formatQuoteMoney(lineDiscountTotalAud)}`,
       );
     }
