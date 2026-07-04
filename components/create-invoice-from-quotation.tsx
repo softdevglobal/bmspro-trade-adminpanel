@@ -90,7 +90,6 @@ type DraftLineItem = {
   rate: string;
   discountPercent: string;
   applyGst: boolean;
-  showOptions: boolean;
 };
 
 const INPUT_CLASS =
@@ -917,8 +916,7 @@ export function CreateInvoiceFromQuotation({
       quantity: "1",
       rate: "",
       discountPercent: "0",
-      applyGst: gstEnabled,
-      showOptions: false,
+      applyGst: true,
     });
     setEditingItemId(null);
   }
@@ -933,7 +931,6 @@ export function CreateInvoiceFromQuotation({
       rate: String(item.rate ?? ""),
       discountPercent: String(item.discountPercent ?? 0),
       applyGst: item.applyGst,
-      showOptions: item.discountPercent > 0 || item.applyGst,
     });
     setEditingItemId(item.id);
   }
@@ -1594,64 +1591,47 @@ export function CreateInvoiceFromQuotation({
                       </label>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setItemDraft((prev) =>
-                          prev
-                            ? { ...prev, showOptions: !prev.showOptions }
-                            : prev,
-                        )
-                      }
-                      className="mt-3 font-body text-[13px] font-semibold text-primary"
-                    >
-                      GST, discount
-                    </button>
+                    <label className="mt-3 block">
+                      <span className={LABEL_CLASS}>Discount (%)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={itemDraft.discountPercent ?? "0"}
+                        onChange={(e) =>
+                          setItemDraft((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  discountPercent: e.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        className={NUMBER_INPUT_CLASS}
+                      />
+                    </label>
 
-                    {itemDraft.showOptions ? (
-                      <div className="mt-3 space-y-3 rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-3">
-                        {gstEnabled ? (
-                          <label className="flex items-center gap-2 font-body text-[13px] text-on-surface">
-                            <input
-                              type="checkbox"
-                              checked={itemDraft.applyGst}
-                              onChange={(e) =>
-                                setItemDraft((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        applyGst: e.target.checked,
-                                      }
-                                    : prev,
-                                )
-                              }
-                              className="rounded border-outline-variant"
-                            />
-                            Apply GST ({gstPercentage}%)
-                          </label>
-                        ) : null}
-                        <label className="block">
-                          <span className={LABEL_CLASS}>Discount (%)</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            value={itemDraft.discountPercent ?? "0"}
-                            onChange={(e) =>
-                              setItemDraft((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      discountPercent: e.target.value,
-                                    }
-                                  : prev,
-                              )
-                            }
-                            className={NUMBER_INPUT_CLASS}
-                          />
-                        </label>
-                      </div>
+                    {gstEnabled ? (
+                      <label className="mt-3 flex items-center gap-2 font-body text-[13px] text-on-surface">
+                        <input
+                          type="checkbox"
+                          checked={itemDraft.applyGst}
+                          onChange={(e) =>
+                            setItemDraft((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    applyGst: e.target.checked,
+                                  }
+                                : prev,
+                            )
+                          }
+                          className="rounded border-outline-variant"
+                        />
+                        Apply GST ({gstPercentage}%)
+                      </label>
                     ) : null}
 
                     <div className="mt-4 flex items-center justify-end gap-2">

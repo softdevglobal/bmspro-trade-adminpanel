@@ -8,6 +8,7 @@ import {
   applyOwnerAction,
   applyAssignedEndVisit,
   applyStaffStart,
+  deleteBusinessInspectionRequest,
   type InspectionActionActor,
 } from "@/lib/inspection/server";
 import {
@@ -789,4 +790,51 @@ export async function PATCH(
     { ok: false, error: "Unsupported action." },
     { status: 400 },
   );
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireBusinessOwner(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  const { id } = await context.params;
+  const result = await deleteBusinessInspectionRequest(auth.businessId, id);
+  if (!result.ok) {
+    return NextResponse.json(
+      { ok: false, error: result.error },
+      { status: result.status },
+    );
+  }
+
+  const { logAuditEvent } = await import("@/lib/audit/server");
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "inspection",
+    action: "inspection.deleted",
+    actor: {
+      uid: auth.uid,
+      role: actorRoleFromClaim(auth.role),
+      name: auth.name,
+      email: auth.email,
+    },
+    source: "admin_panel",
+    summary: `Request ${result.request.requestCode ?? id} deleted`,
+    targetId: result.request.id,
+    targetLabel: result.request.customer.fullName || null,
+    metadata: {
+      requestCode: result.request.requestCode,
+      deletedJob: result.deletedJob,
+      deletedQuotation: result.deletedQuotation,
+      deletedInvoice: result.deletedInvoice,
+    },
+  });
+
+  return NextResponse.json({ ok: true });
 }
