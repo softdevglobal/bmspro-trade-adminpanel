@@ -2318,6 +2318,7 @@ export function AddInspectionModal({
                           }
                           dayStripLayout="fit"
                           timeZone={timeZone}
+                          allowPast
                         />
                         {variant === "job" ? (
                           <p className="mt-3 font-body text-[12px] text-on-surface-variant">

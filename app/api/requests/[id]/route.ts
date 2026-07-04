@@ -830,9 +830,6 @@ export async function DELETE(
     targetLabel: result.request.customer.fullName || null,
     metadata: {
       requestCode: result.request.requestCode,
-      deletedJob: result.deletedJob,
-      deletedQuotation: result.deletedQuotation,
-      deletedInvoice: result.deletedInvoice,
     },
   });
 

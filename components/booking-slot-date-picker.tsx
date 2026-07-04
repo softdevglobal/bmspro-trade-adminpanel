@@ -49,13 +49,11 @@ function dayPageIndexForIso(
   const min = new Date(`${minDate}T12:00:00`);
   const target = new Date(`${iso}T12:00:00`);
   if (Number.isNaN(min.getTime()) || Number.isNaN(target.getTime())) return 0;
-  const diffDays = Math.max(
-    0,
-    Math.round((target.getTime() - min.getTime()) / 86_400_000),
-  );
-  return Math.min(
-    SLOT_MAX_DAY_PAGES - 1,
-    Math.floor(diffDays / pageSize),
+  // Allow negative pages so past selections (admin allowPast) can page backward.
+  const diffDays = Math.round((target.getTime() - min.getTime()) / 86_400_000);
+  return Math.max(
+    -(SLOT_MAX_DAY_PAGES - 1),
+    Math.min(SLOT_MAX_DAY_PAGES - 1, Math.floor(diffDays / pageSize)),
   );
 }
 
@@ -163,10 +161,7 @@ export function getSlotDayPage(
     ? firstBookableDay()
     : atLocalNoon(parsed);
   const toSkip = pageIndex * pageSize;
-
-  for (let i = 0; i < toSkip; i += 1) {
-    cursor.setDate(cursor.getDate() + 1);
-  }
+  cursor.setDate(cursor.getDate() + toSkip);
 
   const options: SlotDayOption[] = [];
   for (let i = 0; i < pageSize; i += 1) {
@@ -212,6 +207,7 @@ export function BookingMonthCalendar({
   blockedDayHint = "Customer already offered both morning and afternoon on this day",
   className = "",
   timeZone,
+  allowPast = false,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
@@ -225,6 +221,8 @@ export function BookingMonthCalendar({
   blockedDayHint?: string;
   className?: string;
   timeZone?: string | null;
+  /** Admin flows: allow scheduling on past dates (customer flows keep the block). */
+  allowPast?: boolean;
 }) {
   const initialView = selectedIso
     ? new Date(`${selectedIso}T12:00:00`)
@@ -245,6 +243,7 @@ export function BookingMonthCalendar({
   }, [minDate]);
 
   const canGoPrev =
+    allowPast ||
     viewYear > minView.year ||
     (viewYear === minView.year && viewMonth > minView.month);
 
@@ -322,7 +321,7 @@ export function BookingMonthCalendar({
             );
           }
 
-          const past = isBeforeMinDate(cell.iso, minDate);
+          const past = !allowPast && isBeforeMinDate(cell.iso, minDate);
           const comboBlocked =
             blockedCombos && isDayFullyBlocked(cell.iso, blockedCombos);
           const disabled = past || comboBlocked;
@@ -392,6 +391,7 @@ export function SlotDayPicker({
   /** Customer booking: horizontal scroll strip. Admin propose dates: fit row, no scroll. */
   dayStripLayout = "scroll",
   timeZone,
+  allowPast = false,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
@@ -408,11 +408,14 @@ export function SlotDayPicker({
   blockedDayHint?: string;
   dayStripLayout?: SlotDayStripLayout;
   timeZone?: string | null;
+  /** Admin flows: allow scheduling on past dates (customer flows keep the block). */
+  allowPast?: boolean;
 }) {
   const [showMonthCalendar, setShowMonthCalendar] = useState(false);
   const isMobile = useIsMobileViewport();
   const daysPerPage = useSlotDaysPerPage(dayStripLayout);
   const fitStrip = dayStripLayout === "fit" || isMobile;
+  const minDayPage = allowPast ? -(SLOT_MAX_DAY_PAGES - 1) : 0;
 
   const pageDays = useMemo(
     () => getSlotDayPage(dayPage, daysPerPage, minDate, timeZone),
@@ -476,7 +479,7 @@ export function SlotDayPicker({
       (selectedIsos?.length ?? 0) >= maxSelections;
     const dayBlocked =
       blockedCombos && isDayFullyBlocked(day.iso, blockedCombos);
-    const tooEarly = isBeforeMinDate(day.iso, minDate);
+    const tooEarly = !allowPast && isBeforeMinDate(day.iso, minDate);
     const relativeLabel = day.isToday
       ? "Today"
       : day.isTomorrow
@@ -570,10 +573,10 @@ export function SlotDayPicker({
       >
         <button
           type="button"
-          disabled={disabled || dayPage === 0}
+          disabled={disabled || dayPage <= minDayPage}
           onClick={(event) => {
             event.stopPropagation();
-            onDayPageChange(Math.max(0, dayPage - 1));
+            onDayPageChange(Math.max(minDayPage, dayPage - 1));
           }}
           aria-label="Show earlier dates"
           className={`inline-flex h-auto min-h-[5.5rem] w-8 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
@@ -633,6 +636,7 @@ export function SlotDayPicker({
           blockedCombos={blockedCombos}
           blockedDayHint={blockedDayHint}
           timeZone={timeZone}
+          allowPast={allowPast}
           onSelect={(iso) => {
             onSelect?.(iso);
             setShowMonthCalendar(false);
