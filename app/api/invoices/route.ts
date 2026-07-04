@@ -1,10 +1,14 @@
+import { logAuditEvent } from "@/lib/audit/server";
+import { actorRoleFromClaim } from "@/lib/audit/types";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
+  cancelBusinessInvoice,
   createDirectInvoice,
   createInvoiceFromQuotation,
   getBusinessInvoiceByQuotationId,
   listBusinessInvoices,
   markBusinessInvoicePaid,
+  undoCancelBusinessInvoice,
 } from "@/lib/invoices/server";
 import { NextResponse } from "next/server";
 
@@ -331,20 +335,86 @@ export async function PATCH(request: Request) {
         ? payload.quotationId.trim()
         : "";
 
-  if (action !== "mark_paid") {
-    return NextResponse.json(
-      { ok: false, error: "Unsupported invoice action." },
-      { status: 400 },
-    );
+  if (action === "mark_paid") {
+    const result = await markBusinessInvoicePaid(auth.businessId, invoiceId);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    return NextResponse.json({ ok: true, invoice: result.invoice });
   }
 
-  const result = await markBusinessInvoicePaid(auth.businessId, invoiceId);
-  if (!result.ok) {
-    return NextResponse.json(
-      { ok: false, error: result.error },
-      { status: result.status },
-    );
+  if (action === "cancel") {
+    const result = await cancelBusinessInvoice(auth.businessId, invoiceId);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "invoice",
+      action: "invoice.cancelled",
+      actor: {
+        uid: auth.uid,
+        role: actorRoleFromClaim(auth.role),
+        name: auth.name ?? auth.email ?? null,
+        email: auth.email ?? null,
+      },
+      source: "admin_panel",
+      summary: `Invoice ${result.invoice.invoiceCode} cancelled`,
+      targetId: result.invoice.id,
+      targetLabel: result.invoice.invoiceCode || null,
+      metadata: {
+        invoiceCode: result.invoice.invoiceCode,
+        quotationCode: result.invoice.quotationCode,
+        status: result.invoice.status,
+      },
+    });
+
+    return NextResponse.json({ ok: true, invoice: result.invoice });
   }
 
-  return NextResponse.json({ ok: true, invoice: result.invoice });
+  if (action === "undo_cancel") {
+    const result = await undoCancelBusinessInvoice(auth.businessId, invoiceId);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "invoice",
+      action: "invoice.cancel_undone",
+      actor: {
+        uid: auth.uid,
+        role: actorRoleFromClaim(auth.role),
+        name: auth.name ?? auth.email ?? null,
+        email: auth.email ?? null,
+      },
+      source: "admin_panel",
+      summary: `Invoice ${result.invoice.invoiceCode} cancellation undone`,
+      targetId: result.invoice.id,
+      targetLabel: result.invoice.invoiceCode || null,
+      metadata: {
+        invoiceCode: result.invoice.invoiceCode,
+        quotationCode: result.invoice.quotationCode,
+        status: result.invoice.status,
+      },
+    });
+
+    return NextResponse.json({ ok: true, invoice: result.invoice });
+  }
+
+  return NextResponse.json(
+    { ok: false, error: "Unsupported invoice action." },
+    { status: 400 },
+  );
 }

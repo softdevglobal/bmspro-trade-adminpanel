@@ -2,8 +2,10 @@ import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import {
   assignBusinessBooking,
+  cancelBusinessBooking,
   completeBusinessBooking,
   deleteBusinessBooking,
+  undoCancelBusinessBooking,
   updateBookingCompletionPhotos,
   updateBusinessBookingSchedule,
   getBusinessBooking,
@@ -607,6 +609,95 @@ export async function PATCH(
       targetId: id,
       targetLabel: result.booking.bookingCode ?? null,
       metadata: { date, startTime, endTime },
+    });
+
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "cancel") {
+    const result = await cancelBusinessBooking(auth.businessId, id);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    let actorUid = "";
+    let actorEmail: string | undefined;
+    let actorRole = "";
+    try {
+      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      actorUid = decoded.uid;
+      actorEmail = decoded.email;
+      actorRole = typeof decoded.role === "string" ? decoded.role : "";
+    } catch {
+      // Best-effort actor metadata; the cancel already succeeded.
+    }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "booking",
+      action: "booking.cancelled",
+      actor: {
+        uid: actorUid,
+        role: actorRoleFromClaim(actorRole),
+        name: actorEmail ?? null,
+        email: actorEmail ?? null,
+      },
+      source: "admin_panel",
+      summary: `Job ${result.booking.bookingCode ?? id} cancelled`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+      metadata: {
+        bookingCode: result.booking.bookingCode,
+        inspectionRequestId: result.booking.inspectionRequestId,
+      },
+    });
+
+    return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "undo_cancel") {
+    const result = await undoCancelBusinessBooking(auth.businessId, id);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    let actorUid = "";
+    let actorEmail: string | undefined;
+    let actorRole = "";
+    try {
+      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      actorUid = decoded.uid;
+      actorEmail = decoded.email;
+      actorRole = typeof decoded.role === "string" ? decoded.role : "";
+    } catch {
+      // Best-effort actor metadata; the restore already succeeded.
+    }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "booking",
+      action: "booking.cancel_undone",
+      actor: {
+        uid: actorUid,
+        role: actorRoleFromClaim(actorRole),
+        name: actorEmail ?? null,
+        email: actorEmail ?? null,
+      },
+      source: "admin_panel",
+      summary: `Job ${result.booking.bookingCode ?? id} cancellation undone`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+      metadata: {
+        bookingCode: result.booking.bookingCode,
+        inspectionRequestId: result.booking.inspectionRequestId,
+        status: result.booking.status,
+      },
     });
 
     return NextResponse.json({ ok: true, booking: result.booking });

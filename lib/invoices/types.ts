@@ -8,7 +8,7 @@ import type {
   QuotationLineItem,
 } from "@/lib/quotations/types";
 
-export type InvoiceStatus = "draft" | "sent" | "paid";
+export type InvoiceStatus = "draft" | "sent" | "paid" | "cancelled";
 
 export type InvoiceDetail = {
   id: string;
@@ -38,6 +38,8 @@ export type InvoiceDetail = {
   bookingStatus: BookingStatus | null;
   bookingStatusAt: number | null;
   pdfUrl: string | null;
+  /** When the invoice was cancelled (null unless status is `cancelled`). */
+  cancelledAt: number | null;
   createdAt: number | null;
   updatedAt: number | null;
 };

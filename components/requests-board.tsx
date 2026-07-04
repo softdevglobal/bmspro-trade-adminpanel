@@ -227,6 +227,7 @@ export function RequestsBoard() {
   );
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [undoError, setUndoError] = useState<string | null>(null);
   const timeZone = profile?.timezone ?? null;
 
   useEffect(() => {
@@ -327,6 +328,38 @@ export function RequestsBoard() {
     setRequestsLocal((prev) =>
       prev.map((req) => (req.id === next.id ? next : req)),
     );
+  }
+
+  async function undoCancelRequest(target: InspectionRequestDetail) {
+    if (!user) return;
+    setUndoError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/requests/${encodeURIComponent(target.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "undo_cancel" }),
+        },
+      );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        request?: InspectionRequestDetail;
+      };
+      if (!response.ok || !data.ok || !data.request) {
+        throw new Error(data.error ?? "Could not restore request.");
+      }
+      handleUpdated(data.request);
+    } catch (err) {
+      setUndoError(
+        err instanceof Error ? err.message : "Could not restore request.",
+      );
+    }
   }
 
   async function confirmDeleteRequest() {
@@ -438,12 +471,12 @@ export function RequestsBoard() {
         </div>
       </div>
 
-      {loadError || deleteError ? (
+      {loadError || deleteError || undoError ? (
         <div
           role="alert"
           className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
         >
-          {loadError ?? deleteError}
+          {loadError ?? deleteError ?? undoError}
         </div>
       ) : null}
 
@@ -474,6 +507,11 @@ export function RequestsBoard() {
                   setSelectedId(req.id);
                 }}
                 onDelete={() => setDeleteTarget(req)}
+                onCancel={() => {
+                  setDrawerOpenMode("cancel");
+                  setSelectedId(req.id);
+                }}
+                onUndoCancel={() => void undoCancelRequest(req)}
               />
             </li>
           ))}
@@ -654,7 +692,15 @@ function RequestScheduleSummary({
   );
 }
 
-function RequestCardMenu({ onDelete }: { onDelete: () => void }) {
+function RequestCardMenu({
+  onDelete,
+  onCancel,
+  onUndoCancel,
+}: {
+  onDelete: () => void;
+  onCancel?: () => void;
+  onUndoCancel?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -693,6 +739,38 @@ function RequestCardMenu({ onDelete }: { onDelete: () => void }) {
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
+          {onCancel ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-amber-600">
+                cancel
+              </span>
+              Cancel request
+            </button>
+          ) : null}
+          {onUndoCancel ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onUndoCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-emerald-600">
+                undo
+              </span>
+              Undo cancellation
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
@@ -720,6 +798,8 @@ function RequestCard({
   onCreateBooking,
   onAwaitingDecision,
   onDelete,
+  onCancel,
+  onUndoCancel,
 }: {
   request: InspectionRequestDetail;
   linkedJob: BookingDetail | null;
@@ -727,6 +807,8 @@ function RequestCard({
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
   onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
 }) {
   const timeZone = useRequestsTimeZone();
   const { canUseModule } = useBusinessModuleSettings();
@@ -822,7 +904,18 @@ function RequestCard({
 
         <div className="shrink-0 sm:text-right">
           <div className="flex items-start justify-end gap-1">
-            <RequestCardMenu onDelete={onDelete} />
+            <RequestCardMenu
+              onDelete={onDelete}
+              onCancel={
+                request.status !== "cancelled" &&
+                request.status !== "completed"
+                  ? onCancel
+                  : undefined
+              }
+              onUndoCancel={
+                request.status === "cancelled" ? onUndoCancel : undefined
+              }
+            />
           </div>
           <p className="mt-1 font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
             Submitted
@@ -1058,7 +1151,6 @@ function DrawerReviewFooter({
   onSetTime,
   onAssign,
   onComplete,
-  onCancel,
   onCreateBooking,
   onAwaitingDecision,
   onProposeJobDates,
@@ -1072,7 +1164,6 @@ function DrawerReviewFooter({
   onSetTime: () => void;
   onAssign: () => void;
   onComplete: () => void;
-  onCancel: () => void;
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
   onProposeJobDates: () => void;
@@ -1347,16 +1438,6 @@ function DrawerReviewFooter({
           />
         </div>
       )}
-
-      <button
-        type="button"
-        onClick={onCancel}
-        disabled={submitting}
-        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="material-symbols-outlined text-[17px]">close</span>
-        Cancel request
-      </button>
     </div>
   );
 }
@@ -1622,6 +1703,11 @@ function DetailDrawerContent({
   const isClosed =
     request.status === "cancelled" ||
     (request.status === "completed" && !canFollowUpAfterQuotation(request));
+
+  const isCancelled = request.status === "cancelled";
+  // A live request can be cancelled; a cancelled one can be restored instead.
+  // Completed requests only offer delete (no cancel).
+  const canCancelRequest = !isCancelled && request.status !== "completed";
 
   useEffect(() => {
     if (mode === "review") return;
@@ -2063,7 +2149,6 @@ function DetailDrawerContent({
             onSetTime={() => openAction("set_time")}
             onAssign={() => openAction("assign")}
             onComplete={openCreateQuotation}
-            onCancel={() => openAction("cancel")}
             onCreateBooking={() => openAction("convert_booking")}
             onAwaitingDecision={() => openAction("awaiting_decision")}
             onProposeJobDates={() => openAction("propose_job_dates")}
@@ -2082,14 +2167,37 @@ function DetailDrawerContent({
         ) : null}
 
         {mode === "review" ? (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
-          >
-            <span className="material-symbols-outlined text-[20px]">delete</span>
-            Delete request
-          </button>
+          <div className="space-y-2">
+            {isCancelled ? (
+              <button
+                type="button"
+                onClick={() => void callAction({ action: "undo_cancel" })}
+                disabled={submitting}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-[20px]">undo</span>
+                Undo cancellation
+              </button>
+            ) : canCancelRequest ? (
+              <button
+                type="button"
+                onClick={() => openAction("cancel")}
+                disabled={submitting}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[14px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-[20px]">cancel</span>
+                Cancel request
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+            >
+              <span className="material-symbols-outlined text-[20px]">delete</span>
+              Delete request
+            </button>
+          </div>
         ) : null}
       </div>
     </>

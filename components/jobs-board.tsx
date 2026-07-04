@@ -25,6 +25,7 @@ import {
   type InspectionRequestDetail,
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
+import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
@@ -48,12 +49,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type PreviewMode = "review" | "assign";
-type JobsFilter = "active" | "completed";
+type JobsFilter = "active" | "completed" | "cancelled";
 
 const JOB_TABS: { id: JobsFilter; label: string }[] = [
   { id: "active", label: "Active" },
   { id: "completed", label: "Completed" },
+  { id: "cancelled", label: "Cancelled" },
 ];
+
+/** A job can be cancelled while it is still open (not completed/cancelled). */
+function canCancelBooking(booking: BookingDetail): boolean {
+  return booking.status !== "completed" && booking.status !== "cancelled";
+}
 
 function formatEstimatedMinutes(minutes: number | null): string | null {
   if (minutes == null || minutes <= 0) return null;
@@ -97,7 +104,15 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
   );
 }
 
-function BookingCardMenu({ onDelete }: { onDelete: () => void }) {
+function BookingCardMenu({
+  onDelete,
+  onCancel,
+  onUndoCancel,
+}: {
+  onDelete: () => void;
+  onCancel?: () => void;
+  onUndoCancel?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -136,6 +151,38 @@ function BookingCardMenu({ onDelete }: { onDelete: () => void }) {
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
+          {onCancel ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-amber-600">
+                cancel
+              </span>
+              Cancel job
+            </button>
+          ) : null}
+          {onUndoCancel ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onUndoCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-emerald-600">
+                undo
+              </span>
+              Undo cancellation
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
@@ -161,12 +208,16 @@ function BookingCard({
   isPreviewOpen,
   onOpen,
   onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
 }: {
   booking: BookingDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
   onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
   timeZone?: string | null;
 }) {
   const title = bookingTitle(booking);
@@ -230,7 +281,13 @@ function BookingCard({
             {formatAddress(booking.address)}
           </p>
         </div>
-        <BookingCardMenu onDelete={onDelete} />
+        <BookingCardMenu
+          onDelete={onDelete}
+          onCancel={canCancelBooking(booking) ? onCancel : undefined}
+          onUndoCancel={
+            booking.status === "cancelled" ? onUndoCancel : undefined
+          }
+        />
       </div>
 
       {booking.scheduledSlot ? (
@@ -274,6 +331,8 @@ function BookingPreviewDrawer({
   onClose,
   onUpdated,
   onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
   requestsById,
 }: {
@@ -284,6 +343,8 @@ function BookingPreviewDrawer({
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
   onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
   timeZone?: string | null;
   requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
@@ -322,6 +383,8 @@ function BookingPreviewDrawer({
               onClose={onClose}
               onUpdated={onUpdated}
               onDelete={onDelete}
+              onCancel={onCancel}
+              onUndoCancel={onUndoCancel}
               timeZone={timeZone}
               requestsById={requestsById}
             />
@@ -518,6 +581,8 @@ function BookingPreviewContent({
   onClose,
   onUpdated,
   onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
   requestsById,
 }: {
@@ -528,6 +593,8 @@ function BookingPreviewContent({
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
   onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
   timeZone?: string | null;
   requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
@@ -1021,14 +1088,37 @@ function BookingPreviewContent({
         ) : null}
 
         {mode === "review" ? (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
-          >
-            <span className="material-symbols-outlined text-[20px]">delete</span>
-            Delete job
-          </button>
+          <div className="space-y-2">
+            {booking.status === "cancelled" ? (
+              <button
+                type="button"
+                onClick={onUndoCancel}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+              >
+                <span className="material-symbols-outlined text-[20px]">undo</span>
+                Undo cancellation
+              </button>
+            ) : canCancelBooking(booking) ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[14px] font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  cancel
+                </span>
+                Cancel job
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+            >
+              <span className="material-symbols-outlined text-[20px]">delete</span>
+              Delete job
+            </button>
+          </div>
         ) : null}
       </div>
     </div>
@@ -1056,6 +1146,9 @@ export function JobsBoard({
   const [deleteTarget, setDeleteTarget] = useState<BookingDetail | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<BookingDetail | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [localBookingState, setLocalBookingState] = useState<{
     source: BookingDetail[];
     bookings: BookingDetail[];
@@ -1072,6 +1165,8 @@ export function JobsBoard({
       (groups, booking) => {
         if (booking.status === "completed") {
           groups.completed.push(booking);
+        } else if (booking.status === "cancelled") {
+          groups.cancelled.push(booking);
         } else {
           groups.active.push(booking);
         }
@@ -1080,11 +1175,13 @@ export function JobsBoard({
       {
         active: [] as BookingDetail[],
         completed: [] as BookingDetail[],
+        cancelled: [] as BookingDetail[],
       },
     );
     return {
       active: sortBookingsBySchedule(groups.active),
       completed: sortBookingsBySchedule(groups.completed),
+      cancelled: sortBookingsBySchedule(groups.cancelled),
     };
   }, [displayBookings]);
   const timeZone = profile?.timezone;
@@ -1093,9 +1190,13 @@ export function JobsBoard({
     () => displayBookings.find((booking) => booking.id === selectedId) ?? null,
     [displayBookings, selectedId],
   );
-  const activeFilter =
-    selectedId === initialJobId && selected?.status === "completed"
-      ? "completed"
+  const activeFilter: JobsFilter =
+    selectedId === initialJobId && selected
+      ? selected.status === "completed"
+        ? "completed"
+        : selected.status === "cancelled"
+          ? "cancelled"
+          : filter
       : filter;
   const visibleBookings = groupedBookings[activeFilter];
 
@@ -1152,6 +1253,74 @@ export function JobsBoard({
       );
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function confirmCancelJob() {
+    if (!user || !cancelTarget) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(cancelTarget.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "cancel" }),
+        },
+      );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        booking?: BookingDetail;
+      };
+      if (!response.ok || !data.ok || !data.booking) {
+        throw new Error(data.error ?? "Could not cancel job.");
+      }
+      handleBookingUpdated(data.booking);
+      setCancelTarget(null);
+    } catch (cancelErr) {
+      setCancelError(
+        cancelErr instanceof Error ? cancelErr.message : "Could not cancel job.",
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function undoCancelJob(booking: BookingDetail) {
+    if (!user) return;
+    setCancelError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(booking.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "undo_cancel" }),
+        },
+      );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        booking?: BookingDetail;
+      };
+      if (!response.ok || !data.ok || !data.booking) {
+        throw new Error(data.error ?? "Could not restore job.");
+      }
+      handleBookingUpdated(data.booking);
+    } catch (undoErr) {
+      setCancelError(
+        undoErr instanceof Error ? undoErr.message : "Could not restore job.",
+      );
     }
   }
 
@@ -1244,7 +1413,8 @@ export function JobsBoard({
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-body text-[12px] text-on-surface-variant">
           {groupedBookings.active.length} active ·{" "}
-          {groupedBookings.completed.length} completed · tap a card to open the
+          {groupedBookings.completed.length} completed ·{" "}
+          {groupedBookings.cancelled.length} cancelled · tap a card to open the
           side preview
         </p>
         <button
@@ -1304,6 +1474,15 @@ export function JobsBoard({
         </div>
       ) : null}
 
+      {cancelError ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-800"
+        >
+          {cancelError}
+        </div>
+      ) : null}
+
       {visibleBookings.length > 0 ? (
         <ul className="space-y-3">
           {visibleBookings.map((booking) => (
@@ -1313,6 +1492,8 @@ export function JobsBoard({
                 isPreviewOpen={selectedId === booking.id}
                 onOpen={() => setSelectedId(booking.id)}
                 onDelete={() => setDeleteTarget(booking)}
+                onCancel={() => setCancelTarget(booking)}
+                onUndoCancel={() => void undoCancelJob(booking)}
                 timeZone={timeZone}
               />
             </li>
@@ -1339,6 +1520,12 @@ export function JobsBoard({
         onDelete={() => {
           if (selected) setDeleteTarget(selected);
         }}
+        onCancel={() => {
+          if (selected) setCancelTarget(selected);
+        }}
+        onUndoCancel={() => {
+          if (selected) void undoCancelJob(selected);
+        }}
         timeZone={timeZone}
         requestsById={requestsById}
       />
@@ -1360,6 +1547,38 @@ export function JobsBoard({
         }}
         onConfirm={() => void confirmDeleteJob()}
         isLoading={deleting}
+      />
+
+      <CancelConfirmModal
+        open={cancelTarget !== null}
+        title="Cancel this job?"
+        description={
+          cancelTarget ? (
+            <>
+              <p>
+                {displayBookingCode(cancelTarget)} for{" "}
+                <span className="font-semibold text-on-surface">
+                  {cancelTarget.customer.fullName || "this customer"}
+                </span>{" "}
+                will move to the Cancelled tab.
+              </p>
+              <p>
+                It stays on record for reference, but can no longer be scheduled
+                or completed.
+              </p>
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Yes, cancel job"
+        cancelLabel="Keep job"
+        loadingLabel="Cancelling..."
+        onCancel={() => {
+          if (!cancelling) setCancelTarget(null);
+        }}
+        onConfirm={() => void confirmCancelJob()}
+        isLoading={cancelling}
       />
 
       {addJobModal}
