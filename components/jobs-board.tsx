@@ -1348,9 +1348,9 @@ export function JobsBoard({
         title="Delete this job?"
         description={
           deleteTarget
-            ? `${displayBookingCode(deleteTarget)} for ${
+            ? `Only ${displayBookingCode(deleteTarget)} for ${
                 deleteTarget.customer.fullName || "this customer"
-              } will be permanently removed. The linked request will stay, but this job will be unlinked. This cannot be undone.`
+              } will be permanently removed. Any linked request and quotation will be kept. This cannot be undone.`
             : ""
         }
         confirmLabel="Yes, delete job"

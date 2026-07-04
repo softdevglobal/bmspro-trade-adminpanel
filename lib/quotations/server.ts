@@ -2695,12 +2695,16 @@ async function sendQuotationCreatedEmail(
   });
 }
 
-/** Permanently removes a quotation, its linked invoice (if any), and request mirrors. */
+/**
+ * Permanently removes only the quotation document. Any linked invoice is left
+ * untouched; only the quotation's own mirror on the request is cleared so the
+ * request no longer points at a deleted quotation.
+ */
 export async function deleteBusinessQuotation(
   businessId: string,
   quotationId: string,
 ): Promise<
-  | { ok: true; quotation: QuotationDetail; deletedInvoice: boolean }
+  | { ok: true; quotation: QuotationDetail }
   | { ok: false; status: number; error: string }
 > {
   const id = quotationId.trim();
@@ -2725,14 +2729,6 @@ export async function deleteBusinessQuotation(
       ? quotationData.inspectionRequestId.trim()
       : "";
 
-  let deletedInvoice = false;
-  const invoiceRef = adminDb.collection("invoices").doc(id);
-  const invoiceSnap = await invoiceRef.get();
-  if (invoiceSnap.exists && invoiceSnap.data()?.businessId === businessId) {
-    await invoiceRef.delete();
-    deletedInvoice = true;
-  }
-
   await quotationRef.delete();
 
   if (inspectionRequestId) {
@@ -2742,26 +2738,16 @@ export async function deleteBusinessQuotation(
       if (requestSnap.exists) {
         const requestData = requestSnap.data() ?? {};
         if (requestData.businessId === businessId) {
-          const patch: Record<string, unknown> = {
-            updatedAt: FieldValue.serverTimestamp(),
-          };
           const quotationSummary = requestData.quotation as
-            | { id?: string }
-            | null
-            | undefined;
-          const invoiceSummary = requestData.invoice as
             | { id?: string }
             | null
             | undefined;
 
           if (quotationSummary?.id === id) {
-            patch.quotation = FieldValue.delete();
-          }
-          if (invoiceSummary?.id === id) {
-            patch.invoice = FieldValue.delete();
-          }
-          if (Object.keys(patch).length > 1) {
-            await requestRef.update(patch);
+            await requestRef.update({
+              quotation: FieldValue.delete(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
           }
         }
       }
@@ -2770,5 +2756,5 @@ export async function deleteBusinessQuotation(
     }
   }
 
-  return { ok: true, quotation, deletedInvoice };
+  return { ok: true, quotation };
 }

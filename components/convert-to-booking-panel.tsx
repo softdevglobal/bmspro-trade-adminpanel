@@ -425,6 +425,7 @@ export function ConvertToBookingPanel({
             label="Customer's preferred job day"
             dayStripLayout="fit"
             timeZone={timeZone}
+            allowPast
             onSelect={(iso) => {
               setUseCustomDate(true);
               setSlot({ date: iso, timeRange: "morning" });

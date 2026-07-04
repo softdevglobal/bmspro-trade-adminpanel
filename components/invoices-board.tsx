@@ -936,9 +936,9 @@ export function InvoicesBoard() {
         title="Delete this invoice?"
         description={
           deleteTarget
-            ? `${deleteTarget.invoiceCode} for ${
+            ? `Only ${deleteTarget.invoiceCode} for ${
                 deleteTarget.customer.fullName || "this customer"
-              } will be permanently removed. This cannot be undone.`
+              } will be permanently removed. Any linked quotation and request will be kept. This cannot be undone.`
             : ""
         }
         confirmLabel="Yes, delete invoice"

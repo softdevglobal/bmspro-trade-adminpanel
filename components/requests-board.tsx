@@ -367,16 +367,16 @@ export function RequestsBoard() {
 
   function requestDeleteDescription(request: InspectionRequestDetail): string {
     const linked: string[] = [];
-    if (request.bookingId) linked.push("its linked job");
-    if (request.quotation) linked.push("its linked quotation");
-    if (request.invoice) linked.push("its linked invoice");
+    if (request.bookingId) linked.push("job");
+    if (request.quotation) linked.push("quotation");
+    if (request.invoice) linked.push("invoice");
     const extras =
       linked.length > 0
-        ? `, including ${linked.join(", ")}`
+        ? ` Any linked ${linked.join(", ")} will be kept.`
         : "";
-    return `${displayInspectionRequestCode(request)} for ${
+    return `Only ${displayInspectionRequestCode(request)} for ${
       request.customer.fullName || "this customer"
-    } will be permanently removed${extras}. This cannot be undone.`;
+    } will be permanently removed.${extras} This cannot be undone.`;
   }
 
   if (authStatus === "loading") {
@@ -2935,6 +2935,7 @@ function AdminJobDatesEditor({
             timeZone={timeZone}
             disabled={saving}
             label="Pick job days to propose"
+            allowPast
           />
           <label className="block">
             <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -3643,6 +3644,7 @@ function ProposeSlotOption({
           blockedCombos={blockedCombos}
           dayStripLayout="fit"
           timeZone={timeZone}
+          allowPast
         />
       </div>
 

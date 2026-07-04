@@ -1891,13 +1891,13 @@ export function QuotationsBoard() {
         title="Delete this quotation?"
         description={
           deleteTarget
-            ? `${displayQuotationCode(deleteTarget)} for ${
+            ? `Only ${displayQuotationCode(deleteTarget)} for ${
                 deleteTarget.customer.fullName || "this customer"
-              } will be permanently removed${
+              } will be permanently removed.${
                 quotationHasInvoice(deleteTarget)
-                  ? ", including its linked invoice"
+                  ? " Its linked invoice will be kept."
                   : ""
-              }. This cannot be undone.`
+              } This cannot be undone.`
             : ""
         }
         confirmLabel="Yes, delete quotation"
