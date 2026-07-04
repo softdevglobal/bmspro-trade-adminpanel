@@ -6,6 +6,7 @@ import {
   slotComboKey,
   todayIso,
 } from "@/components/booking-slot-date-picker";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { AdminDaySchedulePicker } from "@/components/admin-day-schedule-picker";
 import {
@@ -67,6 +68,7 @@ import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   displayBookingCode,
+  displayInspectionRequestCode,
   displayQuotationCode,
 } from "@/lib/reference-codes";
 import {
@@ -199,7 +201,7 @@ function canFollowUpAfterQuotation(request: InspectionRequestDetail): boolean {
 }
 
 export function RequestsBoard() {
-  const { status: authStatus } = useAuth();
+  const { status: authStatus, user } = useAuth();
   const { canUseModule } = useBusinessModuleSettings();
   const jobsModuleEnabled = canUseModule("jobs");
   const profile = useBusinessProfile();
@@ -220,6 +222,11 @@ export function RequestsBoard() {
     null,
   );
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<InspectionRequestDetail | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const timeZone = profile?.timezone ?? null;
 
   useEffect(() => {
@@ -322,6 +329,56 @@ export function RequestsBoard() {
     );
   }
 
+  async function confirmDeleteRequest() {
+    if (!user || !deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/requests/${encodeURIComponent(deleteTarget.id)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not delete request.");
+      }
+      setRequestsLocal((prev) =>
+        prev.filter((entry) => entry.id !== deleteTarget.id),
+      );
+      if (selectedId === deleteTarget.id) {
+        setSelectedId(null);
+        setDrawerOpenMode(null);
+      }
+      setDeleteTarget(null);
+    } catch (deleteErr) {
+      setDeleteError(
+        deleteErr instanceof Error
+          ? deleteErr.message
+          : "Could not delete request.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function requestDeleteDescription(request: InspectionRequestDetail): string {
+    const linked: string[] = [];
+    if (request.bookingId) linked.push("its linked job");
+    if (request.quotation) linked.push("its linked quotation");
+    if (request.invoice) linked.push("its linked invoice");
+    const extras =
+      linked.length > 0
+        ? `, including ${linked.join(", ")}`
+        : "";
+    return `${displayInspectionRequestCode(request)} for ${
+      request.customer.fullName || "this customer"
+    } will be permanently removed${extras}. This cannot be undone.`;
+  }
+
   if (authStatus === "loading") {
     return <BoardSkeleton />;
   }
@@ -381,12 +438,12 @@ export function RequestsBoard() {
         </div>
       </div>
 
-      {loadError ? (
+      {loadError || deleteError ? (
         <div
           role="alert"
           className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
         >
-          {loadError}
+          {loadError ?? deleteError}
         </div>
       ) : null}
 
@@ -416,6 +473,7 @@ export function RequestsBoard() {
                   setDrawerOpenMode("awaiting_decision");
                   setSelectedId(req.id);
                 }}
+                onDelete={() => setDeleteTarget(req)}
               />
             </li>
           ))}
@@ -433,6 +491,22 @@ export function RequestsBoard() {
           setDrawerOpenMode(null);
         }}
         onUpdated={handleUpdated}
+        onDelete={() => {
+          if (selected) setDeleteTarget(selected);
+        }}
+      />
+
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title="Delete this request?"
+        description={deleteTarget ? requestDeleteDescription(deleteTarget) : ""}
+        confirmLabel="Yes, delete request"
+        cancelLabel="Keep request"
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteRequest()}
+        isLoading={deleting}
       />
 
       <AddInspectionModal
@@ -580,18 +654,79 @@ function RequestScheduleSummary({
   );
 }
 
+function RequestCardMenu({ onDelete }: { onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  const menuItemClass =
+    "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low";
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative shrink-0"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        aria-label="Request actions"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+      >
+        <span className="material-symbols-outlined text-[20px]">more_vert</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={`${menuItemClass} text-rose-700 hover:bg-rose-50`}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            <span className="material-symbols-outlined text-[18px] text-rose-600">
+              delete
+            </span>
+            Delete request
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RequestCard({
   request,
   linkedJob,
   onOpen,
   onCreateBooking,
   onAwaitingDecision,
+  onDelete,
 }: {
   request: InspectionRequestDetail;
   linkedJob: BookingDetail | null;
   onOpen: () => void;
   onCreateBooking: () => void;
   onAwaitingDecision: () => void;
+  onDelete: () => void;
 }) {
   const timeZone = useRequestsTimeZone();
   const { canUseModule } = useBusinessModuleSettings();
@@ -686,7 +821,10 @@ function RequestCard({
         </div>
 
         <div className="shrink-0 sm:text-right">
-          <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          <div className="flex items-start justify-end gap-1">
+            <RequestCardMenu onDelete={onDelete} />
+          </div>
+          <p className="mt-1 font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
             Submitted
           </p>
           <p className="font-body text-[13px] font-semibold text-on-surface">
@@ -820,6 +958,7 @@ function RequestDetailDrawer({
   onInitialModeConsumed,
   onClose,
   onUpdated,
+  onDelete,
 }: {
   request: InspectionRequestDetail | null;
   staff: StaffSummary[];
@@ -828,6 +967,7 @@ function RequestDetailDrawer({
   onInitialModeConsumed: () => void;
   onClose: () => void;
   onUpdated: (next: InspectionRequestDetail) => void;
+  onDelete: () => void;
 }) {
   const open = request !== null;
   useRegisterRightDrawer(open, "lg");
@@ -863,6 +1003,7 @@ function RequestDetailDrawer({
               onInitialModeConsumed={onInitialModeConsumed}
               onClose={onClose}
               onUpdated={onUpdated}
+              onDelete={onDelete}
             />
           </motion.aside>
         </motion.div>
@@ -1285,6 +1426,7 @@ function DetailDrawerContent({
   onInitialModeConsumed,
   onClose,
   onUpdated,
+  onDelete,
 }: {
   request: InspectionRequestDetail;
   staff: StaffSummary[];
@@ -1293,6 +1435,7 @@ function DetailDrawerContent({
   onInitialModeConsumed: () => void;
   onClose: () => void;
   onUpdated: (next: InspectionRequestDetail) => void;
+  onDelete: () => void;
 }) {
   const { user } = useAuth();
   const router = useRouter();
@@ -1936,6 +2079,17 @@ function DetailDrawerContent({
               });
             }}
           />
+        ) : null}
+
+        {mode === "review" ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+          >
+            <span className="material-symbols-outlined text-[20px]">delete</span>
+            Delete request
+          </button>
         ) : null}
       </div>
     </>

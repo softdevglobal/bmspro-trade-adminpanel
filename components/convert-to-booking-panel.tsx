@@ -5,6 +5,7 @@ import {
   defaultCalendarVisitEnd,
 } from "@/components/calendar-visit-time-range";
 import {
+  SlotDayPicker,
   todayIso,
 } from "@/components/booking-slot-date-picker";
 import {
@@ -93,10 +94,7 @@ function buildJobDayGroups({
   return groups;
 }
 
-function defaultJobSlot(
-  groups: JobDayGroup[],
-  minBookingDate: string,
-): InspectionSlot {
+function defaultJobSlot(groups: JobDayGroup[]): InspectionSlot {
   const accepted = groups.find((group) => group.id === "accepted")?.slots[0];
   if (accepted) return accepted;
   const customer = groups.find((group) => group.id === "customer")?.slots;
@@ -105,7 +103,9 @@ function defaultJobSlot(
   const admin = groups.find((group) => group.id === "admin")?.slots;
   const [firstAdmin] = sortInspectionSlots(admin ?? []);
   if (firstAdmin) return firstAdmin;
-  return { date: minBookingDate, timeRange: "morning" };
+  // No proposed days (e.g. customer accepted over the phone) — the admin picks
+  // the agreed day manually, so start with nothing selected.
+  return { date: "", timeRange: "morning" };
 }
 
 export function bookingMinDateFromInspection(
@@ -194,13 +194,14 @@ export function ConvertToBookingPanel({
     () => dayGroups.flatMap((group) => group.slots),
     [dayGroups],
   );
-  const initialSlot = useMemo(
-    () => defaultJobSlot(dayGroups, minBookingDate),
-    [dayGroups, minBookingDate],
-  );
+  const initialSlot = useMemo(() => defaultJobSlot(dayGroups), [dayGroups]);
   const [assignChoice, setAssignChoice] = useState<BookingAssignChoice>("owner");
   const [staffId, setStaffId] = useState("");
   const [slot, setSlot] = useState<InspectionSlot>(initialSlot);
+  // Let the admin pick any day when there are no proposed slots, or override the
+  // proposed days with a day agreed over the phone.
+  const [useCustomDate, setUseCustomDate] = useState(dayGroups.length === 0);
+  const [dayPage, setDayPage] = useState(0);
   const [startTime, setStartTime] = useState(initialStartTime);
   const [endTime, setEndTime] = useState(initialEndTime);
   const [estimatedMinutes, setEstimatedMinutes] = useState(() =>
@@ -214,6 +215,8 @@ export function ConvertToBookingPanel({
 
   useEffect(() => {
     setSlot(initialSlot);
+    setUseCustomDate(dayGroups.length === 0);
+    setDayPage(0);
     setStartTime(initialStartTime);
     setEndTime(initialEndTime);
     setEstimatedMinutes(
@@ -231,9 +234,12 @@ export function ConvertToBookingPanel({
     initialStartTime,
     initialEndTime,
     initialSlot,
+    dayGroups.length,
   ]);
 
   useEffect(() => {
+    // A custom (manually picked) day is intentionally off the proposed list.
+    if (useCustomDate) return;
     if (
       selectableSlots.some(
         (option) =>
@@ -243,7 +249,7 @@ export function ConvertToBookingPanel({
       return;
     }
     setSlot(initialSlot);
-  }, [selectableSlots, initialSlot, slot.date, slot.timeRange]);
+  }, [useCustomDate, selectableSlots, initialSlot, slot.date, slot.timeRange]);
 
   useEffect(() => {
     const minutes = minutesBetweenClockTimes(startTime, endTime);
@@ -326,58 +332,106 @@ export function ConvertToBookingPanel({
         Create job
       </h4>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-        Schedule the job after the customer accepted your quotation. If they
-        accepted a proposed day, that is selected by default — you can still
-        pick one of their original job days instead.
+        Schedule the job now that the customer accepted your quotation. Pick a
+        proposed day if they chose one, or select the day you agreed with them
+        over the phone.
       </p>
 
-      {dayGroups.length > 0 ? (
-        <div className="mt-4 space-y-4">
-          <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-            Choose a day
-          </p>
-          {dayGroups.map((group) => (
-            <div key={group.id} className="space-y-2">
-              <div>
-                <p className="font-body text-[12px] font-bold text-on-surface">
-                  {group.label}
-                </p>
-                <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
-                  {group.hint}
-                </p>
+      <div className="mt-4 space-y-4">
+        {dayGroups.length > 0 ? (
+          <>
+            <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+              Choose a day
+            </p>
+            {dayGroups.map((group) => (
+              <div key={group.id} className="space-y-2">
+                <div>
+                  <p className="font-body text-[12px] font-bold text-on-surface">
+                    {group.label}
+                  </p>
+                  <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
+                    {group.hint}
+                  </p>
+                </div>
+                <ul className="flex flex-wrap gap-2">
+                  {sortInspectionSlots(group.slots).map((preferred) => {
+                    const active =
+                      !useCustomDate && slotKey(slot) === slotKey(preferred);
+                    return (
+                      <li key={slotKey(preferred)}>
+                        <button
+                          type="button"
+                          disabled={submitting}
+                          onClick={() => {
+                            setUseCustomDate(false);
+                            setSlot(preferred);
+                          }}
+                          className={`rounded-lg border px-3 py-2 font-body text-[12px] font-semibold transition-colors disabled:opacity-60 ${
+                            active
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-outline-variant/60 bg-white text-on-surface hover:bg-surface-container"
+                          }`}
+                        >
+                          {formatSlotDate(preferred.date, timeZone)} ·{" "}
+                          {TIME_RANGE_LABELS[preferred.timeRange]}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
-              <ul className="flex flex-wrap gap-2">
-                {sortInspectionSlots(group.slots).map((preferred) => {
-                  const active = slotKey(slot) === slotKey(preferred);
-                  return (
-                    <li key={slotKey(preferred)}>
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={() => setSlot(preferred)}
-                        className={`rounded-lg border px-3 py-2 font-body text-[12px] font-semibold transition-colors disabled:opacity-60 ${
-                          active
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-outline-variant/60 bg-white text-on-surface hover:bg-surface-container"
-                        }`}
-                      >
-                        {formatSlotDate(preferred.date, timeZone)} ·{" "}
-                        {TIME_RANGE_LABELS[preferred.timeRange]}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-4 rounded-xl border border-dashed border-amber-200 bg-amber-50/80 px-3 py-2.5 font-body text-[12px] text-amber-900">
-          No job days to schedule yet. Use the customer&apos;s preferred dates,
-          propose alternative days, or wait for the customer to accept a proposed
-          day.
-        </p>
-      )}
+            ))}
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() =>
+                setUseCustomDate((open) => {
+                  const next = !open;
+                  setSlot(next ? { date: "", timeRange: "morning" } : initialSlot);
+                  return next;
+                })
+              }
+              className="inline-flex items-center gap-1 font-body text-[11px] font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[14px]">
+                {useCustomDate ? "expand_less" : "event"}
+              </span>
+              {useCustomDate
+                ? "Hide other day"
+                : "Agreed another day with the customer?"}
+            </button>
+          </>
+        ) : (
+          <div>
+            <p className="font-body text-[12px] font-bold text-on-surface">
+              Pick the day you agreed with the customer
+            </p>
+            <p className="mt-0.5 font-body text-[11px] text-on-surface-variant">
+              The customer accepted this quotation but hasn&apos;t chosen a job
+              day in the app. Select the day you arranged with them over the
+              phone to schedule the job.
+            </p>
+          </div>
+        )}
+
+        {useCustomDate ? (
+          <SlotDayPicker
+            selectedIso={slot.date}
+            mode="single"
+            minDate={minBookingDate}
+            dayPage={dayPage}
+            onDayPageChange={setDayPage}
+            disabled={submitting}
+            label="Customer's preferred job day"
+            dayStripLayout="fit"
+            timeZone={timeZone}
+            onSelect={(iso) => {
+              setUseCustomDate(true);
+              setSlot({ date: iso, timeRange: "morning" });
+            }}
+          />
+        ) : null}
+      </div>
 
       {slot.date ? (
         <div className="mt-4">
@@ -478,7 +532,11 @@ export function ConvertToBookingPanel({
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={submitting || selectableSlots.length === 0 || !slot.date}
+          disabled={
+            submitting ||
+            !slot.date ||
+            (!useCustomDate && selectableSlots.length === 0)
+          }
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-opacity hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span

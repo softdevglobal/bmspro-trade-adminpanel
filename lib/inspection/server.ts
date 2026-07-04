@@ -45,6 +45,9 @@ import {
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
 import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
+import { JOBS_COLLECTION } from "@/lib/bookings/types";
+import { deleteBusinessInvoice } from "@/lib/invoices/server";
+import { deleteBusinessQuotation } from "@/lib/quotations/server";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -1013,4 +1016,80 @@ export async function customerRejectJobProposedSlots(
   });
 
   return { ok: true, request };
+}
+
+/** Permanently removes a request and any linked job, quotation, or invoice. */
+export async function deleteBusinessInspectionRequest(
+  businessId: string,
+  requestId: string,
+): Promise<
+  | {
+      ok: true;
+      request: InspectionRequestDetail;
+      deletedJob: boolean;
+      deletedQuotation: boolean;
+      deletedInvoice: boolean;
+    }
+  | { ok: false; status: number; error: string }
+> {
+  const id = requestId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Request is required." };
+  }
+
+  const snap = await getRequestDocument(id);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const data = snap.data();
+  if (!data || data.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const request = mapInspectionDoc(snap.id, data);
+  let deletedJob = false;
+  let deletedQuotation = false;
+  let deletedInvoice = false;
+
+  const bookingId =
+    typeof data.bookingId === "string" ? data.bookingId.trim() : "";
+  if (bookingId) {
+    const jobRef = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
+    const jobSnap = await jobRef.get();
+    if (jobSnap.exists && jobSnap.data()?.businessId === businessId) {
+      await jobRef.delete();
+      deletedJob = true;
+    }
+  }
+
+  const quotationId = request.quotation?.id?.trim() ?? "";
+  if (quotationId) {
+    const quotationResult = await deleteBusinessQuotation(
+      businessId,
+      quotationId,
+    );
+    if (quotationResult.ok) {
+      deletedQuotation = true;
+      deletedInvoice = quotationResult.deletedInvoice;
+    }
+  } else {
+    const invoiceId = request.invoice?.id?.trim() ?? "";
+    if (invoiceId) {
+      const invoiceResult = await deleteBusinessInvoice(businessId, invoiceId);
+      if (invoiceResult.ok) {
+        deletedInvoice = true;
+      }
+    }
+  }
+
+  await snap.ref.delete();
+
+  return {
+    ok: true,
+    request,
+    deletedJob,
+    deletedQuotation,
+    deletedInvoice,
+  };
 }

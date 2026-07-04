@@ -3,6 +3,7 @@ import { actorRoleFromClaim } from "@/lib/audit/types";
 import {
   assignBusinessBooking,
   completeBusinessBooking,
+  deleteBusinessBooking,
   updateBookingCompletionPhotos,
   updateBusinessBookingSchedule,
   getBusinessBooking,
@@ -615,4 +616,63 @@ export async function PATCH(
     { ok: false, error: "Unsupported action." },
     { status: 400 },
   );
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const token =
+    request.headers.get("authorization")?.match(/^Bearer (.+)$/)?.[1] ??
+    extractBearerToken(request);
+  const auth = await requireBusinessOwnerFromToken(token);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status },
+    );
+  }
+
+  const { id } = await context.params;
+  const result = await deleteBusinessBooking(auth.businessId, id);
+  if (!result.ok) {
+    return NextResponse.json(
+      { ok: false, error: result.error },
+      { status: result.status },
+    );
+  }
+
+  let actorUid = "";
+  let actorEmail: string | undefined;
+  let actorRole = "";
+  try {
+    const decoded = await adminAuth.verifyIdToken(token ?? "");
+    actorUid = decoded.uid;
+    actorEmail = decoded.email;
+    actorRole = typeof decoded.role === "string" ? decoded.role : "";
+  } catch {
+    // Best-effort actor metadata; the delete already succeeded.
+  }
+
+  await logAuditEvent({
+    businessId: auth.businessId,
+    category: "booking",
+    action: "booking.deleted",
+    actor: {
+      uid: actorUid,
+      role: actorRoleFromClaim(actorRole),
+      name: actorEmail ?? null,
+      email: actorEmail ?? null,
+    },
+    source: "admin_panel",
+    summary: `Job ${result.booking.bookingCode ?? id} deleted`,
+    targetId: result.booking.id,
+    targetLabel: result.booking.bookingCode || null,
+    metadata: {
+      bookingCode: result.booking.bookingCode,
+      inspectionRequestId: result.booking.inspectionRequestId,
+    },
+  });
+
+  return NextResponse.json({ ok: true });
 }

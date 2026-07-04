@@ -27,6 +27,7 @@ import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server"
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+import { getRequestDocumentRef } from "@/lib/inspection/request-document";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import {
   QUOTATION_COLLECTION,
@@ -1367,4 +1368,93 @@ export async function createDirectJob(
   }
 
   return { ok: true, booking, request };
+}
+
+async function clearBookingMirrors(
+  businessId: string,
+  inspectionRequestId: string,
+  bookingId: string,
+): Promise<void> {
+  const requestRef = await getRequestDocumentRef(inspectionRequestId);
+  if (requestRef) {
+    const requestSnap = await requestRef.get();
+    if (requestSnap.exists) {
+      const requestData = requestSnap.data() ?? {};
+      if (
+        requestData.businessId === businessId &&
+        requestData.bookingId === bookingId
+      ) {
+        await requestRef.update({
+          bookingId: FieldValue.delete(),
+          bookingCode: FieldValue.delete(),
+          bookingStatus: FieldValue.delete(),
+          bookingStatusAt: FieldValue.delete(),
+          bookingConfirmedAt: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  }
+
+  const quotationSnap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .where("inspectionRequestId", "==", inspectionRequestId)
+    .get();
+  if (quotationSnap.empty) return;
+
+  const batch = adminDb.batch();
+  for (const doc of quotationSnap.docs) {
+    const quotationData = doc.data();
+    if (
+      quotationData.businessId === businessId &&
+      quotationData.bookingId === bookingId
+    ) {
+      batch.update(doc.ref, {
+        bookingId: FieldValue.delete(),
+        bookingCode: FieldValue.delete(),
+        bookingStatus: FieldValue.delete(),
+        bookingStatusAt: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+  }
+  await batch.commit();
+}
+
+/** Permanently removes a job and clears its mirrors on the linked request. */
+export async function deleteBusinessBooking(
+  businessId: string,
+  bookingId: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = bookingId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Job is required." };
+  }
+
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const booking = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (booking.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  await ref.delete();
+
+  const requestId = booking.inspectionRequestId?.trim();
+  if (requestId) {
+    try {
+      await clearBookingMirrors(businessId, requestId, id);
+    } catch (error) {
+      console.error("[booking] request cleanup failed:", error);
+    }
+  }
+
+  return { ok: true, booking };
 }
