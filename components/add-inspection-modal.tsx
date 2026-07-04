@@ -144,51 +144,42 @@ function buildStepFlow(
   calendarFlow: boolean,
 ): StepDef[] {
   const isJob = variant === "job";
-  if (calendarFlow || isJob) {
-    return [
-      {
-        kind: "customer",
-        title: "Customer details",
-        subtitle:
-          "Search for an existing customer, then confirm contact details and the visit address.",
-      },
-      {
-        kind: "service",
-        title: isJob ? JOB_STEPS[0].title : STEPS[0].title,
-        subtitle: isJob ? JOB_STEPS[0].subtitle : STEPS[0].subtitle,
-      },
-      {
-        kind: "schedule",
-        title: isJob ? JOB_STEPS[2].title : STEPS[2].title,
-        subtitle:
-          calendarFlow && isJob
-            ? "Confirm the calendar slot or adjust hourly blocks for this job."
-            : calendarFlow
-              ? "Confirm the calendar slot or adjust the visit window."
-              : isJob
-                ? JOB_STEPS[2].subtitle
-                : STEPS[2].subtitle,
-      },
-      {
-        kind: "assign",
-        title: isJob ? JOB_STEPS[4].title : "Assign inspector",
-        subtitle: isJob
-          ? JOB_STEPS[4].subtitle
-          : "Choose who will run this visit, or assign later from the Requests board.",
-      },
-      {
-        kind: "review",
-        title: isJob ? JOB_STEPS[5].title : STEPS[4].title,
-        subtitle: isJob ? JOB_STEPS[5].subtitle : STEPS[4].subtitle,
-      },
-    ];
-  }
   return [
-    { kind: "service", ...STEPS[0] },
-    { kind: "address", ...STEPS[1] },
-    { kind: "schedule", ...STEPS[2] },
-    { kind: "customer", ...STEPS[3] },
-    { kind: "review", ...STEPS[4] },
+    {
+      kind: "customer",
+      title: "Customer details",
+      subtitle:
+        "Search for an existing customer, then confirm contact details and the visit address.",
+    },
+    {
+      kind: "service",
+      title: isJob ? JOB_STEPS[0].title : STEPS[0].title,
+      subtitle: isJob ? JOB_STEPS[0].subtitle : STEPS[0].subtitle,
+    },
+    {
+      kind: "schedule",
+      title: isJob ? JOB_STEPS[2].title : STEPS[2].title,
+      subtitle:
+        calendarFlow && isJob
+          ? "Confirm the calendar slot or adjust hourly blocks for this job."
+          : calendarFlow
+            ? "Confirm the calendar slot or adjust the visit window."
+            : isJob
+              ? JOB_STEPS[2].subtitle
+              : STEPS[2].subtitle,
+    },
+    {
+      kind: "assign",
+      title: isJob ? JOB_STEPS[4].title : "Assign inspector",
+      subtitle: isJob
+        ? JOB_STEPS[4].subtitle
+        : "Choose who will run this visit, or assign later from the Requests board.",
+    },
+    {
+      kind: "review",
+      title: isJob ? JOB_STEPS[5].title : STEPS[4].title,
+      subtitle: isJob ? JOB_STEPS[5].subtitle : STEPS[4].subtitle,
+    },
   ];
 }
 
@@ -1247,7 +1238,9 @@ export function AddInspectionModal({
         }
       : null);
   const isCalendarFlow = Boolean(resolvedCalendarWindow?.date?.trim());
-  const customerFirstFlow = isCalendarFlow || variant === "job";
+  // Every entry point now uses the customer-first flow (customer + address on
+  // step 1), matching the calendar experience.
+  const customerFirstFlow = true;
   const { user } = useAuth();
   const profile = useBusinessProfile();
   const { requests, loading: customersLoading } = useInspectionRequests();
