@@ -7,9 +7,13 @@ export function quotationHasInvoice(
 }
 
 export function canCancelQuotation(
-  quotation: Pick<QuotationDetail, "status" | "invoiceId">,
+  quotation: Pick<QuotationDetail, "status" | "invoiceId" | "bookingStatus">,
 ): boolean {
-  return quotation.status !== "cancelled" && !quotationHasInvoice(quotation);
+  return (
+    quotation.status !== "cancelled" &&
+    quotation.bookingStatus !== "completed" &&
+    !quotationHasInvoice(quotation)
+  );
 }
 
 /** Job follow-up actions are closed once the booking is completed and invoiced. */

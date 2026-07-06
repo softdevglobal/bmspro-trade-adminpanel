@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import type { BusinessProfilePlan } from "@/lib/onboarding/server";
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
+import { writeBusinessWorkingHoursCache } from "@/lib/calendar/use-business-working-hours";
 import type { BusinessModuleSettings as BusinessModuleSettingsType } from "@/lib/business/module-settings";
 import type { AuTimezone } from "@/lib/onboarding/types";
 import { useEffect, useMemo, useState } from "react";
@@ -41,7 +42,7 @@ type ProfileMeta = {
 };
 
 export function BusinessSettingsPanel() {
-  const { user } = useAuth();
+  const { user, businessId } = useAuth();
   const liveProfile = useBusinessProfile();
   const [metaLoading, setMetaLoading] = useState(true);
   const [meta, setMeta] = useState<ProfileMeta>({
@@ -177,6 +178,9 @@ export function BusinessSettingsPanel() {
 
   function handleWorkingHoursSaved(workingHours: BusinessWorkingHours) {
     setMeta((current) => ({ ...current, workingHours }));
+    if (businessId) {
+      writeBusinessWorkingHoursCache(businessId, workingHours);
+    }
   }
 
   function handleServiceAreasSaved(serviceAreas: string[]) {

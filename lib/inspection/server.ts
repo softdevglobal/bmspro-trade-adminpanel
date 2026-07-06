@@ -65,10 +65,43 @@ const OWNER_ACTION_SUMMARY: Record<string, string> = {
   propose: "proposed alternative inspection times",
   assign: "assigned the inspection to an inspector",
   cancel: "cancelled the inspection",
+  undo_cancel: "restored the cancelled inspection",
   complete: "marked the inspection completed",
   convert_to_booking: "converted the request into a job",
   mark_awaiting_decision: "sent the inspection quotation for decision",
 };
+
+/**
+ * Chooses the status a cancelled request returns to when its cancellation is
+ * undone. Prefers the stored pre-cancellation status; falls back to inferring
+ * from the request data for older cancelled documents.
+ */
+function resolveRestoredRequestStatus(
+  data: Record<string, unknown>,
+): InspectionRequestStatus {
+  const restorable: InspectionRequestStatus[] = [
+    "pending",
+    "owner_proposed",
+    "scheduled",
+    "awaiting_decision",
+    "completed",
+  ];
+  const from = data.cancelledFromStatus;
+  if (
+    typeof from === "string" &&
+    restorable.includes(from as InspectionRequestStatus)
+  ) {
+    return from as InspectionRequestStatus;
+  }
+  if (data.scheduledSlot) return "scheduled";
+  if (
+    Array.isArray(data.ownerProposedSlots) &&
+    data.ownerProposedSlots.length > 0
+  ) {
+    return "owner_proposed";
+  }
+  return "pending";
+}
 
 type ServiceLookup = {
   name: string;
@@ -268,6 +301,7 @@ type OwnerAction =
   | { type: "propose"; slots: InspectionSlot[]; note?: string }
   | { type: "assign"; assignment: InspectionAssignment }
   | { type: "cancel"; note?: string }
+  | { type: "undo_cancel" }
   | { type: "complete"; note?: string }
   | {
       type: "convert_to_booking";
@@ -388,7 +422,23 @@ export async function applyOwnerAction(
     // excluded from slot occupancy and the calendar, so preserving these
     // values does not block new scheduling.
     updates.cancelledAt = FieldValue.serverTimestamp();
+    // Remember the pre-cancellation status so it can be restored on undo.
+    updates.cancelledFromStatus =
+      typeof current.status === "string" && current.status !== "cancelled"
+        ? current.status
+        : null;
     if (typeof action.note === "string") updates.ownerNote = action.note;
+  } else if (action.type === "undo_cancel") {
+    if (current.status !== "cancelled") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Only cancelled requests can be restored.",
+      };
+    }
+    updates.status = resolveRestoredRequestStatus(current);
+    updates.cancelledAt = FieldValue.delete();
+    updates.cancelledFromStatus = FieldValue.delete();
   } else if (action.type === "complete") {
     return {
       ok: false,
@@ -1011,6 +1061,39 @@ export async function customerRejectJobProposedSlots(
       requestCode: request.requestCode ?? null,
     },
   });
+
+  return { ok: true, request };
+}
+
+/**
+ * Permanently removes only the request document. Any linked job, quotation,
+ * or invoice is left untouched (they are independent records).
+ */
+export async function deleteBusinessInspectionRequest(
+  businessId: string,
+  requestId: string,
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = requestId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Request is required." };
+  }
+
+  const snap = await getRequestDocument(id);
+  if (!snap) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const data = snap.data();
+  if (!data || data.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  const request = mapInspectionDoc(snap.id, data);
+
+  await snap.ref.delete();
 
   return { ok: true, request };
 }

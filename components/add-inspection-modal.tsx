@@ -15,11 +15,15 @@ import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
-import type {
-  InspectionRequestType,
-  InspectionSlot,
-  InspectionTimeRange,
-} from "@/lib/inspection/types";
+import { useBookings } from "@/lib/bookings/use-bookings";
+import {
+  buildCustomerOptions,
+  filterCustomerOptions,
+  formatCustomerAddressLine,
+  hasUsableCustomerAddress,
+  type CustomerOption,
+} from "@/lib/inspection/customer-options";
+import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   TIME_RANGE_LABELS,
   formatAddress,
@@ -27,6 +31,11 @@ import {
   formatVisitWindow,
   isClockTime,
   sortInspectionSlots,
+} from "@/lib/inspection/types";
+import type {
+  InspectionRequestType,
+  InspectionSlot,
+  InspectionTimeRange,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { iconForBusinessType } from "@/lib/onboarding/types";
@@ -38,6 +47,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -73,8 +83,8 @@ const STEPS = [
     subtitle: "Where should the inspector visit?",
   },
   {
-    title: "Preferred dates & times",
-    subtitle: "Pick up to 3 days, then choose hourly time slots for each.",
+    title: "Schedule the visit",
+    subtitle: "Pick day(s) and hourly time slots for the inspection.",
   },
   {
     title: "Contact details",
@@ -114,6 +124,64 @@ const JOB_STEPS = [
     subtitle: "Check everything below, then create the job.",
   },
 ] as const;
+
+type StepKind =
+  | "customer"
+  | "service"
+  | "address"
+  | "schedule"
+  | "assign"
+  | "review";
+
+type StepDef = {
+  kind: StepKind;
+  title: string;
+  subtitle: string;
+};
+
+function buildStepFlow(
+  variant: "inspection" | "job",
+  calendarFlow: boolean,
+): StepDef[] {
+  const isJob = variant === "job";
+  return [
+    {
+      kind: "customer",
+      title: "Customer details",
+      subtitle:
+        "Search for an existing customer, then confirm contact details and the visit address.",
+    },
+    {
+      kind: "service",
+      title: isJob ? JOB_STEPS[0].title : STEPS[0].title,
+      subtitle: isJob ? JOB_STEPS[0].subtitle : STEPS[0].subtitle,
+    },
+    {
+      kind: "schedule",
+      title: isJob ? JOB_STEPS[2].title : STEPS[2].title,
+      subtitle:
+        calendarFlow && isJob
+          ? "Confirm the calendar slot or adjust hourly blocks for this job."
+          : calendarFlow
+            ? "Confirm the calendar slot or adjust the visit window."
+            : isJob
+              ? JOB_STEPS[2].subtitle
+              : STEPS[2].subtitle,
+    },
+    {
+      kind: "assign",
+      title: isJob ? JOB_STEPS[4].title : "Assign inspector",
+      subtitle: isJob
+        ? JOB_STEPS[4].subtitle
+        : "Choose who will run this visit, or assign later from the Requests board.",
+    },
+    {
+      kind: "review",
+      title: isJob ? JOB_STEPS[5].title : STEPS[4].title,
+      subtitle: isJob ? JOB_STEPS[5].subtitle : STEPS[4].subtitle,
+    },
+  ];
+}
 
 const EMPTY_ADDRESS: ServiceAddress = {
   street: "",
@@ -175,6 +243,7 @@ function computeFieldErrors(
   form: InspectionFormState,
   workingHours: BusinessWorkingHours,
   variant: "inspection" | "job" = "inspection",
+  workingHoursLoading = false,
 ): FieldErrors {
   const errors: FieldErrors = {};
 
@@ -236,40 +305,44 @@ function computeFieldErrors(
     errors.postcode = "Use a 4-digit Australian postcode.";
   }
 
-  if (form.calendarWindow) {
-    const windowError = validateCalendarVisitWindow(
-      form.calendarWindow.startTime,
-      form.calendarWindow.endTime,
-      workingHours,
-    );
-    if (windowError) errors.preferredSlots = windowError;
-  } else if (form.preferredSlots.length === 0) {
+  if (!workingHoursLoading) {
+    if (form.calendarWindow) {
+      const windowError = validateCalendarVisitWindow(
+        form.calendarWindow.startTime,
+        form.calendarWindow.endTime,
+        workingHours,
+      );
+      if (windowError) errors.preferredSlots = windowError;
+    } else if (form.preferredSlots.length === 0) {
+      errors.preferredSlots = "Pick at least one preferred date.";
+    } else {
+      for (const slot of form.preferredSlots) {
+        if (variant === "job" && !slotTimeIsSelected(slot)) {
+          errors.preferredSlots = `Pick an hourly slot for ${formatSlotDate(slot.date)}.`;
+          break;
+        }
+        const start = slot.startTime ?? "08:00";
+        const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+        const windowError = validateCalendarVisitWindow(start, end, workingHours);
+        if (windowError) {
+          errors.preferredSlots = windowError;
+          break;
+        }
+      }
+      if (!errors.preferredSlots) {
+        const missingIndex = form.preferredSlots.findIndex((slot) => !slot.date);
+        if (missingIndex >= 0) {
+          errors.preferredSlots = `Choose a date for option ${missingIndex + 1}.`;
+        } else if (
+          new Set(form.preferredSlots.map((slot) => slot.date)).size !==
+          form.preferredSlots.length
+        ) {
+          errors.preferredSlots = "Each date must be unique.";
+        }
+      }
+    }
+  } else if (!form.calendarWindow && form.preferredSlots.length === 0) {
     errors.preferredSlots = "Pick at least one preferred date.";
-  } else {
-    for (const slot of form.preferredSlots) {
-      if (variant === "job" && !slotTimeIsSelected(slot)) {
-        errors.preferredSlots = `Pick an hourly slot for ${formatSlotDate(slot.date)}.`;
-        break;
-      }
-      const start = slot.startTime ?? "08:00";
-      const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
-      const windowError = validateCalendarVisitWindow(start, end, workingHours);
-      if (windowError) {
-        errors.preferredSlots = windowError;
-        break;
-      }
-    }
-    if (!errors.preferredSlots) {
-      const missingIndex = form.preferredSlots.findIndex((slot) => !slot.date);
-      if (missingIndex >= 0) {
-        errors.preferredSlots = `Choose a date for option ${missingIndex + 1}.`;
-      } else if (
-        new Set(form.preferredSlots.map((slot) => slot.date)).size !==
-        form.preferredSlots.length
-      ) {
-        errors.preferredSlots = "Each date must be unique.";
-      }
-    }
   }
 
   const fullName = form.customer.fullName.trim();
@@ -371,6 +444,173 @@ function StepHeader({
           {hint}
         </span>
       ) : null}
+    </div>
+  );
+}
+
+function ServiceThumbnail({
+  service,
+  size = "md",
+}: {
+  service: Pick<BusinessServiceDetail, "imageUrl" | "businessType" | "name">;
+  size?: "sm" | "md";
+}) {
+  const sizeClass = size === "sm" ? "h-9 w-9 rounded-lg" : "h-11 w-11 rounded-xl";
+  const iconClass = size === "sm" ? "text-[18px]" : "text-[22px]";
+
+  return (
+    <div
+      className={`${sizeClass} shrink-0 overflow-hidden bg-surface-container`}
+    >
+      {service.imageUrl ? (
+        <img
+          src={service.imageUrl}
+          alt=""
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <span
+            className={`material-symbols-outlined material-symbols-filled text-on-surface-variant ${iconClass}`}
+          >
+            {iconForBusinessType(service.businessType)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServiceSelectField({
+  label,
+  services,
+  selectedService,
+  loading,
+  disabled,
+  invalid,
+  errorMessage,
+  onSelect,
+  onBlur,
+}: {
+  label: string;
+  services: BusinessServiceDetail[];
+  selectedService: BusinessServiceDetail | null;
+  loading: boolean;
+  disabled?: boolean;
+  invalid: boolean;
+  errorMessage: string | null;
+  onSelect: (serviceId: string) => void;
+  onBlur: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        onBlur();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open, onBlur]);
+
+  const pickerDisabled = disabled || loading || services.length === 0;
+
+  return (
+    <div ref={rootRef} className="relative">
+      <span className={LABEL_CLASS}>{label}</span>
+      <button
+        type="button"
+        disabled={pickerDisabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Select a service"
+        onClick={() => {
+          if (pickerDisabled) return;
+          setOpen((current) => !current);
+        }}
+        onBlur={() => {
+          if (!open) onBlur();
+        }}
+        className={`mt-1 flex w-full items-center gap-3 rounded-xl border bg-surface-container-lowest px-3 py-2.5 text-left transition-colors focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60 ${
+          invalid
+            ? "border-error/70 ring-2 ring-error/15"
+            : "border-outline-variant/60"
+        }`}
+      >
+        {selectedService ? (
+          <>
+            <ServiceThumbnail service={selectedService} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-body text-[14px] font-semibold text-on-surface">
+                {selectedService.name}
+              </span>
+              {selectedService.businessType ? (
+                <span className="block truncate font-body text-[12px] text-on-surface-variant">
+                  {selectedService.businessType}
+                </span>
+              ) : null}
+            </span>
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 font-body text-[14px] text-on-surface-variant">
+            {loading ? "Loading services…" : "Select a service"}
+          </span>
+        )}
+        <span className="material-symbols-outlined shrink-0 text-[20px] text-on-surface-variant">
+          {open ? "expand_less" : "expand_more"}
+        </span>
+      </button>
+
+      {open && services.length > 0 ? (
+        <ul
+          role="listbox"
+          className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-outline-variant bg-surface-container-lowest shadow-lg"
+        >
+          {services.map((service) => {
+            const selected = selectedService?.id === service.id;
+            return (
+              <li key={service.id} role="option" aria-selected={selected}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelect(service.id);
+                    setOpen(false);
+                    onBlur();
+                  }}
+                  className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-surface-container-low ${
+                    selected ? "bg-primary/5" : ""
+                  }`}
+                >
+                  <ServiceThumbnail service={service} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-body text-[14px] font-semibold text-on-surface">
+                      {service.name}
+                    </span>
+                    {service.businessType ? (
+                      <span className="block truncate font-body text-[12px] text-on-surface-variant">
+                        {service.businessType}
+                      </span>
+                    ) : null}
+                  </span>
+                  {selected ? (
+                    <span className="material-symbols-outlined material-symbols-filled shrink-0 text-[18px] text-primary">
+                      check_circle
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      <FieldFeedback error={errorMessage} errorId="serviceId-error" />
     </div>
   );
 }
@@ -553,6 +793,267 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ServiceAddressFields({
+  address,
+  showFieldError,
+  fieldErrorMessage,
+  onUpdateAddress,
+  onTouchField,
+}: {
+  address: ServiceAddress;
+  showFieldError: (key: FieldKey) => boolean;
+  fieldErrorMessage: (key: FieldKey) => string | null;
+  onUpdateAddress: <K extends keyof ServiceAddress>(key: K, value: string) => void;
+  onTouchField: (key: FieldKey) => void;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <label className="block sm:col-span-2">
+        <span className={LABEL_CLASS}>Street address</span>
+        <input
+          type="text"
+          value={address.street}
+          onChange={(event) => onUpdateAddress("street", event.target.value)}
+          onBlur={() => onTouchField("street")}
+          placeholder="e.g. 12 Main Street"
+          autoComplete="off"
+          className={inputClassName(showFieldError("street"))}
+          aria-invalid={showFieldError("street")}
+          aria-describedby={
+            fieldErrorMessage("street") ? "street-error" : undefined
+          }
+        />
+        <FieldFeedback
+          error={fieldErrorMessage("street")}
+          errorId="street-error"
+        />
+      </label>
+      <label className="block">
+        <span className={LABEL_CLASS}>Suburb</span>
+        <input
+          type="text"
+          value={address.suburb}
+          onChange={(event) => onUpdateAddress("suburb", event.target.value)}
+          onBlur={() => onTouchField("suburb")}
+          placeholder="e.g. Surry Hills"
+          autoComplete="off"
+          className={inputClassName(showFieldError("suburb"))}
+          aria-invalid={showFieldError("suburb")}
+          aria-describedby={
+            fieldErrorMessage("suburb") ? "suburb-error" : undefined
+          }
+        />
+        <FieldFeedback
+          error={fieldErrorMessage("suburb")}
+          errorId="suburb-error"
+        />
+      </label>
+      <label className="block">
+        <span className={LABEL_CLASS}>State</span>
+        <input
+          type="text"
+          value={address.state}
+          onChange={(event) => onUpdateAddress("state", event.target.value)}
+          onBlur={() => onTouchField("state")}
+          placeholder="e.g. NSW"
+          autoComplete="off"
+          className={inputClassName(showFieldError("state"))}
+          aria-invalid={showFieldError("state")}
+          aria-describedby={
+            fieldErrorMessage("state") ? "state-error" : undefined
+          }
+        />
+        <FieldFeedback
+          error={fieldErrorMessage("state")}
+          errorId="state-error"
+        />
+      </label>
+      <label className="block sm:col-span-2 sm:max-w-[12rem]">
+        <span className={LABEL_CLASS}>Postcode</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={address.postcode}
+          onChange={(event) =>
+            onUpdateAddress(
+              "postcode",
+              event.target.value.replace(/\D/g, "").slice(0, 4),
+            )
+          }
+          onBlur={() => onTouchField("postcode")}
+          placeholder="e.g. 2000"
+          autoComplete="off"
+          className={inputClassName(showFieldError("postcode"))}
+          aria-invalid={showFieldError("postcode")}
+          aria-describedby={
+            fieldErrorMessage("postcode") ? "postcode-error" : undefined
+          }
+        />
+        <FieldFeedback
+          error={fieldErrorMessage("postcode")}
+          errorId="postcode-error"
+        />
+      </label>
+    </div>
+  );
+}
+
+function CustomerDetailsStep({
+  form,
+  customerSearch,
+  showCustomerDropdown,
+  filteredCustomers,
+  customersLoading,
+  includeAddress,
+  showFieldError,
+  fieldErrorMessage,
+  onCustomerSearchChange,
+  onCustomerSearchFocus,
+  onSelectCustomer,
+  onUpdateCustomer,
+  onUpdateAddress,
+  onTouchField,
+}: {
+  form: InspectionFormState;
+  customerSearch: string;
+  showCustomerDropdown: boolean;
+  filteredCustomers: CustomerOption[];
+  customersLoading: boolean;
+  includeAddress: boolean;
+  showFieldError: (key: FieldKey) => boolean;
+  fieldErrorMessage: (key: FieldKey) => string | null;
+  onCustomerSearchChange: (value: string) => void;
+  onCustomerSearchFocus: () => void;
+  onSelectCustomer: (option: CustomerOption) => void;
+  onUpdateCustomer: (
+    field: "fullName" | "email" | "phone",
+    value: string,
+  ) => void;
+  onUpdateAddress: <K extends keyof ServiceAddress>(key: K, value: string) => void;
+  onTouchField: (key: FieldKey) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="relative">
+        <label className="block">
+          <span className={LABEL_CLASS}>Customer name</span>
+          <input
+            type="text"
+            value={customerSearch || form.customer.fullName}
+            onChange={(event) => onCustomerSearchChange(event.target.value)}
+            onFocus={onCustomerSearchFocus}
+            onBlur={() => onTouchField("fullName")}
+            placeholder="Search or enter name"
+            autoComplete="off"
+            className={inputClassName(showFieldError("fullName"))}
+            aria-invalid={showFieldError("fullName")}
+            aria-describedby={
+              fieldErrorMessage("fullName") ? "fullName-error" : undefined
+            }
+          />
+        </label>
+        {showCustomerDropdown && filteredCustomers.length > 0 ? (
+          <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-lowest shadow-lg">
+            <li className="border-b border-outline-variant/40 px-3 py-2 font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              {customersLoading ? "Loading customers…" : "Existing customers"}
+            </li>
+            {filteredCustomers.map((option) => (
+              <li key={option.id}>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onSelectCustomer(option)}
+                  className="flex w-full flex-col px-3 py-2.5 text-left transition-colors hover:bg-surface-container-low"
+                >
+                  <span className="font-body text-[14px] font-semibold text-on-surface">
+                    {option.fullName}
+                  </span>
+                  {option.email ? (
+                    <span className="font-body text-[12px] text-on-surface-variant">
+                      {option.email}
+                    </span>
+                  ) : null}
+                  {option.phone ? (
+                    <span className="font-body text-[12px] text-on-surface-variant">
+                      {formatAuPhoneDisplay(option.phone)}
+                    </span>
+                  ) : null}
+                  {formatCustomerAddressLine(option.address) ? (
+                    <span className="font-body text-[12px] text-on-surface-variant">
+                      {formatCustomerAddressLine(option.address)}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <FieldFeedback
+          error={fieldErrorMessage("fullName")}
+          errorId="fullName-error"
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className={LABEL_CLASS}>Mobile number</span>
+          <AuPhoneInput
+            value={form.customer.phone}
+            onChange={(value) => onUpdateCustomer("phone", value)}
+            autoComplete="off"
+            className="mt-1"
+          />
+          <FieldFeedback
+            error={fieldErrorMessage("phone")}
+            errorId="phone-error"
+          />
+        </label>
+        <label className="block">
+          <span className={LABEL_CLASS}>Email</span>
+          <input
+            type="email"
+            value={form.customer.email}
+            onChange={(event) => onUpdateCustomer("email", event.target.value)}
+            onBlur={() => onTouchField("email")}
+            placeholder="you@example.com"
+            autoComplete="off"
+            className={inputClassName(showFieldError("email"))}
+            aria-invalid={showFieldError("email")}
+            aria-describedby={
+              fieldErrorMessage("email") ? "email-error" : undefined
+            }
+          />
+          <FieldFeedback
+            error={fieldErrorMessage("email")}
+            errorId="email-error"
+          />
+        </label>
+      </div>
+
+      {includeAddress ? (
+        <div className="border-t border-outline-variant/40 pt-4">
+          <p className={LABEL_CLASS}>Service address</p>
+          <div className="mt-3">
+            <ServiceAddressFields
+              address={form.address}
+              showFieldError={showFieldError}
+              fieldErrorMessage={fieldErrorMessage}
+              onUpdateAddress={onUpdateAddress}
+              onTouchField={onTouchField}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <p className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container/50 px-3 py-2.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+        {includeAddress
+          ? "Pick an existing customer to pre-fill their details and address, or enter everything manually. A customer account is created automatically when the email is new."
+          : "Pick an existing customer to pre-fill their details, or enter new contact info. A customer account is created automatically when the email is new."}
+      </p>
+    </div>
+  );
+}
+
 function InspectionPreview({
   form,
   selectedServiceName,
@@ -560,6 +1061,8 @@ function InspectionPreview({
   variant = "inspection",
   assignTo = null,
   staffName = null,
+  showAssignment = false,
+  reviewStepNumber = 5,
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
@@ -567,6 +1070,8 @@ function InspectionPreview({
   variant?: "inspection" | "job";
   assignTo?: "owner" | "staff" | null;
   staffName?: string | null;
+  showAssignment?: boolean;
+  reviewStepNumber?: number;
 }) {
   const jobSummary =
     form.requestType === "existing_service"
@@ -576,7 +1081,7 @@ function InspectionPreview({
   return (
     <div className="space-y-4">
       <StepHeader
-        step={variant === "job" ? 6 : 5}
+        step={reviewStepNumber}
         title="Review & create"
       />
 
@@ -606,7 +1111,7 @@ function InspectionPreview({
       </PreviewSection>
 
       <PreviewSection
-        title={variant === "job" ? "Schedule" : "Preferred visits"}
+        title="Schedule"
         icon="event"
       >
         <ul className="space-y-2">
@@ -642,7 +1147,7 @@ function InspectionPreview({
         ) : null}
       </PreviewSection>
 
-      {variant === "job" ? (
+      {showAssignment ? (
         <PreviewSection title="Assignment" icon="groups">
           <PreviewRow
             label="Assigned to"
@@ -651,7 +1156,9 @@ function InspectionPreview({
                 ? "You (business owner)"
                 : assignTo === "staff"
                   ? staffName ?? "Selected team member"
-                  : "Unassigned — assign later from Jobs"
+                  : variant === "job"
+                    ? "Unassigned — assign later from Jobs"
+                    : "Unassigned — assign later from Requests"
             }
           />
         </PreviewSection>
@@ -730,11 +1237,18 @@ export function AddInspectionModal({
           timeRange: initialPreferredSlot.timeRange,
         }
       : null);
+  const isCalendarFlow = Boolean(resolvedCalendarWindow?.date?.trim());
+  // Every entry point now uses the customer-first flow (customer + address on
+  // step 1), matching the calendar experience.
+  const customerFirstFlow = true;
   const { user } = useAuth();
   const profile = useBusinessProfile();
+  const { requests, loading: customersLoading } = useInspectionRequests();
+  const { bookings } = useBookings();
   const { staff, loading: staffLoading, reload: reloadStaff } =
     useBusinessStaffSummary();
-  const { workingHours } = useBusinessWorkingHours();
+  const { workingHours, loading: workingHoursLoading } =
+    useBusinessWorkingHours();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(createInitialForm);
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
@@ -746,6 +1260,25 @@ export function AddInspectionModal({
   const [success, setSuccess] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [workingDayPage, setWorkingDayPage] = useState(0);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+
+  const stepFlow = useMemo(
+    () => buildStepFlow(variant, isCalendarFlow),
+    [variant, isCalendarFlow],
+  );
+  const currentStep = stepFlow[step - 1];
+  const currentKind = currentStep?.kind ?? "service";
+  const showAssignmentStep = stepFlow.some((entry) => entry.kind === "assign");
+
+  const customerOptions = useMemo(
+    () => buildCustomerOptions(requests, bookings),
+    [requests, bookings],
+  );
+  const filteredCustomers = useMemo(
+    () => filterCustomerOptions(customerOptions, customerSearch),
+    [customerOptions, customerSearch],
+  );
 
   const activeServices = useMemo(
     () => services.filter((service) => service.isActive),
@@ -776,6 +1309,8 @@ export function AddInspectionModal({
       setSubmitting(false);
       setSuccess(false);
       setWorkingDayPage(0);
+      setCustomerSearch("");
+      setShowCustomerDropdown(false);
     },
     [variant],
   );
@@ -843,42 +1378,53 @@ export function AddInspectionModal({
   }, [open, user]);
 
   useEffect(() => {
-    if (!open || variant !== "job") return;
+    if (!open || !showAssignmentStep) return;
     void reloadStaff();
-  }, [open, variant, reloadStaff]);
+  }, [open, showAssignmentStep, reloadStaff]);
 
-  const step1Valid =
+  const serviceValid =
     form.requestType === "existing_service"
       ? form.selectedServiceId !== null
       : form.customTitle.trim().length >= 3 &&
         form.customDescription.trim().length >= 10;
 
-  const step2Valid = isAddressComplete(form.address);
+  const addressValid = isAddressComplete(form.address);
 
-  const step3Valid = form.calendarWindow
-    ? variant === "job"
+  const customerValid =
+    form.customer.fullName.trim().length >= 2 &&
+    EMAIL_REGEX.test(form.customer.email.trim()) &&
+    form.customer.phone.replace(/\D/g, "").length >= 6;
+
+  const scheduleValid = workingHoursLoading
+    ? form.calendarWindow
       ? isClockTime(form.calendarWindow.startTime) &&
-        isClockTime(form.calendarWindow.endTime) &&
-        validateCalendarVisitWindow(
-          form.calendarWindow.startTime,
-          form.calendarWindow.endTime,
-          workingHours,
-        ) === null
-      : validateCalendarVisitWindow(
-          form.calendarWindow.startTime,
-          form.calendarWindow.endTime,
-          workingHours,
-        ) === null
-    : form.preferredSlots.length > 0 &&
-      form.preferredSlots.every((slot) => {
-        if (!slot.date.trim()) return false;
-        if (variant === "job" && !slotTimeIsSelected(slot)) return false;
-        const start = slot.startTime ?? "08:00";
-        const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
-        return validateCalendarVisitWindow(start, end, workingHours) === null;
-      }) &&
-      new Set(form.preferredSlots.map((slot) => slot.date)).size ===
-        form.preferredSlots.length;
+        isClockTime(form.calendarWindow.endTime)
+      : form.preferredSlots.length > 0 &&
+        form.preferredSlots.every((slot) => Boolean(slot.date.trim()))
+    : form.calendarWindow
+      ? variant === "job"
+        ? isClockTime(form.calendarWindow.startTime) &&
+          isClockTime(form.calendarWindow.endTime) &&
+          validateCalendarVisitWindow(
+            form.calendarWindow.startTime,
+            form.calendarWindow.endTime,
+            workingHours,
+          ) === null
+        : validateCalendarVisitWindow(
+            form.calendarWindow.startTime,
+            form.calendarWindow.endTime,
+            workingHours,
+          ) === null
+      : form.preferredSlots.length > 0 &&
+        form.preferredSlots.every((slot) => {
+          if (!slot.date.trim()) return false;
+          if (variant === "job" && !slotTimeIsSelected(slot)) return false;
+          const start = slot.startTime ?? "08:00";
+          const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+          return validateCalendarVisitWindow(start, end, workingHours) === null;
+        }) &&
+        new Set(form.preferredSlots.map((slot) => slot.date)).size ===
+          form.preferredSlots.length;
 
   function updateCalendarWindowTimes(
     startTime: string | null,
@@ -944,13 +1490,8 @@ export function AddInspectionModal({
     });
   }
 
-  const step4Valid =
-    form.customer.fullName.trim().length >= 2 &&
-    EMAIL_REGEX.test(form.customer.email.trim()) &&
-    form.customer.phone.replace(/\D/g, "").length >= 6;
-
-  const step5Valid =
-    variant !== "job" ||
+  const assignValid =
+    !showAssignmentStep ||
     assignTo !== "staff" ||
     (staffId.trim().length > 0 && staff.some((member) => member.id === staffId));
 
@@ -978,11 +1519,9 @@ export function AddInspectionModal({
     return staff.find((member) => member.id === staffId)?.fullName ?? null;
   }, [assignTo, staff, staffId]);
 
-  const reviewStep = variant === "job" ? 6 : 5;
-
   const fieldErrors = useMemo(
-    () => computeFieldErrors(form, workingHours, variant),
-    [form, workingHours, variant],
+    () => computeFieldErrors(form, workingHours, variant, workingHoursLoading),
+    [form, workingHours, variant, workingHoursLoading],
   );
 
   const showFieldError = useCallback(
@@ -1001,40 +1540,70 @@ export function AddInspectionModal({
 
   const touchStepFields = useCallback(
     (stepNum: number) => {
+      const kind = stepFlow[stepNum - 1]?.kind;
       setTouched((prev) => {
         const next = { ...prev };
-        if (stepNum === 1) {
+        if (kind === "service") {
           if (form.requestType === "existing_service") next.serviceId = true;
           else {
             next.customTitle = true;
             next.customDescription = true;
           }
           if (form.budgetAud.trim()) next.budgetAud = true;
-        } else if (stepNum === 2) {
+        } else if (kind === "address") {
           next.street = true;
           next.suburb = true;
           next.state = true;
           next.postcode = true;
-        } else if (stepNum === 3) {
+        } else if (kind === "schedule") {
           next.preferredSlots = true;
-        } else if (stepNum === 4) {
+        } else if (kind === "customer") {
           next.fullName = true;
           next.email = true;
           next.phone = true;
+          if (customerFirstFlow) {
+            next.street = true;
+            next.suburb = true;
+            next.state = true;
+            next.postcode = true;
+          }
         }
         return next;
       });
     },
-    [form.requestType, form.budgetAud],
+    [form.requestType, form.budgetAud, stepFlow, customerFirstFlow],
   );
 
-  const canContinue =
-    (step === 1 && step1Valid) ||
-    (step === 2 && step2Valid) ||
-    (step === 3 && step3Valid) ||
-    (step === 4 && step4Valid) ||
-    (variant === "job" && step === 5 && step5Valid) ||
-    step === reviewStep;
+  const stepIsValid = useMemo(() => {
+    switch (currentKind) {
+      case "customer":
+        return customerFirstFlow
+          ? customerValid && addressValid
+          : customerValid;
+      case "service":
+        return serviceValid;
+      case "address":
+        return addressValid;
+      case "schedule":
+        return scheduleValid;
+      case "assign":
+        return assignValid;
+      case "review":
+        return true;
+      default:
+        return false;
+    }
+  }, [
+    currentKind,
+    customerFirstFlow,
+    customerValid,
+    serviceValid,
+    addressValid,
+    scheduleValid,
+    assignValid,
+  ]);
+
+  const canContinue = stepIsValid;
 
   function updateAddress<K extends keyof ServiceAddress>(key: K, value: string) {
     setForm((prev) => ({
@@ -1053,6 +1622,36 @@ export function AddInspectionModal({
       ...prev,
       customer: { ...prev.customer, [field]: next },
     }));
+    setError(null);
+  }
+
+  function handleCustomerSearchChange(value: string) {
+    setCustomerSearch(value);
+    setForm((prev) => ({
+      ...prev,
+      customer: { ...prev.customer, fullName: value },
+    }));
+    setShowCustomerDropdown(true);
+    setError(null);
+  }
+
+  function selectCustomer(option: CustomerOption) {
+    const nextAddress = option.address
+      ? { ...option.address }
+      : { street: "", suburb: "", state: "", postcode: "" };
+    setForm((prev) => ({
+      ...prev,
+      customer: {
+        fullName: option.fullName,
+        email: option.email,
+        phone: option.phone,
+      },
+      address: hasUsableCustomerAddress(option.address)
+        ? nextAddress
+        : prev.address,
+    }));
+    setCustomerSearch(option.fullName);
+    setShowCustomerDropdown(false);
     setError(null);
   }
 
@@ -1125,23 +1724,31 @@ export function AddInspectionModal({
     if (!canContinue) {
       touchStepFields(step);
       const stepError =
-        step === 1
+        currentKind === "service"
           ? fieldErrors.serviceId ??
             fieldErrors.customTitle ??
             fieldErrors.customDescription ??
             fieldErrors.budgetAud
-          : step === 2
+          : currentKind === "address"
             ? fieldErrors.street ??
               fieldErrors.suburb ??
               fieldErrors.state ??
               fieldErrors.postcode
-            : step === 3
+            : currentKind === "schedule"
               ? fieldErrors.preferredSlots
-              : step === 4
+              : currentKind === "customer"
                 ? fieldErrors.fullName ??
                   fieldErrors.email ??
-                  fieldErrors.phone
-                : variant === "job" && step === 5 && assignTo === "staff" && !staffId
+                  fieldErrors.phone ??
+                  (customerFirstFlow
+                    ? fieldErrors.street ??
+                      fieldErrors.suburb ??
+                      fieldErrors.state ??
+                      fieldErrors.postcode
+                    : null)
+                : currentKind === "assign" &&
+                    assignTo === "staff" &&
+                    !staffId
                   ? "Choose a team member to assign."
                   : null;
       setError(
@@ -1150,8 +1757,7 @@ export function AddInspectionModal({
       return;
     }
     setError(null);
-    const totalSteps = variant === "job" ? JOB_STEPS.length : STEPS.length;
-    if (step < totalSteps) setStep(step + 1);
+    if (step < stepFlow.length) setStep(step + 1);
   }
 
   function goBack() {
@@ -1160,8 +1766,12 @@ export function AddInspectionModal({
   }
 
   async function submit() {
-    if (!user || !step4Valid) {
-      setError("Enter valid customer contact details.");
+    if (!user || !customerValid || (customerFirstFlow && !addressValid)) {
+      setError(
+        customerFirstFlow
+          ? "Enter valid customer contact details and service address."
+          : "Enter valid customer contact details.",
+      );
       return;
     }
 
@@ -1256,6 +1866,34 @@ export function AddInspectionModal({
         );
       }
 
+      if (!isJob && assignTo && payload.requestId) {
+        const assignResponse = await fetch(
+          `/api/requests/${payload.requestId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              action: "assign",
+              assignTo,
+              ...(assignTo === "staff" ? { staffId } : {}),
+            }),
+          },
+        );
+        const assignPayload = (await assignResponse.json()) as {
+          ok?: boolean;
+          error?: string;
+        };
+        if (!assignResponse.ok || !assignPayload.ok) {
+          throw new Error(
+            assignPayload.error ??
+              "Request created, but the inspector could not be assigned.",
+          );
+        }
+      }
+
       setSuccess(true);
       onCreated?.(payload.jobId ?? payload.requestId ?? "");
     } catch (submitError) {
@@ -1273,9 +1911,8 @@ export function AddInspectionModal({
 
   if (!open) return null;
 
-  const steps = variant === "job" ? JOB_STEPS : STEPS;
-  const current = steps[step - 1];
-  const progressPercent = Math.round((step / steps.length) * 100);
+  const current = currentStep ?? stepFlow[0];
+  const progressPercent = Math.round((step / stepFlow.length) * 100);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden overscroll-contain p-0 sm:items-center sm:p-4">
@@ -1296,7 +1933,7 @@ export function AddInspectionModal({
         <header className="flex items-start justify-between gap-4 border-b border-outline-variant bg-surface/90 px-5 py-4 backdrop-blur-md sm:px-6">
           <div className="min-w-0 flex-1">
             <p className="font-body text-[12px] font-semibold uppercase tracking-wider text-primary">
-              Step {step} of {steps.length}
+              Step {step} of {stepFlow.length}
             </p>
             <h2
               id="add-inspection-title"
@@ -1341,7 +1978,7 @@ export function AddInspectionModal({
                   ? form.preferredSlots.length > 1
                     ? "The job is on your board and all selected days appear on the calendar. Inspection and quotation steps are already complete — issue an invoice after the work is done."
                     : "The job is scheduled on your board and calendar. The inspection and quotation steps are already marked complete — issue an invoice after the work is done."
-                  : "The request is now on your board. You can review it, assign an inspector, and confirm a visit time."}
+                  : "The visit is scheduled on your board. Assign an inspector from the request if you have not already."}
               </p>
             </div>
           ) : (
@@ -1355,9 +1992,35 @@ export function AddInspectionModal({
                 </div>
               ) : null}
 
-              {step === 1 ? (
+              {currentKind === "customer" ? (
                 <div className="space-y-4">
-                  <StepHeader step={1} title={current.title} />
+                  <StepHeader
+                    step={step}
+                    title={current.title}
+                    hint="Required"
+                  />
+                  <CustomerDetailsStep
+                    form={form}
+                    customerSearch={customerSearch}
+                    showCustomerDropdown={showCustomerDropdown}
+                    filteredCustomers={filteredCustomers}
+                    customersLoading={customersLoading}
+                    includeAddress={customerFirstFlow}
+                    showFieldError={showFieldError}
+                    fieldErrorMessage={fieldErrorMessage}
+                    onCustomerSearchChange={handleCustomerSearchChange}
+                    onCustomerSearchFocus={() => setShowCustomerDropdown(true)}
+                    onSelectCustomer={selectCustomer}
+                    onUpdateCustomer={updateCustomer}
+                    onUpdateAddress={updateAddress}
+                    onTouchField={touchField}
+                  />
+                </div>
+              ) : null}
+
+              {currentKind === "service" ? (
+                <div className="space-y-4">
+                  <StepHeader step={step} title={current.title} />
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <RequestTypeCard
                       icon="format_list_bulleted"
@@ -1389,80 +2052,27 @@ export function AddInspectionModal({
                   </div>
 
                   {form.requestType === "existing_service" ? (
-                    activeServices.length > 0 ? (
-                      <>
-                      <ul className="overflow-hidden rounded-xl border border-outline-variant/60 bg-surface-container-lowest">
-                        {activeServices.map((service, index) => {
-                          const selected =
-                            form.selectedServiceId === service.id;
-                          return (
-                            <li
-                              key={service.id}
-                              className={
-                                index > 0
-                                  ? "border-t border-outline-variant/40"
-                                  : ""
-                              }
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setForm((prev) => ({
-                                    ...prev,
-                                    selectedServiceId:
-                                      prev.selectedServiceId === service.id
-                                        ? null
-                                        : service.id,
-                                  }));
-                                  touchField("serviceId");
-                                  setError(null);
-                                }}
-                                className={`flex w-full items-center gap-3 p-3 text-left transition-colors sm:p-4 ${
-                                  selected
-                                    ? "bg-primary/5"
-                                    : "hover:bg-surface-container"
-                                }`}
-                              >
-                                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-container">
-                                  {service.imageUrl ? (
-                                    <img
-                                      src={service.imageUrl}
-                                      alt=""
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center">
-                                      <span className="material-symbols-outlined material-symbols-filled text-[28px] text-on-surface-variant">
-                                        {iconForBusinessType(service.businessType)}
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                                <span className="min-w-0 flex-1">
-                                  <span className="block font-body text-[14px] font-semibold text-on-surface">
-                                    {service.name}
-                                  </span>
-                                  <span className="font-body text-[12px] text-on-surface-variant">
-                                    {service.businessType}
-                                  </span>
-                                </span>
-                                {selected ? (
-                                  <span className="material-symbols-outlined material-symbols-filled text-[20px] text-primary">
-                                    check_circle
-                                  </span>
-                                ) : null}
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                      {fieldErrorMessage("serviceId") ? (
-                        <FieldFeedback
-                          error={fieldErrorMessage("serviceId")}
-                          errorId="serviceId-error"
-                        />
-                      ) : null}
-                      </>
+                    activeServices.length > 0 || servicesLoading ? (
+                      <ServiceSelectField
+                        label={
+                          variant === "job" ? "Service" : "Existing service"
+                        }
+                        services={activeServices}
+                        selectedService={selectedService}
+                        loading={servicesLoading}
+                        disabled={activeServices.length === 0}
+                        invalid={showFieldError("serviceId")}
+                        errorMessage={fieldErrorMessage("serviceId")}
+                        onSelect={(serviceId) => {
+                          setForm((prev) => ({
+                            ...prev,
+                            selectedServiceId: serviceId,
+                          }));
+                          touchField("serviceId");
+                          setError(null);
+                        }}
+                        onBlur={() => touchField("serviceId")}
+                      />
                     ) : (
                       <p className="font-body text-body-md text-on-surface-variant">
                         No active services yet — use a custom quotation request.
@@ -1595,120 +2205,27 @@ export function AddInspectionModal({
                 </div>
               ) : null}
 
-              {step === 2 ? (
+              {currentKind === "address" ? (
                 <div className="space-y-4">
                   <StepHeader
-                    step={2}
+                    step={step}
                     title={current.title}
                     hint="Required"
                   />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block sm:col-span-2">
-                      <span className={LABEL_CLASS}>Street address</span>
-                      <input
-                        type="text"
-                        value={form.address.street}
-                        onChange={(event) =>
-                          updateAddress("street", event.target.value)
-                        }
-                        onBlur={() => touchField("street")}
-                        placeholder="e.g. 12 Main Street"
-                        autoComplete="off"
-                        className={inputClassName(showFieldError("street"))}
-                        aria-invalid={showFieldError("street")}
-                        aria-describedby={
-                          fieldErrorMessage("street")
-                            ? "street-error"
-                            : undefined
-                        }
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("street")}
-                        errorId="street-error"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={LABEL_CLASS}>Suburb</span>
-                      <input
-                        type="text"
-                        value={form.address.suburb}
-                        onChange={(event) =>
-                          updateAddress("suburb", event.target.value)
-                        }
-                        onBlur={() => touchField("suburb")}
-                        placeholder="e.g. Surry Hills"
-                        autoComplete="off"
-                        className={inputClassName(showFieldError("suburb"))}
-                        aria-invalid={showFieldError("suburb")}
-                        aria-describedby={
-                          fieldErrorMessage("suburb")
-                            ? "suburb-error"
-                            : undefined
-                        }
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("suburb")}
-                        errorId="suburb-error"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={LABEL_CLASS}>State</span>
-                      <input
-                        type="text"
-                        value={form.address.state}
-                        onChange={(event) =>
-                          updateAddress("state", event.target.value)
-                        }
-                        onBlur={() => touchField("state")}
-                        placeholder="e.g. NSW"
-                        autoComplete="off"
-                        className={inputClassName(showFieldError("state"))}
-                        aria-invalid={showFieldError("state")}
-                        aria-describedby={
-                          fieldErrorMessage("state") ? "state-error" : undefined
-                        }
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("state")}
-                        errorId="state-error"
-                      />
-                    </label>
-                    <label className="block sm:col-span-2 sm:max-w-[12rem]">
-                      <span className={LABEL_CLASS}>Postcode</span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={form.address.postcode}
-                        onChange={(event) =>
-                          updateAddress(
-                            "postcode",
-                            event.target.value.replace(/\D/g, "").slice(0, 4),
-                          )
-                        }
-                        onBlur={() => touchField("postcode")}
-                        placeholder="e.g. 2000"
-                        autoComplete="off"
-                        className={inputClassName(showFieldError("postcode"))}
-                        aria-invalid={showFieldError("postcode")}
-                        aria-describedby={
-                          fieldErrorMessage("postcode")
-                            ? "postcode-error"
-                            : undefined
-                        }
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("postcode")}
-                        errorId="postcode-error"
-                      />
-                    </label>
-                  </div>
+                  <ServiceAddressFields
+                    address={form.address}
+                    showFieldError={showFieldError}
+                    fieldErrorMessage={fieldErrorMessage}
+                    onUpdateAddress={updateAddress}
+                    onTouchField={touchField}
+                  />
                 </div>
               ) : null}
 
-              {step === 3 ? (
+              {currentKind === "schedule" ? (
                 <div className="space-y-4">
                   <StepHeader
-                    step={3}
+                    step={step}
                     title={current.title}
                     hint={
                       variant === "job"
@@ -1794,6 +2311,7 @@ export function AddInspectionModal({
                           }
                           dayStripLayout="fit"
                           timeZone={timeZone}
+                          allowPast
                         />
                         {variant === "job" ? (
                           <p className="mt-3 font-body text-[12px] text-on-surface-variant">
@@ -1846,91 +2364,26 @@ export function AddInspectionModal({
                 </div>
               ) : null}
 
-              {step === reviewStep ? (
+              {currentKind === "review" ? (
                 <InspectionPreview
                   form={form}
                   selectedServiceName={selectedService?.name ?? null}
                   timeZone={timeZone}
                   variant={variant}
-                  assignTo={variant === "job" ? assignTo : null}
+                  assignTo={showAssignmentStep ? assignTo : null}
                   staffName={selectedStaffName}
+                  showAssignment={showAssignmentStep}
+                  reviewStepNumber={step}
                 />
               ) : null}
 
-              {step === 4 ? (
+              {currentKind === "assign" ? (
                 <div className="space-y-4">
                   <StepHeader
-                    step={4}
+                    step={step}
                     title={current.title}
-                    hint="Required"
+                    hint="Optional"
                   />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block sm:col-span-2">
-                      <span className={LABEL_CLASS}>Full name</span>
-                      <input
-                        type="text"
-                        value={form.customer.fullName}
-                        onChange={(event) =>
-                          updateCustomer("fullName", event.target.value)
-                        }
-                        onBlur={() => touchField("fullName")}
-                        placeholder="e.g. Alex Thompson"
-                        autoComplete="off"
-                        className={inputClassName(showFieldError("fullName"))}
-                        aria-invalid={showFieldError("fullName")}
-                        aria-describedby={
-                          fieldErrorMessage("fullName")
-                            ? "fullName-error"
-                            : undefined
-                        }
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("fullName")}
-                        errorId="fullName-error"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={LABEL_CLASS}>Mobile number</span>
-                      <AuPhoneInput
-                        value={form.customer.phone}
-                        onChange={(value) => updateCustomer("phone", value)}
-                        autoComplete="off"
-                        className="mt-1"
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("phone")}
-                        errorId="phone-error"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={LABEL_CLASS}>Email</span>
-                      <input
-                        type="email"
-                        value={form.customer.email}
-                        onChange={(event) =>
-                          updateCustomer("email", event.target.value)
-                        }
-                        onBlur={() => touchField("email")}
-                        placeholder="you@example.com"
-                        autoComplete="off"
-                        className={inputClassName(showFieldError("email"))}
-                        aria-invalid={showFieldError("email")}
-                        aria-describedby={
-                          fieldErrorMessage("email") ? "email-error" : undefined
-                        }
-                      />
-                      <FieldFeedback
-                        error={fieldErrorMessage("email")}
-                        errorId="email-error"
-                      />
-                    </label>
-                  </div>
-                </div>
-              ) : null}
-
-              {variant === "job" && step === 5 ? (
-                <div className="space-y-4">
-                  <StepHeader step={5} title={current.title} hint="Optional" />
                   <JobAssignPicker
                     staff={staff}
                     staffLoading={staffLoading}
@@ -1971,7 +2424,7 @@ export function AddInspectionModal({
                 {step === 1 ? "Cancel" : "Back"}
               </button>
 
-              {step < steps.length ? (
+              {step < stepFlow.length ? (
                 <button
                   type="button"
                   onClick={goNext}

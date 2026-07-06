@@ -171,6 +171,7 @@ export function mapBookingDoc(
     completedFromInvoice: data.completedFromInvoice === true,
     beforeImageUrls: parseImageUrlList(data.beforeImageUrls),
     afterImageUrls: parseImageUrlList(data.afterImageUrls),
+    cancelledAt: toMillis(data.cancelledAt),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
