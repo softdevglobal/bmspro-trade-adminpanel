@@ -158,6 +158,10 @@ function mapQuotationDoc(
         description: readOptionalString(item.description),
         quantity: readOptionalNumber(item.quantity),
         rateAud: readOptionalNumber(item.rateAud),
+        // Without this the API strips per-item discounts, so clients (the
+        // mobile app in particular) rebuild invoices from the pre-discount
+        // rate and overcharge the customer.
+        discountPercent: readOptionalNumber(item.discountPercent),
         gstPercent: readOptionalNumber(item.gstPercent),
       };
     })
