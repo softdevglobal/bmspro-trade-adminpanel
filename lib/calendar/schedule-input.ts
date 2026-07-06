@@ -1,4 +1,8 @@
-import { isClockTime } from "@/lib/inspection/types";
+import {
+  isClockTime,
+  sortInspectionSlots,
+  type InspectionSlot,
+} from "@/lib/inspection/types";
 import {
   DEFAULT_WORKING_HOURS,
   type BusinessWorkingHours,
@@ -29,4 +33,33 @@ export function parseCalendarScheduleInput(
   if (!isClockTime(startTime) || !isClockTime(endTime)) return null;
   if (validateCalendarVisitWindow(startTime, endTime, workingHours)) return null;
   return { date, startTime, endTime };
+}
+
+/** First preferred slot as a confirmed calendar schedule (owner/admin intake). */
+export function scheduleFromPreferredSlots(
+  slots: InspectionSlot[],
+): CalendarScheduleInput | null {
+  const sorted = sortInspectionSlots(
+    slots.filter((entry) => entry.date?.trim()),
+  );
+  const first = sorted[0];
+  if (!first?.date?.trim()) return null;
+  const startTime = first.startTime?.trim() || "08:00";
+  const endTime = first.endTime?.trim() || "09:00";
+  if (!isIsoDate(first.date) || !isClockTime(startTime) || !isClockTime(endTime)) {
+    return null;
+  }
+  return { date: first.date, startTime, endTime };
+}
+
+/** Calendar slot from payload, or first preferred slot for owner-created requests. */
+export function resolveOwnerCreatedSchedule(
+  payload: Record<string, unknown>,
+  preferredSlots: InspectionSlot[],
+  workingHours: BusinessWorkingHours = DEFAULT_WORKING_HOURS,
+): CalendarScheduleInput | null {
+  return (
+    parseCalendarScheduleInput(payload.calendarSchedule, workingHours) ??
+    scheduleFromPreferredSlots(preferredSlots)
+  );
 }
