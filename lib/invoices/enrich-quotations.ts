@@ -29,7 +29,9 @@ export async function enrichQuotationsWithInvoices(
         ? "paid"
         : invoice.status === "sent"
           ? "sent"
-          : "draft";
+          : invoice.status === "cancelled"
+            ? "cancelled"
+            : "draft";
 
     return {
       ...quotation,

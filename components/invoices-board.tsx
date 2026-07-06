@@ -1,5 +1,6 @@
 "use client";
 
+import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -16,7 +17,12 @@ import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-type InvoiceFilter = "due" | "draft" | "paid" | "all";
+type InvoiceFilter = "due" | "draft" | "paid" | "cancelled" | "all";
+
+/** A draft or sent invoice can be cancelled; paid/cancelled cannot. */
+function canCancelInvoice(invoice: InvoiceDetail): boolean {
+  return invoice.status === "draft" || invoice.status === "sent";
+}
 
 const BOARD_SHELL_CLASS = "flex min-h-0 flex-1 flex-col";
 
@@ -47,6 +53,9 @@ function invoiceStatusTone(invoice: InvoiceDetail): string {
   }
   if (invoice.status === "sent") {
     return "border-sky-200 bg-sky-50 text-sky-700";
+  }
+  if (invoice.status === "cancelled") {
+    return "border-rose-200 bg-rose-50 text-rose-700";
   }
   return "border-stone-200 bg-stone-100 text-stone-600";
 }
@@ -87,9 +96,13 @@ function FilterChip({
 function InvoiceCardMenu({
   invoice,
   onDelete,
+  onCancel,
+  onUndoCancel,
 }: {
   invoice: InvoiceDetail;
   onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -145,6 +158,38 @@ function InvoiceCardMenu({
               Edit &amp; send draft
             </Link>
           ) : null}
+          {canCancelInvoice(invoice) ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-amber-600">
+                cancel
+              </span>
+              Cancel invoice
+            </button>
+          ) : null}
+          {invoice.status === "cancelled" ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onUndoCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-emerald-600">
+                undo
+              </span>
+              Undo cancellation
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
@@ -170,11 +215,15 @@ function InvoiceCard({
   isPreviewOpen,
   onOpen,
   onDelete,
+  onCancel,
+  onUndoCancel,
 }: {
   invoice: InvoiceDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
   onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
 }) {
   const displayPhone = formatAuPhoneDisplay(invoice.customer.phone);
   return (
@@ -207,7 +256,12 @@ function InvoiceCard({
             {invoiceStatusLabel(invoice)}
           </span>
         </div>
-        <InvoiceCardMenu invoice={invoice} onDelete={onDelete} />
+        <InvoiceCardMenu
+          invoice={invoice}
+          onDelete={onDelete}
+          onCancel={onCancel}
+          onUndoCancel={onUndoCancel}
+        />
       </div>
       <h4 className="font-display text-[16px] font-semibold text-on-surface">
         {invoice.customer.fullName || "Customer"}
@@ -244,12 +298,16 @@ function InvoicePreviewDrawer({
   onClose,
   onInvoiceUpdated,
   onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
 }: {
   invoice: InvoiceDetail | null;
   onClose: () => void;
   onInvoiceUpdated: (invoice: InvoiceDetail) => void;
   onDelete: (invoice: InvoiceDetail) => void;
+  onCancel: (invoice: InvoiceDetail) => void;
+  onUndoCancel: (invoice: InvoiceDetail) => void;
   timeZone?: string | null;
 }) {  const { user } = useAuth();
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -619,6 +677,29 @@ function InvoicePreviewDrawer({
                   {pdfError}
                 </p>
               ) : null}
+              {invoice.status === "cancelled" ? (
+                <button
+                  type="button"
+                  onClick={() => onUndoCancel(invoice)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    undo
+                  </span>
+                  Undo cancellation
+                </button>
+              ) : canCancelInvoice(invoice) ? (
+                <button
+                  type="button"
+                  onClick={() => onCancel(invoice)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[14px] font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    cancel
+                  </span>
+                  Cancel invoice
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => onDelete(invoice)}
@@ -662,6 +743,9 @@ export function InvoicesBoard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InvoiceDetail | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<InvoiceDetail | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const timeZone = profile?.timezone;
   const load = useCallback(async () => {
     if (!user) {
@@ -724,6 +808,8 @@ export function InvoicesBoard() {
       due: invoices.filter((invoice) => invoice.status === "sent").length,
       draft: invoices.filter((invoice) => invoice.status === "draft").length,
       paid: invoices.filter((invoice) => invoice.status === "paid").length,
+      cancelled: invoices.filter((invoice) => invoice.status === "cancelled")
+        .length,
     }),
     [invoices],
   );
@@ -765,6 +851,89 @@ export function InvoicesBoard() {
       );
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function confirmCancelInvoice() {
+    if (!user || !cancelTarget) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/invoices", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "cancel",
+          invoiceId: cancelTarget.id,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        invoice?: InvoiceDetail;
+      };
+      if (!response.ok || !data.ok || !data.invoice) {
+        throw new Error(data.error ?? "Could not cancel invoice.");
+      }
+      const cancelledInvoice = data.invoice;
+      setInvoices((current) =>
+        current.map((invoice) =>
+          invoice.id === cancelledInvoice.id ? cancelledInvoice : invoice,
+        ),
+      );
+      setCancelTarget(null);
+      setFilter("cancelled");
+    } catch (cancelErr) {
+      setCancelError(
+        cancelErr instanceof Error
+          ? cancelErr.message
+          : "Could not cancel invoice.",
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function undoCancelInvoice(target: InvoiceDetail) {
+    if (!user) return;
+    setCancelError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/invoices", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "undo_cancel",
+          invoiceId: target.id,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        invoice?: InvoiceDetail;
+      };
+      if (!response.ok || !data.ok || !data.invoice) {
+        throw new Error(data.error ?? "Could not restore invoice.");
+      }
+      const restoredInvoice = data.invoice;
+      setInvoices((current) =>
+        current.map((invoice) =>
+          invoice.id === restoredInvoice.id ? restoredInvoice : invoice,
+        ),
+      );
+    } catch (undoErr) {
+      setCancelError(
+        undoErr instanceof Error
+          ? undoErr.message
+          : "Could not restore invoice.",
+      );
     }
   }
 
@@ -888,12 +1057,27 @@ export function InvoicesBoard() {
           onClick={() => setFilter("paid")}
         />
         <FilterChip
+          label="Cancelled"
+          count={counts.cancelled}
+          active={filter === "cancelled"}
+          onClick={() => setFilter("cancelled")}
+        />
+        <FilterChip
           label="All"
           count={counts.all}
           active={filter === "all"}
           onClick={() => setFilter("all")}
         />
       </div>
+
+      {cancelError ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-800"
+        >
+          {cancelError}
+        </div>
+      ) : null}
 
       {filtered.length === 0 ? (
         <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low px-5 py-10 text-center">
@@ -910,6 +1094,8 @@ export function InvoicesBoard() {
                 isPreviewOpen={selectedId === invoice.id}
                 onOpen={() => setSelectedId(invoice.id)}
                 onDelete={() => setDeleteTarget(invoice)}
+                onCancel={() => setCancelTarget(invoice)}
+                onUndoCancel={() => void undoCancelInvoice(invoice)}
               />            </li>
           ))}
         </ul>
@@ -920,6 +1106,8 @@ export function InvoicesBoard() {
         onClose={() => setSelectedId(null)}
         timeZone={timeZone}
         onDelete={(invoice) => setDeleteTarget(invoice)}
+        onCancel={(invoice) => setCancelTarget(invoice)}
+        onUndoCancel={(invoice) => void undoCancelInvoice(invoice)}
         onInvoiceUpdated={(updatedInvoice) => {
           setInvoices((current) =>
             current.map((invoice) =>
@@ -948,6 +1136,37 @@ export function InvoicesBoard() {
         }}
         onConfirm={() => void confirmDeleteInvoice()}
         isLoading={deleting}
+      />
+      <CancelConfirmModal
+        open={cancelTarget !== null}
+        title="Cancel this invoice?"
+        description={
+          cancelTarget ? (
+            <>
+              <p>
+                {cancelTarget.invoiceCode} for{" "}
+                <span className="font-semibold text-on-surface">
+                  {cancelTarget.customer.fullName || "this customer"}
+                </span>{" "}
+                will move to the Cancelled tab.
+              </p>
+              <p>
+                It stays on record for reference, but can no longer be sent or
+                marked as paid.
+              </p>
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Yes, cancel invoice"
+        cancelLabel="Keep invoice"
+        loadingLabel="Cancelling..."
+        onCancel={() => {
+          if (!cancelling) setCancelTarget(null);
+        }}
+        onConfirm={() => void confirmCancelInvoice()}
+        isLoading={cancelling}
       />
     </div>
   );

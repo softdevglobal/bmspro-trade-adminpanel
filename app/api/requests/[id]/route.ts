@@ -616,6 +616,22 @@ export async function PATCH(
     return NextResponse.json({ ok: true, request: result.request });
   }
 
+  if (action === "undo_cancel") {
+    const result = await applyOwnerAction(
+      id,
+      auth.businessId,
+      { type: "undo_cancel" },
+      ownerAudit,
+    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+    return NextResponse.json({ ok: true, request: result.request });
+  }
+
   if (action === "complete") {
     const result = await applyOwnerAction(
       id,

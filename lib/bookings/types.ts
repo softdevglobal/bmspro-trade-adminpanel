@@ -84,6 +84,8 @@ export type BookingDetail = {
   beforeImageUrls: string[];
   /** Optional photos captured after work finished. */
   afterImageUrls: string[];
+  /** When the job was cancelled (null unless status is `cancelled`). */
+  cancelledAt: number | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
