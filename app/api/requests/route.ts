@@ -1,5 +1,5 @@
 import { logAuditEvent } from "@/lib/audit/server";
-import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
+import { resolveOwnerCreatedSchedule } from "@/lib/calendar/schedule-input";
 import { parseWorkingHoursFromBusiness } from "@/lib/calendar/working-hours";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
@@ -149,8 +149,10 @@ export async function POST(request: Request) {
 
   const createdSource = resolveOwnerCreatedSource(request);
   const workingHours = parseWorkingHoursFromBusiness(businessData);
-  const calendarSchedule = parseCalendarScheduleInput(
-    (body as Record<string, unknown>).calendarSchedule,
+  // Owner-created requests confirm the visit immediately (no customer review step).
+  const calendarSchedule = resolveOwnerCreatedSchedule(
+    body as Record<string, unknown>,
+    parsed.value.preferredSlots,
     workingHours,
   );
   const result = await createInspectionRequest(auth.businessId, parsed.value, {

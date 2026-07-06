@@ -83,8 +83,8 @@ const STEPS = [
     subtitle: "Where should the inspector visit?",
   },
   {
-    title: "Preferred dates & times",
-    subtitle: "Pick up to 3 days, then choose hourly time slots for each.",
+    title: "Schedule the visit",
+    subtitle: "Pick day(s) and hourly time slots for the inspection.",
   },
   {
     title: "Contact details",
@@ -1111,7 +1111,7 @@ function InspectionPreview({
       </PreviewSection>
 
       <PreviewSection
-        title={variant === "job" ? "Schedule" : "Preferred visits"}
+        title="Schedule"
         icon="event"
       >
         <ul className="space-y-2">
@@ -1978,7 +1978,7 @@ export function AddInspectionModal({
                   ? form.preferredSlots.length > 1
                     ? "The job is on your board and all selected days appear on the calendar. Inspection and quotation steps are already complete — issue an invoice after the work is done."
                     : "The job is scheduled on your board and calendar. The inspection and quotation steps are already marked complete — issue an invoice after the work is done."
-                  : "The request is now on your board. You can review it, assign an inspector, and confirm a visit time."}
+                  : "The visit is scheduled on your board. Assign an inspector from the request if you have not already."}
               </p>
             </div>
           ) : (
