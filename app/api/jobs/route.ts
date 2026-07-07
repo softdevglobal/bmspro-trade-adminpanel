@@ -172,7 +172,10 @@ export async function POST(request: Request) {
       ? businessData.timezone.trim()
       : PLATFORM_TIME_ZONE;
 
-  const parsed = parseInspectionRequestInput(body, timeZone);
+  // Owner-created direct job: the service address is optional here.
+  const parsed = parseInspectionRequestInput(body, timeZone, {
+    requireAddress: false,
+  });
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
   }

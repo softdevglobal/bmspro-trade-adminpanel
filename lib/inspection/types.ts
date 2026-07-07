@@ -474,9 +474,13 @@ export function needsAdminJobDateProposal(
 export function parseInspectionRequestInput(
   raw: unknown,
   timeZone?: string | null,
+  options?: { requireAddress?: boolean },
 ):
   | { ok: true; value: InspectionRequestInput }
   | { ok: false; error: string } {
+  // The service address is mandatory for customer-facing bookings but optional
+  // for owner-initiated flows (creating a request / direct job from the app).
+  const requireAddress = options?.requireAddress ?? true;
   if (!raw || typeof raw !== "object") {
     return { ok: false, error: "Invalid request body." };
   }
@@ -507,10 +511,11 @@ export function parseInspectionRequestInput(
   };
 
   if (
-    address.street.length < 3 ||
-    address.suburb.length < 2 ||
-    address.state.length < 2 ||
-    address.postcode.length < 3
+    requireAddress &&
+    (address.street.length < 3 ||
+      address.suburb.length < 2 ||
+      address.state.length < 2 ||
+      address.postcode.length < 3)
   ) {
     return { ok: false, error: "Service address must be complete." };
   }
