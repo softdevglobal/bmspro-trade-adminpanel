@@ -1419,7 +1419,7 @@ export function CreateInvoiceFromQuotation({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>Suburb</span>
+                        <span className={LABEL_CLASS}>Suburb (optional)</span>
                         <input
                           type="text"
                           value={address.suburb}
@@ -1434,7 +1434,7 @@ export function CreateInvoiceFromQuotation({
                       </label>
                       <div className="grid grid-cols-2 gap-3">
                         <label className="block">
-                          <span className={LABEL_CLASS}>State</span>
+                          <span className={LABEL_CLASS}>State (optional)</span>
                           <input
                             type="text"
                             value={address.state}
@@ -1448,7 +1448,7 @@ export function CreateInvoiceFromQuotation({
                           />
                         </label>
                         <label className="block">
-                          <span className={LABEL_CLASS}>Postcode</span>
+                          <span className={LABEL_CLASS}>Postcode (optional)</span>
                           <input
                             type="text"
                             value={address.postcode}

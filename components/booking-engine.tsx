@@ -32,6 +32,8 @@ import { AuPhoneInput } from "@/components/au-phone-input";
 import {
   TIME_RANGES,
   formatAddress,
+  getOptionalInspectionAddressFieldErrors,
+  isOptionalInspectionAddressValid,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import {
@@ -58,15 +60,6 @@ export type ServiceAddress = {
 
 function formatServiceAddress(address: ServiceAddress): string {
   return formatAddress(address);
-}
-
-function isServiceAddressComplete(address: ServiceAddress): boolean {
-  return (
-    address.street.trim().length >= 3 &&
-    address.suburb.trim().length >= 2 &&
-    address.state.trim().length >= 2 &&
-    address.postcode.trim().length >= 4
-  );
 }
 
 export function BookingEngine({ business, services }: Props) {
@@ -700,18 +693,11 @@ function collectBookingMissingRequirements(input: {
     }
   }
 
-  if (input.address.street.trim().length < 3) {
-    missing.push("Street address");
-  }
-  if (input.address.suburb.trim().length < 2) {
-    missing.push("Suburb");
-  }
-  if (input.address.state.trim().length < 2) {
-    missing.push("State");
-  }
-  if (input.address.postcode.trim().length < 4) {
-    missing.push("Postcode");
-  }
+  const addressErrors = getOptionalInspectionAddressFieldErrors(input.address);
+  if (addressErrors.street) missing.push("Street address");
+  if (addressErrors.suburb) missing.push("Suburb");
+  if (addressErrors.state) missing.push("State");
+  if (addressErrors.postcode) missing.push("Postcode");
 
   const datedSlots = input.preferredSlots.filter((slot) => slot.date.trim());
   if (datedSlots.length === 0) {
@@ -995,7 +981,7 @@ function ServiceBookingFlow({
   const selectedService =
     services.find((service) => service.id === selectedServiceId) ?? null;
 
-  const addressComplete = isServiceAddressComplete(address);
+  const addressValid = isOptionalInspectionAddressValid(address);
 
   const requestStepValid =
     requestType === "existing_service"
@@ -1121,7 +1107,7 @@ function ServiceBookingFlow({
   const canSubmit =
     businessActive &&
     requestStepValid &&
-    addressComplete &&
+    addressValid &&
     slotsValid &&
     customerValid &&
     !submitting &&
@@ -1505,7 +1491,7 @@ function ServiceBookingFlow({
           <BookingStepHeader
             step={2}
             title="Service address"
-            hint="Required"
+            hint="Optional"
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
@@ -1515,7 +1501,7 @@ function ServiceBookingFlow({
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="block sm:col-span-2">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                Street address
+                Street address (optional)
               </span>
               <input
                 type="text"
@@ -1528,7 +1514,7 @@ function ServiceBookingFlow({
             </label>
             <label className="block">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                Suburb
+                Suburb (optional)
               </span>
               <input
                 type="text"
@@ -1541,7 +1527,7 @@ function ServiceBookingFlow({
             </label>
             <label className="block">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                State
+                State (optional)
               </span>
               <input
                 type="text"
@@ -1554,7 +1540,7 @@ function ServiceBookingFlow({
             </label>
             <label className="block sm:col-span-2 sm:max-w-[12rem] max-sm:w-full">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                Postcode
+                Postcode (optional)
               </span>
               <input
                 type="text"

@@ -29,7 +29,9 @@ import {
   formatAddress,
   formatSlotDate,
   formatVisitWindow,
+  getOptionalInspectionAddressFieldErrors,
   isClockTime,
+  isOptionalInspectionAddressValid,
   sortInspectionSlots,
 } from "@/lib/inspection/types";
 import type {
@@ -275,35 +277,8 @@ function computeFieldErrors(
     }
   }
 
-  const street = form.address.street.trim();
-  if (street.length < 3) {
-    errors.street =
-      street.length === 0
-        ? "Street address is required."
-        : "Enter at least 3 characters.";
-  }
-
-  const suburb = form.address.suburb.trim();
-  if (suburb.length < 2) {
-    errors.suburb =
-      suburb.length === 0 ? "Suburb is required." : "Enter at least 2 characters.";
-  }
-
-  const state = form.address.state.trim();
-  if (state.length < 2) {
-    errors.state =
-      state.length === 0 ? "State is required." : "Enter at least 2 characters.";
-  }
-
-  const postcode = form.address.postcode.trim();
-  if (postcode.length < 4) {
-    errors.postcode =
-      postcode.length === 0
-        ? "Postcode is required."
-        : "Enter a 4-digit postcode.";
-  } else if (!/^\d{4}$/.test(postcode)) {
-    errors.postcode = "Use a 4-digit Australian postcode.";
-  }
+  const addressFieldErrors = getOptionalInspectionAddressFieldErrors(form.address);
+  Object.assign(errors, addressFieldErrors);
 
   if (!workingHoursLoading) {
     if (form.calendarWindow) {
@@ -399,16 +374,6 @@ function FieldFeedback({
     );
   }
   return null;
-}
-
-function isAddressComplete(address: ServiceAddress): boolean {
-  const postcode = address.postcode.trim();
-  return (
-    address.street.trim().length >= 3 &&
-    address.suburb.trim().length >= 2 &&
-    address.state.trim().length >= 2 &&
-    /^\d{4}$/.test(postcode)
-  );
 }
 
 function normalizeBudgetInput(value: string): string {
@@ -809,7 +774,7 @@ function ServiceAddressFields({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="block sm:col-span-2">
-        <span className={LABEL_CLASS}>Street address</span>
+        <span className={LABEL_CLASS}>Street address (optional)</span>
         <input
           type="text"
           value={address.street}
@@ -829,7 +794,7 @@ function ServiceAddressFields({
         />
       </label>
       <label className="block">
-        <span className={LABEL_CLASS}>Suburb</span>
+        <span className={LABEL_CLASS}>Suburb (optional)</span>
         <input
           type="text"
           value={address.suburb}
@@ -849,7 +814,7 @@ function ServiceAddressFields({
         />
       </label>
       <label className="block">
-        <span className={LABEL_CLASS}>State</span>
+        <span className={LABEL_CLASS}>State (optional)</span>
         <input
           type="text"
           value={address.state}
@@ -869,7 +834,7 @@ function ServiceAddressFields({
         />
       </label>
       <label className="block sm:col-span-2 sm:max-w-[12rem]">
-        <span className={LABEL_CLASS}>Postcode</span>
+        <span className={LABEL_CLASS}>Postcode (optional)</span>
         <input
           type="text"
           inputMode="numeric"
@@ -1032,7 +997,7 @@ function CustomerDetailsStep({
 
       {includeAddress ? (
         <div className="border-t border-outline-variant/40 pt-4">
-          <p className={LABEL_CLASS}>Service address</p>
+          <p className={LABEL_CLASS}>Service address (optional)</p>
           <div className="mt-3">
             <ServiceAddressFields
               address={form.address}
@@ -1388,7 +1353,7 @@ export function AddInspectionModal({
       : form.customTitle.trim().length >= 3 &&
         form.customDescription.trim().length >= 10;
 
-  const addressValid = isAddressComplete(form.address);
+  const addressValid = isOptionalInspectionAddressValid(form.address);
 
   const customerValid =
     form.customer.fullName.trim().length >= 2 &&
@@ -1769,7 +1734,9 @@ export function AddInspectionModal({
     if (!user || !customerValid || (customerFirstFlow && !addressValid)) {
       setError(
         customerFirstFlow
-          ? "Enter valid customer contact details and service address."
+          ? addressValid
+            ? "Enter valid customer contact details."
+            : "Enter valid customer contact details and check the address fields you entered."
           : "Enter valid customer contact details.",
       );
       return;

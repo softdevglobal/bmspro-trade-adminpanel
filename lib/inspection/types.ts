@@ -470,6 +470,97 @@ export function needsAdminJobDateProposal(
   );
 }
 
+export type OptionalInspectionAddressFieldErrors = Partial<
+  Record<keyof InspectionAddress, string>
+>;
+
+/** True when empty or when each provided field meets format rules. */
+export function isOptionalInspectionAddressValid(
+  address: InspectionAddress,
+): boolean {
+  const street = address.street.trim();
+  if (street.length > 0 && street.length < 3) return false;
+
+  const suburb = address.suburb.trim();
+  if (suburb.length > 0 && suburb.length < 2) return false;
+
+  const state = address.state.trim();
+  if (state.length > 0 && state.length < 2) return false;
+
+  const postcode = address.postcode.trim();
+  if (
+    postcode.length > 0 &&
+    (postcode.length < 4 || !/^\d{4}$/.test(postcode))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function getOptionalInspectionAddressFieldErrors(
+  address: InspectionAddress,
+): OptionalInspectionAddressFieldErrors {
+  const errors: OptionalInspectionAddressFieldErrors = {};
+
+  const street = address.street.trim();
+  if (street.length > 0 && street.length < 3) {
+    errors.street = "Enter at least 3 characters.";
+  }
+
+  const suburb = address.suburb.trim();
+  if (suburb.length > 0 && suburb.length < 2) {
+    errors.suburb = "Enter at least 2 characters.";
+  }
+
+  const state = address.state.trim();
+  if (state.length > 0 && state.length < 2) {
+    errors.state = "Enter at least 2 characters.";
+  }
+
+  const postcode = address.postcode.trim();
+  if (postcode.length > 0) {
+    if (postcode.length < 4) {
+      errors.postcode = "Enter a 4-digit postcode.";
+    } else if (!/^\d{4}$/.test(postcode)) {
+      errors.postcode = "Use a 4-digit Australian postcode.";
+    }
+  }
+
+  return errors;
+}
+
+export function normalizeInspectionAddress(
+  address: InspectionAddress,
+): InspectionAddress {
+  return {
+    street: address.street.trim(),
+    suburb: address.suburb.trim(),
+    state: address.state.trim(),
+    postcode: address.postcode.trim(),
+  };
+}
+
+export function parseOptionalInspectionAddress(
+  raw: unknown,
+):
+  | { ok: true; value: InspectionAddress }
+  | { ok: false; error: string } {
+  const addressRaw = (raw ?? {}) as Record<string, unknown>;
+  const address = normalizeInspectionAddress({
+    street: trimString(addressRaw.street),
+    suburb: trimString(addressRaw.suburb),
+    state: trimString(addressRaw.state),
+    postcode: trimString(addressRaw.postcode),
+  });
+
+  if (!isOptionalInspectionAddressValid(address)) {
+    return { ok: false, error: "Check the address fields you entered." };
+  }
+
+  return { ok: true, value: address };
+}
+
 /** Validates and normalises a raw payload from the booking page. */
 export function parseInspectionRequestInput(
   raw: unknown,
@@ -498,22 +589,11 @@ export function parseInspectionRequestInput(
   }
   if (!phone) return { ok: false, error: "Mobile number is required." };
 
-  const addressRaw = (input.address ?? {}) as Record<string, unknown>;
-  const address: InspectionAddress = {
-    street: trimString(addressRaw.street),
-    suburb: trimString(addressRaw.suburb),
-    state: trimString(addressRaw.state),
-    postcode: trimString(addressRaw.postcode),
-  };
-
-  if (
-    address.street.length < 3 ||
-    address.suburb.length < 2 ||
-    address.state.length < 2 ||
-    address.postcode.length < 3
-  ) {
-    return { ok: false, error: "Service address must be complete." };
+  const addressParsed = parseOptionalInspectionAddress(input.address);
+  if (!addressParsed.ok) {
+    return { ok: false, error: addressParsed.error };
   }
+  const address = addressParsed.value;
 
   let serviceId: string | null = null;
   let customRequest: { title: string; description: string } | null = null;
