@@ -27,6 +27,8 @@ import {
   attachmentDisplayName,
   isPdfAttachmentUrl,
   buildQuotationDocumentDeposit,
+  formatDocumentDiscountLabel,
+  resolveQuotationItemPricing,
   type GstPricingMode,
   type QuotationDocumentData,
 } from "@/lib/quotations/document";
@@ -235,49 +237,17 @@ function savedLineItemFromQuotation(
   item: QuotationDetail["lineItems"][number],
   index: number,
 ): SavedLineItem {
-  const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
-  let discountPercent =
-    typeof item.discountPercent === "number" && item.discountPercent > 0
-      ? Math.min(100, item.discountPercent)
-      : 0;
-  const unitRate =
-    item.rateAud && item.rateAud > 0
-      ? item.rateAud
-      : Math.round((item.priceAud / quantity) * 100) / 100;
-
-  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
-    const gross = Math.round(unitRate * quantity * 100) / 100;
-    if (gross > item.priceAud + 0.01) {
-      const inferred = Math.min(
-        100,
-        Math.round((1 - item.priceAud / gross) * 10000) / 100,
-      );
-      if (inferred > 0.01) discountPercent = inferred;
-    }
-  }
-
-  let rate: number;
-  if (
-    discountPercent > 0 &&
-    typeof item.discountPercent === "number" &&
-    item.discountPercent > 0
-  ) {
-    rate =
-      Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100;
-  } else if (discountPercent > 0) {
-    rate = unitRate;
-  } else {
-    rate = unitRate;
-  }
-
+  const { quantity, discountPercent, listRateAud } =
+    resolveQuotationItemPricing(item);
   const gstPercent = item.gstPercent ?? 0;
+
   return {
     id: `${index}-${item.name}-${crypto.randomUUID()}`,
     code: item.code ?? "",
     name: item.name,
     description: item.description ?? "",
     quantity,
-    rate,
+    rate: listRateAud,
     discountPercent,
     applyGst: gstPercent > 0,
     amountAud: item.priceAud,
@@ -713,6 +683,13 @@ export function CreateQuotationPage() {
   const gstAmount = documentTotals.gstAud;
   const total = documentTotals.totalAud;
   const depositRequestAud = depositRequest?.amountAud ?? 0;
+  const documentDiscountLabel = formatDocumentDiscountLabel(
+    discountAmount,
+    subtotal,
+    documentDiscount
+      ? { mode: documentDiscount.mode, percent: documentDiscount.percent }
+      : null,
+  );
 
   useEffect(() => {
     if (!depositRequest || total <= 0) return;
@@ -1257,6 +1234,12 @@ export function CreateQuotationPage() {
       lineItems: documentLineItems,
       subtotalAud: subtotal,
       discountAud: discountAmount,
+      documentDiscount: documentDiscount
+        ? {
+            mode: documentDiscount.mode,
+            percent: documentDiscount.percent,
+          }
+        : null,
       gstAud: gstAmount,
       totalAud: total,
       deposit: buildQuotationDocumentDeposit(total, depositRequest),
@@ -1284,6 +1267,7 @@ export function CreateQuotationPage() {
     documentLineItems,
     subtotal,
     discountAmount,
+    documentDiscount,
     gstAmount,
     total,
     depositRequest,
@@ -2306,7 +2290,7 @@ export function CreateQuotationPage() {
                     onClick={() => setDiscountModalOpen(true)}
                     className="font-body text-[12px] text-on-surface-variant underline underline-offset-2 hover:text-primary"
                   >
-                    Discount
+                    {discountAmount > 0 ? documentDiscountLabel : "Discount"}
                   </button>
                   <button
                     type="button"
@@ -2318,13 +2302,6 @@ export function CreateQuotationPage() {
                       : formatAud(0)}
                   </button>
                 </div>
-                {documentDiscount && discountAmount > 0 ? (
-                  <p className="text-right font-body text-[10px] text-on-surface-variant">
-                    {documentDiscount.mode === "percent"
-                      ? `${documentDiscount.percent}% off subtotal`
-                      : "Fixed discount"}
-                  </p>
-                ) : null}
                 <div className="rounded-xl border border-outline-variant/40 bg-gradient-to-br from-surface-container-lowest to-surface-container-low/80 p-2.5">
                   <button
                     type="button"

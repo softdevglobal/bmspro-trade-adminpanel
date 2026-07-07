@@ -5,6 +5,7 @@ import {
   formatQuoteDate,
   formatQuoteMoney,
   formatLineDiscountLabel,
+  formatDocumentDiscountLabel,
   grossSubtotalAud,
   resolveDocumentLineFromQuotationItem,
   resolveQuotationTerms,
@@ -865,7 +866,14 @@ export async function generateDocumentPdf(
     }
     drawPanelRow("Subtotal", formatQuoteMoney(data.subtotalAud));
     if (data.discountAud > 0) {
-      drawPanelRow("Discount", `-${formatQuoteMoney(data.discountAud)}`);
+      drawPanelRow(
+        formatDocumentDiscountLabel(
+          data.discountAud,
+          data.subtotalAud,
+          data.documentDiscount,
+        ),
+        `-${formatQuoteMoney(data.discountAud)}`,
+      );
     }
     if (data.gstAud > 0) {
       const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;
