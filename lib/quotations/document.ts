@@ -245,8 +245,17 @@ export function grossSubtotalAud(
 
 export function formatLineDiscountLabel(item: QuotationDocumentLineItem): string {
   const amount = lineItemDiscountAud(item);
-  if (item.discountPercent <= 0 || amount <= 0) return "—";
-  return `${item.discountPercent}% (−${formatQuoteMoney(amount)})`;
+  if (amount <= 0.01) return "—";
+
+  const gross = Math.round(item.rateAud * item.quantity * 100) / 100;
+  const percent =
+    item.discountPercent > 0
+      ? item.discountPercent
+      : gross > 0
+        ? Math.round((amount / gross) * 10000) / 100
+        : 0;
+
+  return `${formatPercentForLabel(percent)}% (-${formatQuoteMoney(amount)})`;
 }
 
 export function formatQuoteDate(iso: string): string {
@@ -323,47 +332,52 @@ function resolveDiscountPercentFromQuotationItem(
   quantity: number,
   unitRate: number,
 ): number {
-  let discountPercent =
+  // A stored discount percent is what the customer actually entered — trust it.
+  const stored =
     typeof item.discountPercent === "number" &&
     Number.isFinite(item.discountPercent) &&
     item.discountPercent > 0
       ? Math.min(100, item.discountPercent)
       : 0;
+  if (stored > 0) return stored;
 
-  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
+  // Legacy records without a stored percent: infer it from the list rate vs the
+  // net line total when the two disagree.
+  if (unitRate > 0 && quantity > 0) {
     const gross = Math.round(unitRate * quantity * 100) / 100;
     if (gross > item.priceAud + 0.01) {
       const inferred = Math.min(
         100,
         Math.round((1 - item.priceAud / gross) * 10000) / 100,
       );
-      if (inferred > 0.01) discountPercent = inferred;
+      if (inferred > 0.01) return inferred;
     }
   }
 
-  return discountPercent;
+  return 0;
 }
 
-/** Stored rateAud is the pre-discount list rate (ex-GST). */
+/**
+ * Resolves the pre-discount list rate (ex-GST) for display.
+ *
+ * The net line total (`priceAud`) is the source of truth because it drives the
+ * document total, so we derive the list rate from it and the resolved discount
+ * rather than trusting a stored `rateAud`, which can be stale or corrupted
+ * (e.g. double-inflated) and would show a wrong rate/discount in the document.
+ */
 export function resolveListRateFromQuotationItem(
   item: QuotationLineItem,
   quantity: number,
   discountPercent: number,
 ): number {
-  const storedListRate = hasStoredListRate(item);
-  const unitRate = storedListRate
-    ? item.rateAud!
-    : Math.round((item.priceAud / quantity) * 100) / 100;
+  const qty = quantity > 0 ? quantity : 1;
+  const unitNet = Math.round((item.priceAud / qty) * 100) / 100;
 
-  if (discountPercent <= 0) {
-    return unitRate;
+  if (discountPercent <= 0 || discountPercent >= 100) {
+    return hasStoredListRate(item) ? item.rateAud! : unitNet;
   }
-  if (storedListRate) {
-    return unitRate;
-  }
-  return (
-    Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100
-  );
+
+  return Math.round((unitNet / (1 - discountPercent / 100)) * 100) / 100;
 }
 
 /** Restores quantity, discount, and list rate from a persisted line item. */
