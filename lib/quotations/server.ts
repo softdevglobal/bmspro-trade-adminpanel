@@ -1669,20 +1669,14 @@ type QuotationAddressInput = {
 function parseStandaloneAddress(
   raw: QuotationAddressInput,
 ): { ok: true; value: InspectionAddress } | { ok: false; error: string } {
+  // The service address is optional for quotations and invoices. Whatever the
+  // user provides (full, partial or empty) is accepted and stored as-is.
   const address: InspectionAddress = {
     street: (raw?.street ?? "").trim(),
     suburb: (raw?.suburb ?? "").trim(),
     state: (raw?.state ?? "").trim(),
     postcode: (raw?.postcode ?? "").trim(),
   };
-  if (
-    address.street.length < 3 ||
-    address.suburb.length < 2 ||
-    address.state.length < 2 ||
-    address.postcode.length < 3
-  ) {
-    return { ok: false, error: "Enter a complete service address." };
-  }
   return { ok: true, value: address };
 }
 

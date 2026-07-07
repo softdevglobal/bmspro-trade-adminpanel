@@ -359,6 +359,8 @@ export async function applyOwnerAction(
     const occupancy = await computeDaySlotOccupancy(
       businessId,
       action.slot.date,
+      // On a reschedule, don't count this request against itself.
+      isReschedule ? { excludeRequestId: id } : undefined,
     );
     if (
       rangeOverlapsFullSlots(
