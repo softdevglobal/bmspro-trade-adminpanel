@@ -38,9 +38,9 @@ import type {
 } from "@/lib/onboarding/services/display";
 import {
   SERVICE_TEMPLATE_TRADES,
-  type BusinessType,
   type ServiceTemplateTrade,
-} from "@/lib/onboarding/types";
+} from "@/lib/onboarding/services/template-trades";
+import type { BusinessType } from "@/lib/onboarding/types";
 import {
   SERVICE_TEMPLATE_DEFAULTS,
   toServiceTaskInput,
@@ -298,9 +298,8 @@ function tasksFromService(tasks: BusinessServiceDetail["tasks"]): WizardTask[] {
   );
 }
 
-/** Maps legacy Electrical templates to a supported trade for editing. */
+/** Normalises stored trade type for the template wizard. */
 function normalizeTemplateTrade(trade: string | undefined | null): BusinessType {
-  if (trade === "Electrical") return "Other";
   if (SERVICE_TEMPLATE_TRADES.some((type) => type.id === trade)) {
     return trade as BusinessType;
   }
