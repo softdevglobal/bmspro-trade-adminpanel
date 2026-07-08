@@ -395,7 +395,9 @@ export async function updateBusinessBookingSchedule(
     };
   }
 
-  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date);
+  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date, {
+    excludeBookingId: bookingId,
+  });
   if (
     rangeOverlapsFullSlots(occupancy.slots, input.startTime, input.endTime, "job")
   ) {

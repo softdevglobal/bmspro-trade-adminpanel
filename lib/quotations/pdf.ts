@@ -5,6 +5,7 @@ import {
   formatQuoteDate,
   formatQuoteMoney,
   formatLineDiscountLabel,
+  formatDocumentDiscountLabel,
   grossSubtotalAud,
   resolveDocumentLineFromQuotationItem,
   resolveQuotationTerms,
@@ -228,6 +229,24 @@ function wrapText(
   return lines;
 }
 
+function fitNumericText(
+  text: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number,
+): string {
+  const safe = pdfSafeText(text);
+  if (font.widthOfTextAtSize(safe, size) <= maxWidth) return safe;
+  let result = safe;
+  while (
+    result.length > 1 &&
+    font.widthOfTextAtSize(`${result}...`, size) > maxWidth
+  ) {
+    result = result.slice(0, -1);
+  }
+  return `${result}...`;
+}
+
 function splitWordToFit(
   word: string,
   font: PDFFont,
@@ -426,11 +445,19 @@ export async function generateDocumentPdf(
       size?: number;
       bold?: boolean;
       color?: ReturnType<typeof rgb>;
+      maxWidth?: number;
     } = {},
   ) => {
     const size = opts.size ?? 10;
     const bold = opts.bold ?? false;
-    drawNumber(text, rightX - numericWidth(text, size, bold), yPos, opts);
+    const useFont = bold ? fontNumericBold : fontNumeric;
+    const display = opts.maxWidth
+      ? fitNumericText(text, useFont, size, opts.maxWidth)
+      : pdfSafeText(text);
+    drawNumber(display, rightX - useFont.widthOfTextAtSize(display, size), yPos, {
+      ...opts,
+      bold,
+    });
   };
 
   const drawTextRight = (
@@ -441,11 +468,19 @@ export async function generateDocumentPdf(
       size?: number;
       bold?: boolean;
       color?: ReturnType<typeof rgb>;
+      maxWidth?: number;
     } = {},
   ) => {
     const size = opts.size ?? 10;
     const bold = opts.bold ?? false;
-    drawText(text, rightX - textWidth(text, size, bold), yPos, opts);
+    const useFont = bold ? fontBold : font;
+    const display = opts.maxWidth
+      ? fitText(text, useFont, size, opts.maxWidth)
+      : pdfSafeText(text);
+    drawText(display, rightX - useFont.widthOfTextAtSize(display, size), yPos, {
+      ...opts,
+      bold,
+    });
   };
 
   const colRight = (col: { x: number; w: number }) => col.x + col.w - 6;
@@ -655,13 +690,13 @@ export async function generateDocumentPdf(
 
   // ── Table layout ──
   const cols = {
-    code: { x: MARGIN, w: 50 },
-    desc: { x: MARGIN + 50, w: 162 },
-    qty: { x: MARGIN + 212, w: 40 },
-    rate: { x: MARGIN + 252, w: 52 },
-    disc: { x: MARGIN + 304, w: 52 },
-    gst: { x: MARGIN + 356, w: 32 },
-    amount: { x: MARGIN + 388, w: CONTENT_WIDTH - 388 },
+    code: { x: MARGIN, w: 44 },
+    desc: { x: MARGIN + 44, w: 138 },
+    qty: { x: MARGIN + 182, w: 36 },
+    rate: { x: MARGIN + 218, w: 72 },
+    disc: { x: MARGIN + 290, w: 76 },
+    gst: { x: MARGIN + 366, w: 30 },
+    amount: { x: MARGIN + 396, w: CONTENT_WIDTH - 396 },
   };
   const rowH = 22;
 
@@ -769,26 +804,29 @@ export async function generateDocumentPdf(
     });
     drawNumberRight(String(item.quantity), colRight(cols.qty), ry, {
       size: 8.5,
+      maxWidth: cols.qty.w - 8,
     });
     drawNumberRight(formatQuoteMoney(item.rateAud), colRight(cols.rate), ry, {
       size: 8.5,
+      maxWidth: cols.rate.w - 8,
     });
     drawTextRight(
       formatLineDiscountLabel(item),
       colRight(cols.disc),
       ry,
-      { size: 7 },
+      { size: 7, maxWidth: cols.disc.w - 8 },
     );
     drawNumberRight(
       item.gstPercent > 0 ? `${item.gstPercent}%` : "-",
       colRight(cols.gst),
       ry,
-      { size: 8.5 },
+      { size: 8.5, maxWidth: cols.gst.w - 8 },
     );
     const amt = formatQuoteMoney(item.amountAud);
     drawNumberRight(amt, colRight(cols.amount), ry, {
       size: 8.5,
       bold: true,
+      maxWidth: cols.amount.w - 8,
     });
     y -= rowH;
   });
@@ -865,7 +903,14 @@ export async function generateDocumentPdf(
     }
     drawPanelRow("Subtotal", formatQuoteMoney(data.subtotalAud));
     if (data.discountAud > 0) {
-      drawPanelRow("Discount", `-${formatQuoteMoney(data.discountAud)}`);
+      drawPanelRow(
+        formatDocumentDiscountLabel(
+          data.discountAud,
+          data.subtotalAud,
+          data.documentDiscount,
+        ),
+        `-${formatQuoteMoney(data.discountAud)}`,
+      );
     }
     if (data.gstAud > 0) {
       const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;

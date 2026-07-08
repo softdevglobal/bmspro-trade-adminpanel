@@ -28,6 +28,7 @@ import {
   type InspectionSlot,
   REQUEST_STATUSES,
   parseCreatedSource,
+  parseOptionalInspectionAddress,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
 import {
@@ -158,6 +159,10 @@ function mapQuotationDoc(
         description: readOptionalString(item.description),
         quantity: readOptionalNumber(item.quantity),
         rateAud: readOptionalNumber(item.rateAud),
+        // Without this the API strips per-item discounts, so clients (the
+        // mobile app in particular) rebuild invoices from the pre-discount
+        // rate and overcharge the customer.
+        discountPercent: readOptionalNumber(item.discountPercent),
         gstPercent: readOptionalNumber(item.gstPercent),
       };
     })
@@ -1665,21 +1670,7 @@ type QuotationAddressInput = {
 function parseStandaloneAddress(
   raw: QuotationAddressInput,
 ): { ok: true; value: InspectionAddress } | { ok: false; error: string } {
-  const address: InspectionAddress = {
-    street: (raw?.street ?? "").trim(),
-    suburb: (raw?.suburb ?? "").trim(),
-    state: (raw?.state ?? "").trim(),
-    postcode: (raw?.postcode ?? "").trim(),
-  };
-  if (
-    address.street.length < 3 ||
-    address.suburb.length < 2 ||
-    address.state.length < 2 ||
-    address.postcode.length < 3
-  ) {
-    return { ok: false, error: "Enter a complete service address." };
-  }
-  return { ok: true, value: address };
+  return parseOptionalInspectionAddress(raw ?? {});
 }
 
 async function resolveOwnerAssignment(
