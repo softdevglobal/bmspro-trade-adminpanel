@@ -139,7 +139,10 @@ function buildHourSlotOccupancyForDate(
   >,
   jobsSnap: Awaited<ReturnType<ReturnType<typeof adminDb.collection>["get"]>>,
   personalEvents: Awaited<ReturnType<typeof listPersonalCalendarEvents>>,
+  options?: { excludeJobId?: string; excludeRequestId?: string },
 ): HourSlotOccupancy[] {
+  const excludeJobId = options?.excludeJobId?.trim() || null;
+  const excludeRequestId = options?.excludeRequestId?.trim() || null;
   const { startHour, endHour } = resolveCalendarSlotBounds(workingHours);
   const slotDefs = hourSlotDefinitions(startHour, endHour);
   const windows: { jobs: number; requests: number; personal: number }[] =
@@ -153,6 +156,8 @@ function buildHourSlotOccupancyForDate(
   );
 
   for (const doc of requestsSnap.docs) {
+    // Exclude the request being rescheduled so it doesn't count against itself.
+    if (excludeRequestId && doc.id === excludeRequestId) continue;
     const request = mapInspectionDoc(doc.id, doc.data() ?? {});
     if (request.status !== "scheduled") continue;
     const slot = request.scheduledSlot;
@@ -174,6 +179,10 @@ function buildHourSlotOccupancyForDate(
   }
 
   for (const doc of jobsSnap.docs) {
+    // When rescheduling a job, exclude it from occupancy so its own current
+    // slots don't count against the move (a multi-hour job would otherwise
+    // report its destination range as full when it overlaps its old slots).
+    if (excludeJobId && doc.id === excludeJobId) continue;
     const booking = mapBookingDoc(doc.id, doc.data() ?? {});
     if (booking.status !== "scheduled" && booking.status !== "ongoing") continue;
 
@@ -247,6 +256,7 @@ export async function loadBusinessWorkingHours(
 export async function computeDaySlotOccupancy(
   businessId: string,
   date: string,
+  options?: { excludeBookingId?: string; excludeRequestId?: string },
 ): Promise<DaySlotOccupancy> {
   const snap = await adminDb.collection("businesses").doc(businessId).get();
   const businessData = snap.exists ? (snap.data() ?? {}) : {};
@@ -269,6 +279,10 @@ export async function computeDaySlotOccupancy(
     requestsSnap,
     jobsSnap,
     personalEvents,
+    {
+      excludeJobId: options?.excludeBookingId,
+      excludeRequestId: options?.excludeRequestId,
+    },
   );
 
   return { date, capacity, workingHours, slots };
