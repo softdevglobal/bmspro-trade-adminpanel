@@ -33,8 +33,13 @@ import {
   buildQuotationDocumentDeposit,
   computeDocumentTotals,
   computeQuotationLineAmounts,
+  deriveGstSettingsFromLineItems,
   formatDepositPaymentNote,
+  formatDocumentDiscountLabel,
   formatQuoteDate,
+  resolveDocumentLineFromQuotationItem,
+  resolveQuotationItemPricing,
+  type DocumentDiscountDisplay,
   type GstPricingMode,
   type QuotationDocumentData,
   type QuotationDocumentLineItem,
@@ -90,7 +95,6 @@ type DraftLineItem = {
   rate: string;
   discountPercent: string;
   applyGst: boolean;
-  showOptions: boolean;
 };
 
 const INPUT_CLASS =
@@ -125,39 +129,8 @@ function quotationLineToSaved(
   item: QuotationLineItem,
   index: number,
 ): SavedLineItem {
-  const quantity = item.quantity ?? 1;
-  let discountPercent =
-    typeof item.discountPercent === "number" && item.discountPercent > 0
-      ? Math.min(100, item.discountPercent)
-      : 0;
-  const unitRate =
-    item.rateAud ??
-    (quantity > 0
-      ? Math.round((item.priceAud / quantity) * 100) / 100
-      : item.priceAud);
-
-  if (discountPercent <= 0 && unitRate > 0 && quantity > 0) {
-    const gross = Math.round(unitRate * quantity * 100) / 100;
-    if (gross > item.priceAud + 0.01) {
-      const inferred = Math.min(
-        100,
-        Math.round((1 - item.priceAud / gross) * 10000) / 100,
-      );
-      if (inferred > 0.01) discountPercent = inferred;
-    }
-  }
-
-  let rate: number;
-  if (
-    discountPercent > 0 &&
-    typeof item.discountPercent === "number" &&
-    item.discountPercent > 0
-  ) {
-    rate =
-      Math.round((unitRate / (1 - discountPercent / 100)) * 100) / 100;
-  } else {
-    rate = unitRate;
-  }
+  const { quantity, discountPercent, listRateAud } =
+    resolveQuotationItemPricing(item);
 
   return {
     id: `line-${index}-${Math.random().toString(36).slice(2, 8)}`,
@@ -165,7 +138,7 @@ function quotationLineToSaved(
     name: item.name,
     description: item.description?.trim() ?? "",
     quantity,
-    rate,
+    rate: listRateAud,
     discountPercent,
     applyGst: (item.gstPercent ?? 0) > 0,
     amountAud: item.priceAud,
@@ -289,6 +262,8 @@ export function CreateInvoiceFromQuotation({
   const [gstPercentage, setGstPercentage] = useState(10);
   const [gstPricing, setGstPricing] =
     useState<GstPricingMode>("exclusive");
+  /** Keeps invoice totals aligned with the source quotation until prices are edited. */
+  const [pricingFromQuotation, setPricingFromQuotation] = useState(false);
   const [businessAddress, setBusinessAddress] = useState<string | null>(null);
   const [businessEmail, setBusinessEmail] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
@@ -345,6 +320,7 @@ export function CreateInvoiceFromQuotation({
         ]);
 
       let loadedDraftInvoice: InvoiceDetail | null = null;
+      let loadedQuotation: QuotationDetail | null = null;
       if (draftInvoiceRes) {
         const invoiceBody = (await draftInvoiceRes.json()) as {
           ok?: boolean;
@@ -374,6 +350,7 @@ export function CreateInvoiceFromQuotation({
         }
 
         const q = quotationBody.quotation;
+        loadedQuotation = q;
         setQuotation(q);
         setCustomerName(q.customer.fullName);
         setCustomerEmail(q.customer.email);
@@ -381,6 +358,12 @@ export function CreateInvoiceFromQuotation({
         setCustomerSearch(q.customer.fullName);
         setAddress(q.address);
         setLineItems(q.lineItems.map(quotationLineToSaved));
+        const quotationGst = deriveGstSettingsFromLineItems(q.lineItems);
+        setGstEnabled(quotationGst.enabled);
+        setGstPercentage(quotationGst.percentage);
+        setPricingFromQuotation(
+          !isEditingDraftInvoice && q.createdSource !== "invoice_direct",
+        );
         if (q.discountAud > 0) {
           setDiscount({ mode: "fixed", percent: 0, amountAud: q.discountAud });
         }
@@ -423,6 +406,14 @@ export function CreateInvoiceFromQuotation({
         setCustomerSearch(loadedDraftInvoice.customer.fullName);
         setAddress(loadedDraftInvoice.address);
         setLineItems(loadedDraftInvoice.lineItems.map(quotationLineToSaved));
+        const draftGst = deriveGstSettingsFromLineItems(
+          loadedDraftInvoice.lineItems,
+        );
+        setGstEnabled(draftGst.enabled);
+        setGstPercentage(draftGst.percentage);
+        setPricingFromQuotation(
+          loadedQuotation?.createdSource !== "invoice_direct",
+        );
         setDiscount(
           loadedDraftInvoice.discountAud > 0
             ? {
@@ -494,9 +485,11 @@ export function CreateInvoiceFromQuotation({
         };
         const profile = profileBody.profile;
         if (profile) {
-          setGstEnabled(Boolean(profile.registeredForGst));
-          if (profile.gstPercentage != null) {
-            setGstPercentage(profile.gstPercentage);
+          if (direct || isEditingDraftInvoice) {
+            setGstEnabled(Boolean(profile.registeredForGst));
+            if (profile.gstPercentage != null) {
+              setGstPercentage(profile.gstPercentage);
+            }
           }
           setBusinessAddress(profile.businessAddress ?? null);
           setBusinessEmail(profile.businessEmail ?? null);
@@ -610,7 +603,23 @@ export function CreateInvoiceFromQuotation({
     return matches.slice(0, 8);
   }, [catalog, itemDraft, catalogSuggestField]);
 
+  const storedPricingLineItems = useMemo((): QuotationLineItem[] => {
+    if (isEditingDraftInvoice && draftInvoice) {
+      return draftInvoice.lineItems;
+    }
+    if (quotation) {
+      return quotation.lineItems;
+    }
+    return [];
+  }, [isEditingDraftInvoice, draftInvoice, quotation]);
+
   const documentLineItems = useMemo((): QuotationDocumentLineItem[] => {
+    if (pricingFromQuotation && storedPricingLineItems.length > 0) {
+      const defaultGst = gstEnabled ? gstPercentage : 0;
+      return storedPricingLineItems.map((item) =>
+        resolveDocumentLineFromQuotationItem(item, defaultGst),
+      );
+    }
     return lineItems.map((item) => {
       const gstPercent = lineGstPercent(item.applyGst, gstEnabled, gstPercentage);
       const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
@@ -631,9 +640,17 @@ export function CreateInvoiceFromQuotation({
         amountAud,
       };
     });
-  }, [lineItems, gstEnabled, gstPercentage, gstPricing]);
+  }, [
+    pricingFromQuotation,
+    storedPricingLineItems,
+    lineItems,
+    gstEnabled,
+    gstPercentage,
+    gstPricing,
+  ]);
 
   useEffect(() => {
+    if (pricingFromQuotation) return;
     const frame = requestAnimationFrame(() => {
       setLineItems((prev) =>
         prev.map((item) => ({
@@ -648,7 +665,7 @@ export function CreateInvoiceFromQuotation({
       );
     });
     return () => cancelAnimationFrame(frame);
-  }, [gstEnabled, gstPercentage, gstPricing]);
+  }, [gstEnabled, gstPercentage, gstPricing, pricingFromQuotation]);
 
   const subtotalRaw = useMemo(
     () => documentLineItems.reduce((sum, item) => sum + item.amountAud, 0),
@@ -656,21 +673,70 @@ export function CreateInvoiceFromQuotation({
   );
 
   const discountAud = useMemo(() => {
+    if (pricingFromQuotation) {
+      if (isEditingDraftInvoice && draftInvoice) {
+        return draftInvoice.discountAud;
+      }
+      if (quotation) {
+        return quotation.discountAud;
+      }
+    }
     if (!discount) return 0;
     const amount =
       discount.mode === "percent"
         ? (subtotalRaw * discount.percent) / 100
         : discount.amountAud;
     return Math.round(Math.min(Math.max(0, amount), subtotalRaw) * 100) / 100;
-  }, [discount, subtotalRaw]);
+  }, [
+    pricingFromQuotation,
+    isEditingDraftInvoice,
+    draftInvoice,
+    quotation,
+    discount,
+    subtotalRaw,
+  ]);
 
-  const { subtotalAud, gstAud, totalAud } = useMemo(
+  const documentDiscountDisplay = useMemo((): DocumentDiscountDisplay | null => {
+    if (discountAud <= 0) return null;
+    if (discount) {
+      return { mode: discount.mode, percent: discount.percent };
+    }
+    return null;
+  }, [discount, discountAud]);
+
+  const { subtotalAud, gstAud, totalAud } = useMemo(() => {
+    const totals = computeDocumentTotals({
+      lineItems: documentLineItems,
+      discountAud,
+    });
+    if (pricingFromQuotation) {
+      const authoritativeTotal =
+        (isEditingDraftInvoice
+          ? draftInvoice?.finalPriceAud
+          : quotation?.finalPriceAud) ?? totals.totalAud;
+      return {
+        ...totals,
+        totalAud: authoritativeTotal,
+      };
+    }
+    return totals;
+  }, [
+    documentLineItems,
+    discountAud,
+    pricingFromQuotation,
+    isEditingDraftInvoice,
+    draftInvoice,
+    quotation,
+  ]);
+
+  const documentDiscountLabel = useMemo(
     () =>
-      computeDocumentTotals({
-        lineItems: documentLineItems,
+      formatDocumentDiscountLabel(
         discountAud,
-      }),
-    [documentLineItems, discountAud],
+        subtotalAud,
+        documentDiscountDisplay,
+      ),
+    [discountAud, subtotalAud, documentDiscountDisplay],
   );
 
   const documentDeposit = useMemo(
@@ -711,6 +777,7 @@ export function CreateInvoiceFromQuotation({
       lineItems: documentLineItems,
       subtotalAud,
       discountAud,
+      documentDiscount: documentDiscountDisplay,
       gstAud,
       totalAud,
       deposit: documentDeposit,
@@ -747,6 +814,7 @@ export function CreateInvoiceFromQuotation({
     documentLineItems,
     subtotalAud,
     discountAud,
+    documentDiscountDisplay,
     gstAud,
     totalAud,
     documentDeposit,
@@ -844,12 +912,15 @@ export function CreateInvoiceFromQuotation({
                 quotationId: quotation!.id,
                 ...(isDirectDraftInvoice ? directPayload : {}),
               }),
-          lineItems: toApiLineItems(
-            lineItems,
-            gstEnabled,
-            gstPercentage,
-            gstPricing,
-          ),
+          lineItems:
+            pricingFromQuotation && storedPricingLineItems.length > 0
+              ? storedPricingLineItems
+              : toApiLineItems(
+                  lineItems,
+                  gstEnabled,
+                  gstPercentage,
+                  gstPricing,
+                ),
           finalPriceAud: totalAud,
           discountAud,
           gstAud,
@@ -917,8 +988,7 @@ export function CreateInvoiceFromQuotation({
       quantity: "1",
       rate: "",
       discountPercent: "0",
-      applyGst: gstEnabled,
-      showOptions: false,
+      applyGst: true,
     });
     setEditingItemId(null);
   }
@@ -933,7 +1003,6 @@ export function CreateInvoiceFromQuotation({
       rate: String(item.rate ?? ""),
       discountPercent: String(item.discountPercent ?? 0),
       applyGst: item.applyGst,
-      showOptions: item.discountPercent > 0 || item.applyGst,
     });
     setEditingItemId(item.id);
   }
@@ -979,6 +1048,7 @@ export function CreateInvoiceFromQuotation({
     } else {
       setLineItems((prev) => [...prev, saved]);
     }
+    setPricingFromQuotation(false);
     setItemDraft(null);
     setEditingItemId(null);
     setCatalogSuggestField(null);
@@ -1349,7 +1419,7 @@ export function CreateInvoiceFromQuotation({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>Suburb</span>
+                        <span className={LABEL_CLASS}>Suburb (optional)</span>
                         <input
                           type="text"
                           value={address.suburb}
@@ -1364,7 +1434,7 @@ export function CreateInvoiceFromQuotation({
                       </label>
                       <div className="grid grid-cols-2 gap-3">
                         <label className="block">
-                          <span className={LABEL_CLASS}>State</span>
+                          <span className={LABEL_CLASS}>State (optional)</span>
                           <input
                             type="text"
                             value={address.state}
@@ -1378,7 +1448,7 @@ export function CreateInvoiceFromQuotation({
                           />
                         </label>
                         <label className="block">
-                          <span className={LABEL_CLASS}>Postcode</span>
+                          <span className={LABEL_CLASS}>Postcode (optional)</span>
                           <input
                             type="text"
                             value={address.postcode}
@@ -1455,11 +1525,12 @@ export function CreateInvoiceFromQuotation({
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              setPricingFromQuotation(false);
                               setLineItems((prev) =>
                                 prev.filter((row) => row.id !== item.id),
-                              )
-                            }
+                              );
+                            }}
                             className="text-on-surface-variant hover:text-error"
                             aria-label="Remove item"
                           >
@@ -1594,64 +1665,47 @@ export function CreateInvoiceFromQuotation({
                       </label>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setItemDraft((prev) =>
-                          prev
-                            ? { ...prev, showOptions: !prev.showOptions }
-                            : prev,
-                        )
-                      }
-                      className="mt-3 font-body text-[13px] font-semibold text-primary"
-                    >
-                      GST, discount
-                    </button>
+                    <label className="mt-3 block">
+                      <span className={LABEL_CLASS}>Discount (%)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={itemDraft.discountPercent ?? "0"}
+                        onChange={(e) =>
+                          setItemDraft((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  discountPercent: e.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        className={NUMBER_INPUT_CLASS}
+                      />
+                    </label>
 
-                    {itemDraft.showOptions ? (
-                      <div className="mt-3 space-y-3 rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-3">
-                        {gstEnabled ? (
-                          <label className="flex items-center gap-2 font-body text-[13px] text-on-surface">
-                            <input
-                              type="checkbox"
-                              checked={itemDraft.applyGst}
-                              onChange={(e) =>
-                                setItemDraft((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        applyGst: e.target.checked,
-                                      }
-                                    : prev,
-                                )
-                              }
-                              className="rounded border-outline-variant"
-                            />
-                            Apply GST ({gstPercentage}%)
-                          </label>
-                        ) : null}
-                        <label className="block">
-                          <span className={LABEL_CLASS}>Discount (%)</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            value={itemDraft.discountPercent ?? "0"}
-                            onChange={(e) =>
-                              setItemDraft((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      discountPercent: e.target.value,
-                                    }
-                                  : prev,
-                              )
-                            }
-                            className={NUMBER_INPUT_CLASS}
-                          />
-                        </label>
-                      </div>
+                    {gstEnabled ? (
+                      <label className="mt-3 flex items-center gap-2 font-body text-[13px] text-on-surface">
+                        <input
+                          type="checkbox"
+                          checked={itemDraft.applyGst}
+                          onChange={(e) =>
+                            setItemDraft((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    applyGst: e.target.checked,
+                                  }
+                                : prev,
+                            )
+                          }
+                          className="rounded border-outline-variant"
+                        />
+                        Apply GST ({gstPercentage}%)
+                      </label>
                     ) : null}
 
                     <div className="mt-4 flex items-center justify-end gap-2">
@@ -1853,7 +1907,7 @@ export function CreateInvoiceFromQuotation({
                   className="flex w-full items-center justify-between text-primary"
                 >
                   <span className="font-semibold">
-                    {discountAud > 0 ? "Discount" : "Add discount"}
+                    {discountAud > 0 ? documentDiscountLabel : "Add discount"}
                   </span>
                   <span className="font-numeric font-medium text-on-surface">
                     {discountAud > 0 ? `−${formatAud(discountAud)}` : ""}
@@ -1862,7 +1916,10 @@ export function CreateInvoiceFromQuotation({
                 <div className="rounded-xl border border-outline-variant/40 bg-gradient-to-br from-surface-container-lowest to-surface-container-low/80 p-2.5">
                   <button
                     type="button"
-                    onClick={() => setGstEnabled((value) => !value)}
+                    onClick={() => {
+                      setPricingFromQuotation(false);
+                      setGstEnabled((value) => !value);
+                    }}
                     aria-pressed={gstEnabled}
                     className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 transition-all duration-300 ease-out ${
                       gstEnabled
@@ -1931,7 +1988,10 @@ export function CreateInvoiceFromQuotation({
                         />
                         <button
                           type="button"
-                          onClick={() => setGstPricing("exclusive")}
+                          onClick={() => {
+                            setPricingFromQuotation(false);
+                            setGstPricing("exclusive");
+                          }}
                           className={`relative z-10 rounded-full px-2 py-2 font-body text-[11px] font-semibold transition-colors duration-300 ${
                             gstPricing === "exclusive"
                               ? "text-[#1a1f28]"
@@ -1942,7 +2002,10 @@ export function CreateInvoiceFromQuotation({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setGstPricing("inclusive")}
+                          onClick={() => {
+                            setPricingFromQuotation(false);
+                            setGstPricing("inclusive");
+                          }}
                           className={`relative z-10 rounded-full px-2 py-2 font-body text-[11px] font-semibold transition-colors duration-300 ${
                             gstPricing === "inclusive"
                               ? "text-[#1a1f28]"
@@ -2088,7 +2151,10 @@ export function CreateInvoiceFromQuotation({
         subtotalAud={subtotalRaw}
         initial={discount}
         onClose={() => setDiscountModalOpen(false)}
-        onSave={(next) => setDiscount(next)}
+        onSave={(next) => {
+          setPricingFromQuotation(false);
+          setDiscount(next);
+        }}
       />
       <DepositRequestModal
         open={depositModalOpen}

@@ -25,6 +25,8 @@ import {
   type InspectionRequestDetail,
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
+import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
@@ -44,15 +46,21 @@ import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type PreviewMode = "review" | "assign";
-type JobsFilter = "active" | "completed";
+type JobsFilter = "active" | "completed" | "cancelled";
 
 const JOB_TABS: { id: JobsFilter; label: string }[] = [
   { id: "active", label: "Active" },
   { id: "completed", label: "Completed" },
+  { id: "cancelled", label: "Cancelled" },
 ];
+
+/** A job can be cancelled while it is still open (not completed/cancelled). */
+function canCancelBooking(booking: BookingDetail): boolean {
+  return booking.status !== "completed" && booking.status !== "cancelled";
+}
 
 function formatEstimatedMinutes(minutes: number | null): string | null {
   if (minutes == null || minutes <= 0) return null;
@@ -96,15 +104,120 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
   );
 }
 
+function BookingCardMenu({
+  onDelete,
+  onCancel,
+  onUndoCancel,
+}: {
+  onDelete: () => void;
+  onCancel?: () => void;
+  onUndoCancel?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  const menuItemClass =
+    "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low";
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative shrink-0"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        aria-label="Job actions"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+      >
+        <span className="material-symbols-outlined text-[20px]">more_vert</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
+        >
+          {onCancel ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-amber-600">
+                cancel
+              </span>
+              Cancel job
+            </button>
+          ) : null}
+          {onUndoCancel ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onUndoCancel();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-emerald-600">
+                undo
+              </span>
+              Undo cancellation
+            </button>
+          ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            className={`${menuItemClass} text-rose-700 hover:bg-rose-50`}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            <span className="material-symbols-outlined text-[18px] text-rose-600">
+              delete
+            </span>
+            Delete job
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function BookingCard({
   booking,
   isPreviewOpen,
   onOpen,
+  onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
 }: {
   booking: BookingDetail;
   isPreviewOpen: boolean;
   onOpen: () => void;
+  onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
   timeZone?: string | null;
 }) {
   const title = bookingTitle(booking);
@@ -116,16 +229,23 @@ function BookingCard({
   const displayPhone = formatAuPhoneDisplay(booking.customer.phone);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className={`group flex w-full min-w-0 flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 ${
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`group flex w-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 ${
         isPreviewOpen
           ? "border-primary/40 ring-2 ring-primary/15"
           : "border-primary/20 hover:border-primary/30 hover:shadow-md"
       }`}
     >
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-primary">
@@ -161,6 +281,13 @@ function BookingCard({
             {formatAddress(booking.address)}
           </p>
         </div>
+        <BookingCardMenu
+          onDelete={onDelete}
+          onCancel={canCancelBooking(booking) ? onCancel : undefined}
+          onUndoCancel={
+            booking.status === "cancelled" ? onUndoCancel : undefined
+          }
+        />
       </div>
 
       {booking.scheduledSlot ? (
@@ -192,7 +319,7 @@ function BookingCard({
           <JobInstructionsGlance booking={booking} />
         </div>
       ) : null}
-    </button>
+    </div>
   );
 }
 
@@ -203,6 +330,9 @@ function BookingPreviewDrawer({
   onReloadStaff,
   onClose,
   onUpdated,
+  onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
   requestsById,
 }: {
@@ -212,6 +342,9 @@ function BookingPreviewDrawer({
   onReloadStaff: () => Promise<void>;
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
+  onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
   timeZone?: string | null;
   requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
@@ -249,6 +382,9 @@ function BookingPreviewDrawer({
               onReloadStaff={onReloadStaff}
               onClose={onClose}
               onUpdated={onUpdated}
+              onDelete={onDelete}
+              onCancel={onCancel}
+              onUndoCancel={onUndoCancel}
               timeZone={timeZone}
               requestsById={requestsById}
             />
@@ -444,6 +580,9 @@ function BookingPreviewContent({
   onReloadStaff,
   onClose,
   onUpdated,
+  onDelete,
+  onCancel,
+  onUndoCancel,
   timeZone,
   requestsById,
 }: {
@@ -453,6 +592,9 @@ function BookingPreviewContent({
   onReloadStaff: () => Promise<void>;
   onClose: () => void;
   onUpdated: (next: BookingDetail) => void;
+  onDelete: () => void;
+  onCancel: () => void;
+  onUndoCancel: () => void;
   timeZone?: string | null;
   requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
@@ -944,6 +1086,40 @@ function BookingPreviewContent({
             {actionError}
           </div>
         ) : null}
+
+        {mode === "review" ? (
+          <div className="space-y-2">
+            {booking.status === "cancelled" ? (
+              <button
+                type="button"
+                onClick={onUndoCancel}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-body text-[14px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+              >
+                <span className="material-symbols-outlined text-[20px]">undo</span>
+                Undo cancellation
+              </button>
+            ) : canCancelBooking(booking) ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[14px] font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  cancel
+                </span>
+                Cancel job
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+            >
+              <span className="material-symbols-outlined text-[20px]">delete</span>
+              Delete job
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -954,7 +1130,7 @@ export function JobsBoard({
 }: {
   initialJobId?: string | null;
 }) {
-  const { status: authStatus } = useAuth();
+  const { status: authStatus, user } = useAuth();
   const profile = useBusinessProfile();
   const { bookings, loading, error } = useBookings();
   const { requests } = useInspectionRequests();
@@ -967,6 +1143,12 @@ export function JobsBoard({
   const [selectedId, setSelectedId] = useState<string | null>(initialJobId);
   const [filter, setFilter] = useState<JobsFilter>("active");
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<BookingDetail | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<BookingDetail | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [localBookingState, setLocalBookingState] = useState<{
     source: BookingDetail[];
     bookings: BookingDetail[];
@@ -983,6 +1165,8 @@ export function JobsBoard({
       (groups, booking) => {
         if (booking.status === "completed") {
           groups.completed.push(booking);
+        } else if (booking.status === "cancelled") {
+          groups.cancelled.push(booking);
         } else {
           groups.active.push(booking);
         }
@@ -991,11 +1175,13 @@ export function JobsBoard({
       {
         active: [] as BookingDetail[],
         completed: [] as BookingDetail[],
+        cancelled: [] as BookingDetail[],
       },
     );
     return {
       active: sortBookingsBySchedule(groups.active),
       completed: sortBookingsBySchedule(groups.completed),
+      cancelled: sortBookingsBySchedule(groups.cancelled),
     };
   }, [displayBookings]);
   const timeZone = profile?.timezone;
@@ -1004,9 +1190,13 @@ export function JobsBoard({
     () => displayBookings.find((booking) => booking.id === selectedId) ?? null,
     [displayBookings, selectedId],
   );
-  const activeFilter =
-    selectedId === initialJobId && selected?.status === "completed"
-      ? "completed"
+  const activeFilter: JobsFilter =
+    selectedId === initialJobId && selected
+      ? selected.status === "completed"
+        ? "completed"
+        : selected.status === "cancelled"
+          ? "cancelled"
+          : filter
       : filter;
   const visibleBookings = groupedBookings[activeFilter];
 
@@ -1026,6 +1216,112 @@ export function JobsBoard({
   function handleFilterChange(nextFilter: JobsFilter) {
     setFilter(nextFilter);
     setSelectedId(null);
+  }
+
+  async function confirmDeleteJob() {
+    if (!user || !deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(deleteTarget.id)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not delete job.");
+      }
+      setLocalBookingState((current) => {
+        const base =
+          current?.source === bookings ? current.bookings : bookings;
+        return {
+          source: bookings,
+          bookings: base.filter((entry) => entry.id !== deleteTarget.id),
+        };
+      });
+      if (selectedId === deleteTarget.id) {
+        setSelectedId(null);
+      }
+      setDeleteTarget(null);
+    } catch (deleteErr) {
+      setDeleteError(
+        deleteErr instanceof Error ? deleteErr.message : "Could not delete job.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function confirmCancelJob() {
+    if (!user || !cancelTarget) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(cancelTarget.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "cancel" }),
+        },
+      );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        booking?: BookingDetail;
+      };
+      if (!response.ok || !data.ok || !data.booking) {
+        throw new Error(data.error ?? "Could not cancel job.");
+      }
+      handleBookingUpdated(data.booking);
+      setCancelTarget(null);
+    } catch (cancelErr) {
+      setCancelError(
+        cancelErr instanceof Error ? cancelErr.message : "Could not cancel job.",
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function undoCancelJob(booking: BookingDetail) {
+    if (!user) return;
+    setCancelError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(booking.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "undo_cancel" }),
+        },
+      );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        booking?: BookingDetail;
+      };
+      if (!response.ok || !data.ok || !data.booking) {
+        throw new Error(data.error ?? "Could not restore job.");
+      }
+      handleBookingUpdated(data.booking);
+    } catch (undoErr) {
+      setCancelError(
+        undoErr instanceof Error ? undoErr.message : "Could not restore job.",
+      );
+    }
   }
 
   const addJobModal = (
@@ -1117,7 +1413,8 @@ export function JobsBoard({
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-body text-[12px] text-on-surface-variant">
           {groupedBookings.active.length} active ·{" "}
-          {groupedBookings.completed.length} completed · tap a card to open the
+          {groupedBookings.completed.length} completed ·{" "}
+          {groupedBookings.cancelled.length} cancelled · tap a card to open the
           side preview
         </p>
         <button
@@ -1168,6 +1465,24 @@ export function JobsBoard({
         })}
       </div>
 
+      {deleteError ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-700"
+        >
+          {deleteError}
+        </div>
+      ) : null}
+
+      {cancelError ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-800"
+        >
+          {cancelError}
+        </div>
+      ) : null}
+
       {visibleBookings.length > 0 ? (
         <ul className="space-y-3">
           {visibleBookings.map((booking) => (
@@ -1176,6 +1491,9 @@ export function JobsBoard({
                 booking={booking}
                 isPreviewOpen={selectedId === booking.id}
                 onOpen={() => setSelectedId(booking.id)}
+                onDelete={() => setDeleteTarget(booking)}
+                onCancel={() => setCancelTarget(booking)}
+                onUndoCancel={() => void undoCancelJob(booking)}
                 timeZone={timeZone}
               />
             </li>
@@ -1199,8 +1517,68 @@ export function JobsBoard({
         onReloadStaff={reloadStaff}
         onClose={() => setSelectedId(null)}
         onUpdated={handleBookingUpdated}
+        onDelete={() => {
+          if (selected) setDeleteTarget(selected);
+        }}
+        onCancel={() => {
+          if (selected) setCancelTarget(selected);
+        }}
+        onUndoCancel={() => {
+          if (selected) void undoCancelJob(selected);
+        }}
         timeZone={timeZone}
         requestsById={requestsById}
+      />
+
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title="Delete this job?"
+        description={
+          deleteTarget
+            ? `Only ${displayBookingCode(deleteTarget)} for ${
+                deleteTarget.customer.fullName || "this customer"
+              } will be permanently removed. Any linked request and quotation will be kept. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Yes, delete job"
+        cancelLabel="Keep job"
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDeleteJob()}
+        isLoading={deleting}
+      />
+
+      <CancelConfirmModal
+        open={cancelTarget !== null}
+        title="Cancel this job?"
+        description={
+          cancelTarget ? (
+            <>
+              <p>
+                {displayBookingCode(cancelTarget)} for{" "}
+                <span className="font-semibold text-on-surface">
+                  {cancelTarget.customer.fullName || "this customer"}
+                </span>{" "}
+                will move to the Cancelled tab.
+              </p>
+              <p>
+                It stays on record for reference, but can no longer be scheduled
+                or completed.
+              </p>
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Yes, cancel job"
+        cancelLabel="Keep job"
+        loadingLabel="Cancelling..."
+        onCancel={() => {
+          if (!cancelling) setCancelTarget(null);
+        }}
+        onConfirm={() => void confirmCancelJob()}
+        isLoading={cancelling}
       />
 
       {addJobModal}

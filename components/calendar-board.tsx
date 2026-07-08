@@ -58,7 +58,6 @@ import { useBusinessModuleSettings } from "@/lib/business/use-business-module-se
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
   isPastCalendarDate,
-  isPastHourSlot,
   PAST_HOUR_SLOT_HINT,
 } from "@/lib/calendar/past-scheduling";
 import { platformTodayIso } from "@/lib/platform/timezone";
@@ -311,7 +310,6 @@ function CalendarDayTimeSlots({
   workingHours,
   canAddEvents,
   isBusinessClosed,
-  timeZone,
   jobsModuleEnabled = true,
   onAddEvent,
   onOpenLink,
@@ -364,7 +362,6 @@ function CalendarDayTimeSlots({
     selection: CalendarSlotSelection,
   ) {
     if (isBusinessClosed) return;
-    if (isPastHourSlot(selection.date, selection.startTime, timeZone)) return;
     const occupancy = occupancyForHour(occupancySlots, selection.startTime);
     if (kind === "job" && !jobsModuleEnabled) return;
     if (kind === "job" && occupancy?.jobsFull) return;
@@ -423,7 +420,6 @@ function CalendarDayTimeSlots({
                   capacityLoading={capacityLoading}
                   canAddEvents={canAddEvents}
                   closedDay={isBusinessClosed}
-                  pastSlot={isPastHourSlot(isoDate, slot.startTime, timeZone)}
                   jobsModuleEnabled={jobsModuleEnabled}
                   onAddEvent={handleAddEvent}
                   onOpenLink={onOpenLink}
@@ -1028,12 +1024,6 @@ export function CalendarBoard() {
     selection: CalendarSlotSelection,
   ) {
     if (closedDates.has(selection.date)) {
-      return;
-    }
-    if (isPastCalendarDate(selection.date, timeZone)) {
-      return;
-    }
-    if (isPastHourSlot(selection.date, selection.startTime, timeZone)) {
       return;
     }
 

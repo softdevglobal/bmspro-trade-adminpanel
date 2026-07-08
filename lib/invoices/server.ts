@@ -276,11 +276,18 @@ function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail
       typeof data.invoiceDate === "string" ? data.invoiceDate : "",
     dueDate: typeof data.dueDate === "string" ? data.dueDate : "",
     status:
-      data.status === "paid" ? "paid" : data.status === "sent" ? "sent" : "draft",
+      data.status === "paid"
+        ? "paid"
+        : data.status === "sent"
+          ? "sent"
+          : data.status === "cancelled"
+            ? "cancelled"
+            : "draft",
     pdfUrl:
       typeof data.pdfUrl === "string" && data.pdfUrl.trim()
         ? data.pdfUrl.trim()
         : null,
+    cancelledAt: toMillis(data.cancelledAt),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
@@ -489,6 +496,101 @@ export async function markBusinessInvoicePaid(
   const paidInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
   await mirrorInvoiceToInspectionRequest(paidInvoice);
   return { ok: true, invoice: paidInvoice };
+}
+
+/**
+ * Cancels an invoice without deleting it. Draft or sent invoices can be
+ * cancelled; paid invoices cannot. The record is kept for reference and the
+ * cancelled status is mirrored onto the linked request.
+ */
+export async function cancelBusinessInvoice(
+  businessId: string,
+  invoiceId: string,
+): Promise<
+  | { ok: true; invoice: InvoiceDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = invoiceId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Invoice is required." };
+  }
+
+  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
+  }
+
+  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
+  if (invoice.status === "cancelled") {
+    return { ok: true, invoice };
+  }
+  if (invoice.status === "paid") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Paid invoices cannot be cancelled.",
+    };
+  }
+
+  await docRef.update({
+    status: "cancelled",
+    cancelledFromStatus: invoice.status,
+    cancelledAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await docRef.get();
+  const cancelledInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
+  await mirrorInvoiceToInspectionRequest(cancelledInvoice);
+  return { ok: true, invoice: cancelledInvoice };
+}
+
+/**
+ * Restores a cancelled invoice to its pre-cancellation status (draft or sent)
+ * and re-mirrors it onto the linked request.
+ */
+export async function undoCancelBusinessInvoice(
+  businessId: string,
+  invoiceId: string,
+): Promise<
+  | { ok: true; invoice: InvoiceDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = invoiceId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Invoice is required." };
+  }
+
+  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
+  }
+
+  const data = snap.data() ?? {};
+  const invoice = mapInvoiceDoc(snap.id, data);
+  if (invoice.status !== "cancelled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only cancelled invoices can be restored.",
+    };
+  }
+
+  const restoredStatus = data.cancelledFromStatus === "sent" ? "sent" : "draft";
+
+  await docRef.update({
+    status: restoredStatus,
+    cancelledFromStatus: FieldValue.delete(),
+    cancelledAt: FieldValue.delete(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await docRef.get();
+  const restoredInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
+  await mirrorInvoiceToInspectionRequest(restoredInvoice);
+  return { ok: true, invoice: restoredInvoice };
 }
 
 function buildInvoiceValues(input: CreateInvoiceInput):

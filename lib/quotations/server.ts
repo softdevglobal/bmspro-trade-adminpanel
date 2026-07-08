@@ -28,6 +28,7 @@ import {
   type InspectionSlot,
   REQUEST_STATUSES,
   parseCreatedSource,
+  parseOptionalInspectionAddress,
 } from "@/lib/inspection/types";
 import { ensureCustomerAccount } from "@/lib/customer/server";
 import {
@@ -158,6 +159,10 @@ function mapQuotationDoc(
         description: readOptionalString(item.description),
         quantity: readOptionalNumber(item.quantity),
         rateAud: readOptionalNumber(item.rateAud),
+        // Without this the API strips per-item discounts, so clients (the
+        // mobile app in particular) rebuild invoices from the pre-discount
+        // rate and overcharge the customer.
+        discountPercent: readOptionalNumber(item.discountPercent),
         gstPercent: readOptionalNumber(item.gstPercent),
       };
     })
@@ -1665,21 +1670,7 @@ type QuotationAddressInput = {
 function parseStandaloneAddress(
   raw: QuotationAddressInput,
 ): { ok: true; value: InspectionAddress } | { ok: false; error: string } {
-  const address: InspectionAddress = {
-    street: (raw?.street ?? "").trim(),
-    suburb: (raw?.suburb ?? "").trim(),
-    state: (raw?.state ?? "").trim(),
-    postcode: (raw?.postcode ?? "").trim(),
-  };
-  if (
-    address.street.length < 3 ||
-    address.suburb.length < 2 ||
-    address.state.length < 2 ||
-    address.postcode.length < 3
-  ) {
-    return { ok: false, error: "Enter a complete service address." };
-  }
-  return { ok: true, value: address };
+  return parseOptionalInspectionAddress(raw ?? {});
 }
 
 async function resolveOwnerAssignment(
@@ -2695,12 +2686,16 @@ async function sendQuotationCreatedEmail(
   });
 }
 
-/** Permanently removes a quotation, its linked invoice (if any), and request mirrors. */
+/**
+ * Permanently removes only the quotation document. Any linked invoice is left
+ * untouched; only the quotation's own mirror on the request is cleared so the
+ * request no longer points at a deleted quotation.
+ */
 export async function deleteBusinessQuotation(
   businessId: string,
   quotationId: string,
 ): Promise<
-  | { ok: true; quotation: QuotationDetail; deletedInvoice: boolean }
+  | { ok: true; quotation: QuotationDetail }
   | { ok: false; status: number; error: string }
 > {
   const id = quotationId.trim();
@@ -2725,14 +2720,6 @@ export async function deleteBusinessQuotation(
       ? quotationData.inspectionRequestId.trim()
       : "";
 
-  let deletedInvoice = false;
-  const invoiceRef = adminDb.collection("invoices").doc(id);
-  const invoiceSnap = await invoiceRef.get();
-  if (invoiceSnap.exists && invoiceSnap.data()?.businessId === businessId) {
-    await invoiceRef.delete();
-    deletedInvoice = true;
-  }
-
   await quotationRef.delete();
 
   if (inspectionRequestId) {
@@ -2742,26 +2729,16 @@ export async function deleteBusinessQuotation(
       if (requestSnap.exists) {
         const requestData = requestSnap.data() ?? {};
         if (requestData.businessId === businessId) {
-          const patch: Record<string, unknown> = {
-            updatedAt: FieldValue.serverTimestamp(),
-          };
           const quotationSummary = requestData.quotation as
-            | { id?: string }
-            | null
-            | undefined;
-          const invoiceSummary = requestData.invoice as
             | { id?: string }
             | null
             | undefined;
 
           if (quotationSummary?.id === id) {
-            patch.quotation = FieldValue.delete();
-          }
-          if (invoiceSummary?.id === id) {
-            patch.invoice = FieldValue.delete();
-          }
-          if (Object.keys(patch).length > 1) {
-            await requestRef.update(patch);
+            await requestRef.update({
+              quotation: FieldValue.delete(),
+              updatedAt: FieldValue.serverTimestamp(),
+            });
           }
         }
       }
@@ -2770,5 +2747,5 @@ export async function deleteBusinessQuotation(
     }
   }
 
-  return { ok: true, quotation, deletedInvoice };
+  return { ok: true, quotation };
 }

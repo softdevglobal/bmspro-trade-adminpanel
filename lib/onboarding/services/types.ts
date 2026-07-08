@@ -7,10 +7,17 @@
 
 import {
   BUSINESS_TYPES,
-  SERVICE_TEMPLATE_TRADES,
   type BusinessType,
-  type ServiceTemplateTrade,
 } from "@/lib/onboarding/types";
+import {
+  SERVICE_TEMPLATE_TRADES,
+  type ServiceTemplateTrade,
+} from "@/lib/onboarding/services/template-trades";
+
+export {
+  SERVICE_TEMPLATE_TRADES,
+  type ServiceTemplateTrade,
+} from "@/lib/onboarding/services/template-trades";
 
 /** Default scheduling fields for templates when not collected in the UI. */
 export const SERVICE_TEMPLATE_DEFAULTS = {

@@ -365,7 +365,6 @@ export async function DELETE(
     targetLabel: result.quotation.customer.fullName || null,
     metadata: {
       quotationCode: result.quotation.quotationCode,
-      deletedInvoice: result.deletedInvoice,
       status: result.quotation.status,
     },
   });

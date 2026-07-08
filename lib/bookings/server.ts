@@ -27,6 +27,7 @@ import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server"
 import { allocateBookingCode } from "@/lib/reference-codes.server";
 import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
 import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+import { getRequestDocumentRef } from "@/lib/inspection/request-document";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import {
   QUOTATION_COLLECTION,
@@ -394,7 +395,9 @@ export async function updateBusinessBookingSchedule(
     };
   }
 
-  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date);
+  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date, {
+    excludeBookingId: bookingId,
+  });
   if (
     rangeOverlapsFullSlots(occupancy.slots, input.startTime, input.endTime, "job")
   ) {
@@ -594,7 +597,7 @@ async function resolveBookingProgressBackfill(
   const updates: Record<string, unknown> = {};
   let visitStartedAt = current.visitStartedAt;
   let visitEndedAt = current.visitEndedAt;
-  let bookingStartedAt = current.bookingStartedAt;
+  const bookingStartedAt = current.bookingStartedAt;
 
   const requestId = inspectionRequestId ?? current.inspectionRequestId;
   if ((!visitStartedAt || !visitEndedAt) && requestId) {
@@ -1367,4 +1370,251 @@ export async function createDirectJob(
   }
 
   return { ok: true, booking, request };
+}
+
+async function clearBookingMirrors(
+  businessId: string,
+  inspectionRequestId: string,
+  bookingId: string,
+): Promise<void> {
+  const requestRef = await getRequestDocumentRef(inspectionRequestId);
+  if (requestRef) {
+    const requestSnap = await requestRef.get();
+    if (requestSnap.exists) {
+      const requestData = requestSnap.data() ?? {};
+      if (
+        requestData.businessId === businessId &&
+        requestData.bookingId === bookingId
+      ) {
+        await requestRef.update({
+          bookingId: FieldValue.delete(),
+          bookingCode: FieldValue.delete(),
+          bookingStatus: FieldValue.delete(),
+          bookingStatusAt: FieldValue.delete(),
+          bookingConfirmedAt: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  }
+
+  const quotationSnap = await adminDb
+    .collection(QUOTATION_COLLECTION)
+    .where("inspectionRequestId", "==", inspectionRequestId)
+    .get();
+  if (quotationSnap.empty) return;
+
+  const batch = adminDb.batch();
+  for (const doc of quotationSnap.docs) {
+    const quotationData = doc.data();
+    if (
+      quotationData.businessId === businessId &&
+      quotationData.bookingId === bookingId
+    ) {
+      batch.update(doc.ref, {
+        bookingId: FieldValue.delete(),
+        bookingCode: FieldValue.delete(),
+        bookingStatus: FieldValue.delete(),
+        bookingStatusAt: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+  }
+  await batch.commit();
+}
+
+/** Permanently removes a job and clears its mirrors on the linked request. */
+export async function deleteBusinessBooking(
+  businessId: string,
+  bookingId: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = bookingId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Job is required." };
+  }
+
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const booking = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (booking.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  await ref.delete();
+
+  const requestId = booking.inspectionRequestId?.trim();
+  if (requestId) {
+    try {
+      await clearBookingMirrors(businessId, requestId, id);
+    } catch (error) {
+      console.error("[booking] request cleanup failed:", error);
+    }
+  }
+
+  return { ok: true, booking };
+}
+
+/**
+ * Cancels a job (booking) without deleting it. The record is kept for
+ * reference and its `cancelled` status is mirrored onto the linked request
+ * and quotations. Completed jobs cannot be cancelled.
+ */
+export async function cancelBusinessBooking(
+  businessId: string,
+  bookingId: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = bookingId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Job is required." };
+  }
+
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  if (current.status === "cancelled") {
+    return { ok: true, booking: current };
+  }
+  if (current.status === "completed") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Completed jobs cannot be cancelled.",
+    };
+  }
+
+  await ref.update({
+    status: "cancelled",
+    // Remember the pre-cancellation status so it can be restored on undo.
+    cancelledFromStatus: current.status,
+    cancelledAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  if (current.inspectionRequestId) {
+    await Promise.all([
+      mirrorBookingToQuotations(current.inspectionRequestId, {
+        bookingStatus: "cancelled",
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+      mirrorBookingStatusToInspection(current.inspectionRequestId, "cancelled", {
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+    ]);
+  }
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+  };
+}
+
+const RESTORABLE_BOOKING_STATUSES: BookingStatus[] = [
+  "awaiting",
+  "scheduled",
+  "ongoing",
+];
+
+/** Chooses the status a cancelled job returns to when its cancellation is undone. */
+function resolveRestoredBookingStatus(
+  data: Record<string, unknown>,
+): BookingStatus {
+  const from = data.cancelledFromStatus;
+  if (
+    typeof from === "string" &&
+    RESTORABLE_BOOKING_STATUSES.includes(from as BookingStatus)
+  ) {
+    return from as BookingStatus;
+  }
+  return "scheduled";
+}
+
+/**
+ * Restores a cancelled job to its pre-cancellation status and re-mirrors that
+ * status onto the linked request and quotations.
+ */
+export async function undoCancelBusinessBooking(
+  businessId: string,
+  bookingId: string,
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = bookingId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Job is required." };
+  }
+
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const data = snap.data() ?? {};
+  const current = mapBookingDoc(snap.id, data);
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  if (current.status !== "cancelled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only cancelled jobs can be restored.",
+    };
+  }
+
+  const restoredStatus = resolveRestoredBookingStatus(data);
+
+  await ref.update({
+    status: restoredStatus,
+    cancelledAt: FieldValue.delete(),
+    cancelledFromStatus: FieldValue.delete(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  if (current.inspectionRequestId) {
+    await Promise.all([
+      mirrorBookingToQuotations(current.inspectionRequestId, {
+        bookingStatus: restoredStatus,
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+      mirrorBookingStatusToInspection(
+        current.inspectionRequestId,
+        restoredStatus,
+        {
+          bookingId: current.id,
+          bookingCode: current.bookingCode,
+        },
+      ),
+    ]);
+  }
+
+  const updated = await ref.get();
+  return {
+    ok: true,
+    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+  };
 }

@@ -184,6 +184,14 @@ export async function notifyCustomerOfNewRequest(
   const email = request.customer.email?.trim();
   if (!email) return;
 
+  const ownerCreated =
+    request.createdSource === "owner_dashboard" ||
+    request.createdSource === "owner_mobile";
+  if (ownerCreated && request.status === "scheduled") {
+    await notifyCustomerOfStatusChange(request, "scheduled", context);
+    return;
+  }
+
   const emailDetails: EmailDetailRow[] = [{ label: "Service", value: headline }];
   const address = formatAddress(request.address).trim();
   if (address) {

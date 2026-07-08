@@ -1,5 +1,5 @@
 import type { BookingDetail } from "@/lib/bookings/types";
-import type { InvoiceDetail } from "@/lib/invoices/types";
+import type { InvoiceDetail, InvoiceStatus } from "@/lib/invoices/types";
 import {
   STATUS_LABELS,
   type InspectionRequestDetail,
@@ -28,7 +28,7 @@ export type CustomerWorkContext = {
 
 function resolveInvoiceStatus(
   ctx: CustomerWorkContext,
-): "draft" | "sent" | "paid" | null {
+): InvoiceStatus | null {
   return ctx.invoice?.status ?? ctx.request.invoice?.status ?? null;
 }
 

@@ -29,6 +29,8 @@ type JobPreferredDatesPickerProps = {
   label?: string;
   /** Shown below the day strip (e.g. customer quote acceptance guidance). */
   helperNote?: string;
+  /** Admin flows: allow proposing past job days (customer flows keep the block). */
+  allowPast?: boolean;
 };
 
 export function JobPreferredDatesPicker({
@@ -38,6 +40,7 @@ export function JobPreferredDatesPicker({
   disabled = false,
   label = "Pick up to 3 preferred job days",
   helperNote,
+  allowPast = false,
 }: JobPreferredDatesPickerProps) {
   const minDate = todayIso(timeZone);
   const [dayPage, setDayPage] = useState(0);
@@ -88,6 +91,7 @@ export function JobPreferredDatesPicker({
           dayStripLayout="fit"
           timeZone={timeZone}
           disabled={disabled}
+          allowPast={allowPast}
         />
         {helperNote ? (
           <p className="mt-2 rounded-lg border border-amber-200/70 bg-amber-50/90 px-3 py-2 font-body text-[11px] leading-snug text-amber-900/90">
@@ -121,11 +125,9 @@ export function JobPreferredDatesPicker({
               <div className="mt-2 flex flex-wrap gap-2">
                 {(["morning", "afternoon"] as const).map((range) => {
                   const active = slot.timeRange === range;
-                  const sessionPast = isPastTimeRangeSession(
-                    slot.date,
-                    range,
-                    timeZone,
-                  );
+                  const sessionPast =
+                    !allowPast &&
+                    isPastTimeRangeSession(slot.date, range, timeZone);
                   return (
                     <button
                       key={range}

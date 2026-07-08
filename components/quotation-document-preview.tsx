@@ -5,6 +5,7 @@ import {
   formatQuoteMoney,
   formatQuoteDate,
   formatDepositSummary,
+  formatDocumentDiscountLabel,
   formatLineDiscountLabel,
   grossSubtotalAud,
   totalLineDiscountAud,
@@ -38,6 +39,11 @@ export function QuotationDocumentPreview({
   const itemsGrossSubtotalAud = grossSubtotalAud(lineItems);
   const hasLineDiscounts = lineDiscountTotalAud > 0.01;
   const hasDocumentDiscount = document.discountAud > 0.01;
+  const documentDiscountLabel = formatDocumentDiscountLabel(
+    document.discountAud,
+    document.subtotalAud,
+    document.documentDiscount,
+  );
   const depositBalanceDueAud =
     document.deposit && isInvoice && !document.deposit.paid
       ? document.totalAud
@@ -280,7 +286,7 @@ export function QuotationDocumentPreview({
                   </span>
                 </div>
                 <div className="flex justify-end gap-10 pr-1 text-[#6b7280]">
-                  <span>Line discounts</span>
+                  <span>Item discount</span>
                   <span className="font-numeric font-medium">
                     −{formatQuoteMoney(lineDiscountTotalAud)}
                   </span>
@@ -325,7 +331,7 @@ export function QuotationDocumentPreview({
                   </span>
                 </div>
                 <div className="flex justify-between gap-4 text-[#6b7280]">
-                  <span>Line discounts</span>
+                  <span>Item discount</span>
                   <span className="font-numeric font-medium text-[#1e2430]">
                     −{formatQuoteMoney(lineDiscountTotalAud)}
                   </span>
@@ -340,7 +346,7 @@ export function QuotationDocumentPreview({
             </div>
             {hasDocumentDiscount ? (
               <div className="flex justify-between gap-4 text-[#6b7280]">
-                <span>Discount</span>
+                <span>{documentDiscountLabel}</span>
                 <span className="font-numeric font-medium text-[#1e2430]">
                   −{formatQuoteMoney(document.discountAud)}
                 </span>
