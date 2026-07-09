@@ -109,7 +109,7 @@ export function SmsDeliveryLog({
   );
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       {showHeader ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -145,9 +145,13 @@ export function SmsDeliveryLog({
             : "No SMS messages have been logged yet."}
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-outline-variant bg-white">
+        <div className="min-w-0 rounded-xl border border-outline-variant bg-white">
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left font-body text-[12px]">
+            <table
+              className={`w-full text-left font-body text-[12px] ${
+                variant === "admin" ? "min-w-[920px]" : "min-w-[760px]"
+              }`}
+            >
               <thead className="border-b border-outline-variant bg-surface-container-lowest">
                 <tr>
                   <th className="px-3 py-2.5 font-semibold text-on-surface-variant">

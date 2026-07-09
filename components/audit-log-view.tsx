@@ -268,8 +268,7 @@ export function AuditLogView({
             setCategory(value as AuditCategory | "all")
           }
           ariaLabel="Filter by category"
-          className="sm:w-55"
-          
+          className="sm:w-56"
         >
           {categoryOptions.map((option) => (
             <option key={option.value} value={option.value}>
@@ -283,7 +282,7 @@ export function AuditLogView({
             value={businessId}
             onChange={(value) => setBusinessId(value)}
             ariaLabel="Filter by tenant"
-            className="sm:w-52"
+            className="sm:w-56"
           >
             <option value="">All tenants</option>
             {tenantOptions.map((t) => (
@@ -298,7 +297,7 @@ export function AuditLogView({
           value={source}
           onChange={(value) => setSource(value as AuditSource | "all")}
           ariaLabel="Filter by source"
-          className="sm:w-44"
+          className="sm:w-56"
         >
           <option value="all">All sources</option>
           <option value="customer_portal">Customer portal</option>

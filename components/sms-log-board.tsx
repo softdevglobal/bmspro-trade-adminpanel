@@ -65,7 +65,7 @@ export function SmsLogBoard({ variant }: SmsLogBoardProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {error ? (
         <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 font-body text-[12px] font-semibold text-rose-700">
           {error}

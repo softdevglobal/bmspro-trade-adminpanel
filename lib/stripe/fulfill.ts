@@ -90,7 +90,30 @@ async function isSessionFulfilled(sessionId: string): Promise<boolean> {
     .collection(FULFILLED_SESSIONS)
     .doc(sessionId)
     .get();
-  return snap.exists;
+  if (!snap.exists) return false;
+  const data = snap.data() ?? {};
+  return data.fulfilledAt != null;
+}
+
+/** Atomically reserves a checkout session so fulfillment runs at most once. */
+async function claimCheckoutSessionForFulfillment(input: {
+  sessionId: string;
+  businessId: string;
+  type: "sms_topup" | "subscription";
+}): Promise<boolean> {
+  const ref = adminDb.collection(FULFILLED_SESSIONS).doc(input.sessionId);
+
+  return adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists) return false;
+    tx.create(ref, {
+      sessionId: input.sessionId,
+      businessId: input.businessId,
+      type: input.type,
+      claimedAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
 }
 
 export async function fulfillCheckoutSession(
@@ -170,15 +193,6 @@ export async function confirmCheckoutSessionForBusiness(
   }
 
   const stripe = getStripe();
-
-  if (await isSessionFulfilled(trimmedId)) {
-    const session = await stripe.checkout.sessions.retrieve(trimmedId);
-    return {
-      alreadyFulfilled: true,
-      type: resolveCheckoutSessionType(session),
-    };
-  }
-
   const session = await stripe.checkout.sessions.retrieve(trimmedId);
 
   const sessionBusinessId =
@@ -195,10 +209,39 @@ export async function confirmCheckoutSessionForBusiness(
     throw new Error("Payment is not complete yet. Please wait and refresh.");
   }
 
-  const type = await fulfillCheckoutSession(session);
-  if (type !== "skipped") {
-    await markSessionFulfilled(trimmedId, session, type);
+  const type = resolveCheckoutSessionType(session);
+  if (type === "skipped") {
+    return { alreadyFulfilled: false, type };
   }
 
-  return { alreadyFulfilled: false, type };
+  if (await isSessionFulfilled(trimmedId)) {
+    return { alreadyFulfilled: true, type };
+  }
+
+  const claimed = await claimCheckoutSessionForFulfillment({
+    sessionId: trimmedId,
+    businessId: sessionBusinessId,
+    type,
+  });
+
+  if (!claimed) {
+    return { alreadyFulfilled: true, type };
+  }
+
+  const claimRef = adminDb.collection(FULFILLED_SESSIONS).doc(trimmedId);
+
+  try {
+    const fulfilledType = await fulfillCheckoutSession(session);
+    if (fulfilledType !== "skipped") {
+      await markSessionFulfilled(trimmedId, session, fulfilledType);
+    }
+    return { alreadyFulfilled: false, type: fulfilledType };
+  } catch (error) {
+    try {
+      await claimRef.delete();
+    } catch {
+      // Ignore cleanup errors — a completed mark may have raced.
+    }
+    throw error;
+  }
 }

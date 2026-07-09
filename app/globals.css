@@ -125,6 +125,30 @@ body {
   font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
+/* Dark sidebar — slim scrollbar aligned with on-background / inverse-primary palette */
+.sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-inverse-primary) 42%, transparent)
+    transparent;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-inverse-primary) 38%, transparent);
+  border-radius: 9999px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-inverse-primary) 58%, transparent);
+}
+
 @media print {
   body[data-printing-document="true"] * {
     visibility: hidden;
