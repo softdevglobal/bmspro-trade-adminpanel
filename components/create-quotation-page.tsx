@@ -28,6 +28,7 @@ import {
   isPdfAttachmentUrl,
   buildQuotationDocumentDeposit,
   formatDocumentDiscountLabel,
+  inferDocumentDiscount,
   resolveQuotationItemPricing,
   type GstPricingMode,
   type QuotationDocumentData,
@@ -499,14 +500,14 @@ export function CreateQuotationPage() {
         setTermsAndConditions(quotation.termsAndConditions ?? "");
         setTermsLoaded(true);
         setComment(quotation.notes ?? "");
+        // Re-derive the discount percent from the stored amount so editing the
+        // draft (e.g. adding items) keeps a "10% off" discount scaling instead
+        // of freezing it as a fixed dollar figure.
         setDocumentDiscount(
-          quotation.discountAud > 0
-            ? {
-                mode: "fixed",
-                percent: 0,
-                amountAud: quotation.discountAud,
-              }
-            : null,
+          inferDocumentDiscount(
+            quotation.discountAud,
+            quotation.lineItems.reduce((sum, item) => sum + item.priceAud, 0),
+          ),
         );
         setDepositRequest(quotation.depositRequest);
 

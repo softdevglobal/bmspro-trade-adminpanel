@@ -37,6 +37,7 @@ import {
   formatDepositPaymentNote,
   formatDocumentDiscountLabel,
   formatQuoteDate,
+  inferDocumentDiscount,
   resolveDocumentLineFromQuotationItem,
   resolveQuotationItemPricing,
   type DocumentDiscountDisplay,
@@ -365,7 +366,13 @@ export function CreateInvoiceFromQuotation({
           !isEditingDraftInvoice && q.createdSource !== "invoice_direct",
         );
         if (q.discountAud > 0) {
-          setDiscount({ mode: "fixed", percent: 0, amountAud: q.discountAud });
+          // The quotation stores only the discount amount. Re-derive the percent
+          // so it keeps scaling when line items are added to the invoice.
+          const quotationSubtotal = q.lineItems.reduce(
+            (sum, item) => sum + item.priceAud,
+            0,
+          );
+          setDiscount(inferDocumentDiscount(q.discountAud, quotationSubtotal));
         }
         if (q.depositRequest) {
           setDeposit({
@@ -416,11 +423,13 @@ export function CreateInvoiceFromQuotation({
         );
         setDiscount(
           loadedDraftInvoice.discountAud > 0
-            ? {
-                mode: "fixed",
-                percent: 0,
-                amountAud: loadedDraftInvoice.discountAud,
-              }
+            ? inferDocumentDiscount(
+                loadedDraftInvoice.discountAud,
+                loadedDraftInvoice.lineItems.reduce(
+                  (sum, item) => sum + item.priceAud,
+                  0,
+                ),
+              )
             : null,
         );
         if (loadedDraftInvoice.depositRequest) {

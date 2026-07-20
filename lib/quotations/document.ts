@@ -110,6 +110,36 @@ export function formatDocumentDiscountLabel(
   return `Discount (${formatQuoteMoney(discountAud)})`;
 }
 
+/**
+ * Recovers a document discount's mode/percent from a stored dollar amount.
+ *
+ * Quotations persist only the discount amount, not whether it was a percentage.
+ * When converting to an invoice (or reloading a draft) we re-derive the percent
+ * so a "10% off" discount keeps scaling as line items change, instead of being
+ * frozen as a fixed dollar figure. Falls back to fixed when the amount doesn't
+ * cleanly correspond to a percentage of the subtotal.
+ */
+export function inferDocumentDiscount(
+  discountAud: number,
+  subtotalAud: number,
+): { mode: "percent" | "fixed"; percent: number; amountAud: number } | null {
+  if (!(discountAud > 0)) return null;
+  if (subtotalAud > 0) {
+    const impliedPercent =
+      Math.round((discountAud / subtotalAud) * 10000) / 100;
+    const fromPercent =
+      Math.round(((subtotalAud * impliedPercent) / 100) * 100) / 100;
+    if (
+      impliedPercent > 0 &&
+      impliedPercent <= 100 &&
+      Math.abs(fromPercent - discountAud) <= 0.02
+    ) {
+      return { mode: "percent", percent: impliedPercent, amountAud: discountAud };
+    }
+  }
+  return { mode: "fixed", percent: 0, amountAud: discountAud };
+}
+
 export function buildQuotationDocumentDeposit(
   totalAud: number,
   deposit:
