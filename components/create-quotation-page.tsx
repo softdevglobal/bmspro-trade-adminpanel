@@ -635,13 +635,14 @@ export function CreateQuotationPage() {
           gstEnabled,
           gstPercentage,
         );
-        const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
-          quantity: item.quantity,
-          rate: item.rate,
-          discountPercent: item.discountPercent,
-          gstPercent,
-          gstPricing,
-        });
+        const { amountAud, listRateAudExGst, grossAud } =
+          computeQuotationLineAmounts({
+            quantity: item.quantity,
+            rate: item.rate,
+            discountPercent: item.discountPercent,
+            gstPercent,
+            gstPricing,
+          });
         return {
           code: (item.code ?? "").trim() || null,
           name: item.name,
@@ -651,6 +652,7 @@ export function CreateQuotationPage() {
           discountPercent: item.discountPercent,
           gstPercent,
           amountAud,
+          grossAud,
         };
       }),
     [lineItems, gstEnabled, gstPercentage, gstPricing],
@@ -676,8 +678,9 @@ export function CreateQuotationPage() {
       computeDocumentTotals({
         lineItems: documentLineItems,
         discountAud: discountAmount,
+        gstPricing,
       }),
-    [documentLineItems, discountAmount],
+    [documentLineItems, discountAmount, gstPricing],
   );
 
   const gstAmount = documentTotals.gstAud;
@@ -693,11 +696,19 @@ export function CreateQuotationPage() {
 
   useEffect(() => {
     if (!depositRequest || total <= 0) return;
-    const capped = Math.min(depositRequest.amountAud, total);
-    if (Math.abs(capped - depositRequest.amountAud) > 0.001) {
+    // A percent deposit must track the live total, so recompute it from the
+    // percentage; a fixed deposit only needs capping so it never exceeds the
+    // total. Without this, changing line items leaves a stale deposit amount.
+    const target =
+      depositRequest.mode === "percent"
+        ? Math.round(
+            Math.min((total * depositRequest.percent) / 100, total) * 100,
+          ) / 100
+        : Math.min(depositRequest.amountAud, total);
+    if (Math.abs(target - depositRequest.amountAud) > 0.001) {
       const frame = requestAnimationFrame(() => {
         setDepositRequest((prev) =>
-          prev ? { ...prev, amountAud: capped } : prev,
+          prev ? { ...prev, amountAud: target } : prev,
         );
       });
       return () => cancelAnimationFrame(frame);

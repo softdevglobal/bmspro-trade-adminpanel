@@ -309,6 +309,14 @@ export function buildQuotationDocumentFromDetail(
     : formatQuoteDate(platformTodayIso(new Date(), branding.timezone));
 
   const totalAud = quotation.finalPriceAud || totals.totalAud;
+  // Pricing mode (inclusive/exclusive) isn't stored, so derive GST from the
+  // authoritative saved total. This keeps subtotal − discount + GST = total for
+  // both modes (an inclusive $500 quote shows $454.55 + $45.45, not $500.01).
+  const gstAud = Math.max(
+    0,
+    Math.round((totalAud - Math.max(0, totals.subtotalAud - discountAud)) * 100) /
+      100,
+  );
 
   return {
     quoteNo: displayQuotationCode(quotation),
@@ -325,7 +333,7 @@ export function buildQuotationDocumentFromDetail(
     lineItems,
     subtotalAud: totals.subtotalAud,
     discountAud,
-    gstAud: totals.gstAud,
+    gstAud,
     totalAud,
     deposit: buildQuotationDocumentDeposit(totalAud, quotation.depositRequest),
     termsAndConditions: resolveQuotationTerms(quotation),

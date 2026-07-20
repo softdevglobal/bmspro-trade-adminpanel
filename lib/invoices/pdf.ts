@@ -40,6 +40,13 @@ export function buildInvoiceDocumentFromDetail(
   const discountAud = invoice.discountAud ?? 0;
   const totals = computeDocumentTotals({ lineItems, discountAud });
   const totalAud = invoice.finalPriceAud || totals.totalAud;
+  // Pricing mode isn't stored, so derive GST from the authoritative saved total
+  // to keep subtotal − discount + GST = total for inclusive-priced invoices too.
+  const gstAud = Math.max(
+    0,
+    Math.round((totalAud - Math.max(0, totals.subtotalAud - discountAud)) * 100) /
+      100,
+  );
 
   return {
     quoteNo: invoice.invoiceCode,
@@ -53,7 +60,7 @@ export function buildInvoiceDocumentFromDetail(
     lineItems,
     subtotalAud: totals.subtotalAud,
     discountAud,
-    gstAud: totals.gstAud,
+    gstAud,
     totalAud,
     deposit: buildQuotationDocumentDeposit(totalAud, invoice.depositRequest),
     termsAndConditions: invoice.termsAndConditions?.trim()

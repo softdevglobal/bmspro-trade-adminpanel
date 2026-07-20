@@ -12,6 +12,12 @@ export type QuotationDocumentLineItem = {
   gstPercent: number;
   /** Line amount excluding GST (after quantity × rate and line discount). */
   amountAud: number;
+  /**
+   * Customer-facing line total: the GST-inclusive amount for inclusive pricing,
+   * or the ex-GST amount for exclusive pricing. Used so inclusive-priced totals
+   * close to the amount actually entered instead of drifting a cent on rounding.
+   */
+  grossAud?: number;
 };
 
 export type QuotationDocumentCustomer = {
@@ -285,7 +291,12 @@ export function computeQuotationLineAmounts(input: {
   discountPercent: number;
   gstPercent: number;
   gstPricing: GstPricingMode;
-}): { amountAud: number; rateAudExGst: number; listRateAudExGst: number } {
+}): {
+  amountAud: number;
+  rateAudExGst: number;
+  listRateAudExGst: number;
+  grossAud: number;
+} {
   const gross =
     Math.round(
       input.quantity *
@@ -305,7 +316,8 @@ export function computeQuotationLineAmounts(input: {
             (rateAudExGst / (1 - input.discountPercent / 100)) * 100,
           ) / 100
         : rateAudExGst;
-    return { amountAud: gross, rateAudExGst, listRateAudExGst };
+    // Exclusive: the entered amount is already ex-GST, so gross == amount.
+    return { amountAud: gross, rateAudExGst, listRateAudExGst, grossAud: gross };
   }
 
   const amountAud =
@@ -319,7 +331,9 @@ export function computeQuotationLineAmounts(input: {
       ? Math.round((rateAudExGst / (1 - input.discountPercent / 100)) * 100) /
         100
       : rateAudExGst;
-  return { amountAud, rateAudExGst, listRateAudExGst };
+  // Inclusive: the entered amount already includes GST — keep it as the gross
+  // so document totals close to what was typed instead of drifting on rounding.
+  return { amountAud, rateAudExGst, listRateAudExGst, grossAud: gross };
 }
 
 /** True when the line item has a persisted pre-discount list rate. */
@@ -449,6 +463,8 @@ export function resolveQuotationTerms(input: {
 export function computeDocumentTotals(input: {
   lineItems: QuotationDocumentLineItem[];
   discountAud: number;
+  /** When "inclusive", entered prices already contain GST. */
+  gstPricing?: GstPricingMode;
 }): { subtotalAud: number; gstAud: number; totalAud: number } {
   const subtotalAud = input.lineItems.reduce(
     (sum, item) => sum + item.amountAud,
@@ -456,6 +472,35 @@ export function computeDocumentTotals(input: {
   );
   const discountAud = Math.max(0, input.discountAud);
   const afterDiscount = Math.max(0, subtotalAud - discountAud);
+
+  if (input.gstPricing === "inclusive") {
+    // The GST is already baked into the entered (gross) amounts. Derive it from
+    // the gross vs ex-GST subtotal so the breakdown always closes to what the
+    // customer typed (e.g. $500 inclusive shows as $454.55 + $45.45, not $500.01).
+    const grossSubtotal =
+      Math.round(
+        input.lineItems.reduce(
+          (sum, item) =>
+            sum +
+            (item.grossAud ??
+              item.amountAud * (1 + Math.max(0, item.gstPercent) / 100)),
+          0,
+        ) * 100,
+      ) / 100;
+    const embeddedGst = Math.max(0, Math.round((grossSubtotal - subtotalAud) * 100) / 100);
+    const gstAud =
+      subtotalAud > 0
+        ? Math.max(
+            0,
+            Math.round((embeddedGst * afterDiscount) / subtotalAud * 100) / 100,
+          )
+        : 0;
+    return {
+      subtotalAud,
+      gstAud,
+      totalAud: Math.round((afterDiscount + gstAud) * 100) / 100,
+    };
+  }
 
   const taxableSubtotal = input.lineItems.reduce((sum, item) => {
     if (item.gstPercent <= 0) return sum;

@@ -622,13 +622,14 @@ export function CreateInvoiceFromQuotation({
     }
     return lineItems.map((item) => {
       const gstPercent = lineGstPercent(item.applyGst, gstEnabled, gstPercentage);
-      const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
-        quantity: item.quantity,
-        rate: item.rate,
-        discountPercent: item.discountPercent,
-        gstPercent,
-        gstPricing,
-      });
+      const { amountAud, listRateAudExGst, grossAud } =
+        computeQuotationLineAmounts({
+          quantity: item.quantity,
+          rate: item.rate,
+          discountPercent: item.discountPercent,
+          gstPercent,
+          gstPricing,
+        });
       return {
         code: item.code.trim() || null,
         name: item.name.trim() || "Line item",
@@ -638,6 +639,7 @@ export function CreateInvoiceFromQuotation({
         discountPercent: item.discountPercent,
         gstPercent,
         amountAud,
+        grossAud,
       };
     });
   }, [
@@ -708,14 +710,25 @@ export function CreateInvoiceFromQuotation({
     const totals = computeDocumentTotals({
       lineItems: documentLineItems,
       discountAud,
+      gstPricing,
     });
     if (pricingFromQuotation) {
       const authoritativeTotal =
         (isEditingDraftInvoice
           ? draftInvoice?.finalPriceAud
           : quotation?.finalPriceAud) ?? totals.totalAud;
+      // Keep the GST/subtotal breakdown closing to the authoritative total so
+      // an inclusive-priced quote shows $454.55 + $45.45 = $500.00, not $500.01.
+      const gstFromTotal = Math.max(
+        0,
+        Math.round(
+          (authoritativeTotal - Math.max(0, totals.subtotalAud - discountAud)) *
+            100,
+        ) / 100,
+      );
       return {
         ...totals,
+        gstAud: gstFromTotal,
         totalAud: authoritativeTotal,
       };
     }
@@ -723,6 +736,7 @@ export function CreateInvoiceFromQuotation({
   }, [
     documentLineItems,
     discountAud,
+    gstPricing,
     pricingFromQuotation,
     isEditingDraftInvoice,
     draftInvoice,
@@ -739,14 +753,21 @@ export function CreateInvoiceFromQuotation({
     [discountAud, subtotalAud, documentDiscountDisplay],
   );
 
-  const documentDeposit = useMemo(
-    () =>
-      buildQuotationDocumentDeposit(
-        totalAud,
-        deposit ? { ...deposit, paid: depositPaid } : null,
-      ),
-    [totalAud, deposit, depositPaid],
-  );
+  const documentDeposit = useMemo(() => {
+    if (!deposit) return null;
+    // Percent deposits track the live total; recompute so editing line items
+    // updates the deposit instead of leaving the amount saved earlier.
+    const effectiveAmountAud =
+      deposit.mode === "percent" && deposit.percent > 0
+        ? Math.round(Math.min((totalAud * deposit.percent) / 100, totalAud) * 100) /
+          100
+        : deposit.amountAud;
+    return buildQuotationDocumentDeposit(totalAud, {
+      ...deposit,
+      amountAud: effectiveAmountAud,
+      paid: depositPaid,
+    });
+  }, [totalAud, deposit, depositPaid]);
 
   // Only a received deposit reduces what the customer owes; an unpaid
   // deposit means the invoice is issued for the full amount.
