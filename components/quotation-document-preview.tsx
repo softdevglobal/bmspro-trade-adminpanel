@@ -6,6 +6,7 @@ import {
   formatQuoteDate,
   formatDepositSummary,
   formatDocumentDiscountLabel,
+  formatGstTotalsLabel,
   formatLineDiscountLabel,
   grossSubtotalAud,
   totalLineDiscountAud,
@@ -355,11 +356,13 @@ export function QuotationDocumentPreview({
             {document.gstAud > 0 ? (
               <div className="flex justify-between gap-2 text-[#6b7280]">
                 <span className="min-w-0 text-[10px] leading-snug">
-                  GST {business.gstPercentage}% (
-                  {formatQuoteMoney(
-                    document.subtotalAud - document.discountAud,
-                  )}
-                  )
+                  {formatGstTotalsLabel({
+                    gstPercentage: business.gstPercentage,
+                    gstPricing: document.gstPricing,
+                    gstTaxableBaseAud: document.gstTaxableBaseAud,
+                    afterDiscountAud:
+                      document.subtotalAud - document.discountAud,
+                  })}
                 </span>
                 <span className="shrink-0 font-numeric font-medium text-[#1e2430]">
                   {formatQuoteMoney(document.gstAud)}

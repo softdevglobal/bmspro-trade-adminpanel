@@ -36,8 +36,10 @@ import {
   deriveGstSettingsFromLineItems,
   formatDepositPaymentNote,
   formatDocumentDiscountLabel,
+  formatGstTotalsLabel,
   formatQuoteDate,
   inferDocumentDiscount,
+  inferGstPricingMode,
   resolveDocumentLineFromQuotationItem,
   resolveQuotationItemPricing,
   type DocumentDiscountDisplay,
@@ -362,6 +364,15 @@ export function CreateInvoiceFromQuotation({
         const quotationGst = deriveGstSettingsFromLineItems(q.lineItems);
         setGstEnabled(quotationGst.enabled);
         setGstPercentage(quotationGst.percentage);
+        setGstPricing(
+          q.gstPricing ??
+            inferGstPricingMode({
+              subtotalAud: q.subtotalAud,
+              discountAud: q.discountAud,
+              finalPriceAud: q.finalPriceAud,
+              hasTaxableLines: quotationGst.enabled,
+            }),
+        );
         setPricingFromQuotation(
           !isEditingDraftInvoice && q.createdSource !== "invoice_direct",
         );
@@ -418,6 +429,15 @@ export function CreateInvoiceFromQuotation({
         );
         setGstEnabled(draftGst.enabled);
         setGstPercentage(draftGst.percentage);
+        setGstPricing(
+          loadedDraftInvoice.gstPricing ??
+            inferGstPricingMode({
+              subtotalAud: loadedDraftInvoice.subtotalAud,
+              discountAud: loadedDraftInvoice.discountAud,
+              finalPriceAud: loadedDraftInvoice.finalPriceAud,
+              hasTaxableLines: draftGst.enabled,
+            }),
+        );
         setPricingFromQuotation(
           loadedQuotation?.createdSource !== "invoice_direct",
         );
@@ -660,24 +680,6 @@ export function CreateInvoiceFromQuotation({
     gstPricing,
   ]);
 
-  useEffect(() => {
-    if (pricingFromQuotation) return;
-    const frame = requestAnimationFrame(() => {
-      setLineItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          amountAud: computeSavedLineAmount(
-            item,
-            gstEnabled,
-            gstPercentage,
-            gstPricing,
-          ),
-        })),
-      );
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [gstEnabled, gstPercentage, gstPricing, pricingFromQuotation]);
-
   const subtotalRaw = useMemo(
     () => documentLineItems.reduce((sum, item) => sum + item.amountAud, 0),
     [documentLineItems],
@@ -715,7 +717,7 @@ export function CreateInvoiceFromQuotation({
     return null;
   }, [discount, discountAud]);
 
-  const { subtotalAud, gstAud, totalAud } = useMemo(() => {
+  const { subtotalAud, gstAud, totalAud, gstTaxableBaseAud } = useMemo(() => {
     const totals = computeDocumentTotals({
       lineItems: documentLineItems,
       discountAud,
@@ -726,18 +728,14 @@ export function CreateInvoiceFromQuotation({
         (isEditingDraftInvoice
           ? draftInvoice?.finalPriceAud
           : quotation?.finalPriceAud) ?? totals.totalAud;
-      // Keep the GST/subtotal breakdown closing to the authoritative total so
-      // an inclusive-priced quote shows $454.55 + $45.45 = $500.00, not $500.01.
-      const gstFromTotal = Math.max(
-        0,
-        Math.round(
-          (authoritativeTotal - Math.max(0, totals.subtotalAud - discountAud)) *
-            100,
-        ) / 100,
-      );
+      // Keep totals locked to the source quotation until the user edits pricing.
+      const lockedGst =
+        isEditingDraftInvoice && typeof draftInvoice?.gstAud === "number"
+          ? draftInvoice.gstAud
+          : totals.gstAud;
       return {
         ...totals,
-        gstAud: gstFromTotal,
+        gstAud: lockedGst,
         totalAud: authoritativeTotal,
       };
     }
@@ -809,6 +807,8 @@ export function CreateInvoiceFromQuotation({
       discountAud,
       documentDiscount: documentDiscountDisplay,
       gstAud,
+      gstTaxableBaseAud,
+      gstPricing,
       totalAud,
       deposit: documentDeposit,
       termsAndConditions: (() => {
@@ -846,6 +846,8 @@ export function CreateInvoiceFromQuotation({
     discountAud,
     documentDiscountDisplay,
     gstAud,
+    gstTaxableBaseAud,
+    gstPricing,
     totalAud,
     documentDeposit,
     termsAndConditions,
@@ -954,6 +956,7 @@ export function CreateInvoiceFromQuotation({
           finalPriceAud: totalAud,
           discountAud,
           gstAud,
+          gstPricing,
           depositRequest: documentDeposit
             ? {
                 mode: documentDeposit.mode,
@@ -1983,7 +1986,9 @@ export function CreateInvoiceFromQuotation({
                           }`}
                         >
                           {gstEnabled
-                            ? "GST is included in invoice totals"
+                            ? gstPricing === "inclusive"
+                              ? "GST extracted from prices"
+                              : "GST added on top of prices"
                             : "Tap to add GST to this invoice"}
                         </span>
                       </span>
@@ -2050,7 +2055,14 @@ export function CreateInvoiceFromQuotation({
                 </div>
                 {gstAud > 0 ? (
                   <div className="flex justify-between text-on-surface-variant">
-                    <span>GST ({gstPercentage}%)</span>
+                    <span>
+                      {formatGstTotalsLabel({
+                        gstPercentage,
+                        gstPricing,
+                        gstTaxableBaseAud,
+                        afterDiscountAud: subtotalAud - discountAud,
+                      })}
+                    </span>
                     <span className="font-numeric font-medium text-on-surface">
                       {formatAud(gstAud)}
                     </span>

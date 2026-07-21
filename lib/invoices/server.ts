@@ -248,6 +248,7 @@ function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail
       typeof data.gstAud === "number" && Number.isFinite(data.gstAud)
         ? data.gstAud
         : 0,
+    gstPricing: data.gstPricing === "inclusive" ? "inclusive" : "exclusive",
     finalPriceAud:
       typeof data.finalPriceAud === "number" &&
       Number.isFinite(data.finalPriceAud)
@@ -600,6 +601,7 @@ function buildInvoiceValues(input: CreateInvoiceInput):
       subtotalAud: number;
       discountAud: number;
       gstAud: number;
+      gstPricing: "exclusive" | "inclusive";
       finalPriceAud: number;
       balanceDueAud: number;
       depositRequest: QuotationDepositRequest | null;
@@ -619,6 +621,8 @@ function buildInvoiceValues(input: CreateInvoiceInput):
   const subtotalAud = lineItems.reduce((sum, item) => sum + item.priceAud, 0);
   const discountAud = Math.max(0, input.discountAud ?? 0);
   const gstAud = Math.max(0, input.gstAud ?? 0);
+  const gstPricing =
+    input.gstPricing === "inclusive" ? "inclusive" : "exclusive";
   const finalPriceAud = Math.max(0, input.finalPriceAud);
 
   const depositRequest = parseDepositRequest(input.depositRequest);
@@ -643,6 +647,7 @@ function buildInvoiceValues(input: CreateInvoiceInput):
     subtotalAud,
     discountAud,
     gstAud,
+    gstPricing,
     finalPriceAud,
     balanceDueAud,
     depositRequest,
@@ -730,6 +735,7 @@ export async function createInvoiceFromQuotation(
         subtotalAud: values.subtotalAud,
         discountAud: values.discountAud,
         gstAud: values.gstAud,
+        gstPricing: values.gstPricing,
         finalPriceAud: values.finalPriceAud,
         balanceDueAud: values.balanceDueAud,
         depositRequest: values.depositRequestData,
@@ -878,6 +884,7 @@ export async function createInvoiceFromQuotation(
     subtotalAud: values.subtotalAud,
     discountAud: values.discountAud,
     gstAud: values.gstAud,
+    gstPricing: values.gstPricing,
     finalPriceAud: values.finalPriceAud,
     balanceDueAud: values.balanceDueAud,
     depositRequest: values.depositRequestData,
@@ -1003,6 +1010,7 @@ export async function createDirectInvoice(
     finalPriceAud: input.finalPriceAud,
     discountAud: input.discountAud,
     gstAud: input.gstAud,
+    gstPricing: input.gstPricing,
     depositRequest: input.depositRequest,
     notes: input.notes,
     termsAndConditions: input.termsAndConditions,

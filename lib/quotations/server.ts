@@ -279,6 +279,7 @@ function mapQuotationDoc(
       typeof data.discountAud === "number" && Number.isFinite(data.discountAud)
         ? Math.max(0, data.discountAud)
         : 0,
+    gstPricing: data.gstPricing === "inclusive" ? "inclusive" : "exclusive",
     depositRequest,
     validUntil:
       typeof data.validUntil === "string" ? data.validUntil : null,
@@ -578,6 +579,8 @@ export async function createQuotationForInspection(
     input.discountAud >= 0
       ? input.discountAud
       : 0;
+  const gstPricing =
+    input.gstPricing === "inclusive" ? "inclusive" : "exclusive";
   const computedFinal = Math.max(0, subtotalAud - discountAud);
   const finalPriceAud =
     typeof input.finalPriceAud === "number" &&
@@ -734,6 +737,7 @@ export async function createQuotationForInspection(
     paymentInstructions: null,
     termsAndConditions,
     discountAud,
+    gstPricing,
     depositRequest,
     validUntil:
       typeof input.validUntil === "string" && input.validUntil.trim()
@@ -974,6 +978,8 @@ export async function updateDraftQuotation(
     input.discountAud >= 0
       ? input.discountAud
       : 0;
+  const gstPricing =
+    input.gstPricing === "inclusive" ? "inclusive" : "exclusive";
   const computedFinal = Math.max(0, subtotalAud - discountAud);
   const finalPriceAud =
     typeof input.finalPriceAud === "number" &&
@@ -1118,6 +1124,7 @@ export async function updateDraftQuotation(
       paymentInstructions: null,
       termsAndConditions,
       discountAud,
+      gstPricing,
       depositRequest,
       validUntil,
       updatedAt: FieldValue.serverTimestamp(),
@@ -1597,6 +1604,7 @@ export type StandaloneQuotationInput = {
   paymentInstructions?: string | null;
   termsAndConditions?: string | null;
   discountAud?: number | null;
+  gstPricing?: "exclusive" | "inclusive" | null;
   validUntil?: string | null;
   imageUrls?: string[];
   depositRequest?: unknown;
@@ -1806,6 +1814,8 @@ export async function createStandaloneQuotation(
     input.discountAud >= 0
       ? input.discountAud
       : 0;
+  const gstPricing =
+    input.gstPricing === "inclusive" ? "inclusive" : "exclusive";
   const computedFinal = Math.max(0, subtotalAud - discountAud);
   const finalPriceAud =
     typeof input.finalPriceAud === "number" &&
@@ -1916,6 +1926,7 @@ export async function createStandaloneQuotation(
     paymentInstructions: null,
     termsAndConditions,
     discountAud,
+    gstPricing,
     depositRequest,
     validUntil:
       typeof input.validUntil === "string" && input.validUntil.trim()
