@@ -24,6 +24,8 @@ export type InvoiceDetail = {
   subtotalAud: number;
   discountAud: number;
   gstAud: number;
+  /** Exclusive adds GST on top; inclusive extracts GST from line nets. */
+  gstPricing: "exclusive" | "inclusive";
   finalPriceAud: number;
   /** Amount still owed after any deposit (equals finalPriceAud when no deposit). */
   balanceDueAud: number;
@@ -58,6 +60,7 @@ export type CreateInvoiceInput = {
   serviceTitle?: string;
   discountAud?: number | null;
   gstAud?: number | null;
+  gstPricing?: "exclusive" | "inclusive" | null;
   depositRequest?: unknown;
   notes?: string | null;
   termsAndConditions?: string | null;

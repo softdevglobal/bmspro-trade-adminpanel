@@ -38,8 +38,17 @@ export function buildInvoiceDocumentFromDetail(
     : 0;
   const lineItems = lineItemsFromInvoice(invoice, gstPercentage);
   const discountAud = invoice.discountAud ?? 0;
-  const totals = computeDocumentTotals({ lineItems, discountAud });
+  const gstPricing = invoice.gstPricing ?? "exclusive";
+  const totals = computeDocumentTotals({
+    lineItems,
+    discountAud,
+    gstPricing,
+  });
   const totalAud = invoice.finalPriceAud || totals.totalAud;
+  const gstAud =
+    typeof invoice.gstAud === "number" && invoice.gstAud > 0
+      ? invoice.gstAud
+      : totals.gstAud;
 
   return {
     quoteNo: invoice.invoiceCode,
@@ -53,7 +62,9 @@ export function buildInvoiceDocumentFromDetail(
     lineItems,
     subtotalAud: totals.subtotalAud,
     discountAud,
-    gstAud: totals.gstAud,
+    gstAud,
+    gstTaxableBaseAud: totals.gstTaxableBaseAud,
+    gstPricing,
     totalAud,
     deposit: buildQuotationDocumentDeposit(totalAud, invoice.depositRequest),
     termsAndConditions: invoice.termsAndConditions?.trim()

@@ -405,7 +405,7 @@ export function Sidebar({
         </div>
 
         <nav
-          className={`flex flex-1 flex-col gap-0.5 overflow-y-auto [scrollbar-gutter:stable] ${
+          className={`sidebar-scrollbar flex flex-1 flex-col gap-0.5 overflow-y-auto [scrollbar-gutter:stable] ${
             showLabels ? "px-3" : "items-center px-2"
           }`}
         >
@@ -486,12 +486,8 @@ export function Sidebar({
                   </span>
                 ) : null}
                 {hasChildren && showLabels ? (
-                  <span
-                    className={`material-symbols-outlined ml-auto shrink-0 text-[22px] leading-none transition-transform duration-300 ease-in-out ${
-                      groupOpen ? "rotate-180" : ""
-                    }`}
-                  >
-                    expand_more
+                  <span className="material-symbols-outlined ml-auto shrink-0 text-[22px] leading-none">
+                    {groupOpen ? "expand_less" : "expand_more"}
                   </span>
                 ) : null}
                 {!showLabels && (

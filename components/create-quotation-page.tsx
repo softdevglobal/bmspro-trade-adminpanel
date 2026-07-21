@@ -28,6 +28,9 @@ import {
   isPdfAttachmentUrl,
   buildQuotationDocumentDeposit,
   formatDocumentDiscountLabel,
+  formatGstTotalsLabel,
+  inferDocumentDiscount,
+  inferGstPricingMode,
   resolveQuotationItemPricing,
   type GstPricingMode,
   type QuotationDocumentData,
@@ -499,14 +502,14 @@ export function CreateQuotationPage() {
         setTermsAndConditions(quotation.termsAndConditions ?? "");
         setTermsLoaded(true);
         setComment(quotation.notes ?? "");
+        // Re-derive the discount percent from the stored amount so editing the
+        // draft (e.g. adding items) keeps a "10% off" discount scaling instead
+        // of freezing it as a fixed dollar figure.
         setDocumentDiscount(
-          quotation.discountAud > 0
-            ? {
-                mode: "fixed",
-                percent: 0,
-                amountAud: quotation.discountAud,
-              }
-            : null,
+          inferDocumentDiscount(
+            quotation.discountAud,
+            quotation.lineItems.reduce((sum, item) => sum + item.priceAud, 0),
+          ),
         );
         setDepositRequest(quotation.depositRequest);
 
@@ -516,6 +519,15 @@ export function CreateQuotationPage() {
             (item) => (item.gstPercent ?? 0) > 0,
           )?.gstPercent;
           if (gstPercent) setGstPercentage(gstPercent);
+          setGstPricing(
+            quotation.gstPricing ??
+              inferGstPricingMode({
+                subtotalAud: quotation.subtotalAud,
+                discountAud: quotation.discountAud,
+                finalPriceAud: quotation.finalPriceAud,
+                hasTaxableLines: true,
+              }),
+          );
         }
 
         if (quotation.validUntil) {
@@ -610,22 +622,7 @@ export function CreateQuotationPage() {
     [timeZone],
   );
 
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      setLineItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          amountAud: computeSavedLineAmount(
-            item,
-            gstEnabled,
-            gstPercentage,
-            gstPricing,
-          ),
-        })),
-      );
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [gstEnabled, gstPercentage, gstPricing]);
+  // Line nets are independent of GST mode — amounts are set when items are saved.
 
   const documentLineItems = useMemo(
     () =>
@@ -635,13 +632,14 @@ export function CreateQuotationPage() {
           gstEnabled,
           gstPercentage,
         );
-        const { amountAud, listRateAudExGst } = computeQuotationLineAmounts({
-          quantity: item.quantity,
-          rate: item.rate,
-          discountPercent: item.discountPercent,
-          gstPercent,
-          gstPricing,
-        });
+        const { amountAud, listRateAudExGst, grossAud } =
+          computeQuotationLineAmounts({
+            quantity: item.quantity,
+            rate: item.rate,
+            discountPercent: item.discountPercent,
+            gstPercent,
+            gstPricing,
+          });
         return {
           code: (item.code ?? "").trim() || null,
           name: item.name,
@@ -651,6 +649,7 @@ export function CreateQuotationPage() {
           discountPercent: item.discountPercent,
           gstPercent,
           amountAud,
+          grossAud,
         };
       }),
     [lineItems, gstEnabled, gstPercentage, gstPricing],
@@ -676,8 +675,9 @@ export function CreateQuotationPage() {
       computeDocumentTotals({
         lineItems: documentLineItems,
         discountAud: discountAmount,
+        gstPricing,
       }),
-    [documentLineItems, discountAmount],
+    [documentLineItems, discountAmount, gstPricing],
   );
 
   const gstAmount = documentTotals.gstAud;
@@ -693,11 +693,19 @@ export function CreateQuotationPage() {
 
   useEffect(() => {
     if (!depositRequest || total <= 0) return;
-    const capped = Math.min(depositRequest.amountAud, total);
-    if (Math.abs(capped - depositRequest.amountAud) > 0.001) {
+    // A percent deposit must track the live total, so recompute it from the
+    // percentage; a fixed deposit only needs capping so it never exceeds the
+    // total. Without this, changing line items leaves a stale deposit amount.
+    const target =
+      depositRequest.mode === "percent"
+        ? Math.round(
+            Math.min((total * depositRequest.percent) / 100, total) * 100,
+          ) / 100
+        : Math.min(depositRequest.amountAud, total);
+    if (Math.abs(target - depositRequest.amountAud) > 0.001) {
       const frame = requestAnimationFrame(() => {
         setDepositRequest((prev) =>
-          prev ? { ...prev, amountAud: capped } : prev,
+          prev ? { ...prev, amountAud: target } : prev,
         );
       });
       return () => cancelAnimationFrame(frame);
@@ -1114,6 +1122,7 @@ export function CreateQuotationPage() {
         }),
         finalPriceAud: total,
         discountAud: discountAmount,
+        gstPricing,
         ...(previewServiceDescription
           ? { serviceDescription: previewServiceDescription }
           : {}),
@@ -1241,6 +1250,8 @@ export function CreateQuotationPage() {
           }
         : null,
       gstAud: gstAmount,
+      gstTaxableBaseAud: documentTotals.gstTaxableBaseAud,
+      gstPricing,
       totalAud: total,
       deposit: buildQuotationDocumentDeposit(total, depositRequest),
       termsAndConditions: termsAndConditions.trim() || null,
@@ -1269,6 +1280,7 @@ export function CreateQuotationPage() {
     discountAmount,
     documentDiscount,
     gstAmount,
+    documentTotals.gstTaxableBaseAud,
     total,
     depositRequest,
     termsAndConditions,
@@ -1985,15 +1997,7 @@ export function CreateQuotationPage() {
                               gstPercent,
                               gstPricing,
                             });
-                            if (gstPercent <= 0) return amountAud;
-                            if (gstPricing === "inclusive") {
-                              return lineAmount(quantity, rate, discountPercent);
-                            }
-                            return (
-                              Math.round(
-                                amountAud * (1 + gstPercent / 100) * 100,
-                              ) / 100
-                            );
+                            return amountAud;
                           })(),
                         )}
                       </span>
@@ -2339,7 +2343,9 @@ export function CreateQuotationPage() {
                           }`}
                         >
                           {gstEnabled
-                            ? "GST is included in totals"
+                            ? gstPricing === "inclusive"
+                              ? "GST extracted from prices"
+                              : "GST added on top of prices"
                             : "Tap to add GST to this quote"}
                         </span>
                       </span>
@@ -2400,7 +2406,14 @@ export function CreateQuotationPage() {
                 </div>
                 {gstEnabled ? (
                   <div className="flex justify-between text-on-surface-variant">
-                    <span>GST ({gstPercentage}%)</span>
+                    <span>
+                      {formatGstTotalsLabel({
+                        gstPercentage,
+                        gstPricing,
+                        gstTaxableBaseAud: documentTotals.gstTaxableBaseAud,
+                        afterDiscountAud: subtotal - discountAmount,
+                      })}
+                    </span>
                     <span className="font-numeric font-medium text-on-surface">
                       {formatAud(gstAmount)}
                     </span>

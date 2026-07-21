@@ -191,6 +191,8 @@ export async function PATCH(
         Number.isFinite(payload.discountAud)
           ? payload.discountAud
           : null,
+      gstPricing:
+        payload.gstPricing === "inclusive" ? "inclusive" : "exclusive",
       validUntil:
         typeof payload.validUntil === "string" ? payload.validUntil : null,
       imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],

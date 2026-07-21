@@ -20,6 +20,47 @@ type ConfirmResult = {
   error?: string;
 };
 
+const CONFIRMED_SESSION_STORAGE_PREFIX = "stripe-checkout-confirmed:";
+const INFLIGHT_SESSION_STORAGE_PREFIX = "stripe-checkout-inflight:";
+
+function hasConfirmedCheckoutSession(sessionId: string): boolean {
+  try {
+    return (
+      sessionStorage.getItem(CONFIRMED_SESSION_STORAGE_PREFIX + sessionId) ===
+      "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function rememberConfirmedCheckoutSession(sessionId: string): void {
+  try {
+    sessionStorage.setItem(CONFIRMED_SESSION_STORAGE_PREFIX + sessionId, "1");
+  } catch {
+    // Ignore storage failures — server idempotency still applies.
+  }
+}
+
+function tryClaimCheckoutConfirmation(sessionId: string): boolean {
+  try {
+    const inflightKey = INFLIGHT_SESSION_STORAGE_PREFIX + sessionId;
+    if (sessionStorage.getItem(inflightKey) === "1") return false;
+    sessionStorage.setItem(inflightKey, "1");
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function releaseCheckoutConfirmation(sessionId: string): void {
+  try {
+    sessionStorage.removeItem(INFLIGHT_SESSION_STORAGE_PREFIX + sessionId);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 /** After Stripe redirect, confirms payment via API (no webhook secret needed). */
 export function useStripeCheckoutReturn(options?: {
   onSuccess?: (result: ConfirmResult) => void | Promise<void>;
@@ -27,19 +68,17 @@ export function useStripeCheckoutReturn(options?: {
   onError?: (message: string) => void;
 }) {
   const { user } = useAuth();
-  const handledRef = useRef(false);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
   useEffect(() => {
-    if (!user || handledRef.current) return;
+    if (!user) return;
 
     const params = new URLSearchParams(window.location.search);
     const checkout = params.get("checkout");
     const sessionId = params.get("session_id")?.trim();
 
     if (checkout === "canceled") {
-      handledRef.current = true;
       cleanCheckoutParamsFromUrl();
       optionsRef.current?.onCanceled?.();
       return;
@@ -47,14 +86,18 @@ export function useStripeCheckoutReturn(options?: {
 
     if (checkout !== "success" || !sessionId) return;
 
-    let cancelled = false;
-    let completed = false;
+    if (!tryClaimCheckoutConfirmation(sessionId)) return;
 
     void (async () => {
-      if (handledRef.current) return;
-      handledRef.current = true;
-
       try {
+        if (hasConfirmedCheckoutSession(sessionId)) {
+          await optionsRef.current?.onSuccess?.({
+            ok: true,
+            alreadyFulfilled: true,
+          });
+          return;
+        }
+
         const token = await user.getIdToken();
         const res = await fetch("/api/stripe/checkout/confirm", {
           method: "POST",
@@ -65,7 +108,6 @@ export function useStripeCheckoutReturn(options?: {
           body: JSON.stringify({ sessionId }),
         });
         const data = await readJsonResponse<ConfirmResult>(res);
-        if (cancelled) return;
 
         if (!res.ok || !data.ok) {
           optionsRef.current?.onError?.(
@@ -74,22 +116,14 @@ export function useStripeCheckoutReturn(options?: {
           return;
         }
 
+        rememberConfirmedCheckoutSession(sessionId);
         await optionsRef.current?.onSuccess?.(data);
-        completed = true;
       } catch {
-        if (!cancelled) {
-          optionsRef.current?.onError?.("Could not confirm payment.");
-        }
+        optionsRef.current?.onError?.("Could not confirm payment.");
       } finally {
-        if (!cancelled) cleanCheckoutParamsFromUrl();
+        releaseCheckoutConfirmation(sessionId);
+        cleanCheckoutParamsFromUrl();
       }
     })();
-
-    return () => {
-      cancelled = true;
-      if (!completed) {
-        handledRef.current = false;
-      }
-    };
   }, [user]);
 }

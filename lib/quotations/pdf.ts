@@ -6,6 +6,7 @@ import {
   formatQuoteMoney,
   formatLineDiscountLabel,
   formatDocumentDiscountLabel,
+  formatGstTotalsLabel,
   grossSubtotalAud,
   resolveDocumentLineFromQuotationItem,
   resolveQuotationTerms,
@@ -300,7 +301,12 @@ export function buildQuotationDocumentFromDetail(
     : 0;
   const lineItems = lineItemsFromQuotation(quotation, gstPercentage);
   const discountAud = quotation.discountAud ?? 0;
-  const totals = computeDocumentTotals({ lineItems, discountAud });
+  const gstPricing = quotation.gstPricing ?? "exclusive";
+  const totals = computeDocumentTotals({
+    lineItems,
+    discountAud,
+    gstPricing,
+  });
 
   const quoteDate = quotation.createdAt
     ? formatQuoteDate(
@@ -309,6 +315,7 @@ export function buildQuotationDocumentFromDetail(
     : formatQuoteDate(platformTodayIso(new Date(), branding.timezone));
 
   const totalAud = quotation.finalPriceAud || totals.totalAud;
+  const gstAud = totals.gstAud;
 
   return {
     quoteNo: displayQuotationCode(quotation),
@@ -325,7 +332,9 @@ export function buildQuotationDocumentFromDetail(
     lineItems,
     subtotalAud: totals.subtotalAud,
     discountAud,
-    gstAud: totals.gstAud,
+    gstAud,
+    gstTaxableBaseAud: totals.gstTaxableBaseAud,
+    gstPricing,
     totalAud,
     deposit: buildQuotationDocumentDeposit(totalAud, quotation.depositRequest),
     termsAndConditions: resolveQuotationTerms(quotation),
@@ -913,7 +922,12 @@ export async function generateDocumentPdf(
       );
     }
     if (data.gstAud > 0) {
-      const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;
+      const gstLabel = formatGstTotalsLabel({
+        gstPercentage: data.business.gstPercentage,
+        gstPricing: data.gstPricing,
+        gstTaxableBaseAud: data.gstTaxableBaseAud,
+        afterDiscountAud: data.subtotalAud - data.discountAud,
+      });
       drawText(gstLabel, panelX + 12, ty, {
         size: 8.5,
         color: MUTED,
