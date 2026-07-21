@@ -48,6 +48,8 @@ export type QuotationDetail = {
   paymentInstructions: string | null;
   termsAndConditions: string | null;
   discountAud: number;
+  /** Exclusive adds GST on top; inclusive extracts GST from line nets. */
+  gstPricing: "exclusive" | "inclusive";
   depositRequest: QuotationDepositRequest | null;
   validUntil: string | null;
   imageUrls: string[];
@@ -88,6 +90,7 @@ export type CreateQuotationInput = {
   notes?: string | null;
   termsAndConditions?: string | null;
   discountAud?: number | null;
+  gstPricing?: "exclusive" | "inclusive" | null;
   validUntil?: string | null;
   imageUrls?: string[];
   depositRequest?: unknown;

@@ -28,7 +28,9 @@ import {
   isPdfAttachmentUrl,
   buildQuotationDocumentDeposit,
   formatDocumentDiscountLabel,
+  formatGstTotalsLabel,
   inferDocumentDiscount,
+  inferGstPricingMode,
   resolveQuotationItemPricing,
   type GstPricingMode,
   type QuotationDocumentData,
@@ -517,6 +519,15 @@ export function CreateQuotationPage() {
             (item) => (item.gstPercent ?? 0) > 0,
           )?.gstPercent;
           if (gstPercent) setGstPercentage(gstPercent);
+          setGstPricing(
+            quotation.gstPricing ??
+              inferGstPricingMode({
+                subtotalAud: quotation.subtotalAud,
+                discountAud: quotation.discountAud,
+                finalPriceAud: quotation.finalPriceAud,
+                hasTaxableLines: true,
+              }),
+          );
         }
 
         if (quotation.validUntil) {
@@ -611,22 +622,7 @@ export function CreateQuotationPage() {
     [timeZone],
   );
 
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      setLineItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          amountAud: computeSavedLineAmount(
-            item,
-            gstEnabled,
-            gstPercentage,
-            gstPricing,
-          ),
-        })),
-      );
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [gstEnabled, gstPercentage, gstPricing]);
+  // Line nets are independent of GST mode — amounts are set when items are saved.
 
   const documentLineItems = useMemo(
     () =>
@@ -1126,6 +1122,7 @@ export function CreateQuotationPage() {
         }),
         finalPriceAud: total,
         discountAud: discountAmount,
+        gstPricing,
         ...(previewServiceDescription
           ? { serviceDescription: previewServiceDescription }
           : {}),
@@ -1253,6 +1250,8 @@ export function CreateQuotationPage() {
           }
         : null,
       gstAud: gstAmount,
+      gstTaxableBaseAud: documentTotals.gstTaxableBaseAud,
+      gstPricing,
       totalAud: total,
       deposit: buildQuotationDocumentDeposit(total, depositRequest),
       termsAndConditions: termsAndConditions.trim() || null,
@@ -1281,6 +1280,7 @@ export function CreateQuotationPage() {
     discountAmount,
     documentDiscount,
     gstAmount,
+    documentTotals.gstTaxableBaseAud,
     total,
     depositRequest,
     termsAndConditions,
@@ -1997,15 +1997,7 @@ export function CreateQuotationPage() {
                               gstPercent,
                               gstPricing,
                             });
-                            if (gstPercent <= 0) return amountAud;
-                            if (gstPricing === "inclusive") {
-                              return lineAmount(quantity, rate, discountPercent);
-                            }
-                            return (
-                              Math.round(
-                                amountAud * (1 + gstPercent / 100) * 100,
-                              ) / 100
-                            );
+                            return amountAud;
                           })(),
                         )}
                       </span>
@@ -2351,7 +2343,9 @@ export function CreateQuotationPage() {
                           }`}
                         >
                           {gstEnabled
-                            ? "GST is included in totals"
+                            ? gstPricing === "inclusive"
+                              ? "GST extracted from prices"
+                              : "GST added on top of prices"
                             : "Tap to add GST to this quote"}
                         </span>
                       </span>
@@ -2412,7 +2406,14 @@ export function CreateQuotationPage() {
                 </div>
                 {gstEnabled ? (
                   <div className="flex justify-between text-on-surface-variant">
-                    <span>GST ({gstPercentage}%)</span>
+                    <span>
+                      {formatGstTotalsLabel({
+                        gstPercentage,
+                        gstPricing,
+                        gstTaxableBaseAud: documentTotals.gstTaxableBaseAud,
+                        afterDiscountAud: subtotal - discountAmount,
+                      })}
+                    </span>
                     <span className="font-numeric font-medium text-on-surface">
                       {formatAud(gstAmount)}
                     </span>

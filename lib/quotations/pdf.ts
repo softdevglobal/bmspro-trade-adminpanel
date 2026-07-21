@@ -6,6 +6,7 @@ import {
   formatQuoteMoney,
   formatLineDiscountLabel,
   formatDocumentDiscountLabel,
+  formatGstTotalsLabel,
   grossSubtotalAud,
   resolveDocumentLineFromQuotationItem,
   resolveQuotationTerms,
@@ -300,7 +301,12 @@ export function buildQuotationDocumentFromDetail(
     : 0;
   const lineItems = lineItemsFromQuotation(quotation, gstPercentage);
   const discountAud = quotation.discountAud ?? 0;
-  const totals = computeDocumentTotals({ lineItems, discountAud });
+  const gstPricing = quotation.gstPricing ?? "exclusive";
+  const totals = computeDocumentTotals({
+    lineItems,
+    discountAud,
+    gstPricing,
+  });
 
   const quoteDate = quotation.createdAt
     ? formatQuoteDate(
@@ -309,14 +315,7 @@ export function buildQuotationDocumentFromDetail(
     : formatQuoteDate(platformTodayIso(new Date(), branding.timezone));
 
   const totalAud = quotation.finalPriceAud || totals.totalAud;
-  // Pricing mode (inclusive/exclusive) isn't stored, so derive GST from the
-  // authoritative saved total. This keeps subtotal − discount + GST = total for
-  // both modes (an inclusive $500 quote shows $454.55 + $45.45, not $500.01).
-  const gstAud = Math.max(
-    0,
-    Math.round((totalAud - Math.max(0, totals.subtotalAud - discountAud)) * 100) /
-      100,
-  );
+  const gstAud = totals.gstAud;
 
   return {
     quoteNo: displayQuotationCode(quotation),
@@ -334,6 +333,8 @@ export function buildQuotationDocumentFromDetail(
     subtotalAud: totals.subtotalAud,
     discountAud,
     gstAud,
+    gstTaxableBaseAud: totals.gstTaxableBaseAud,
+    gstPricing,
     totalAud,
     deposit: buildQuotationDocumentDeposit(totalAud, quotation.depositRequest),
     termsAndConditions: resolveQuotationTerms(quotation),
@@ -921,7 +922,12 @@ export async function generateDocumentPdf(
       );
     }
     if (data.gstAud > 0) {
-      const gstLabel = `GST ${data.business.gstPercentage}% (${formatQuoteMoney(data.subtotalAud - data.discountAud)})`;
+      const gstLabel = formatGstTotalsLabel({
+        gstPercentage: data.business.gstPercentage,
+        gstPricing: data.gstPricing,
+        gstTaxableBaseAud: data.gstTaxableBaseAud,
+        afterDiscountAud: data.subtotalAud - data.discountAud,
+      });
       drawText(gstLabel, panelX + 12, ty, {
         size: 8.5,
         color: MUTED,

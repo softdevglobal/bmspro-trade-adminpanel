@@ -194,6 +194,8 @@ export async function POST(request: Request) {
         Number.isFinite(payload.discountAud)
           ? payload.discountAud
           : null,
+      gstPricing:
+        payload.gstPricing === "inclusive" ? "inclusive" : "exclusive",
       validUntil:
         typeof payload.validUntil === "string" ? payload.validUntil : null,
       imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],
@@ -285,6 +287,8 @@ export async function POST(request: Request) {
       notes,
       termsAndConditions,
       discountAud,
+      gstPricing:
+        payload.gstPricing === "inclusive" ? "inclusive" : "exclusive",
       validUntil,
       imageUrls: Array.isArray(imageUrls) ? imageUrls : [],
       depositRequest,

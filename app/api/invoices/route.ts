@@ -174,6 +174,11 @@ export async function POST(request: Request) {
     );
   }
 
+  const gstPricing =
+    payload.gstPricing === "inclusive"
+      ? ("inclusive" as const)
+      : ("exclusive" as const);
+
   const sharedInput = {
     lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
     finalPriceAud:
@@ -190,6 +195,7 @@ export async function POST(request: Request) {
       typeof payload.gstAud === "number" && Number.isFinite(payload.gstAud)
         ? payload.gstAud
         : null,
+    gstPricing,
     customer: customerPayload
       ? {
           fullName:
