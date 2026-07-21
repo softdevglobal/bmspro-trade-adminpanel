@@ -150,6 +150,11 @@ body {
 }
 
 @media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
   body[data-printing-document="true"] * {
     visibility: hidden;
   }
