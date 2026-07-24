@@ -107,7 +107,18 @@ export async function PATCH(request: Request) {
       jobs: boolean;
       requests: boolean;
     };
+    feePayerMode?: "business" | "customer";
   } = {};
+
+  if ("feePayerMode" in raw) {
+    if (raw.feePayerMode !== "business" && raw.feePayerMode !== "customer") {
+      return NextResponse.json(
+        { ok: false, error: "Invalid fee payer mode." },
+        { status: 400 },
+      );
+    }
+    updates.feePayerMode = raw.feePayerMode;
+  }
 
   if ("businessName" in raw) {
     if (typeof raw.businessName !== "string") {

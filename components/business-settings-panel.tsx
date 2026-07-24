@@ -5,6 +5,7 @@ import { BusinessSlotCapacitySettings } from "@/components/business-slot-capacit
 import { BusinessWorkingHoursSettings } from "@/components/business-working-hours-settings";
 import { BookingLinkCard } from "@/components/booking-link-card";
 import { BusinessGstSettings } from "@/components/business-gst-settings";
+import { BusinessPaymentsSettings } from "@/components/business-payments-settings";
 import { BusinessProfileSettings } from "@/components/business-profile-settings";
 import { BusinessServiceAreasSettings } from "@/components/business-service-areas-settings";
 import { BusinessSecuritySettings } from "@/components/business-security-settings";
@@ -237,6 +238,7 @@ export function BusinessSettingsPanel() {
       />
 
       <BusinessGstSettings />
+      <BusinessPaymentsSettings />
       <BusinessSecuritySettings />
 
       <BusinessTermsSettings />

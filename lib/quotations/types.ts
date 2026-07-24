@@ -1,5 +1,6 @@
 import type { BookingStatus } from "@/lib/bookings/types";
 import type { InvoiceStatus } from "@/lib/invoices/types";
+import type { DepositPaymentRecord } from "@/lib/payments/types";
 import type {
   InspectionAddress,
   InspectionCustomer,
@@ -51,6 +52,8 @@ export type QuotationDetail = {
   /** Exclusive adds GST on top; inclusive extracts GST from line nets. */
   gstPricing: "exclusive" | "inclusive";
   depositRequest: QuotationDepositRequest | null;
+  /** Set once a Stripe deposit payment has settled for this quotation. */
+  depositPayment: DepositPaymentRecord | null;
   validUntil: string | null;
   imageUrls: string[];
   pdfUrl: string | null;

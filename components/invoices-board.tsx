@@ -2,6 +2,7 @@
 
 import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { PaymentLinkButton } from "@/components/payment-link-button";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -557,6 +558,75 @@ function InvoicePreviewDrawer({
                   </>
                 ) : null}
               </section>
+
+              {invoice.status !== "draft" && invoice.status !== "cancelled" ? (
+                <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
+                  <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    Online payments
+                  </p>
+                  {invoice.payments.length > 0 ? (
+                    <ul className="mt-2 space-y-1.5">
+                      {invoice.payments.map((payment, index) => (
+                        <li
+                          key={payment.stripeCheckoutSessionId ?? index}
+                          className="flex items-center justify-between gap-3 font-body text-[13px]"
+                        >
+                          <span className="min-w-0 text-on-surface">
+                            <span className="material-symbols-outlined align-middle text-[15px] text-emerald-600">
+                              check_circle
+                            </span>{" "}
+                            {formatWhen(payment.paidAt, timeZone)}
+                            {payment.stripePaymentIntentId ? (
+                              <span className="ml-1 block truncate font-mono text-[11px] text-on-surface-variant sm:inline">
+                                {payment.stripePaymentIntentId}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="font-numeric shrink-0 font-semibold text-emerald-700">
+                            {formatAud(payment.amountAud)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+                      No online payments yet.
+                    </p>
+                  )}
+                  <div className="mt-2 flex items-center justify-between border-t border-outline-variant/40 pt-2 font-body text-[13px]">
+                    <span className="text-on-surface-variant">
+                      {invoice.status === "paid" ? "Paid in full" : "Balance due"}
+                    </span>
+                    <span
+                      className={`font-numeric font-semibold ${
+                        invoice.status === "paid"
+                          ? "text-emerald-600"
+                          : "text-on-surface"
+                      }`}
+                    >
+                      {formatAud(
+                        invoice.status === "paid"
+                          ? invoice.amountPaidAud || invoice.finalPriceAud
+                          : invoice.balanceDueAud,
+                      )}
+                    </span>
+                  </div>
+                  {invoice.status === "sent" && invoice.balanceDueAud > 0 ? (
+                    <div className="mt-3">
+                      <PaymentLinkButton
+                        type="invoice"
+                        targetId={invoice.id}
+                        label="Copy payment link"
+                        className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-3 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                      <p className="mt-1.5 font-body text-[11px] text-on-surface-variant">
+                        Share this secure link for the customer to pay{" "}
+                        {formatAud(invoice.balanceDueAud)} online.
+                      </p>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
 
               {invoice.notes ? (
                 <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">

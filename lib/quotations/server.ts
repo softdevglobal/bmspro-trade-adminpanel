@@ -35,6 +35,10 @@ import {
   customerOwnsRequestRecord,
   type CustomerOwnershipIdentity,
 } from "@/lib/customer/ownership";
+import {
+  parseDepositPaymentRecord,
+  type StripePaymentRecord,
+} from "@/lib/payments/types";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
@@ -281,6 +285,7 @@ function mapQuotationDoc(
         : 0,
     gstPricing: data.gstPricing === "inclusive" ? "inclusive" : "exclusive",
     depositRequest,
+    depositPayment: parseDepositPaymentRecord(data.depositPayment),
     validUntil:
       typeof data.validUntil === "string" ? data.validUntil : null,
     imageUrls: parseImageUrls(data.imageUrls),
@@ -2283,6 +2288,68 @@ export async function getBusinessQuotationById(
   );
   const [enriched] = await enrichQuotationsWithInvoices([quotation]);
   return enriched ?? null;
+}
+
+/**
+ * Records a settled Stripe deposit payment on a quotation: stores the payment
+ * detail and flags the deposit as received so a later invoice deducts it.
+ * Idempotent per Stripe checkout session.
+ */
+export async function recordQuotationDepositPayment(
+  businessId: string,
+  quotationId: string,
+  payment: StripePaymentRecord,
+): Promise<
+  | { ok: true; quotation: QuotationDetail; alreadyRecorded: boolean }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Quotation is required." };
+  }
+
+  const docRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const data = snap.data() ?? {};
+  const existingPayment = parseDepositPaymentRecord(data.depositPayment);
+  if (
+    existingPayment?.status === "paid" &&
+    existingPayment.stripeCheckoutSessionId === payment.stripeCheckoutSessionId
+  ) {
+    const quotation = await getBusinessQuotationById(businessId, id);
+    return quotation
+      ? { ok: true, quotation, alreadyRecorded: true }
+      : { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const update: Record<string, unknown> = {
+    depositPayment: {
+      status: "paid",
+      amountAud: payment.amountAud,
+      feeAud: payment.feeAud,
+      totalChargedAud: payment.totalChargedAud,
+      feePayerMode: payment.feePayerMode,
+      stripeCheckoutSessionId: payment.stripeCheckoutSessionId,
+      stripePaymentIntentId: payment.stripePaymentIntentId,
+      paidAt: FieldValue.serverTimestamp(),
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (data.depositRequest && typeof data.depositRequest === "object") {
+    update["depositRequest.paid"] = true;
+  }
+
+  await docRef.update(update);
+
+  const quotation = await getBusinessQuotationById(businessId, id);
+  if (!quotation) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  return { ok: true, quotation, alreadyRecorded: false };
 }
 
 /** Returns quotation PDF bytes for viewing, printing, or download. */

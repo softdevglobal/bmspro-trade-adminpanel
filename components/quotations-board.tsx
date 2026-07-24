@@ -8,6 +8,7 @@ import {
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
+import { PaymentLinkButton } from "@/components/payment-link-button";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -957,6 +958,61 @@ function QuotationPreviewContent({
             <span className="font-numeric">{formatAud(quotation.finalPriceAud)}</span>
           </div>
         </section>
+
+        {quotation.depositRequest ? (
+          <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Deposit
+            </p>
+            <div className="mt-2 flex items-center justify-between font-body text-[13px]">
+              <span className="text-on-surface-variant">
+                {quotation.depositRequest.mode === "percent" &&
+                quotation.depositRequest.percent
+                  ? `Deposit (${quotation.depositRequest.percent}%)`
+                  : "Deposit required"}
+              </span>
+              <span className="font-numeric font-semibold text-on-surface">
+                {formatAud(quotation.depositRequest.amountAud)}
+              </span>
+            </div>
+            {quotation.depositPayment?.status === "paid" ||
+            quotation.depositRequest.paid === true ? (
+              <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2">
+                <p className="flex items-center gap-1.5 font-body text-[12.5px] font-semibold text-emerald-800">
+                  <span className="material-symbols-outlined text-[16px]">
+                    check_circle
+                  </span>
+                  Deposit paid
+                  {quotation.depositPayment?.paidAt
+                    ? ` · ${formatWhen(quotation.depositPayment.paidAt, timeZone)}`
+                    : ""}
+                </p>
+                {quotation.depositPayment?.stripePaymentIntentId ? (
+                  <p className="mt-0.5 break-all font-mono text-[11px] text-emerald-700">
+                    {quotation.depositPayment.stripePaymentIntentId}
+                  </p>
+                ) : null}
+              </div>
+            ) : quotation.status === "sent" ? (
+              <div className="mt-2">
+                <PaymentLinkButton
+                  type="quotation"
+                  targetId={quotation.id}
+                  label="Copy deposit payment link"
+                  className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-3 font-body text-[13px] font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <p className="mt-1.5 font-body text-[11px] text-on-surface-variant">
+                  Share this secure link for the customer to pay the{" "}
+                  {formatAud(quotation.depositRequest.amountAud)} deposit online.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 font-body text-[11px] text-on-surface-variant">
+                Send the quotation to let the customer pay the deposit online.
+              </p>
+            )}
+          </section>
+        ) : null}
 
         {quotation.notes ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
