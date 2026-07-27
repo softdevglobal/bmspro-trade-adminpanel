@@ -31,6 +31,8 @@ export type InvoiceSentEmailInput = {
   bookingSlug?: string | null;
   logoUrl?: string | null;
   businessId?: string | null;
+  /** Secure pay URL for the balance — adds a "Pay now" button when set. */
+  payUrl?: string | null;
   pdfBytes: Buffer;
   pdfFileName: string;
 };
@@ -103,6 +105,7 @@ export async function sendInvoiceSentEmail(
       ? buildBookingUrl(input.bookingSlug)
       : null;
     const details = buildInvoiceEmailDetails(input);
+    const payUrl = input.payUrl?.trim() || null;
 
     const html = renderEmail({
       eyebrow: "Invoice",
@@ -113,10 +116,17 @@ export async function sendInvoiceSentEmail(
       details,
       highlight: formatEmailAud(input.balanceDueAud),
       highlightLabel: deposit?.paid ? "Balance due" : "Total due",
-      ctaUrl: bookingEngineUrl,
-      ctaLabel: bookingEngineUrl ? "View your account" : undefined,
-      footnote:
-        "The full invoice is attached as a PDF. If you have any questions, reply to this email.",
+      ctaUrl: payUrl ?? bookingEngineUrl,
+      ctaLabel: payUrl
+        ? "Pay now"
+        : bookingEngineUrl
+          ? "View your account"
+          : undefined,
+      secondaryCtaUrl: payUrl ? bookingEngineUrl : null,
+      secondaryCtaLabel: payUrl && bookingEngineUrl ? "View your account" : null,
+      footnote: payUrl
+        ? "Pay securely by card using the button above, or open the link in the attached PDF. The full invoice is attached as a PDF — reply to this email with any questions."
+        : "The full invoice is attached as a PDF. If you have any questions, reply to this email.",
       businessName: input.businessName,
       logoUrl: input.logoUrl,
     });

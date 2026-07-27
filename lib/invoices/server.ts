@@ -22,6 +22,7 @@ import {
   parseInvoicePaymentEntries,
   type StripePaymentRecord,
 } from "@/lib/payments/types";
+import { resolveInvoicePayUrl } from "@/lib/payments/document-pay-link";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { buildInvoiceCodeForQuotation } from "@/lib/reference-codes";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
@@ -340,6 +341,10 @@ async function generateInvoicePdfBytes(
   businessId: string,
 ): Promise<Buffer | null> {
   const profile = await getBusinessProfile(businessId);
+  const connected = Boolean(
+    profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
+  );
+  const payUrl = await resolveInvoicePayUrl(businessId, invoice, connected);
   try {
     const { generateInvoicePdf } = await import("@/lib/invoices/pdf");
     return await generateInvoicePdf(invoice, {
@@ -351,6 +356,7 @@ async function generateInvoicePdfBytes(
       abn: profile?.abn ?? null,
       registeredForGst: profile?.registeredForGst ?? false,
       gstPercentage: profile?.gstPercentage ?? null,
+      payUrl,
     });
   } catch (error) {
     console.error("[invoice] PDF generation failed:", error);
@@ -1121,6 +1127,10 @@ async function sendInvoiceEmailForDetail(
   );
 
   const invoiceCode = invoice.invoiceCode.trim() || "invoice";
+  const connected = Boolean(
+    profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
+  );
+  const payUrl = await resolveInvoicePayUrl(businessId, invoice, connected);
 
   await sendInvoiceSentEmail({
     customerEmail: email,
@@ -1136,6 +1146,7 @@ async function sendInvoiceEmailForDetail(
     bookingSlug: profile?.bookingSlug ?? null,
     logoUrl: profile?.logoUrl ?? null,
     businessId,
+    payUrl,
     pdfBytes: bytes,
     pdfFileName: `${invoiceCode}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });

@@ -24,7 +24,9 @@ import {
   PDFDocument,
   PDFFont,
   PDFImage,
+  PDFName,
   PDFPage,
+  PDFString,
   StandardFonts,
   degrees,
   rgb,
@@ -294,6 +296,7 @@ export function buildQuotationDocumentFromDetail(
     registeredForGst?: boolean;
     gstPercentage?: number | null;
     timezone?: string | null;
+    payUrl?: string | null;
   },
 ): QuotationDocumentData {
   const gstPercentage = branding.registeredForGst
@@ -340,6 +343,7 @@ export function buildQuotationDocumentFromDetail(
     termsAndConditions: resolveQuotationTerms(quotation),
     paymentInstructions: null,
     notes: quotation.notes?.trim() ? quotation.notes.trim() : null,
+    payUrl: branding.payUrl ?? null,
     business: {
       businessName: branding.businessName?.trim() || "Business",
       logoUrl: branding.logoUrl ?? null,
@@ -1113,6 +1117,77 @@ export async function generateDocumentPdf(
     y -= 8;
   }
 
+  // ── Pay online (secure Stripe link) ──
+  const payUrl = data.payUrl?.trim();
+  if (payUrl) {
+    const boxH = 60;
+    ensureSpace(boxH + 12);
+    const boxTop = y;
+    page.drawRectangle({
+      x: MARGIN,
+      y: boxTop - boxH,
+      width: CONTENT_WIDTH,
+      height: boxH,
+      color: WHITE,
+      opacity: 0.92,
+      borderColor: BRAND,
+      borderWidth: 1,
+    });
+    page.drawRectangle({
+      x: MARGIN,
+      y: boxTop - boxH,
+      width: 4,
+      height: boxH,
+      color: BRAND,
+    });
+    const payHeading =
+      kind === "invoice" ? "Pay this invoice online" : "Pay your deposit online";
+    drawText(payHeading, MARGIN + 14, boxTop - 18, {
+      size: 11,
+      bold: true,
+      color: BRAND,
+    });
+    drawText(
+      "Pay securely by card - click the link below or open it in your browser:",
+      MARGIN + 14,
+      boxTop - 32,
+      { size: 8.5, color: MUTED, maxWidth: CONTENT_WIDTH - 28 },
+    );
+    const urlSize = 9;
+    const urlY = boxTop - 47;
+    drawText(payUrl, MARGIN + 14, urlY, {
+      size: urlSize,
+      bold: true,
+      color: BRAND,
+      maxWidth: CONTENT_WIDTH - 28,
+    });
+
+    // Clickable URI link annotation over the printed URL.
+    const urlWidth = Math.min(
+      fontBold.widthOfTextAtSize(pdfSafeText(payUrl), urlSize),
+      CONTENT_WIDTH - 28,
+    );
+    const linkAnnotation = doc.context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [MARGIN + 12, urlY - 3, MARGIN + 16 + urlWidth, urlY + urlSize + 2],
+      Border: [0, 0, 0],
+      A: doc.context.obj({
+        Type: "Action",
+        S: "URI",
+        URI: PDFString.of(payUrl),
+      }),
+    });
+    const annotRef = doc.context.register(linkAnnotation);
+    const existingAnnots = page.node.Annots();
+    if (existingAnnots) {
+      existingAnnots.push(annotRef);
+    } else {
+      page.node.set(PDFName.of("Annots"), doc.context.obj([annotRef]));
+    }
+    y -= boxH + 14;
+  }
+
   // Footer
   const footerLines: { text: string; kind: "text" | "phone" | "abn" }[] = [];
   if (data.business.address) {
@@ -1176,6 +1251,7 @@ export async function generateQuotationPdf(
     gstPercentage?: number | null;
     inspectionRequestCode?: string | null;
     timezone?: string | null;
+    payUrl?: string | null;
   } = {},
 ): Promise<Buffer> {
   const data = buildQuotationDocumentFromDetail(quotation, options);

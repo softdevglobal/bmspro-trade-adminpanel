@@ -41,6 +41,8 @@ export type QuotationSentEmailInput = {
   bookingSlug?: string | null;
   logoUrl?: string | null;
   businessId?: string | null;
+  /** Secure pay URL for the deposit — adds a "Pay deposit now" button when set. */
+  payUrl?: string | null;
   pdfBytes: Buffer;
   pdfFileName: string;
 };
@@ -116,6 +118,7 @@ export async function sendQuotationSentEmail(
       input.depositRequest,
     );
     const details = buildQuotationEmailDetails(input);
+    const payUrl = input.payUrl?.trim() || null;
 
     const html = renderEmail({
       eyebrow: "Quotation",
@@ -132,10 +135,19 @@ export async function sendQuotationSentEmail(
         ? formatEmailAud(input.balanceDueAud)
         : formatEmailAud(input.totalAud),
       highlightLabel: deposit ? "Balance due" : "Total",
-      ctaUrl: bookingEngineUrl,
-      ctaLabel: bookingEngineUrl ? "View your account" : undefined,
-      footnote:
-        "The full quotation is attached as a PDF. If you have any questions, reply to this email.",
+      ctaUrl: payUrl ?? bookingEngineUrl,
+      ctaLabel: payUrl
+        ? deposit
+          ? "Pay deposit now"
+          : "Pay now"
+        : bookingEngineUrl
+          ? "View your account"
+          : undefined,
+      secondaryCtaUrl: payUrl ? bookingEngineUrl : null,
+      secondaryCtaLabel: payUrl && bookingEngineUrl ? "View your account" : null,
+      footnote: payUrl
+        ? "Pay your deposit securely by card using the button above, or open the link in the attached PDF. The full quotation is attached as a PDF — reply to this email with any questions."
+        : "The full quotation is attached as a PDF. If you have any questions, reply to this email.",
       businessName: input.businessName,
       logoUrl: null,
     });

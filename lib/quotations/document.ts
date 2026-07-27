@@ -70,6 +70,8 @@ export type QuotationDocumentData = {
   termsAndConditions: string | null;
   paymentInstructions: string | null;
   notes: string | null;
+  /** Secure public pay URL — renders a clickable "Pay online" box when set. */
+  payUrl?: string | null;
   business: QuotationDocumentBusiness;
 };
 

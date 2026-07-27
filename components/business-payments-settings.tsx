@@ -21,6 +21,7 @@ export function BusinessPaymentsSettings() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<PaymentsProfile | null>(null);
+  const [feeMode, setFeeMode] = useState<FeePayerMode>("business");
   const [connecting, setConnecting] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,15 +67,15 @@ export function BusinessPaymentsSettings() {
           profile?: PaymentsProfile;
         };
         if (!response.ok || !payload.ok || !payload.profile || !active) return;
+        const resolvedMode =
+          payload.profile.feePayerMode === "customer" ? "customer" : "business";
         setProfile({
-          feePayerMode:
-            payload.profile.feePayerMode === "customer"
-              ? "customer"
-              : "business",
+          feePayerMode: resolvedMode,
           stripeConnectAccountId: payload.profile.stripeConnectAccountId ?? null,
           stripeConnectOnboarded:
             payload.profile.stripeConnectOnboarded === true,
         });
+        setFeeMode(resolvedMode);
       } catch {
         /* keep defaults */
       } finally {
@@ -171,10 +172,8 @@ export function BusinessPaymentsSettings() {
     }
   }
 
-  async function handleFeeModeChange(mode: FeePayerMode) {
-    if (!user || !profile || profile.feePayerMode === mode) return;
-    const previous = profile.feePayerMode;
-    setProfile({ ...profile, feePayerMode: mode });
+  async function handleSaveFeeMode() {
+    if (!user || !profile) return;
     setSavingMode(true);
     setError(null);
     setNotice(null);
@@ -186,7 +185,7 @@ export function BusinessPaymentsSettings() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ feePayerMode: mode }),
+        body: JSON.stringify({ feePayerMode: feeMode }),
       });
       const payload = (await response.json()) as {
         ok?: boolean;
@@ -195,11 +194,9 @@ export function BusinessPaymentsSettings() {
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error ?? "Could not save fee setting.");
       }
+      setProfile({ ...profile, feePayerMode: feeMode });
       setNotice("Fee setting saved.");
     } catch (err) {
-      setProfile((current) =>
-        current ? { ...current, feePayerMode: previous } : current,
-      );
       setError(
         err instanceof Error ? err.message : "Could not save fee setting.",
       );
@@ -300,21 +297,31 @@ export function BusinessPaymentsSettings() {
             </p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FeeOption
-                active={profile?.feePayerMode === "business"}
+                active={feeMode === "business"}
                 disabled={savingMode}
-                onSelect={() => void handleFeeModeChange("business")}
+                onSelect={() => setFeeMode("business")}
                 icon="account_balance_wallet"
                 title="Business absorbs the fee"
                 description="The customer pays exactly the amount. Stripe's fee is deducted from your payout."
               />
               <FeeOption
-                active={profile?.feePayerMode === "customer"}
+                active={feeMode === "customer"}
                 disabled={savingMode}
-                onSelect={() => void handleFeeModeChange("customer")}
+                onSelect={() => setFeeMode("customer")}
                 icon="add_card"
                 title="Customer pays the fee"
                 description="A processing fee (approx. 2.9% + $0.30) is added at checkout so you receive the full amount."
               />
+            </div>
+            <div className="mt-4 flex flex-col gap-2 border-t border-outline-variant/50 pt-4 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                disabled={savingMode || !profile || feeMode === profile.feePayerMode}
+                onClick={() => void handleSaveFeeMode()}
+                className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-4 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {savingMode ? "Saving…" : "Save fee setting"}
+              </button>
             </div>
           </div>
 

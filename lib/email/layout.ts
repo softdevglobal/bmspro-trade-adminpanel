@@ -20,6 +20,9 @@ export type EmailTemplateContent = {
   highlightLabel?: string | null;
   ctaUrl?: string | null;
   ctaLabel?: string | null;
+  /** Optional secondary (outline) button shown beside the primary CTA. */
+  secondaryCtaUrl?: string | null;
+  secondaryCtaLabel?: string | null;
   /** Secondary note under the CTA. */
   footnote?: string | null;
   /** Business name shown in the footer; falls back to brand only. */
@@ -295,18 +298,29 @@ export function renderEmail(content: EmailTemplateContent): string {
         </table>`
       : "";
 
-  const ctaBlock = content.ctaUrl
-    ? `
+  const primaryCtaButton = content.ctaUrl
+    ? `<a href="${escapeHtml(
+        content.ctaUrl,
+      )}" target="_blank" style="display:inline-block;margin:0 10px 10px 0;padding:13px 26px;font-size:14px;font-weight:700;color:#ffffff;background:${tone.accent};text-decoration:none;border-radius:10px;">${escapeHtml(
+        content.ctaLabel || "View details",
+      )}</a>`
+    : "";
+  const secondaryCtaButton = content.secondaryCtaUrl
+    ? `<a href="${escapeHtml(
+        content.secondaryCtaUrl,
+      )}" target="_blank" style="display:inline-block;margin:0 0 10px 0;padding:12px 24px;font-size:14px;font-weight:700;color:${tone.accent};background:#ffffff;text-decoration:none;border:1px solid ${tone.accent};border-radius:10px;">${escapeHtml(
+        content.secondaryCtaLabel || "View details",
+      )}</a>`
+    : "";
+  const ctaBlock =
+    content.ctaUrl || content.secondaryCtaUrl
+      ? `
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
           <tr>
-            <td style="border-radius:10px;background:${tone.accent};">
-              <a href="${escapeHtml(content.ctaUrl)}" target="_blank" style="display:inline-block;padding:13px 26px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">${escapeHtml(
-                content.ctaLabel || "View details",
-              )}</a>
-            </td>
+            <td>${primaryCtaButton}${secondaryCtaButton}</td>
           </tr>
         </table>`
-    : "";
+      : "";
 
   const footnoteBlock = content.footnote
     ? `<p style="margin:18px 0 0;font-size:12px;line-height:1.6;color:${MUTED};">${escapeHtml(
