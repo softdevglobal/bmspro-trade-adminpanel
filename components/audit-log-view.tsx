@@ -501,17 +501,25 @@ function AuditFilterSelect({
   className?: string;
   children: React.ReactNode;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
     <label className={`relative flex h-10 w-full shrink-0 items-center ${className ?? ""}`}>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => setIsOpen(false)}
         aria-label={ariaLabel}
         className="h-full w-full appearance-none rounded-lg border border-outline-variant bg-surface-container-lowest py-2 pl-3 pr-10 font-body text-[13px] font-medium text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
       >
         {children}
       </select>
-      <span className="material-symbols-outlined pointer-events-none absolute right-3 text-[20px] text-outline">
+      <span
+        className={`material-symbols-outlined pointer-events-none absolute right-3 text-[20px] text-outline transition-transform ${
+          isOpen ? "rotate-180" : ""
+        }`}
+      >
         expand_more
       </span>
     </label>
