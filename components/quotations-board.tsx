@@ -987,11 +987,6 @@ function QuotationPreviewContent({
                     ? ` · ${formatWhen(quotation.depositPayment.paidAt, timeZone)}`
                     : ""}
                 </p>
-                {quotation.depositPayment?.stripePaymentIntentId ? (
-                  <p className="mt-0.5 break-all font-mono text-[11px] text-emerald-700">
-                    {quotation.depositPayment.stripePaymentIntentId}
-                  </p>
-                ) : null}
               </div>
             ) : quotation.status === "sent" ? (
               <div className="mt-2">

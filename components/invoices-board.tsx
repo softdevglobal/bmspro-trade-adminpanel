@@ -576,11 +576,6 @@ function InvoicePreviewDrawer({
                               check_circle
                             </span>{" "}
                             {formatWhen(payment.paidAt, timeZone)}
-                            {payment.stripePaymentIntentId ? (
-                              <span className="ml-1 block truncate font-mono text-[11px] text-on-surface-variant sm:inline">
-                                {payment.stripePaymentIntentId}
-                              </span>
-                            ) : null}
                           </span>
                           <span className="font-numeric shrink-0 font-semibold text-emerald-700">
                             {formatAud(payment.amountAud)}

@@ -178,7 +178,6 @@ export function PublicPaymentCheckout({
             <PaidState
               title={context.title}
               reference={context.reference}
-              paymentReference={context.paymentReference}
               paidDate={paidDate}
               totalAud={amounts.totalAud}
             />
@@ -282,13 +281,11 @@ export function PublicPaymentCheckout({
 function PaidState({
   title,
   reference,
-  paymentReference,
   paidDate,
   totalAud,
 }: {
   title: string;
   reference: string;
-  paymentReference: string | null;
   paidDate: string | null;
   totalAud: number;
 }) {
@@ -321,16 +318,6 @@ function PaidState({
             </span>
             <span className="font-body text-[13px] text-on-surface">
               {paidDate}
-            </span>
-          </div>
-        ) : null}
-        {paymentReference ? (
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-body text-[12px] text-on-surface-variant">
-              Reference
-            </span>
-            <span className="truncate font-mono text-[11px] text-on-surface-variant">
-              {paymentReference}
             </span>
           </div>
         ) : null}
