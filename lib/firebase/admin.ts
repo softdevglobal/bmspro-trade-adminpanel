@@ -1,3 +1,5 @@
+import { setDefaultResultOrder } from "node:dns";
+
 import {
   cert,
   getApp,
@@ -8,6 +10,17 @@ import {
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getStorage, type Storage } from "firebase-admin/storage";
+
+// Some local networks advertise IPv6 without a working route to it, which makes
+// gRPC (used by the Admin SDK below) hang or fail with EHOSTUNREACH when DNS
+// returns an AAAA record first. Prefer IPv4 results so Firestore/Auth/Storage
+// calls don't attempt the broken IPv6 path.
+//
+// This lives here rather than in `instrumentation.ts` because that file is
+// compiled for the Edge runtime too, where `node:dns` doesn't resolve — a
+// `NEXT_RUNTIME` check doesn't help, since the bundler follows the import
+// before any of it runs.
+setDefaultResultOrder("ipv4first");
 
 function loadAdminApp(): App {
   if (getApps().length > 0) return getApp();
