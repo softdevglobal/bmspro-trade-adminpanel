@@ -31,6 +31,7 @@ export function buildInvoiceDocumentFromDetail(
     abn?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
+    payUrl?: string | null;
   },
 ): QuotationDocumentData {
   const gstPercentage = branding.registeredForGst
@@ -72,6 +73,7 @@ export function buildInvoiceDocumentFromDetail(
       : null,
     paymentInstructions: null,
     notes: invoice.notes?.trim() ? invoice.notes.trim() : null,
+    payUrl: branding.payUrl ?? null,
     business: {
       businessName: branding.businessName?.trim() || "Business",
       logoUrl: branding.logoUrl ?? null,
@@ -97,6 +99,7 @@ export async function generateInvoicePdf(
     abn?: string | null;
     registeredForGst?: boolean;
     gstPercentage?: number | null;
+    payUrl?: string | null;
   } = {},
 ): Promise<Buffer> {
   const data = buildInvoiceDocumentFromDetail(invoice, branding);

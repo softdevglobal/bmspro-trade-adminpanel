@@ -3,6 +3,7 @@ import type {
   InspectionAddress,
   InspectionCustomer,
 } from "@/lib/inspection/types";
+import type { InvoicePaymentEntry } from "@/lib/payments/types";
 import type {
   QuotationDepositRequest,
   QuotationLineItem,
@@ -29,6 +30,10 @@ export type InvoiceDetail = {
   finalPriceAud: number;
   /** Amount still owed after any deposit (equals finalPriceAud when no deposit). */
   balanceDueAud: number;
+  /** Total settled via Stripe payments against this invoice. */
+  amountPaidAud: number;
+  /** History of settled Stripe payments (newest first). */
+  payments: InvoicePaymentEntry[];
   depositRequest: QuotationDepositRequest | null;
   notes: string | null;
   termsAndConditions: string | null;

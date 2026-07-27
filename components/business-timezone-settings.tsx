@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 
 const SELECT_CLASS =
-  "mt-2 w-full rounded-xl border border-outline-variant bg-surface-container-low px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+  "mt-2 w-full appearance-none rounded-xl border border-outline-variant bg-surface-container-low px-3 py-2.5 pr-10 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
 type Props = {
   timezone: string | null;
@@ -38,6 +38,7 @@ export function BusinessTimezoneSettings({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectOpen, setSelectOpen] = useState(false);
 
   async function handleSave() {
     if (!user) return;
@@ -91,20 +92,31 @@ export function BusinessTimezoneSettings({
             <span className="font-body text-[13px] font-semibold text-on-surface">
               Business timezone
             </span>
-            <select
-              value={selectedTimezone}
-              disabled={saving}
-              onChange={(event) =>
-                setSelectedTimezone(event.target.value as AuTimezone)
-              }
-              className={SELECT_CLASS}
-            >
-              {AU_TIMEZONES.map((tz) => (
-                <option key={tz.id} value={tz.id}>
-                  {tz.label}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={selectedTimezone}
+                disabled={saving}
+                onFocus={() => setSelectOpen(true)}
+                onBlur={() => setSelectOpen(false)}
+                onChange={(event) =>
+                  setSelectedTimezone(event.target.value as AuTimezone)
+                }
+                className={SELECT_CLASS}
+              >
+                {AU_TIMEZONES.map((tz) => (
+                  <option key={tz.id} value={tz.id}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+              <span
+                className={`pointer-events-none absolute right-3 top-1/2 mt-1 -translate-y-1/2 material-symbols-outlined text-[20px] text-outline transition-transform ${
+                  selectOpen ? "rotate-180" : ""
+                }`}
+              >
+                expand_more
+              </span>
+            </div>
             <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
               This setting applies to the whole business account.
             </span>

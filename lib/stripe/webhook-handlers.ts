@@ -11,6 +11,8 @@ import {
 } from "@/lib/stripe/billing";
 import { getStripe } from "@/lib/stripe/client";
 import { isStripeWebhookConfigured } from "@/lib/stripe/config";
+import { markConnectAccountOnboarded } from "@/lib/stripe/connect";
+import { fulfillPaymentCheckoutSession } from "@/lib/stripe/payment-fulfillment";
 
 const PROCESSED_INVOICES = "stripe_processed_invoices";
 
@@ -153,6 +155,22 @@ export async function processStripeWebhookEvent(
     case "customer.subscription.deleted":
       await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
       break;
+    case "checkout.session.completed":
+      // Deposit / invoice Direct Charges arrive from the connected account
+      // (event.account). Non-payment sessions are ignored by the handler.
+      await fulfillPaymentCheckoutSession({
+        session: event.data.object as Stripe.Checkout.Session,
+        connectedAccountId:
+          typeof event.account === "string" ? event.account : null,
+      });
+      break;
+    case "account.updated": {
+      const account = event.data.object as Stripe.Account;
+      if (account.details_submitted && account.charges_enabled) {
+        await markConnectAccountOnboarded(account.id);
+      }
+      break;
+    }
     default:
       break;
   }

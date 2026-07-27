@@ -2,6 +2,8 @@
 
 Stripe powers **subscription plans** (recurring) and **SMS top-ups** (one-time payments). Catalog items live in Firestore; each plan/package stores a `stripePriceId` configured in the super-admin UI.
 
+> **Customer payments** (quotation deposits & invoices via Stripe Connect Direct Charges) are documented separately in [`lib/payments/README.md`](../payments/README.md). That flow uses each tradie's **connected** account; the billing below uses the **platform** account.
+
 No webhook secret is required. After Checkout, Stripe redirects back to your app and the server confirms the session via the Stripe API.
 
 ## Quick summary

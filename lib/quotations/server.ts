@@ -35,6 +35,11 @@ import {
   customerOwnsRequestRecord,
   type CustomerOwnershipIdentity,
 } from "@/lib/customer/ownership";
+import {
+  parseDepositPaymentRecord,
+  type StripePaymentRecord,
+} from "@/lib/payments/types";
+import { resolveQuotationPayUrl } from "@/lib/payments/document-pay-link";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
@@ -281,6 +286,7 @@ function mapQuotationDoc(
         : 0,
     gstPricing: data.gstPricing === "inclusive" ? "inclusive" : "exclusive",
     depositRequest,
+    depositPayment: parseDepositPaymentRecord(data.depositPayment),
     validUntil:
       typeof data.validUntil === "string" ? data.validUntil : null,
     imageUrls: parseImageUrls(data.imageUrls),
@@ -753,6 +759,7 @@ export async function createQuotationForInspection(
   let quotation = mapQuotationDoc(ref.id, saved.data() ?? {});
 
   const businessBranding = await loadQuotationBusinessBranding(businessId);
+  const payUrl = await resolveQuotationPayUrl(businessId, quotation);
 
   // Generate a branded PDF, upload to storage, and persist its URL.
   let pdfBytes: Buffer | null = null;
@@ -773,6 +780,7 @@ export async function createQuotationForInspection(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      payUrl,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
           ? requestData.requestCode
@@ -852,7 +860,7 @@ export async function createQuotationForInspection(
   }
 
   if (shouldSend) {
-    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
+    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding, payUrl);
     try {
       const updatedSnap = await requestSnap.ref.get();
       const updatedRequest = mapInspectionDoc(
@@ -1135,6 +1143,7 @@ export async function updateDraftQuotation(
   let saved = await quotationRef.get();
   let quotation = mapQuotationDoc(quotationRef.id, saved.data() ?? {});
   const businessBranding = await loadQuotationBusinessBranding(businessId);
+  const payUrl = await resolveQuotationPayUrl(businessId, quotation);
 
   let pdfBytes: Buffer | null = null;
   try {
@@ -1154,6 +1163,7 @@ export async function updateDraftQuotation(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      payUrl,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
           ? requestData.requestCode
@@ -1241,7 +1251,7 @@ export async function updateDraftQuotation(
   }
 
   if (shouldSend) {
-    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
+    await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding, payUrl);
     try {
       const updatedSnap = await requestSnap.ref.get();
       const updatedRequest = mapInspectionDoc(
@@ -1940,6 +1950,7 @@ export async function createStandaloneQuotation(
 
   const saved = await ref.get();
   let quotation = mapQuotationDoc(ref.id, saved.data() ?? {});
+  const payUrl = await resolveQuotationPayUrl(businessId, quotation);
 
   // 3. Generate a branded PDF, upload it, and persist its URL.
   let pdfBytes: Buffer | null = null;
@@ -1960,6 +1971,7 @@ export async function createStandaloneQuotation(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      payUrl,
       inspectionRequestCode: requestCode,
     });
     const uploaded = await uploadQuotationPdf(pdfBytes, {
@@ -2035,7 +2047,7 @@ export async function createStandaloneQuotation(
   // 6. Email the customer their quotation PDF and surface it in the portal when explicitly sending.
   if (shouldSend) {
     try {
-      await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding);
+      await sendQuotationCreatedEmail(businessId, quotation, pdfBytes, businessBranding, payUrl);
     } catch (error) {
       console.error("standalone quotation email failed:", error);
     }
@@ -2285,6 +2297,68 @@ export async function getBusinessQuotationById(
   return enriched ?? null;
 }
 
+/**
+ * Records a settled Stripe deposit payment on a quotation: stores the payment
+ * detail and flags the deposit as received so a later invoice deducts it.
+ * Idempotent per Stripe checkout session.
+ */
+export async function recordQuotationDepositPayment(
+  businessId: string,
+  quotationId: string,
+  payment: StripePaymentRecord,
+): Promise<
+  | { ok: true; quotation: QuotationDetail; alreadyRecorded: boolean }
+  | { ok: false; status: number; error: string }
+> {
+  const id = quotationId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Quotation is required." };
+  }
+
+  const docRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const data = snap.data() ?? {};
+  const existingPayment = parseDepositPaymentRecord(data.depositPayment);
+  if (
+    existingPayment?.status === "paid" &&
+    existingPayment.stripeCheckoutSessionId === payment.stripeCheckoutSessionId
+  ) {
+    const quotation = await getBusinessQuotationById(businessId, id);
+    return quotation
+      ? { ok: true, quotation, alreadyRecorded: true }
+      : { ok: false, status: 404, error: "Quotation not found." };
+  }
+
+  const update: Record<string, unknown> = {
+    depositPayment: {
+      status: "paid",
+      amountAud: payment.amountAud,
+      feeAud: payment.feeAud,
+      totalChargedAud: payment.totalChargedAud,
+      feePayerMode: payment.feePayerMode,
+      stripeCheckoutSessionId: payment.stripeCheckoutSessionId,
+      stripePaymentIntentId: payment.stripePaymentIntentId,
+      paidAt: FieldValue.serverTimestamp(),
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (data.depositRequest && typeof data.depositRequest === "object") {
+    update["depositRequest.paid"] = true;
+  }
+
+  await docRef.update(update);
+
+  const quotation = await getBusinessQuotationById(businessId, id);
+  if (!quotation) {
+    return { ok: false, status: 404, error: "Quotation not found." };
+  }
+  return { ok: true, quotation, alreadyRecorded: false };
+}
+
 /** Returns quotation PDF bytes for viewing, printing, or download. */
 export async function getBusinessQuotationPdf(
   businessId: string,
@@ -2319,6 +2393,7 @@ export async function getBusinessQuotationPdf(
   }
 
   const businessBranding = await loadQuotationBusinessBranding(businessId);
+  const payUrl = await resolveQuotationPayUrl(businessId, quotation);
   let inspectionRequestCode: string | null = null;
   const requestId = quotation.inspectionRequestId?.trim();
   if (requestId) {
@@ -2353,6 +2428,7 @@ export async function getBusinessQuotationPdf(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      payUrl,
       inspectionRequestCode,
     });
     if (!pdfBytes?.length) {
@@ -2664,6 +2740,7 @@ async function sendQuotationCreatedEmail(
   quotation: QuotationDetail,
   pdfBytes: Buffer | null,
   businessBranding: QuotationBusinessBranding,
+  payUrl: string | null = null,
 ): Promise<void> {
   if (!pdfBytes?.length) return;
 
@@ -2692,6 +2769,7 @@ async function sendQuotationCreatedEmail(
     bookingSlug,
     logoUrl,
     businessId,
+    payUrl,
     pdfBytes,
     pdfFileName: `${quoteCode || "quotation"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });

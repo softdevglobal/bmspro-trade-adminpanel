@@ -38,6 +38,7 @@ import {
   parseBusinessModuleSettings,
   type BusinessModuleSettings,
 } from "@/lib/business/module-settings";
+import { parseFeePayerMode, type FeePayerMode } from "@/lib/stripe/fees";
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 /**
@@ -360,6 +361,12 @@ export type BusinessProfile = {
   slotCapacityInspectionRequests: number;
   workingHours: BusinessWorkingHours;
   enabledModules: BusinessModuleSettings;
+  /** Who covers the Stripe processing fee on customer payments. */
+  feePayerMode: FeePayerMode;
+  /** Connected Stripe account id (null until the owner connects Stripe). */
+  stripeConnectAccountId: string | null;
+  /** True once the connected account can accept charges. */
+  stripeConnectOnboarded: boolean;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -440,6 +447,13 @@ export async function getBusinessProfile(
       parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
     workingHours: parseWorkingHoursFromBusiness(data),
     enabledModules: parseBusinessModuleSettings(data),
+    feePayerMode: parseFeePayerMode(data.feePayerMode),
+    stripeConnectAccountId:
+      typeof data.stripeConnectAccountId === "string" &&
+      data.stripeConnectAccountId.trim()
+        ? data.stripeConnectAccountId.trim()
+        : null,
+    stripeConnectOnboarded: data.stripeConnectOnboarded === true,
   };
 }
 
@@ -462,11 +476,16 @@ export async function updateBusinessProfile(
     slotCapacityInspectionRequests?: number;
     workingHours?: BusinessWorkingHours;
     enabledModules?: BusinessModuleSettings;
+    feePayerMode?: FeePayerMode;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
     updatedAt: FieldValue.serverTimestamp(),
   };
+
+  if ("feePayerMode" in updates && updates.feePayerMode) {
+    payload.feePayerMode = updates.feePayerMode;
+  }
 
   if ("businessName" in updates) {
     payload.businessName = updates.businessName;

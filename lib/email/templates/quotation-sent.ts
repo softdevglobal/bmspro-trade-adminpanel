@@ -3,6 +3,7 @@ import "server-only";
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
+import { formatSmsAud } from "@/lib/sms/format-amount";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
@@ -41,6 +42,8 @@ export type QuotationSentEmailInput = {
   bookingSlug?: string | null;
   logoUrl?: string | null;
   businessId?: string | null;
+  /** Secure pay URL for the deposit — adds a "Pay deposit now" button when set. */
+  payUrl?: string | null;
   pdfBytes: Buffer;
   pdfFileName: string;
 };
@@ -116,6 +119,7 @@ export async function sendQuotationSentEmail(
       input.depositRequest,
     );
     const details = buildQuotationEmailDetails(input);
+    const payUrl = input.payUrl?.trim() || null;
 
     const html = renderEmail({
       eyebrow: "Quotation",
@@ -132,10 +136,19 @@ export async function sendQuotationSentEmail(
         ? formatEmailAud(input.balanceDueAud)
         : formatEmailAud(input.totalAud),
       highlightLabel: deposit ? "Balance due" : "Total",
-      ctaUrl: bookingEngineUrl,
-      ctaLabel: bookingEngineUrl ? "View your account" : undefined,
-      footnote:
-        "The full quotation is attached as a PDF. If you have any questions, reply to this email.",
+      ctaUrl: payUrl ?? bookingEngineUrl,
+      ctaLabel: payUrl
+        ? deposit
+          ? "Pay deposit now"
+          : "Pay now"
+        : bookingEngineUrl
+          ? "View your account"
+          : undefined,
+      secondaryCtaUrl: payUrl ? bookingEngineUrl : null,
+      secondaryCtaLabel: payUrl && bookingEngineUrl ? "View your account" : null,
+      footnote: payUrl
+        ? "Pay your deposit securely by card using the button above, or open the link in the attached PDF. The full quotation is attached as a PDF — reply to this email with any questions."
+        : "The full quotation is attached as a PDF. If you have any questions, reply to this email.",
       businessName: input.businessName,
       logoUrl: null,
     });
@@ -164,7 +177,7 @@ export async function sendQuotationSentEmail(
 
   // SMS is sent independently so an email failure never skips the SMS.
   if (input.customerPhone) {
-    const total = formatEmailAud(input.totalAud);
+    const total = formatSmsAud(input.totalAud);
     await sendSms({
       to: input.customerPhone,
       businessId: input.businessId,

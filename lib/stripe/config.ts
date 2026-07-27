@@ -12,6 +12,16 @@ export function isStripeWebhookConfigured(): boolean {
   );
 }
 
+/** Platform Connect client id (`ca_...`) used for Standard OAuth onboarding. */
+export function getStripeConnectClientId(): string | null {
+  return process.env.STRIPE_CLIENT_ID?.trim() || null;
+}
+
+/** True when Stripe Connect (Standard OAuth) onboarding is available. */
+export function isStripeConnectConfigured(): boolean {
+  return isStripeConfigured() && Boolean(getStripeConnectClientId());
+}
+
 /** Public site URL for Checkout success/cancel redirects. */
 export function getAppBaseUrl(): string {
   const url =

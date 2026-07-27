@@ -18,6 +18,11 @@ import type {
   QuotationLineItem,
 } from "@/lib/quotations/types";
 import { formatDepositPaymentNote } from "@/lib/quotations/document";
+import {
+  parseInvoicePaymentEntries,
+  type StripePaymentRecord,
+} from "@/lib/payments/types";
+import { resolveInvoicePayUrl } from "@/lib/payments/document-pay-link";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { buildInvoiceCodeForQuotation } from "@/lib/reference-codes";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
@@ -262,6 +267,12 @@ function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail
             Number.isFinite(data.finalPriceAud)
           ? data.finalPriceAud
           : 0,
+    amountPaidAud:
+      typeof data.amountPaidAud === "number" &&
+      Number.isFinite(data.amountPaidAud)
+        ? Math.max(0, data.amountPaidAud)
+        : 0,
+    payments: parseInvoicePaymentEntries(data.payments),
     depositRequest: parseDepositRequest(data.depositRequest),
     bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
     bookingCode:
@@ -330,6 +341,10 @@ async function generateInvoicePdfBytes(
   businessId: string,
 ): Promise<Buffer | null> {
   const profile = await getBusinessProfile(businessId);
+  const connected = Boolean(
+    profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
+  );
+  const payUrl = await resolveInvoicePayUrl(businessId, invoice, connected);
   try {
     const { generateInvoicePdf } = await import("@/lib/invoices/pdf");
     return await generateInvoicePdf(invoice, {
@@ -341,6 +356,7 @@ async function generateInvoicePdfBytes(
       abn: profile?.abn ?? null,
       registeredForGst: profile?.registeredForGst ?? false,
       gstPercentage: profile?.gstPercentage ?? null,
+      payUrl,
     });
   } catch (error) {
     console.error("[invoice] PDF generation failed:", error);
@@ -497,6 +513,75 @@ export async function markBusinessInvoicePaid(
   const paidInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
   await mirrorInvoiceToInspectionRequest(paidInvoice);
   return { ok: true, invoice: paidInvoice };
+}
+
+/**
+ * Records a settled Stripe payment against an invoice: decrements the remaining
+ * balance, appends to the payment history, and marks the invoice paid once the
+ * balance reaches zero. Idempotent per Stripe checkout session.
+ */
+export async function recordInvoiceStripePayment(
+  businessId: string,
+  invoiceId: string,
+  payment: StripePaymentRecord,
+): Promise<
+  | { ok: true; invoice: InvoiceDetail; alreadyRecorded: boolean }
+  | { ok: false; status: number; error: string }
+> {
+  const id = invoiceId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Invoice is required." };
+  }
+
+  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
+  }
+
+  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
+
+  // Idempotency: never apply the same checkout session twice.
+  const alreadyRecorded = invoice.payments.some(
+    (entry) =>
+      entry.stripeCheckoutSessionId === payment.stripeCheckoutSessionId,
+  );
+  if (alreadyRecorded) {
+    return { ok: true, invoice, alreadyRecorded: true };
+  }
+
+  const newAmountPaid =
+    Math.round((invoice.amountPaidAud + payment.amountAud) * 100) / 100;
+  const newBalanceDue =
+    Math.round(Math.max(0, invoice.balanceDueAud - payment.amountAud) * 100) /
+    100;
+  const settled = newBalanceDue <= 0;
+
+  const entry = {
+    amountAud: payment.amountAud,
+    feeAud: payment.feeAud,
+    totalChargedAud: payment.totalChargedAud,
+    feePayerMode: payment.feePayerMode,
+    stripeCheckoutSessionId: payment.stripeCheckoutSessionId,
+    stripePaymentIntentId: payment.stripePaymentIntentId,
+    paidAt: payment.paidAt,
+  };
+
+  await docRef.update({
+    payments: FieldValue.arrayUnion(entry),
+    amountPaidAud: newAmountPaid,
+    balanceDueAud: newBalanceDue,
+    ...(settled ? { status: "paid" } : {}),
+    lastPaymentAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const updated = await docRef.get();
+  const nextInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
+  if (settled) {
+    await mirrorInvoiceToInspectionRequest(nextInvoice);
+  }
+  return { ok: true, invoice: nextInvoice, alreadyRecorded: false };
 }
 
 /**
@@ -1042,6 +1127,10 @@ async function sendInvoiceEmailForDetail(
   );
 
   const invoiceCode = invoice.invoiceCode.trim() || "invoice";
+  const connected = Boolean(
+    profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
+  );
+  const payUrl = await resolveInvoicePayUrl(businessId, invoice, connected);
 
   await sendInvoiceSentEmail({
     customerEmail: email,
@@ -1057,6 +1146,7 @@ async function sendInvoiceEmailForDetail(
     bookingSlug: profile?.bookingSlug ?? null,
     logoUrl: profile?.logoUrl ?? null,
     businessId,
+    payUrl,
     pdfBytes: bytes,
     pdfFileName: `${invoiceCode}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });
