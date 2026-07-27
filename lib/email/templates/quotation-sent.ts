@@ -3,6 +3,7 @@ import "server-only";
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
+import { formatSmsAud } from "@/lib/sms/format-amount";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
@@ -176,7 +177,7 @@ export async function sendQuotationSentEmail(
 
   // SMS is sent independently so an email failure never skips the SMS.
   if (input.customerPhone) {
-    const total = formatEmailAud(input.totalAud);
+    const total = formatSmsAud(input.totalAud);
     await sendSms({
       to: input.customerPhone,
       businessId: input.businessId,

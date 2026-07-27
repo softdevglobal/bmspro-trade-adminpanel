@@ -3,6 +3,7 @@ import "server-only";
 import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
+import { formatSmsAud } from "@/lib/sms/format-amount";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
@@ -155,7 +156,7 @@ export async function sendInvoiceSentEmail(
 
   // SMS is sent independently so an email failure never skips the SMS.
   if (input.customerPhone) {
-    const amount = formatEmailAud(input.balanceDueAud);
+    const amount = formatSmsAud(input.balanceDueAud);
     const amountLabel = deposit?.paid ? "balance due" : "total due";
     await sendSms({
       to: input.customerPhone,
