@@ -20,6 +20,11 @@ function isLoopback(url: string): boolean {
   );
 }
 
+/** True when a URL is reachable from outside this machine (i.e. not loopback). */
+export function isPubliclyReachable(url: string): boolean {
+  return !isLoopback(url);
+}
+
 /**
  * First candidate that is a usable public origin, ignoring loopback addresses
  * once deployed so a stale build-time value can't ship localhost links.

@@ -5,7 +5,7 @@ import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
 import { formatSmsAud } from "@/lib/sms/format-amount";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
-import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { platformBrandLogoSrc } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import {
@@ -126,7 +126,7 @@ export async function sendQuotationSentEmail(
       tone: "brand",
       headerAlign: "center",
       headerHeadline: "BMS Pro Trade",
-      platformLogoUrl: platformBrandLogoDataUri(),
+      platformLogoUrl: platformBrandLogoSrc(),
       bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
       title: `Quotation for ${input.serviceTitle}`,
       greetingName: firstName(input.customerFullName),

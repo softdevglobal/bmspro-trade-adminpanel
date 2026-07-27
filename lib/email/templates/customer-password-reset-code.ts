@@ -3,7 +3,7 @@ import "server-only";
 import { renderEmail } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
-import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { platformBrandLogoSrc } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 
 function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
@@ -41,7 +41,7 @@ export async function sendCustomerPasswordResetCodeEmail(
     tone: "brand",
     headerAlign: "center",
     headerHeadline: "BMS Pro Trade",
-    platformLogoUrl: platformBrandLogoDataUri(),
+    platformLogoUrl: platformBrandLogoSrc(),
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
     title: business
       ? `Reset your ${business} customer password`

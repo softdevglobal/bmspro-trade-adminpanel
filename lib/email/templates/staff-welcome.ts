@@ -4,7 +4,7 @@ import { renderEmail, type EmailDetailRow } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
-import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { platformBrandLogoSrc } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl, loginUrl } from "@/lib/email/templates/_shared/urls";
 
 function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
@@ -48,7 +48,7 @@ export async function sendStaffWelcomeEmail(
     tone: "brand",
     headerAlign: "center",
     headerHeadline: "Welcome to BMS Pro Trade",
-    platformLogoUrl: platformBrandLogoDataUri(),
+    platformLogoUrl: platformBrandLogoSrc(),
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
     title: `You've joined ${input.businessName}`,
     greetingName: firstName(input.fullName),

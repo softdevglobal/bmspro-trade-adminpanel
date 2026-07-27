@@ -25,8 +25,12 @@ export function loginUrl(): string | null {
   return base ? `${base}/login` : null;
 }
 
-/** Public URL for the platform logo used in owner welcome emails. */
+/**
+ * Public URL for the platform logo shown in email headers. Built from the app
+ * origin rather than {@link appBaseUrl}, because the file is served out of this
+ * app's `public/` — a separately hosted booking engine would 404 on it.
+ */
 export function platformBrandLogoUrl(): string | null {
-  const base = appBaseUrl();
+  const base = resolveAppBaseUrl();
   return base ? `${base}/bms_pro_blue.jpeg` : null;
 }
