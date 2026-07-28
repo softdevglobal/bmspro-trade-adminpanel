@@ -4,7 +4,10 @@ import {
   formatIsoDateInPlatformTimeZone,
   platformTodayIso,
 } from "@/lib/platform/timezone";
-import type { NotificationRecord } from "@/lib/notifications/types";
+import type {
+  NotificationRecord,
+  NotificationType,
+} from "@/lib/notifications/types";
 
 export type DashboardKpi = {
   key: string;
@@ -22,13 +25,124 @@ export type DashboardPipelineStage = {
   icon: string;
 };
 
+/** High-level Live feed grouping for owner filters. */
+export type DashboardActivityCategory = "customer" | "staff" | "other";
+
 export type DashboardActivityItem = {
   id: string;
   text: string;
+  body: string;
   createdAt: number;
   type: string;
   read: boolean;
+  category: DashboardActivityCategory;
+  customerName: string | null;
+  staffName: string | null;
 };
+
+const STAFF_NOTIFICATION_TYPES = new Set<NotificationType>([
+  "leave_requested",
+  "leave_assignment_conflict",
+  "staff_off_day",
+  "request_assigned",
+]);
+
+const CUSTOMER_NOTIFICATION_TYPES = new Set<NotificationType>([
+  "request_created",
+  "request_scheduled",
+  "request_proposed",
+  "request_cancelled",
+  "request_completed",
+  "visit_on_the_way",
+  "booking_on_the_way",
+  "job_completed",
+  "invoice_sent",
+  "quotation_sent",
+  "quotation_accepted",
+  "quotation_rejected",
+]);
+
+export function activityCategoryForType(
+  type: string,
+): DashboardActivityCategory {
+  if (STAFF_NOTIFICATION_TYPES.has(type as NotificationType)) return "staff";
+  if (CUSTOMER_NOTIFICATION_TYPES.has(type as NotificationType)) {
+    return "customer";
+  }
+  return "other";
+}
+
+/** Match a known staff name mentioned in notification copy (longest first). */
+export function resolveStaffNameFromText(
+  text: string,
+  staffNames: string[],
+): string | null {
+  const haystack = text.trim().toLowerCase();
+  if (!haystack || staffNames.length === 0) return null;
+
+  const sorted = staffNames
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  for (const name of sorted) {
+    if (haystack.includes(name.toLowerCase())) return name;
+  }
+  return null;
+}
+
+export function mapNotificationToActivityItem(
+  note: NotificationRecord,
+  staffNames: string[] = [],
+): DashboardActivityItem {
+  const title = note.title.trim();
+  const body = note.body.trim();
+  const category = activityCategoryForType(note.type);
+  const staffName =
+    category === "staff"
+      ? resolveStaffNameFromText(`${title} ${body}`, staffNames)
+      : null;
+
+  return {
+    id: note.id,
+    text: title || body || "Activity update",
+    body: title ? body : "",
+    createdAt: note.createdAt,
+    type: note.type,
+    read: note.read,
+    category,
+    customerName: note.customerName?.trim() || null,
+    staffName,
+  };
+}
+
+export function buildLiveFeedActivity(
+  notifications: NotificationRecord[],
+  options?: {
+    staffNames?: string[];
+    category?: DashboardActivityCategory | "all";
+    staffName?: string | null;
+    limit?: number;
+  },
+): DashboardActivityItem[] {
+  const staffNames = options?.staffNames ?? [];
+  const category = options?.category ?? "all";
+  const staffNameFilter = options?.staffName?.trim().toLowerCase() || null;
+  const limit = options?.limit ?? 12;
+
+  return notifications
+    .slice()
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((note) => mapNotificationToActivityItem(note, staffNames))
+    .filter((item) => {
+      if (category !== "all" && item.category !== category) return false;
+      if (category === "staff" && staffNameFilter) {
+        return item.staffName?.toLowerCase() === staffNameFilter;
+      }
+      return true;
+    })
+    .slice(0, limit);
+}
 
 export type DashboardUpcomingItem = {
   id: string;
@@ -209,17 +323,7 @@ export function computeDashboardOverview(input: {
     { key: "done", label: "Completed", value: completedCount, icon: "task_alt" },
   ];
 
-  const activity: DashboardActivityItem[] = input.notifications
-    .slice()
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 8)
-    .map((note) => ({
-      id: note.id,
-      text: note.title.trim() || note.body.trim() || "Activity update",
-      createdAt: note.createdAt,
-      type: note.type,
-      read: note.read,
-    }));
+  const activity = buildLiveFeedActivity(input.notifications, { limit: 8 });
 
   const upcomingCandidates: Array<{
     sortKey: string;
