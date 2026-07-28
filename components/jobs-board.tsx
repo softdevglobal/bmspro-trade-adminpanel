@@ -26,11 +26,17 @@ import {
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
+import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
+import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
+import {
+  formatJobCopyText,
+  jobCopySections,
+} from "@/lib/copy-data/format";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
@@ -632,6 +638,8 @@ function BookingPreviewContent({
   const [staffId, setStaffId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [copyDataOpen, setCopyDataOpen] = useState(false);
+  const copySections = useMemo(() => jobCopySections(booking), [booking]);
 
   useEffect(() => {
     if (mode === "assign") {
@@ -1110,6 +1118,16 @@ function BookingPreviewContent({
 
         {mode === "review" ? (
           <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setCopyDataOpen(true)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                content_copy
+              </span>
+              Copy data
+            </button>
             {canEdit ? (
               <Link
                 href={`/dashboard/jobs?edit=${encodeURIComponent(booking.id)}`}
@@ -1154,6 +1172,19 @@ function BookingPreviewContent({
           </div>
         ) : null}
       </div>
+      <CopyDataModal
+        open={copyDataOpen}
+        title="Copy job data"
+        sections={copySections}
+        onClose={() => setCopyDataOpen(false)}
+        onCopy={async (selectedIds) => {
+          const text = formatJobCopyText(booking, selectedIds, timeZone);
+          if (!text.trim()) {
+            throw new Error("Nothing to copy for the selected sections.");
+          }
+          await copyTextToClipboard(text);
+        }}
+      />
     </div>
   );
 }

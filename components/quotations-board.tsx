@@ -5,6 +5,7 @@ import {
   canConvertQuotationToBooking,
   ConvertToBookingPanel,
 } from "@/components/convert-to-booking-panel";
+import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
@@ -14,6 +15,11 @@ import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
+import {
+  formatQuotationCopyText,
+  quotationCopySections,
+} from "@/lib/copy-data/format";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
   BOOKING_STATUS_LABELS,
@@ -673,6 +679,7 @@ function QuotationPreviewContent({
   const [quotationPrintLoading, setQuotationPrintLoading] = useState(false);
   const [invoicePrintLoading, setInvoicePrintLoading] = useState(false);
   const [invoicePdfError, setInvoicePdfError] = useState<string | null>(null);
+  const [copyDataOpen, setCopyDataOpen] = useState(false);
   const title = quotation.serviceTitle || "Quotation";
   const downloadFilename = `quotation-${title
     .replace(/[^a-z0-9]+/gi, "-")
@@ -705,13 +712,11 @@ function QuotationPreviewContent({
   const canEditQuotation =
     quotation.status === "draft" ||
     (quotation.status === "sent" && quotation.invoiceStatus !== "paid");
-  const hasFooterActions =
-    previewMode === "review" &&
-    (quotation.status === "sent" ||
-      quotation.status === "draft" ||
-      Boolean(quotation.pdfUrl) ||
-      hasInvoice ||
-      canCancel);
+  const hasFooterActions = previewMode === "review";
+  const copySections = useMemo(
+    () => quotationCopySections(quotation),
+    [quotation],
+  );
   const displayPhone = formatAuPhoneDisplay(quotation.customer.phone);
   const contactLine =
     [displayPhone, quotation.customer.email].filter(Boolean).join(" · ") || "—";
@@ -1135,6 +1140,16 @@ function QuotationPreviewContent({
 
         {hasFooterActions ? (
           <footer className="space-y-2 border-t border-outline-variant/40 pt-3">
+            <button
+              type="button"
+              onClick={() => setCopyDataOpen(true)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                content_copy
+              </span>
+              Copy data
+            </button>
             {awaitingCustomer && quotation.status === "sent" ? (
               <div
                 className={`flex items-start gap-2 rounded-xl border p-3 ${
@@ -1377,6 +1392,19 @@ function QuotationPreviewContent({
           loadPdfBytes={() => fetchAdminInvoicePdfBytes(user, quotation.id)}
         />
       ) : null}
+      <CopyDataModal
+        open={copyDataOpen}
+        title="Copy quotation data"
+        sections={copySections}
+        onClose={() => setCopyDataOpen(false)}
+        onCopy={async (selectedIds) => {
+          const text = formatQuotationCopyText(quotation, selectedIds);
+          if (!text.trim()) {
+            throw new Error("Nothing to copy for the selected sections.");
+          }
+          await copyTextToClipboard(text);
+        }}
+      />
     </div>
   );
 }

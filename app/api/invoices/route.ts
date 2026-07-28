@@ -8,6 +8,7 @@ import {
   getBusinessInvoiceByQuotationId,
   listBusinessInvoices,
   markBusinessInvoicePaid,
+  sendInvoiceReviewRequest,
   undoCancelBusinessInvoice,
 } from "@/lib/invoices/server";
 import { NextResponse } from "next/server";
@@ -351,6 +352,18 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json({ ok: true, invoice: result.invoice });
+  }
+
+  if (action === "send_review_request") {
+    const result = await sendInvoiceReviewRequest(auth.businessId, invoiceId);
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
   if (action === "cancel") {
