@@ -19,7 +19,7 @@ function StaffQuotationAccessBadge({
       <span className="material-symbols-outlined material-symbols-filled text-[12px]">
         {cangetQuotation ? "request_quote" : "error"}
       </span>
-      {cangetQuotation ? "Can get quotation" : "Quotation creation Not allowed"}
+      {cangetQuotation ? "Quotation" : "Quotation creation Not allowed"}
     </span>
   );
 }
