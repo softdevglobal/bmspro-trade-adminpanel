@@ -20,6 +20,7 @@ import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hou
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useBookings } from "@/lib/bookings/use-bookings";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -1229,8 +1230,12 @@ export function AddInspectionModal({
   const customerFirstFlow = true;
   const { user } = useAuth();
   const profile = useBusinessProfile();
-  const { requests, loading: customersLoading } = useInspectionRequests();
+  const { requests, loading: requestCustomersLoading } = useInspectionRequests();
   const { bookings } = useBookings();
+  const { customers: registeredCustomers, loading: registeredCustomersLoading } =
+    useRegisteredCustomers();
+  const customersLoading =
+    requestCustomersLoading || registeredCustomersLoading;
   const { staff, loading: staffLoading, reload: reloadStaff } =
     useBusinessStaffSummary();
   const { workingHours, loading: workingHoursLoading } =
@@ -1262,8 +1267,8 @@ export function AddInspectionModal({
   const showAssignmentStep = stepFlow.some((entry) => entry.kind === "assign");
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests, bookings),
-    [requests, bookings],
+    () => buildCustomerOptions(requests, bookings, registeredCustomers),
+    [requests, bookings, registeredCustomers],
   );
   const filteredCustomers = useMemo(
     () => filterCustomerOptions(customerOptions, customerSearch),

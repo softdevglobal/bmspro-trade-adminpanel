@@ -1,6 +1,7 @@
 "use client";
 
 import { BusinessModuleSettings } from "@/components/business-module-settings";
+import { BusinessDataExportSettings } from "@/components/business-data-export-settings";
 import { BusinessSlotCapacitySettings } from "@/components/business-slot-capacity-settings";
 import { BusinessWorkingHoursSettings } from "@/components/business-working-hours-settings";
 import { BookingLinkCard } from "@/components/booking-link-card";
@@ -201,6 +202,8 @@ export function BusinessSettingsPanel() {
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
 
       <BookingLinkCard variant="permanent" />
+
+      <BusinessDataExportSettings />
 
       <BusinessModuleSettings
         enabledModules={meta.enabledModules}

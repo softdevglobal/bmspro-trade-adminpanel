@@ -1475,22 +1475,24 @@ export function JobsBoard({
   return (
     <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-body text-[12px] text-on-surface-variant">
+        <p className="font-body text-[12px] text-on-surface-variant sm:flex-1">
           {groupedBookings.active.length} active ·{" "}
           {groupedBookings.completed.length} completed ·{" "}
           {groupedBookings.cancelled.length} cancelled · tap a card to open the
           side preview
         </p>
-        <button
-          type="button"
-          onClick={() => setAddModalOpen(true)}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
-        >
-          <span className="material-symbols-outlined text-[14px] leading-none">
-            add
-          </span>
-          Add job
-        </button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setAddModalOpen(true)}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
+          >
+            <span className="material-symbols-outlined text-[14px] leading-none">
+              add
+            </span>
+            Add job
+          </button>
+        </div>
       </div>
 
       <div
