@@ -263,13 +263,6 @@ function computeFieldErrors(
     else if (title.length < 3) {
       errors.customTitle = "Use at least 3 characters.";
     }
-
-    const description = form.customDescription.trim();
-    if (!description) {
-      errors.customDescription = "Describe the work needed.";
-    } else if (description.length < 10) {
-      errors.customDescription = `Add more detail (${description.length}/10 characters minimum).`;
-    }
   }
 
   const budget = form.budgetAud.trim();
@@ -1385,8 +1378,7 @@ export function AddInspectionModal({
   const serviceValid =
     form.requestType === "existing_service"
       ? form.selectedServiceId !== null
-      : form.customTitle.trim().length >= 3 &&
-        form.customDescription.trim().length >= 10;
+      : form.customTitle.trim().length >= 3;
 
   const addressValid = isOptionalInspectionAddressValid(form.address);
 
@@ -2115,7 +2107,12 @@ export function AddInspectionModal({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>What needs doing?</span>
+                        <span className={LABEL_CLASS}>
+                          What needs doing?{" "}
+                          <span className="font-normal normal-case tracking-normal text-outline">
+                            (optional)
+                          </span>
+                        </span>
                         <textarea
                           value={form.customDescription}
                           onChange={(event) => {
@@ -2137,7 +2134,7 @@ export function AddInspectionModal({
                           error={fieldErrorMessage("customDescription")}
                           hint={
                             !fieldErrorMessage("customDescription")
-                              ? `At least 10 characters (${form.customDescription.trim().length}/10).`
+                              ? "Optional — helps the team prepare for the visit."
                               : undefined
                           }
                           errorId="customDescription-feedback"

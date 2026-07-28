@@ -1052,9 +1052,6 @@ export function CreateQuotationPage() {
       if (customServiceTitle.trim().length < 3) {
         return "Add a job title (at least 3 characters).";
       }
-      if (customServiceDescription.trim().length < 10) {
-        return "Describe the work needed (at least 10 characters).";
-      }
     }
     if (lineItems.length === 0) return "Add at least one line item.";
     return null;
@@ -1064,7 +1061,6 @@ export function CreateQuotationPage() {
     requestType,
     selectedServiceId,
     customServiceTitle,
-    customServiceDescription,
   ]);
 
   async function save(sendToCustomer = false) {
@@ -1729,7 +1725,12 @@ export function CreateQuotationPage() {
                     />
                   </label>
                   <label className="block">
-                    <span className={LABEL_CLASS}>What needs doing?</span>
+                    <span className={LABEL_CLASS}>
+                      What needs doing?{" "}
+                      <span className="font-normal normal-case tracking-normal text-outline">
+                        (optional)
+                      </span>
+                    </span>
                     <textarea
                       value={customServiceDescription}
                       onChange={(e) => {
@@ -1742,8 +1743,7 @@ export function CreateQuotationPage() {
                       maxLength={1500}
                     />
                     <p className="mt-1 font-body text-[11px] text-on-surface-variant">
-                      At least 10 characters (
-                      {customServiceDescription.trim().length}/10).
+                      Optional — helps describe the scope of work.
                     </p>
                   </label>
                 </div>

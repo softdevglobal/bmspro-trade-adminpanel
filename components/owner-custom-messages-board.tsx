@@ -1,5 +1,6 @@
 "use client";
 
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { auth } from "@/lib/firebase/client";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import type { BusinessSmsBalance } from "@/lib/sms-packages/balance";
@@ -24,6 +25,20 @@ const QUICK_TEMPLATES: Array<{ label: string; text: string }> = [
     text: "Happy New Year! Thank you for trusting us this year. Wishing you health and happiness in the year ahead.",
   },
 ];
+
+/** Builds the SMS body customers receive, matching the API prefix. */
+function previewOutboundMessage(
+  message: string,
+  businessName: string | null | undefined,
+): string {
+  const trimmed = message.trim();
+  const name = businessName?.trim() || null;
+  if (!trimmed || !name) return trimmed;
+  if (trimmed.toLowerCase().startsWith(`${name.toLowerCase()}:`)) {
+    return trimmed;
+  }
+  return `${name}: ${trimmed}`;
+}
 
 type CustomerContact = {
   id: string;
@@ -65,6 +80,9 @@ async function authFetch<T>(
 }
 
 export function OwnerCustomMessagesBoard() {
+  const business = useBusinessProfile();
+  const businessName = business?.businessName?.trim() || null;
+
   const [customers, setCustomers] = useState<CustomerContact[]>([]);
   const [balance, setBalance] = useState<BusinessSmsBalance | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,6 +96,26 @@ export function OwnerCustomMessagesBoard() {
   const [sending, setSending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const outboundPreview = useMemo(
+    () => previewOutboundMessage(message, businessName),
+    [message, businessName],
+  );
+
+  const prefixLength = useMemo(() => {
+    if (!businessName) return 0;
+    if (
+      message
+        .trim()
+        .toLowerCase()
+        .startsWith(`${businessName.toLowerCase()}:`)
+    ) {
+      return 0;
+    }
+    return `${businessName}: `.length;
+  }, [businessName, message]);
+
+  const maxBodyLength = Math.max(0, MAX_MESSAGE_LENGTH - prefixLength);
 
   const load = useCallback(async () => {
     const result = await authFetch<{
@@ -123,6 +161,7 @@ export function OwnerCustomMessagesBoard() {
 
   const canSubmit =
     message.trim().length > 0 &&
+    outboundPreview.length <= MAX_MESSAGE_LENGTH &&
     recipientCount > 0 &&
     !insufficientCredits &&
     !sending;
@@ -158,6 +197,12 @@ export function OwnerCustomMessagesBoard() {
 
     if (!message.trim()) {
       setFormError("Write a message to send.");
+      return;
+    }
+    if (outboundPreview.length > MAX_MESSAGE_LENGTH) {
+      setFormError(
+        `Message is too long (max ${MAX_MESSAGE_LENGTH} characters including business name).`,
+      );
       return;
     }
     if (recipientCount === 0) {
@@ -242,21 +287,34 @@ export function OwnerCustomMessagesBoard() {
             </label>
             <textarea
               value={message}
-              maxLength={MAX_MESSAGE_LENGTH}
+              maxLength={maxBodyLength}
               onChange={(event) => setMessage(event.target.value)}
               rows={4}
               placeholder="Write the SMS your customers will receive."
               className={`${INPUT_CLASS} resize-y`}
             />
             <p className="mt-1 text-right font-body text-[11px] text-on-surface-variant">
-              {message.length}/{MAX_MESSAGE_LENGTH}
+              {outboundPreview.length}/{MAX_MESSAGE_LENGTH}
+              {businessName ? " (includes business name)" : ""}
             </p>
+            {businessName && message.trim() ? (
+              <p className="mt-2 rounded-lg bg-surface-container-low px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                Customers will receive:{" "}
+                <span className="text-on-surface">{outboundPreview}</span>
+              </p>
+            ) : businessName ? (
+              <p className="mt-2 font-body text-[12px] text-on-surface-variant">
+                Your business name ({businessName}) is added to every message.
+              </p>
+            ) : null}
             <div className="mt-2 flex flex-wrap gap-2">
               {QUICK_TEMPLATES.map((template) => (
                 <button
                   key={template.label}
                   type="button"
-                  onClick={() => setMessage(template.text)}
+                  onClick={() =>
+                    setMessage(template.text.slice(0, maxBodyLength))
+                  }
                   className="inline-flex items-center gap-1 rounded-full border border-outline-variant px-3 py-1 font-body text-[12px] font-medium text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
                 >
                   <span className="material-symbols-outlined text-[14px]">

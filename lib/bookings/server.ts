@@ -1141,13 +1141,6 @@ export async function createDirectJob(
         error: "Add a job title (at least 3 characters).",
       };
     }
-    if (description.length < 10) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Describe the work needed (at least 10 characters).",
-      };
-    }
     customRequest = { title, description };
     serviceId = null;
     quotationTitle = title;

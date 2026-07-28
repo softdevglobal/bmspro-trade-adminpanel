@@ -1,5 +1,6 @@
 import { listInspectionRequests } from "@/lib/inspection/server";
 import type { InspectionRequestDetail } from "@/lib/inspection/types";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { getBusinessSmsBalance } from "@/lib/sms-packages/server";
 import { sendBulkSms, toE164 } from "@/lib/sms/textbee";
@@ -8,6 +9,22 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const MAX_MESSAGE_LENGTH = 480;
+
+/** Prefixes the SMS with the business name so recipients know who sent it. */
+function withBusinessName(message: string, businessName: string | null): {
+  text: string;
+  businessName: string | null;
+} {
+  const name = businessName?.trim() || null;
+  if (!name) return { text: message, businessName: null };
+
+  const alreadyPrefixed = message
+    .toLowerCase()
+    .startsWith(`${name.toLowerCase()}:`);
+  if (alreadyPrefixed) return { text: message, businessName: name };
+
+  return { text: `${name}: ${message}`, businessName: name };
+}
 
 type CustomerContact = {
   id: string;
@@ -111,11 +128,18 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  if (message.length > MAX_MESSAGE_LENGTH) {
+
+  const profile = await getBusinessProfile(auth.businessId);
+  const { text: outboundMessage, businessName } = withBusinessName(
+    message,
+    profile?.businessName ?? null,
+  );
+
+  if (outboundMessage.length > MAX_MESSAGE_LENGTH) {
     return NextResponse.json(
       {
         ok: false,
-        error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters).`,
+        error: `Message is too long (max ${MAX_MESSAGE_LENGTH} characters including business name).`,
       },
       { status: 400 },
     );
@@ -159,8 +183,12 @@ export async function POST(request: Request) {
 
   const sentCount = await sendBulkSms(
     selected.map((contact) => contact.phone),
-    message,
+    outboundMessage,
     auth.businessId,
+    {
+      senderName: businessName,
+      source: "custom_message",
+    },
   );
 
   if (sentCount === 0) {

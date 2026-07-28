@@ -625,12 +625,6 @@ export function parseInspectionRequestInput(
     if (title.length < 3) {
       return { ok: false, error: "Add a short title for the work needed." };
     }
-    if (description.length < 10) {
-      return {
-        ok: false,
-        error: "Describe the work needed in a bit more detail.",
-      };
-    }
     customRequest = { title, description };
   }
 

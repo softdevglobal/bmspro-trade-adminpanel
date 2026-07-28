@@ -895,7 +895,12 @@ export function EditJobPage({ jobId }: { jobId: string }) {
                   />
                 </label>
                 <label className="block">
-                  <span className={LABEL_CLASS}>What needs doing?</span>
+                  <span className={LABEL_CLASS}>
+                    What needs doing?{" "}
+                    <span className="font-normal normal-case tracking-normal text-outline">
+                      (optional)
+                    </span>
+                  </span>
                   <textarea
                     value={customDescription}
                     onChange={(event) =>

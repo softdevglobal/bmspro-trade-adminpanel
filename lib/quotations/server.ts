@@ -660,13 +660,6 @@ export async function createQuotationForInspection(
         error: "Add a job title (at least 3 characters).",
       };
     }
-    if (customDescription.length < 10) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Describe the work needed (at least 10 characters).",
-      };
-    }
 
     serviceTitle = customTitle;
     serviceDescription = customDescription || null;
@@ -1819,13 +1812,6 @@ export async function createStandaloneQuotation(
         ok: false,
         status: 400,
         error: "Add a job title (at least 3 characters).",
-      };
-    }
-    if (customDescription.length < 10) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Describe the work needed (at least 10 characters).",
       };
     }
     customRequest = { title: customTitle, description: customDescription };

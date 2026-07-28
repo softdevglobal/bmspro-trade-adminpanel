@@ -688,9 +688,6 @@ function collectBookingMissingRequirements(input: {
     if (input.customTitle.trim().length < 3) {
       missing.push("Job title (at least 3 characters)");
     }
-    if (input.customDescription.trim().length < 10) {
-      missing.push("Job description (at least 10 characters)");
-    }
   }
 
   const addressErrors = getOptionalInspectionAddressFieldErrors(input.address);
@@ -986,8 +983,7 @@ function ServiceBookingFlow({
   const requestStepValid =
     requestType === "existing_service"
       ? selectedService !== null
-      : customTitle.trim().length >= 3 &&
-        customDescription.trim().length >= 10;
+      : customTitle.trim().length >= 3;
 
   const slotsValid =
     availabilityReady &&
@@ -1443,7 +1439,10 @@ function ServiceBookingFlow({
               </label>
               <label className="block">
                 <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                  What needs doing?
+                  What needs doing?{" "}
+                  <span className="font-normal normal-case tracking-normal text-outline">
+                    (optional)
+                  </span>
                 </span>
                 <textarea
                   value={customDescription}
@@ -1457,7 +1456,7 @@ function ServiceBookingFlow({
                   maxLength={1500}
                 />
                 <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
-                  At least 10 characters so the team can size up the visit.
+                  Optional — helps the team size up the visit.
                 </span>
               </label>
             </div>
