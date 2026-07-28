@@ -66,6 +66,14 @@ const QUICK_ACTIONS = [
   },
 ] as const;
 
+const KPI_LINKS: Record<string, string> = {
+  today: "/dashboard/calendar",
+  unassigned: "/dashboard/jobs",
+  awaiting_invoice: "/dashboard/invoices",
+  messages: "/dashboard#live-feed",
+  team: "/dashboard/team",
+};
+
 const KPI_STYLES: Record<
   DashboardKpi["accent"],
   { shell: string; icon: string; glow: string }
@@ -288,43 +296,50 @@ function BusinessDashboardOverview() {
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {overview.kpis.map((card, index) => {
             const style = KPI_STYLES[card.accent];
+            const href = KPI_LINKS[card.key] ?? "/dashboard";
             return (
-              <motion.div
+              <Link
                 key={card.key}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.08 * index }}
-                className={`relative overflow-hidden rounded-[22px] border p-5 ${style.shell}`}
+                href={href}
+                className="block rounded-[22px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               >
-                <div
-                  aria-hidden
-                  className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full blur-2xl ${style.glow}`}
-                />
-                <div className="relative flex items-start justify-between gap-3">
-                  <span
-                    className={`flex h-11 w-11 items-center justify-center rounded-2xl ${style.icon}`}
-                  >
-                    <span className="material-symbols-outlined text-[22px]">
-                      {card.icon}
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.08 * index }}
+                  className={`relative overflow-hidden rounded-[22px] border p-5 transition-transform hover:-translate-y-0.5 hover:shadow-md ${style.shell}`}
+                >
+                  <div
+                    aria-hidden
+                    className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full blur-2xl ${style.glow}`}
+                  />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <span
+                      className={`flex h-11 w-11 items-center justify-center rounded-2xl ${style.icon}`}
+                    >
+                      <span className="material-symbols-outlined text-[22px]">
+                        {card.icon}
+                      </span>
                     </span>
-                  </span>
-                  <span className="rounded-full bg-white/70 px-2.5 py-1 text-right font-body text-[11px] font-semibold text-on-surface-variant">
-                    {loading ? "…" : card.trend}
-                  </span>
-                </div>
-                <p className="relative mt-5 font-display text-[34px] font-bold leading-none text-on-surface">
-                  {loading ? "—" : card.value}
-                </p>
-                <p className="relative mt-2 font-body text-[14px] font-medium text-on-surface-variant">
-                  {card.label}
-                </p>
-              </motion.div>
+                    <span className="rounded-full bg-white/70 px-2.5 py-1 text-right font-body text-[11px] font-semibold text-on-surface-variant">
+                      {loading ? "…" : card.trend}
+                    </span>
+                  </div>
+                  <p className="relative mt-5 font-display text-[34px] font-bold leading-none text-on-surface">
+                    {loading ? "—" : card.value}
+                  </p>
+                  <p className="relative mt-2 font-body text-[14px] font-medium text-on-surface-variant">
+                    {card.label}
+                  </p>
+                </motion.div>
+              </Link>
             );
           })}
         </section>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
           <motion.section
+            id="live-feed"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
