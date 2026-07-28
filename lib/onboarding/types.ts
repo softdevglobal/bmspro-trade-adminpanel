@@ -76,7 +76,6 @@ export type OnboardingPayload = {
   logoUrl?: string | null;
 };
 
-export const MAX_SERVICE_AREAS = 20;
 export const MIN_SERVICE_AREAS = 1;
 
 /**
@@ -106,7 +105,7 @@ export function normaliseServiceAreas(values: string[] | undefined): string[] {
     seen.add(key);
     out.push(cased);
   }
-  return out.slice(0, MAX_SERVICE_AREAS);
+  return out;
 }
 
 export type TenantStatus = "pending_review" | "active" | "suspended";

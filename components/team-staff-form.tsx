@@ -681,7 +681,7 @@ function StaffSetupStepContent({
           <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3">
             <div className="min-w-0">
               <p className="font-body text-[13px] font-semibold leading-snug text-on-surface">
-                Can get quotation
+                Quotation
               </p>
               <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
                 Allow this staff member to receive and handle quotation requests.
@@ -699,7 +699,7 @@ function StaffSetupStepContent({
                 type="button"
                 role="switch"
                 aria-checked={form.canget_qutaion}
-                aria-label="Can get quotation"
+                aria-label="Quotation"
                 onClick={() => onCanGetQuotationChange(!form.canget_qutaion)}
                 className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
                   form.canget_qutaion ? "bg-primary" : "bg-outline-variant/80"
@@ -1158,7 +1158,7 @@ function StaffReviewPanel({
         />
         <ReviewMetaRow
           icon="request_quote"
-          label="Can get quotation"
+          label="Quotation"
           value={form.canget_qutaion ? "Yes" : "No"}
         />
       </div>
@@ -1626,7 +1626,7 @@ function StaffDetailDrawer({
               value={`${workingDayCount(member.availability)} of 7`}
             />
             <DetailRow
-              label="Can get quotation"
+              label="Quotation"
               value={member.canget_qutaion ? "Yes" : "No"}
             />
           </DetailSection>

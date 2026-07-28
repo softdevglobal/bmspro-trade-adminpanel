@@ -3946,7 +3946,7 @@ function AssignForm({
       </p>
       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
         The assigned person will visit the customer location. Staff marked
-        &ldquo;Can get quotation&rdquo; create the quote on site; otherwise you
+        &ldquo;Quotation&rdquo; create the quote on site; otherwise you
         create it after the visit.
       </p>
 

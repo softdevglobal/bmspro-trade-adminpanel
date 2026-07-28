@@ -516,6 +516,77 @@ export async function markBusinessInvoicePaid(
 }
 
 /**
+ * Sends the business Google review link to the invoice customer via email and/or SMS.
+ * Only allowed for paid invoices. Best-effort delivery (email/SMS never throw).
+ */
+export async function sendInvoiceReviewRequest(
+  businessId: string,
+  invoiceId: string,
+): Promise<
+  | { ok: true }
+  | { ok: false; status: number; error: string }
+> {
+  const id = invoiceId.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Invoice is required." };
+  }
+
+  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
+  }
+
+  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
+  if (invoice.status !== "paid") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Review requests can only be sent for paid invoices.",
+    };
+  }
+
+  const profile = await getBusinessProfile(businessId);
+  const reviewUrl = profile?.googleReviewUrl?.trim() || "";
+  if (!reviewUrl) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        "Add your Google review link in Business settings before sending a review request.",
+    };
+  }
+
+  const email = invoice.customer.email?.trim() || "";
+  const phone = invoice.customer.phone?.trim() || "";
+  if (!email && !phone) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This customer has no email or phone number on the invoice.",
+    };
+  }
+
+  const { sendReviewRequestEmail } = await import(
+    "@/lib/email/templates/review-request"
+  );
+
+  await sendReviewRequestEmail({
+    customerEmail: email || null,
+    customerPhone: phone || null,
+    customerFullName: invoice.customer.fullName,
+    invoiceNo: invoice.invoiceCode,
+    serviceTitle: invoice.serviceTitle,
+    googleReviewUrl: reviewUrl,
+    businessName: profile?.businessName ?? null,
+    logoUrl: profile?.logoUrl ?? null,
+    businessId,
+  });
+
+  return { ok: true };
+}
+
+/**
  * Records a settled Stripe payment against an invoice: decrements the remaining
  * balance, appends to the payment history, and marks the invoice paid once the
  * balance reaches zero. Idempotent per Stripe checkout session.
@@ -775,9 +846,13 @@ export async function createInvoiceFromQuotation(
       existing.id,
       existing.data() ?? {},
     );
-    if (existingInvoice.status === "draft") {
+    if (
+      existingInvoice.status === "draft" ||
+      existingInvoice.status === "sent"
+    ) {
       const canUpdateDirectDetails =
-        quotation.createdSource === "invoice_direct";
+        quotation.createdSource === "invoice_direct" ||
+        existingInvoice.status === "sent";
       const customer =
         canUpdateDirectDetails && input.customer
           ? input.customer
@@ -812,6 +887,11 @@ export async function createInvoiceFromQuotation(
       });
 
       const now = FieldValue.serverTimestamp();
+      const nextStatus = input.send
+        ? "sent"
+        : existingInvoice.status === "sent"
+          ? "sent"
+          : "draft";
       await docRef.update({
         serviceTitle,
         customer,
@@ -828,7 +908,7 @@ export async function createInvoiceFromQuotation(
         termsAndConditions: values.termsAndConditions,
         invoiceDate: input.invoiceDate.trim(),
         dueDate: input.dueDate.trim(),
-        status: input.send ? "sent" : "draft",
+        status: nextStatus,
         bookingId: booking?.bookingId ?? existingInvoice.bookingId,
         bookingCode: booking?.bookingCode ?? existingInvoice.bookingCode,
         bookingStatus: booking?.bookingStatus ?? existingInvoice.bookingStatus,
@@ -850,6 +930,22 @@ export async function createInvoiceFromQuotation(
       }
       await mirrorInvoiceToInspectionRequest(invoice);
       return { ok: true, invoice };
+    }
+
+    if (existingInvoice.status === "paid") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Paid invoices cannot be edited.",
+      };
+    }
+
+    if (existingInvoice.status === "cancelled") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Cancelled invoices cannot be edited.",
+      };
     }
 
     if (!input.send) {

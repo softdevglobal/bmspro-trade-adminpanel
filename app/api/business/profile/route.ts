@@ -34,6 +34,39 @@ export const runtime = "nodejs";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^\+?[\d\s()-]{6,}$/;
 
+function parseGoogleReviewUrl(
+  raw: unknown,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, value: null };
+  if (typeof raw !== "string") {
+    return { ok: false, error: "Enter a valid Google review link." };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: null };
+  if (trimmed.length > 500) {
+    return {
+      ok: false,
+      error: "Google review link must be 500 characters or less.",
+    };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return {
+      ok: false,
+      error: "Enter a valid Google review URL (https://…).",
+    };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      ok: false,
+      error: "Google review link must start with http:// or https://.",
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
 function parseGstPercentageInput(
   raw: unknown,
 ): { ok: true; value: number } | { ok: false; error: string } {
@@ -92,6 +125,7 @@ export async function PATCH(request: Request) {
     businessEmail?: string | null;
     businessPhone?: string | null;
     abn?: string | null;
+    googleReviewUrl?: string | null;
     timezone?: string;
     logoUrl?: string | null;
     registeredForGst?: boolean;
@@ -214,6 +248,17 @@ export async function PATCH(request: Request) {
       }
       updates.abn = trimmed || null;
     }
+  }
+
+  if ("googleReviewUrl" in raw) {
+    const parsed = parseGoogleReviewUrl(raw.googleReviewUrl);
+    if (!parsed.ok) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error },
+        { status: 400 },
+      );
+    }
+    updates.googleReviewUrl = parsed.value;
   }
 
   if ("timezone" in raw) {

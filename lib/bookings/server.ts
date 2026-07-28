@@ -378,11 +378,15 @@ export async function updateBusinessBookingSchedule(
     return { ok: false, status: 403, error: "Job not found." };
   }
 
-  if (current.status !== "scheduled" && current.status !== "ongoing") {
+  if (
+    current.status !== "awaiting" &&
+    current.status !== "scheduled" &&
+    current.status !== "ongoing"
+  ) {
     return {
       ok: false,
       status: 400,
-      error: "Only scheduled or in-progress jobs can be rescheduled.",
+      error: "Only active jobs can be rescheduled.",
     };
   }
 
@@ -1134,14 +1138,7 @@ export async function createDirectJob(
       return {
         ok: false,
         status: 400,
-        error: "Add a job title (at least 3 characters).",
-      };
-    }
-    if (description.length < 10) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Describe the work needed (at least 10 characters).",
+        error: "Add a scope of work (at least 3 characters).",
       };
     }
     customRequest = { title, description };

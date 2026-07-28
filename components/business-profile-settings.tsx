@@ -58,6 +58,7 @@ export function BusinessProfileSettings({
           businessAddress: form.businessAddress.trim() || null,
           businessPhone: form.businessPhone.trim() || null,
           abn: form.abn.trim() || null,
+          googleReviewUrl: form.googleReviewUrl.trim() || null,
         }),
       });
       const payload = (await response.json()) as {
@@ -69,6 +70,7 @@ export function BusinessProfileSettings({
           businessEmail?: string | null;
           businessPhone?: string | null;
           abn?: string | null;
+          googleReviewUrl?: string | null;
         };
       };
       if (!response.ok || !payload.ok || !payload.profile) {
@@ -81,6 +83,7 @@ export function BusinessProfileSettings({
         businessEmail: p.businessEmail ?? "",
         businessPhone: p.businessPhone ?? "",
         abn: p.abn ?? "",
+        googleReviewUrl: p.googleReviewUrl ?? "",
       };
       onSaved(next);
       setNotice("Business profile saved.");
@@ -189,6 +192,25 @@ export function BusinessProfileSettings({
                 maxLength={20}
                 placeholder="11 digit Australian Business Number"
               />
+            </label>
+
+            <label className="block sm:col-span-2">
+              <span className="font-body text-[13px] font-semibold text-on-surface">
+                Google review link
+              </span>
+              <input
+                type="url"
+                value={form.googleReviewUrl}
+                disabled={saving}
+                onChange={(e) => updateField("googleReviewUrl", e.target.value)}
+                className={INPUT_CLASS}
+                maxLength={500}
+                placeholder="https://g.page/r/.../review"
+              />
+              <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
+                Paste your Google “write a review” link. You can send it to
+                customers from paid invoices.
+              </span>
             </label>
           </div>
 

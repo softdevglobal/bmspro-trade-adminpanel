@@ -9,6 +9,10 @@ import {
 } from "@/components/calendar-visit-time-range";
 import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { JobAssignPicker } from "@/components/job-assign-picker";
+import {
+  JobInstructionsFields,
+  normalizeInstructionTasksForSubmit,
+} from "@/components/job-instructions-fields";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -255,16 +259,9 @@ function computeFieldErrors(
     }
   } else {
     const title = form.customTitle.trim();
-    if (!title) errors.customTitle = "Job title is required.";
+    if (!title) errors.customTitle = "Scope of Work is required.";
     else if (title.length < 3) {
       errors.customTitle = "Use at least 3 characters.";
-    }
-
-    const description = form.customDescription.trim();
-    if (!description) {
-      errors.customDescription = "Describe the work needed.";
-    } else if (description.length < 10) {
-      errors.customDescription = `Add more detail (${description.length}/10 characters minimum).`;
     }
   }
 
@@ -1028,6 +1025,8 @@ function InspectionPreview({
   staffName = null,
   showAssignment = false,
   reviewStepNumber = 5,
+  instructionDescription = "",
+  instructionTasks = [],
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
@@ -1037,11 +1036,17 @@ function InspectionPreview({
   staffName?: string | null;
   showAssignment?: boolean;
   reviewStepNumber?: number;
+  instructionDescription?: string;
+  instructionTasks?: string[];
 }) {
   const jobSummary =
     form.requestType === "existing_service"
       ? selectedServiceName ?? "Selected service"
       : form.customTitle.trim();
+  const previewInstructionTasks =
+    normalizeInstructionTasksForSubmit(instructionTasks);
+  const hasInstructions =
+    Boolean(instructionDescription.trim()) || previewInstructionTasks.length > 0;
 
   return (
     <div className="space-y-4">
@@ -1126,6 +1131,25 @@ function InspectionPreview({
                     : "Unassigned — assign later from Requests"
             }
           />
+        </PreviewSection>
+      ) : null}
+
+      {variant === "job" && hasInstructions ? (
+        <PreviewSection title="Job instructions" icon="assignment">
+          {instructionDescription.trim() ? (
+            <PreviewRow
+              label="Description"
+              value={instructionDescription.trim()}
+            />
+          ) : null}
+          {previewInstructionTasks.length > 0 ? (
+            <PreviewRow
+              label="Tasks"
+              value={previewInstructionTasks
+                .map((task, index) => `${index + 1}. ${task}`)
+                .join("\n")}
+            />
+          ) : null}
         </PreviewSection>
       ) : null}
 
@@ -1218,6 +1242,8 @@ export function AddInspectionModal({
   const [form, setForm] = useState(createInitialForm);
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
   const [staffId, setStaffId] = useState("");
+  const [instructionDescription, setInstructionDescription] = useState("");
+  const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1269,6 +1295,8 @@ export function AddInspectionModal({
       setForm(createInitialForm(calendarWindow ?? null, modalVariant));
       setAssignTo(null);
       setStaffId("");
+      setInstructionDescription("");
+      setInstructionTasks([]);
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -1350,8 +1378,7 @@ export function AddInspectionModal({
   const serviceValid =
     form.requestType === "existing_service"
       ? form.selectedServiceId !== null
-      : form.customTitle.trim().length >= 3 &&
-        form.customDescription.trim().length >= 10;
+      : form.customTitle.trim().length >= 3;
 
   const addressValid = isOptionalInspectionAddressValid(form.address);
 
@@ -1795,15 +1822,19 @@ export function AddInspectionModal({
     };
 
     const isJob = variant === "job";
-    const jobBody =
-      isJob && assignTo
-        ? {
-            assignTo,
-            ...(assignTo === "staff" ? { staffId } : {}),
-          }
-        : isJob
-          ? { assignTo: "none" }
-          : {};
+    const jobBody = isJob
+      ? {
+          ...(assignTo
+            ? {
+                assignTo,
+                ...(assignTo === "staff" ? { staffId } : {}),
+              }
+            : { assignTo: "none" }),
+          instructionDescription: instructionDescription.trim() || undefined,
+          instructionTasks:
+            normalizeInstructionTasksForSubmit(instructionTasks),
+        }
+      : {};
 
     try {
       const token = await user.getIdToken();
@@ -2048,7 +2079,7 @@ export function AddInspectionModal({
                   ) : (
                     <div className="grid gap-3">
                       <label className="block">
-                        <span className={LABEL_CLASS}>Job title</span>
+                        <span className={LABEL_CLASS}>Scope of Work</span>
                         <input
                           type="text"
                           value={form.customTitle}
@@ -2076,7 +2107,12 @@ export function AddInspectionModal({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>What needs doing?</span>
+                        <span className={LABEL_CLASS}>
+                          What needs doing?{" "}
+                          <span className="font-normal normal-case tracking-normal text-outline">
+                            (optional)
+                          </span>
+                        </span>
                         <textarea
                           value={form.customDescription}
                           onChange={(event) => {
@@ -2098,7 +2134,7 @@ export function AddInspectionModal({
                           error={fieldErrorMessage("customDescription")}
                           hint={
                             !fieldErrorMessage("customDescription")
-                              ? `At least 10 characters (${form.customDescription.trim().length}/10).`
+                              ? "Optional — helps the team prepare for the visit."
                               : undefined
                           }
                           errorId="customDescription-feedback"
@@ -2278,7 +2314,6 @@ export function AddInspectionModal({
                           }
                           dayStripLayout="fit"
                           timeZone={timeZone}
-                          allowPast
                         />
                         {variant === "job" ? (
                           <p className="mt-3 font-body text-[12px] text-on-surface-variant">
@@ -2341,6 +2376,8 @@ export function AddInspectionModal({
                   staffName={selectedStaffName}
                   showAssignment={showAssignmentStep}
                   reviewStepNumber={step}
+                  instructionDescription={instructionDescription}
+                  instructionTasks={instructionTasks}
                 />
               ) : null}
 
@@ -2365,6 +2402,15 @@ export function AddInspectionModal({
                     onAssignToChange={setAssignTo}
                     onStaffIdChange={setStaffId}
                   />
+                  {variant === "job" ? (
+                    <JobInstructionsFields
+                      description={instructionDescription}
+                      tasks={instructionTasks}
+                      disabled={submitting}
+                      onDescriptionChange={setInstructionDescription}
+                      onTasksChange={setInstructionTasks}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </>

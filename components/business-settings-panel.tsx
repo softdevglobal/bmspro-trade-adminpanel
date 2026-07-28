@@ -27,6 +27,7 @@ export type ProfileFormState = {
   businessEmail: string;
   businessPhone: string;
   abn: string;
+  googleReviewUrl: string;
 };
 
 type ProfileMeta = {
@@ -64,6 +65,7 @@ export function BusinessSettingsPanel() {
     businessEmail: "",
     businessPhone: "",
     abn: "",
+    googleReviewUrl: "",
   });
 
   useEffect(() => {
@@ -90,6 +92,7 @@ export function BusinessSettingsPanel() {
             businessEmail?: string | null;
             businessPhone?: string | null;
             abn?: string | null;
+            googleReviewUrl?: string | null;
             businessType?: string | null;
             state?: string | null;
             timezone?: string | null;
@@ -111,6 +114,7 @@ export function BusinessSettingsPanel() {
           businessEmail: p.businessEmail ?? "",
           businessPhone: p.businessPhone ?? "",
           abn: p.abn ?? "",
+          googleReviewUrl: p.googleReviewUrl ?? "",
         });
         setMeta({
           businessType: p.businessType ?? null,
