@@ -523,7 +523,7 @@ export function EditJobPage({ jobId }: { jobId: string }) {
       return;
     }
     if (requestType === "custom_quote" && customTitle.trim().length < 3) {
-      setError("Job title must be at least 3 characters.");
+      setError("Scope of Work must be at least 3 characters.");
       return;
     }
     if (!date) {
@@ -883,7 +883,7 @@ export function EditJobPage({ jobId }: { jobId: string }) {
             ) : (
               <div className="grid gap-3">
                 <label className="block">
-                  <span className={LABEL_CLASS}>Job title</span>
+                  <span className={LABEL_CLASS}>Scope of Work</span>
                   <input
                     type="text"
                     value={customTitle}

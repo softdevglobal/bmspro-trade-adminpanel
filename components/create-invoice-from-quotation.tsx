@@ -883,7 +883,7 @@ export function CreateInvoiceFromQuotation({
           return;
         }
       } else if (customServiceTitle.trim().length < 3) {
-        setError("Add a job title (at least 3 characters).");
+        setError("Add a scope of work (at least 3 characters).");
         setTab("create");
         return;
       }
@@ -1347,7 +1347,7 @@ export function CreateInvoiceFromQuotation({
 
                   <div className="mt-3 grid gap-3">
                     <label className="block">
-                      <span className={LABEL_CLASS}>Job title</span>
+                      <span className={LABEL_CLASS}>Scope of Work</span>
                       <input
                         type="text"
                         value={customServiceTitle}

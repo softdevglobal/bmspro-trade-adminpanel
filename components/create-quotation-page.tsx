@@ -1050,7 +1050,7 @@ export function CreateQuotationPage() {
       if (!selectedServiceId) return "Select a service from the list.";
     } else {
       if (customServiceTitle.trim().length < 3) {
-        return "Add a job title (at least 3 characters).";
+        return "Add a scope of work (at least 3 characters).";
       }
     }
     if (lineItems.length === 0) return "Add at least one line item.";
@@ -1711,7 +1711,7 @@ export function CreateQuotationPage() {
 
                 <div className="mt-3 grid gap-3">
                   <label className="block">
-                    <span className={LABEL_CLASS}>Job title</span>
+                    <span className={LABEL_CLASS}>Scope of Work</span>
                     <input
                       type="text"
                       value={customServiceTitle}

@@ -1138,7 +1138,7 @@ export async function createDirectJob(
       return {
         ok: false,
         status: 400,
-        error: "Add a job title (at least 3 characters).",
+        error: "Add a scope of work (at least 3 characters).",
       };
     }
     customRequest = { title, description };

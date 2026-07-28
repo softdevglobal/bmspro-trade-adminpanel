@@ -686,7 +686,7 @@ function collectBookingMissingRequirements(input: {
     }
   } else {
     if (input.customTitle.trim().length < 3) {
-      missing.push("Job title (at least 3 characters)");
+      missing.push("Scope of Work (at least 3 characters)");
     }
   }
 
@@ -1423,7 +1423,7 @@ function ServiceBookingFlow({
             <div className="mt-4 grid gap-3">
               <label className="block">
                 <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                  Job title
+                  Scope of Work
                 </span>
                 <input
                   type="text"

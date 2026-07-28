@@ -795,7 +795,7 @@ export async function PATCH(
           : booking.customRequest?.description ?? "";
       if (title.length < 3) {
         return NextResponse.json(
-          { ok: false, error: "Job title must be at least 3 characters." },
+          { ok: false, error: "Scope of Work must be at least 3 characters." },
           { status: 400 },
         );
       }

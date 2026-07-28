@@ -259,7 +259,7 @@ function computeFieldErrors(
     }
   } else {
     const title = form.customTitle.trim();
-    if (!title) errors.customTitle = "Job title is required.";
+    if (!title) errors.customTitle = "Scope of Work is required.";
     else if (title.length < 3) {
       errors.customTitle = "Use at least 3 characters.";
     }
@@ -2079,7 +2079,7 @@ export function AddInspectionModal({
                   ) : (
                     <div className="grid gap-3">
                       <label className="block">
-                        <span className={LABEL_CLASS}>Job title</span>
+                        <span className={LABEL_CLASS}>Scope of Work</span>
                         <input
                           type="text"
                           value={form.customTitle}
