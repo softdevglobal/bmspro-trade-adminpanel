@@ -464,8 +464,11 @@ export function CreateQuotationPage() {
           throw new Error(data.error ?? "Could not load draft quotation.");
         }
         const quotation = data.quotation;
-        if (quotation.status !== "draft") {
-          throw new Error("Only draft quotations can be edited.");
+        if (quotation.status === "cancelled") {
+          throw new Error("Cancelled quotations cannot be edited.");
+        }
+        if (quotation.status !== "draft" && quotation.status !== "sent") {
+          throw new Error("This quotation cannot be edited.");
         }
 
         inspectionPrefilledRef.current = true;
@@ -1311,7 +1314,7 @@ export function CreateQuotationPage() {
             </Link>
             <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
               {draftQuotationId
-                ? "Edit draft quotation"
+                ? "Edit quotation"
                 : boundInspection
                   ? "Quotation for visit"
                   : "Create a quotation"}
@@ -1333,7 +1336,7 @@ export function CreateQuotationPage() {
               {submitting || draftLoading ? (
                 <SaveSpinner label={draftLoading ? "Loading…" : "Saving…"} />
               ) : draftQuotationId ? (
-                "Update draft"
+                "Save"
               ) : (
                 "Save draft"
               )}

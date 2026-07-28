@@ -4,7 +4,6 @@ import { ServiceAreasField } from "@/components/service-areas-field";
 import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
-  MAX_SERVICE_AREAS,
   MIN_SERVICE_AREAS,
   normaliseServiceAreas,
   titleCaseServiceArea,
@@ -49,10 +48,7 @@ export function BusinessServiceAreasSettings({
   }
 
   function addRow() {
-    setRows((current) => {
-      if (current.length >= MAX_SERVICE_AREAS) return current;
-      return [...current, ""];
-    });
+    setRows((current) => [...current, ""]);
     setError(null);
     setNotice(null);
   }

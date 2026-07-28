@@ -333,7 +333,7 @@ function RadarVisualization({
   business: BookingBusiness;
   reducedMotion: boolean;
 }) {
-  const areas = business.serviceAreas.slice(0, 6);
+  const areas = business.serviceAreas;
   const [activeArea, setActiveArea] = useState(0);
 
   // Cycle through suburbs

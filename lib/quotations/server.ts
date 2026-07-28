@@ -924,12 +924,35 @@ export async function updateDraftQuotation(
   if (quotationData.businessId !== businessId) {
     return { ok: false, status: 404, error: "Quotation not found." };
   }
-  if (quotationData.status === "sent") {
+  if (quotationData.status === "cancelled") {
     return {
       ok: false,
       status: 400,
-      error: "Sent quotations cannot be edited.",
+      error: "Cancelled quotations cannot be edited.",
     };
+  }
+  if (quotationData.status !== "draft" && quotationData.status !== "sent") {
+    return {
+      ok: false,
+      status: 400,
+      error: "This quotation cannot be edited.",
+    };
+  }
+
+  // Paid invoices lock the source quotation so totals stay consistent.
+  const linkedInvoiceSnap = await adminDb
+    .collection("invoices")
+    .doc(id)
+    .get();
+  if (linkedInvoiceSnap.exists) {
+    const invoiceStatus = linkedInvoiceSnap.data()?.status;
+    if (invoiceStatus === "paid") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Quotations with a paid invoice cannot be edited.",
+      };
+    }
   }
 
   const inspectionId =
@@ -1198,6 +1221,10 @@ export async function updateDraftQuotation(
               : null,
         });
 
+  const previousStatus =
+    quotationData.status === "sent" ? "sent" : "draft";
+  const nextStatus = shouldSend ? "sent" : previousStatus;
+
   try {
     await requestSnap.ref.set(
       {
@@ -1208,11 +1235,11 @@ export async function updateDraftQuotation(
           subtotalAud,
           balanceDueAud,
           pdfUrl: quotation.pdfUrl ?? null,
-          status: shouldSend ? "sent" : "draft",
+          status: nextStatus,
           createdAt:
             quotationData.createdAt ?? requestData.quotation?.createdAt ?? null,
         },
-        ...(shouldSend
+        ...(shouldSend && previousStatus !== "sent"
           ? {
               status: "awaiting_decision" satisfies InspectionRequestStatus,
               ...awaitingBookingFields(),
@@ -1223,7 +1250,7 @@ export async function updateDraftQuotation(
       { merge: true },
     );
 
-    if (shouldSend) {
+    if (shouldSend && previousStatus !== "sent") {
       await quotationRef.set(
         {
           status: "sent",
@@ -1233,6 +1260,15 @@ export async function updateDraftQuotation(
         { merge: true },
       );
       quotation = { ...quotation, status: "sent", bookingStatus: "awaiting" };
+    } else if (shouldSend) {
+      await quotationRef.set(
+        {
+          status: "sent",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      quotation = { ...quotation, status: "sent" };
     }
   } catch (error) {
     console.error("draft quotation mirror to request failed:", error);

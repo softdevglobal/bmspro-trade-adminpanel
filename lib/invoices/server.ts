@@ -775,9 +775,13 @@ export async function createInvoiceFromQuotation(
       existing.id,
       existing.data() ?? {},
     );
-    if (existingInvoice.status === "draft") {
+    if (
+      existingInvoice.status === "draft" ||
+      existingInvoice.status === "sent"
+    ) {
       const canUpdateDirectDetails =
-        quotation.createdSource === "invoice_direct";
+        quotation.createdSource === "invoice_direct" ||
+        existingInvoice.status === "sent";
       const customer =
         canUpdateDirectDetails && input.customer
           ? input.customer
@@ -812,6 +816,11 @@ export async function createInvoiceFromQuotation(
       });
 
       const now = FieldValue.serverTimestamp();
+      const nextStatus = input.send
+        ? "sent"
+        : existingInvoice.status === "sent"
+          ? "sent"
+          : "draft";
       await docRef.update({
         serviceTitle,
         customer,
@@ -828,7 +837,7 @@ export async function createInvoiceFromQuotation(
         termsAndConditions: values.termsAndConditions,
         invoiceDate: input.invoiceDate.trim(),
         dueDate: input.dueDate.trim(),
-        status: input.send ? "sent" : "draft",
+        status: nextStatus,
         bookingId: booking?.bookingId ?? existingInvoice.bookingId,
         bookingCode: booking?.bookingCode ?? existingInvoice.bookingCode,
         bookingStatus: booking?.bookingStatus ?? existingInvoice.bookingStatus,
@@ -850,6 +859,22 @@ export async function createInvoiceFromQuotation(
       }
       await mirrorInvoiceToInspectionRequest(invoice);
       return { ok: true, invoice };
+    }
+
+    if (existingInvoice.status === "paid") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Paid invoices cannot be edited.",
+      };
+    }
+
+    if (existingInvoice.status === "cancelled") {
+      return {
+        ok: false,
+        status: 400,
+        error: "Cancelled invoices cannot be edited.",
+      };
     }
 
     if (!input.send) {

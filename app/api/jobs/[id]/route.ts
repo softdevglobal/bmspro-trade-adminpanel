@@ -27,6 +27,9 @@ import {
   notifyBusinessOfStaffOnLeaveAssignment,
 } from "@/lib/notifications/server";
 import { staffIsOffOnDate } from "@/lib/team/staff-off-day-server";
+import { getRequestDocumentRef } from "@/lib/inspection/request-document";
+import { COLLECTIONS } from "@/lib/onboarding/services/collections";
+import { FieldValue } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -38,6 +41,35 @@ function clockToMinutes(raw: unknown): number | null {
   const m = parts.length > 1 ? Number.parseInt(parts[1] ?? "", 10) : 0;
   if (Number.isNaN(h)) return null;
   return h * 60 + (Number.isNaN(m) ? 0 : m);
+}
+
+function sanitizeJobInstructionTasks(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0)
+    .slice(0, 20);
+}
+
+async function lookupBusinessService(
+  businessId: string,
+  serviceId: string,
+): Promise<{ name: string; businessType: string } | null> {
+  const snap = await adminDb
+    .collection(COLLECTIONS.SERVICES)
+    .doc(serviceId)
+    .get();
+  if (!snap.exists) return null;
+  const data = snap.data();
+  if (!data || data.businessId !== businessId) return null;
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const businessType =
+    typeof data.businessType === "string"
+      ? data.businessType
+      : typeof data.category === "string"
+        ? data.category
+        : "";
+  return name ? { name, businessType } : null;
 }
 
 async function resolveStaffAssignment(
@@ -612,6 +644,253 @@ export async function PATCH(
     });
 
     return NextResponse.json({ ok: true, booking: result.booking });
+  }
+
+  if (action === "update_details") {
+    const booking = await getBusinessBooking(auth.businessId, id);
+    if (!booking) {
+      return NextResponse.json(
+        { ok: false, error: "Job not found." },
+        { status: 404 },
+      );
+    }
+    if (booking.status === "cancelled" || booking.status === "completed") {
+      return NextResponse.json(
+        { ok: false, error: "Only active jobs can be edited." },
+        { status: 400 },
+      );
+    }
+
+    const customerRaw =
+      payload.customer && typeof payload.customer === "object"
+        ? (payload.customer as Record<string, unknown>)
+        : null;
+    const addressRaw =
+      payload.address && typeof payload.address === "object"
+        ? (payload.address as Record<string, unknown>)
+        : null;
+    const customRequestRaw =
+      payload.customRequest && typeof payload.customRequest === "object"
+        ? (payload.customRequest as Record<string, unknown>)
+        : null;
+    const slotRaw =
+      payload.slot && typeof payload.slot === "object"
+        ? (payload.slot as Record<string, unknown>)
+        : null;
+    const date =
+      typeof slotRaw?.date === "string" ? slotRaw.date.trim() : "";
+    const timeRangeRaw =
+      typeof slotRaw?.timeRange === "string" ? slotRaw.timeRange.trim() : "";
+    const timeRange =
+      timeRangeRaw === "morning" || timeRangeRaw === "afternoon"
+        ? timeRangeRaw
+        : "";
+    const startTime =
+      typeof payload.startTime === "string" ? payload.startTime.trim() : "";
+    const endTime =
+      typeof payload.endTime === "string" ? payload.endTime.trim() : "";
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !timeRange) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid date and time of day." },
+        { status: 400 },
+      );
+    }
+    const startMin = clockToMinutes(startTime);
+    const endMin = clockToMinutes(endTime);
+    if (startMin == null || endMin == null || endMin <= startMin) {
+      return NextResponse.json(
+        { ok: false, error: "Choose a valid time window." },
+        { status: 400 },
+      );
+    }
+
+    const scheduleResult = await updateBusinessBookingSchedule(auth.businessId, id, {
+      slot: { date, timeRange },
+      startTime,
+      endTime,
+    });
+    if (!scheduleResult.ok) {
+      return NextResponse.json(
+        { ok: false, error: scheduleResult.error },
+        { status: scheduleResult.status },
+      );
+    }
+
+    const customer = {
+      fullName:
+        typeof customerRaw?.fullName === "string"
+          ? customerRaw.fullName.trim()
+          : booking.customer.fullName,
+      email:
+        typeof customerRaw?.email === "string"
+          ? customerRaw.email.trim()
+          : booking.customer.email,
+      phone:
+        typeof customerRaw?.phone === "string"
+          ? customerRaw.phone.trim()
+          : booking.customer.phone,
+    };
+    const address = {
+      street:
+        typeof addressRaw?.street === "string"
+          ? addressRaw.street.trim()
+          : booking.address.street,
+      suburb:
+        typeof addressRaw?.suburb === "string"
+          ? addressRaw.suburb.trim()
+          : booking.address.suburb,
+      state:
+        typeof addressRaw?.state === "string"
+          ? addressRaw.state.trim()
+          : booking.address.state,
+      postcode:
+        typeof addressRaw?.postcode === "string"
+          ? addressRaw.postcode.trim()
+          : booking.address.postcode,
+    };
+    const requestTypeRaw =
+      typeof payload.requestType === "string" ? payload.requestType.trim() : "";
+    const requestType =
+      requestTypeRaw === "existing_service" || requestTypeRaw === "custom_quote"
+        ? requestTypeRaw
+        : booking.requestType;
+
+    let serviceId = booking.serviceId;
+    let serviceName = booking.serviceName;
+    let serviceBusinessType = booking.serviceBusinessType;
+    let customRequest = booking.customRequest;
+
+    if (requestType === "existing_service") {
+      const requestedServiceId =
+        typeof payload.serviceId === "string" ? payload.serviceId.trim() : "";
+      if (!requestedServiceId) {
+        return NextResponse.json(
+          { ok: false, error: "Select a service from the list." },
+          { status: 400 },
+        );
+      }
+      const service = await lookupBusinessService(
+        auth.businessId,
+        requestedServiceId,
+      );
+      if (!service) {
+        return NextResponse.json(
+          { ok: false, error: "Selected service is no longer available." },
+          { status: 400 },
+        );
+      }
+      serviceId = requestedServiceId;
+      serviceName = service.name;
+      serviceBusinessType = service.businessType || null;
+      customRequest = null;
+    } else {
+      const title =
+        typeof customRequestRaw?.title === "string"
+          ? customRequestRaw.title.trim()
+          : booking.customRequest?.title ?? "";
+      const description =
+        typeof customRequestRaw?.description === "string"
+          ? customRequestRaw.description.trim()
+          : booking.customRequest?.description ?? "";
+      if (title.length < 3) {
+        return NextResponse.json(
+          { ok: false, error: "Job title must be at least 3 characters." },
+          { status: 400 },
+        );
+      }
+      serviceId = null;
+      serviceName =
+        typeof payload.serviceName === "string" && payload.serviceName.trim()
+          ? payload.serviceName.trim()
+          : title;
+      serviceBusinessType = null;
+      customRequest = { title, description };
+    }
+
+    const ownerNote =
+      typeof payload.ownerNote === "string"
+        ? payload.ownerNote.trim()
+        : booking.ownerNote;
+    const instructionDescription =
+      typeof payload.jobInstructionsDescription === "string"
+        ? payload.jobInstructionsDescription.trim()
+        : booking.jobInstructionsDescription;
+    const instructionTasks =
+      payload.jobInstructionsTasks !== undefined
+        ? sanitizeJobInstructionTasks(payload.jobInstructionsTasks)
+        : booking.jobInstructionsTasks;
+
+    const detailUpdates = {
+      customer,
+      address,
+      requestType,
+      serviceId,
+      serviceName,
+      serviceBusinessType,
+      customRequest,
+      ownerNote: ownerNote || null,
+      jobInstructionsDescription: instructionDescription || null,
+      jobInstructionsTasks: instructionTasks,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    await adminDb.collection("jobs").doc(id).update(detailUpdates);
+
+    if (booking.inspectionRequestId) {
+      try {
+        const requestRef = await getRequestDocumentRef(
+          booking.inspectionRequestId,
+        );
+        if (requestRef) {
+          await requestRef.update({
+            requestType,
+            serviceId,
+            serviceName,
+            serviceBusinessType,
+            customRequest,
+            customer,
+            address,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      } catch {
+        // Job update already succeeded; linked request sync is best-effort.
+      }
+    }
+
+    if (booking.quotationId) {
+      try {
+        await adminDb
+          .collection("quotations")
+          .doc(booking.quotationId)
+          .update({
+            serviceTitle:
+              requestType === "custom_quote"
+                ? (customRequest?.title ?? serviceName)
+                : serviceName,
+            serviceDescription:
+              requestType === "custom_quote"
+                ? (customRequest?.description ?? null)
+                : null,
+            customer,
+            address,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+      } catch {
+        // Best-effort quotation sync.
+      }
+    }
+
+    const updated = await getBusinessBooking(auth.businessId, id);
+    if (!updated) {
+      return NextResponse.json(
+        { ok: false, error: "Job not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, booking: updated });
   }
 
   if (action === "cancel") {

@@ -105,10 +105,12 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
 }
 
 function BookingCardMenu({
+  editHref,
   onDelete,
   onCancel,
   onUndoCancel,
 }: {
+  editHref?: string | null;
   onDelete: () => void;
   onCancel?: () => void;
   onUndoCancel?: () => void;
@@ -151,6 +153,19 @@ function BookingCardMenu({
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
+          {editHref ? (
+            <Link
+              href={editHref}
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                edit_square
+              </span>
+              Edit job
+            </Link>
+          ) : null}
           {onCancel ? (
             <button
               type="button"
@@ -282,6 +297,11 @@ function BookingCard({
           </p>
         </div>
         <BookingCardMenu
+          editHref={
+            canCancelBooking(booking)
+              ? `/dashboard/jobs?edit=${encodeURIComponent(booking.id)}`
+              : null
+          }
           onDelete={onDelete}
           onCancel={canCancelBooking(booking) ? onCancel : undefined}
           onUndoCancel={
@@ -634,6 +654,7 @@ function BookingPreviewContent({
     Boolean(invoiceHref) &&
     booking.quotation?.status === "sent" &&
     booking.quotation.customerDecision !== "rejected";
+  const canEdit = booking.status !== "cancelled" && booking.status !== "completed";
 
   async function submitAssign() {
     if (!user) return;
@@ -1089,6 +1110,18 @@ function BookingPreviewContent({
 
         {mode === "review" ? (
           <div className="space-y-2">
+            {canEdit ? (
+              <Link
+                href={`/dashboard/jobs?edit=${encodeURIComponent(booking.id)}`}
+                onClick={onClose}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  edit_calendar
+                </span>
+                Edit job
+              </Link>
+            ) : null}
             {booking.status === "cancelled" ? (
               <button
                 type="button"

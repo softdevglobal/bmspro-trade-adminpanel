@@ -63,6 +63,16 @@ export async function GET(request: Request) {
     );
   }
 
-  const occupancy = await computeDaySlotOccupancy(auth.businessId, date);
+  const excludeBookingId =
+    new URL(request.url).searchParams.get("excludeBookingId")?.trim() ||
+    undefined;
+  const excludeRequestId =
+    new URL(request.url).searchParams.get("excludeRequestId")?.trim() ||
+    undefined;
+
+  const occupancy = await computeDaySlotOccupancy(auth.businessId, date, {
+    excludeBookingId,
+    excludeRequestId,
+  });
   return NextResponse.json({ ok: true, ...occupancy });
 }

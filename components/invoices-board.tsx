@@ -107,9 +107,11 @@ function InvoiceCardMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const editDraftHref = `/dashboard/invoices?invoice=${encodeURIComponent(
+  const editHref = `/dashboard/invoices?invoice=${encodeURIComponent(
     invoice.id,
   )}`;
+  const canEdit =
+    invoice.status === "draft" || invoice.status === "sent";
 
   useEffect(() => {
     if (!open) return;
@@ -146,9 +148,9 @@ function InvoiceCardMenu({
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
-          {invoice.status === "draft" ? (
+          {canEdit ? (
             <Link
-              href={editDraftHref}
+              href={editHref}
               role="menuitem"
               className={menuItemClass}
               onClick={() => setOpen(false)}
@@ -156,7 +158,7 @@ function InvoiceCardMenu({
               <span className="material-symbols-outlined text-[18px] text-primary">
                 edit_square
               </span>
-              Edit &amp; send draft
+              {invoice.status === "draft" ? "Edit & send draft" : "Edit invoice"}
             </Link>
           ) : null}
           {canCancelInvoice(invoice) ? (
@@ -320,9 +322,11 @@ function InvoicePreviewDrawer({
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
   const open = invoice !== null;
   useRegisterRightDrawer(open, "lg");
-  const editDraftHref = invoice
+  const editHref = invoice
     ? `/dashboard/invoices?invoice=${encodeURIComponent(invoice.id)}`
     : "/dashboard/invoices";
+  const canEditInvoice =
+    invoice?.status === "draft" || invoice?.status === "sent";
   const displayPhone = invoice
     ? formatAuPhoneDisplay(invoice.customer.phone)
     : "";
@@ -682,16 +686,18 @@ function InvoicePreviewDrawer({
                   {markPaidLoading ? "Marking paid…" : "Mark as paid"}
                 </button>
               ) : null}
-              {invoice.status === "draft" ? (
+              {canEditInvoice ? (
                 <Link
-                  href={editDraftHref}
+                  href={editHref}
                   onClick={onClose}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
                 >
                   <span className="material-symbols-outlined text-[20px]">
                     edit_square
                   </span>
-                  Edit &amp; send draft
+                  {invoice.status === "draft"
+                    ? "Edit & send draft"
+                    : "Edit invoice"}
                 </Link>
               ) : null}
               {markPaidError ? (

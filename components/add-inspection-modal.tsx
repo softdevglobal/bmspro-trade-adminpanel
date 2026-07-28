@@ -9,6 +9,10 @@ import {
 } from "@/components/calendar-visit-time-range";
 import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { JobAssignPicker } from "@/components/job-assign-picker";
+import {
+  JobInstructionsFields,
+  normalizeInstructionTasksForSubmit,
+} from "@/components/job-instructions-fields";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -1028,6 +1032,8 @@ function InspectionPreview({
   staffName = null,
   showAssignment = false,
   reviewStepNumber = 5,
+  instructionDescription = "",
+  instructionTasks = [],
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
@@ -1037,11 +1043,17 @@ function InspectionPreview({
   staffName?: string | null;
   showAssignment?: boolean;
   reviewStepNumber?: number;
+  instructionDescription?: string;
+  instructionTasks?: string[];
 }) {
   const jobSummary =
     form.requestType === "existing_service"
       ? selectedServiceName ?? "Selected service"
       : form.customTitle.trim();
+  const previewInstructionTasks =
+    normalizeInstructionTasksForSubmit(instructionTasks);
+  const hasInstructions =
+    Boolean(instructionDescription.trim()) || previewInstructionTasks.length > 0;
 
   return (
     <div className="space-y-4">
@@ -1126,6 +1138,25 @@ function InspectionPreview({
                     : "Unassigned — assign later from Requests"
             }
           />
+        </PreviewSection>
+      ) : null}
+
+      {variant === "job" && hasInstructions ? (
+        <PreviewSection title="Job instructions" icon="assignment">
+          {instructionDescription.trim() ? (
+            <PreviewRow
+              label="Description"
+              value={instructionDescription.trim()}
+            />
+          ) : null}
+          {previewInstructionTasks.length > 0 ? (
+            <PreviewRow
+              label="Tasks"
+              value={previewInstructionTasks
+                .map((task, index) => `${index + 1}. ${task}`)
+                .join("\n")}
+            />
+          ) : null}
         </PreviewSection>
       ) : null}
 
@@ -1218,6 +1249,8 @@ export function AddInspectionModal({
   const [form, setForm] = useState(createInitialForm);
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
   const [staffId, setStaffId] = useState("");
+  const [instructionDescription, setInstructionDescription] = useState("");
+  const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1269,6 +1302,8 @@ export function AddInspectionModal({
       setForm(createInitialForm(calendarWindow ?? null, modalVariant));
       setAssignTo(null);
       setStaffId("");
+      setInstructionDescription("");
+      setInstructionTasks([]);
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -1795,15 +1830,19 @@ export function AddInspectionModal({
     };
 
     const isJob = variant === "job";
-    const jobBody =
-      isJob && assignTo
-        ? {
-            assignTo,
-            ...(assignTo === "staff" ? { staffId } : {}),
-          }
-        : isJob
-          ? { assignTo: "none" }
-          : {};
+    const jobBody = isJob
+      ? {
+          ...(assignTo
+            ? {
+                assignTo,
+                ...(assignTo === "staff" ? { staffId } : {}),
+              }
+            : { assignTo: "none" }),
+          instructionDescription: instructionDescription.trim() || undefined,
+          instructionTasks:
+            normalizeInstructionTasksForSubmit(instructionTasks),
+        }
+      : {};
 
     try {
       const token = await user.getIdToken();
@@ -2341,6 +2380,8 @@ export function AddInspectionModal({
                   staffName={selectedStaffName}
                   showAssignment={showAssignmentStep}
                   reviewStepNumber={step}
+                  instructionDescription={instructionDescription}
+                  instructionTasks={instructionTasks}
                 />
               ) : null}
 
@@ -2365,6 +2406,15 @@ export function AddInspectionModal({
                     onAssignToChange={setAssignTo}
                     onStaffIdChange={setStaffId}
                   />
+                  {variant === "job" ? (
+                    <JobInstructionsFields
+                      description={instructionDescription}
+                      tasks={instructionTasks}
+                      disabled={submitting}
+                      onDescriptionChange={setInstructionDescription}
+                      onTasksChange={setInstructionTasks}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </>

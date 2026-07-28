@@ -378,11 +378,15 @@ export async function updateBusinessBookingSchedule(
     return { ok: false, status: 403, error: "Job not found." };
   }
 
-  if (current.status !== "scheduled" && current.status !== "ongoing") {
+  if (
+    current.status !== "awaiting" &&
+    current.status !== "scheduled" &&
+    current.status !== "ongoing"
+  ) {
     return {
       ok: false,
       status: 400,
-      error: "Only scheduled or in-progress jobs can be rescheduled.",
+      error: "Only active jobs can be rescheduled.",
     };
   }
 
