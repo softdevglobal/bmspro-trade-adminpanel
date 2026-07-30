@@ -456,21 +456,26 @@ export function BusinessDataExportSettings() {
                 <span className="mb-1.5 block font-body text-[12px] font-semibold text-on-surface-variant">
                   Dataset to import
                 </span>
-                <select
-                  value={importDataset}
-                  onChange={(event) =>
-                    setImportDataset(event.target.value as ExportDatasetKey)
-                  }
-                  className="w-full rounded-xl border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  {(Object.keys(EXPORT_DATASET_LABELS) as ExportDatasetKey[]).map(
-                    (key) => (
-                      <option key={key} value={key}>
-                        {EXPORT_DATASET_LABELS[key]}
-                      </option>
-                    ),
-                  )}
-                </select>
+                <div className="relative">
+                  <select
+                    value={importDataset}
+                    onChange={(event) =>
+                      setImportDataset(event.target.value as ExportDatasetKey)
+                    }
+                    className="w-full appearance-none rounded-xl border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 pr-9 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    {(Object.keys(EXPORT_DATASET_LABELS) as ExportDatasetKey[]).map(
+                      (key) => (
+                        <option key={key} value={key}>
+                          {EXPORT_DATASET_LABELS[key]}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-outline">
+                    expand_more
+                  </span>
+                </div>
               </label>
               <div className="flex items-end">
                 <button
