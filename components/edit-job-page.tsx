@@ -18,6 +18,7 @@ import {
 import type { BookingDetail } from "@/lib/bookings/types";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -310,8 +311,12 @@ export function EditJobPage({ jobId }: { jobId: string }) {
   const { user } = useAuth();
   const profile = useBusinessProfile();
   const timeZone = profile?.timezone;
-  const { requests, loading: customersLoading } = useInspectionRequests();
+  const { requests, loading: requestCustomersLoading } = useInspectionRequests();
   const { bookings } = useBookings();
+  const { customers: registeredCustomers, loading: registeredCustomersLoading } =
+    useRegisteredCustomers();
+  const customersLoading =
+    requestCustomersLoading || registeredCustomersLoading;
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -351,8 +356,8 @@ export function EditJobPage({ jobId }: { jobId: string }) {
   const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests, bookings),
-    [requests, bookings],
+    () => buildCustomerOptions(requests, bookings, registeredCustomers),
+    [requests, bookings, registeredCustomers],
   );
   const filteredCustomers = useMemo(
     () => filterCustomerOptions(customerOptions, customerSearch),

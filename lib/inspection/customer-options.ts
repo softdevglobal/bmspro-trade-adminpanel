@@ -119,9 +119,19 @@ function upsertCustomerRecord(
   mergeCustomerRecord(existing, input);
 }
 
+/** Registered business customers (e.g. from `/api/customers`). */
+export type RegisteredCustomerContact = {
+  fullName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
+};
+
 export function buildCustomerOptions(
   requests: InspectionRequestDetail[],
   jobs: BookingDetail[] = [],
+  registered: RegisteredCustomerContact[] = [],
 ): CustomerOption[] {
   const map = new Map<string, CustomerOptionRecord>();
 
@@ -146,6 +156,22 @@ export function buildCustomerOptions(
       phone: job.customer.phone?.trim() || "",
       address: job.address,
       activity,
+    });
+  }
+
+  for (const profile of registered) {
+    const contact: InspectionCustomer = {
+      fullName: profile.fullName?.trim() || "Unknown",
+      email: profile.email?.trim() || "",
+      phone: profile.phone?.trim() || "",
+    };
+    const key = customerKeyFromContact(contact);
+    upsertCustomerRecord(map, key, {
+      fullName: contact.fullName,
+      email: contact.email,
+      phone: contact.phone,
+      address: null,
+      activity: profile.updatedAt ?? profile.createdAt ?? 0,
     });
   }
 

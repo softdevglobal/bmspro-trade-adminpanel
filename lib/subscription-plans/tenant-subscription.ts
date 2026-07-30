@@ -41,6 +41,75 @@ export async function countBusinessStaff(businessId: string): Promise<number> {
   return snapshot.size;
 }
 
+/** Plan staff cap from a business doc. Negative values mean unlimited. */
+export function resolveStaffLimitFromBusinessData(
+  data: Record<string, unknown>,
+): number {
+  if (typeof data.staffLimit === "number" && Number.isFinite(data.staffLimit)) {
+    return data.staffLimit;
+  }
+  const planRaw = data.plan as { staff?: number } | null | undefined;
+  if (typeof planRaw?.staff === "number" && Number.isFinite(planRaw.staff)) {
+    return planRaw.staff;
+  }
+  return 0;
+}
+
+/**
+ * Prefer the live subscription plan's staff cap so Team management matches
+ * Available Plans even if businesses.staffLimit is stale after a plan edit.
+ */
+export async function getBusinessStaffLimit(
+  businessId: string,
+): Promise<number> {
+  const snap = await adminDb.collection("businesses").doc(businessId).get();
+  if (!snap.exists) return 0;
+  const data = snap.data() ?? {};
+  const planId = resolveStoredPlanId(data);
+  if (planId) {
+    const plan = await getSubscriptionPlanById(planId);
+    if (plan && typeof plan.staff === "number" && Number.isFinite(plan.staff)) {
+      return plan.staff;
+    }
+  }
+  return resolveStaffLimitFromBusinessData(data);
+}
+
+/**
+ * Blocks creating another staff user when the tenant is at/over the plan seat
+ * cap. Unlimited plans use staffLimit < 0.
+ */
+export async function assertStaffSeatAvailable(businessId: string): Promise<
+  | { ok: true; staffCount: number; staffLimit: number }
+  | {
+      ok: false;
+      error: string;
+      staffCount: number;
+      staffLimit: number;
+    }
+> {
+  const [staffCount, staffLimit] = await Promise.all([
+    countBusinessStaff(businessId),
+    getBusinessStaffLimit(businessId),
+  ]);
+
+  if (staffLimit < 0 || staffCount < staffLimit) {
+    return { ok: true, staffCount, staffLimit };
+  }
+
+  const seatLabel =
+    staffLimit === 1 ? "1 staff member" : `${staffLimit} staff members`;
+  return {
+    ok: false,
+    error:
+      staffLimit <= 0
+        ? "Your plan does not include staff seats. Upgrade your subscription to add team members."
+        : `Your plan allows ${seatLabel}. You already have ${staffCount}. Upgrade your plan or remove a staff member before adding another.`,
+    staffCount,
+    staffLimit,
+  };
+}
+
 function resolveStoredPlanId(data: Record<string, unknown>): string | null {
   if (typeof data.planId === "string" && data.planId.trim()) {
     return data.planId.trim();
@@ -73,12 +142,7 @@ export async function getTenantSubscriptionSnapshot(
     | { name?: string; priceLabel?: string }
     | null
     | undefined;
-  const staffLimit =
-    typeof data.staffLimit === "number" && Number.isFinite(data.staffLimit)
-      ? data.staffLimit
-      : typeof (planRaw as { staff?: number } | undefined)?.staff === "number"
-        ? (planRaw as { staff: number }).staff
-        : 0;
+  let staffLimit = resolveStaffLimitFromBusinessData(data);
 
   const staffCountPromise = countBusinessStaff(businessId);
 
@@ -136,6 +200,9 @@ export async function getTenantSubscriptionSnapshot(
   const bundledSmsPromise = planId
     ? getSubscriptionPlanById(planId).then(async (plan) => {
         if (!plan) return;
+        if (typeof plan.staff === "number" && Number.isFinite(plan.staff)) {
+          staffLimit = plan.staff;
+        }
         const [enriched] = await enrichPlansWithBundledSms([plan]);
         const bundled = enriched.bundledSmsPackage;
         if (bundled) {

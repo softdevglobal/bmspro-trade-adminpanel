@@ -13,6 +13,7 @@ import {
   type CustomerWorkContext,
   type CustomerWorkDisplayStatus,
 } from "@/lib/customer/work-status";
+import type { CustomerProfile } from "@/lib/customer/types";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import {
   BOOKING_STATUS_LABELS,
@@ -62,16 +63,25 @@ const WORK_STATUS_TONE: Record<CustomerWorkDisplayStatus, string> = {
   job_completed: "bg-sky-50 text-sky-700 border-sky-200",
 };
 
-function customerKey(request: InspectionRequestDetail): string {
-  const email = request.customer.email?.trim().toLowerCase();
+function customerKeyFromContact(input: {
+  fullName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}): string {
+  const email = input.email?.trim().toLowerCase();
   if (email) return `email:${email}`;
-  const phone = request.customer.phone?.replace(/\D/g, "");
+  const phone = input.phone?.replace(/\D/g, "");
   if (phone) return `phone:${phone}`;
-  return `name:${request.customer.fullName.trim().toLowerCase()}`;
+  return `name:${(input.fullName ?? "").trim().toLowerCase() || "unknown"}`;
+}
+
+function customerKey(request: InspectionRequestDetail): string {
+  return customerKeyFromContact(request.customer);
 }
 
 function buildCustomerSummaries(
   requests: InspectionRequestDetail[],
+  registeredCustomers: CustomerProfile[] = [],
 ): CustomerSummary[] {
   const map = new Map<string, CustomerSummary>();
 
@@ -106,6 +116,38 @@ function buildCustomerSummaries(
     }
     if (!existing.phone && request.customer.phone) {
       existing.phone = request.customer.phone.trim();
+    }
+  }
+
+  for (const profile of registeredCustomers) {
+    const key = customerKeyFromContact(profile);
+    const existing = map.get(key);
+    const activity = profile.updatedAt ?? profile.createdAt ?? 0;
+
+    if (!existing) {
+      map.set(key, {
+        id: key,
+        fullName: profile.fullName?.trim() || "Unknown customer",
+        email: profile.email?.trim() || "",
+        phone: profile.phone?.trim() || "",
+        requestCount: 0,
+        lastActivity: activity,
+        requests: [],
+      });
+      continue;
+    }
+
+    if (!existing.fullName && profile.fullName) {
+      existing.fullName = profile.fullName.trim();
+    }
+    if (!existing.email && profile.email) {
+      existing.email = profile.email.trim();
+    }
+    if (!existing.phone && profile.phone) {
+      existing.phone = profile.phone.trim();
+    }
+    if (activity > existing.lastActivity) {
+      existing.lastActivity = activity;
     }
   }
 
@@ -339,6 +381,9 @@ export function CustomersBoard() {
   const { requests, loading, error } = useInspectionRequests();
   const { bookings } = useBookings();
   const [invoices, setInvoices] = useState<InvoiceDetail[]>([]);
+  const [registeredCustomers, setRegisteredCustomers] = useState<
+    CustomerProfile[]
+  >([]);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -362,9 +407,33 @@ export function CustomersBoard() {
     }
   }, [user]);
 
+  const loadRegisteredCustomers = useCallback(async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/customers", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        customers?: CustomerProfile[];
+      };
+      if (response.ok && data.ok) {
+        setRegisteredCustomers(data.customers ?? []);
+      }
+    } catch {
+      // Keep request-derived customers when the registry cannot load.
+    }
+  }, [user]);
+
   useEffect(() => {
     void loadInvoices();
   }, [loadInvoices]);
+
+  useEffect(() => {
+    void loadRegisteredCustomers();
+  }, [loadRegisteredCustomers]);
 
   useEffect(() => {
     if (selectedId) {
@@ -385,8 +454,8 @@ export function CustomersBoard() {
   );
 
   const customers = useMemo(
-    () => buildCustomerSummaries(requests),
-    [requests],
+    () => buildCustomerSummaries(requests, registeredCustomers),
+    [requests, registeredCustomers],
   );
 
   const filtered = useMemo(() => {
@@ -466,7 +535,8 @@ export function CustomersBoard() {
               No customers yet
             </p>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
-              Customers appear here when they submit an request.
+              Customers appear here when they submit a request, or when you
+              import them from Settings.
             </p>
           </div>
         ) : (
@@ -678,6 +748,16 @@ function CustomerPreviewContent({
             Work history
           </h4>
 
+          {sortedRequests.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low px-4 py-6 text-center">
+              <p className="font-body text-[13px] font-semibold text-on-surface">
+                No work history yet
+              </p>
+              <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                This customer was imported or registered, but has no requests yet.
+              </p>
+            </div>
+          ) : (
           <ul className="space-y-2">
             {sortedRequests.map((request) => {
               const expanded = expandedRequestId === request.id;
@@ -812,6 +892,7 @@ function CustomerPreviewContent({
               );
             })}
           </ul>
+          )}
         </div>
       </div>
     </div>

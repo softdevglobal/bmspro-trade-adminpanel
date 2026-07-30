@@ -88,6 +88,7 @@ export function TeamStaffForm() {
   const [welcomeEmailSent, setWelcomeEmailSent] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [staffLimit, setStaffLimit] = useState<number | null>(null);
   const [isLoadingStaff, setIsLoadingStaff] = useState(false);
   const [staffListError, setStaffListError] = useState<string | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -119,6 +120,21 @@ export function TeamStaffForm() {
       return matchesSearch;
     });
   }, [search, staffMembers]);
+
+  const atStaffLimit = useMemo(() => {
+    if (staffLimit === null || staffLimit < 0) return false;
+    return staffMembers.length >= staffLimit;
+  }, [staffLimit, staffMembers.length]);
+
+  const staffLimitMessage = useMemo(() => {
+    if (!atStaffLimit || staffLimit === null) return null;
+    if (staffLimit <= 0) {
+      return "Your plan does not include staff seats. Upgrade your subscription to add team members.";
+    }
+    const seatLabel =
+      staffLimit === 1 ? "1 staff member" : `${staffLimit} staff members`;
+    return `Your plan allows ${seatLabel}. Upgrade your plan or remove a staff member to add another.`;
+  }, [atStaffLimit, staffLimit]);
 
   function updateField(
     field: "fullName" | "phone" | "email",
@@ -207,6 +223,13 @@ export function TeamStaffForm() {
   }
 
   function openSetup() {
+    if (atStaffLimit) {
+      setStaffListError(
+        staffLimitMessage ??
+          "Your plan staff limit has been reached. Upgrade to add more team members.",
+      );
+      return;
+    }
     resetFormState();
     setSetupMode("create");
     setEditTarget(null);
@@ -258,6 +281,7 @@ export function TeamStaffForm() {
       const data = (await response.json()) as {
         ok?: boolean;
         staff?: StaffMember[];
+        staffLimit?: number;
         error?: string;
       };
 
@@ -271,6 +295,11 @@ export function TeamStaffForm() {
           canget_qutaion: member.canget_qutaion === true,
           photoUrl: member.photoUrl ?? null,
         })),
+      );
+      setStaffLimit(
+        typeof data.staffLimit === "number" && Number.isFinite(data.staffLimit)
+          ? data.staffLimit
+          : null,
       );
     } catch (loadError) {
       setStaffListError(
@@ -485,6 +514,9 @@ export function TeamStaffForm() {
       <StaffMembersList
         members={filteredStaffMembers}
         totalCount={staffMembers.length}
+        staffLimit={staffLimit}
+        atStaffLimit={atStaffLimit}
+        staffLimitMessage={staffLimitMessage}
         search={search}
         isLoading={isLoadingStaff}
         error={staffListError}
@@ -582,6 +614,8 @@ export function TeamStaffForm() {
           name={successName}
           mode={successMode}
           welcomeEmailSent={welcomeEmailSent}
+          canAddAnother={!atStaffLimit}
+          addAnotherBlockedMessage={staffLimitMessage}
           onAddAnother={addAnotherStaffMember}
           onClose={() => {
             setSuccessName(null);
@@ -1218,6 +1252,9 @@ function ReviewMetaRow({
 function StaffMembersList({
   members,
   totalCount,
+  staffLimit,
+  atStaffLimit,
+  staffLimitMessage,
   search,
   isLoading,
   error,
@@ -1231,6 +1268,9 @@ function StaffMembersList({
 }: {
   members: StaffMember[];
   totalCount: number;
+  staffLimit: number | null;
+  atStaffLimit: boolean;
+  staffLimitMessage: string | null;
   search: string;
   isLoading: boolean;
   error: string | null;
@@ -1250,7 +1290,9 @@ function StaffMembersList({
             Staff members
           </h3>
           <p className="font-body text-body-md text-on-surface-variant">
-            {totalCount} {totalCount === 1 ? "person" : "people"} saved as staff.
+            {staffLimit !== null && staffLimit >= 0
+              ? `${totalCount} of ${staffLimit} plan seats used.`
+              : `${totalCount} ${totalCount === 1 ? "person" : "people"} saved as staff.`}
           </p>
         </div>
 
@@ -1285,13 +1327,32 @@ function StaffMembersList({
           <button
             type="button"
             onClick={onSetup}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 font-body text-[14px] font-semibold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90 sm:h-10 sm:w-auto sm:text-[13px]"
+            disabled={atStaffLimit}
+            title={atStaffLimit ? (staffLimitMessage ?? undefined) : undefined}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 font-body text-[14px] font-semibold text-on-primary shadow-md shadow-primary/20 transition-all hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:h-10 sm:w-auto sm:text-[13px]"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
             Setup staff
           </button>
         </div>
       </div>
+
+      {atStaffLimit && staffLimitMessage ? (
+        <div className="flex items-start gap-2 rounded-lg border border-primary/25 bg-primary-fixed/40 px-3 py-2.5 font-body text-[13px] text-on-surface">
+          <span className="material-symbols-outlined mt-0.5 text-[18px] text-primary">
+            info
+          </span>
+          <span>
+            {staffLimitMessage}{" "}
+            <a
+              href="/dashboard/subscription"
+              className="font-semibold text-primary underline-offset-2 hover:underline"
+            >
+              View subscription
+            </a>
+          </span>
+        </div>
+      ) : null}
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
@@ -1328,7 +1389,8 @@ function StaffMembersList({
             <button
               type="button"
               onClick={onSetup}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary"
+              disabled={atStaffLimit}
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="material-symbols-outlined text-[18px]">add</span>
               Setup staff
@@ -2043,12 +2105,16 @@ function SuccessModal({
   name,
   mode,
   welcomeEmailSent,
+  canAddAnother = true,
+  addAnotherBlockedMessage = null,
   onAddAnother,
   onClose,
 }: {
   name: string;
   mode: SetupMode;
   welcomeEmailSent?: boolean;
+  canAddAnother?: boolean;
+  addAnotherBlockedMessage?: string | null;
   onAddAnother: () => void;
   onClose: () => void;
 }) {
@@ -2082,7 +2148,7 @@ function SuccessModal({
         ) : (
           <div className="mb-8" />
         )}
-        {mode === "create" ? (
+        {mode === "create" && canAddAnother ? (
           <button
             type="button"
             onClick={onAddAnother}
@@ -2091,10 +2157,15 @@ function SuccessModal({
             Add Another Member
           </button>
         ) : null}
+        {mode === "create" && !canAddAnother && addAnotherBlockedMessage ? (
+          <p className="mb-4 font-body text-[13px] text-on-surface-variant">
+            {addAnotherBlockedMessage}
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={onClose}
-          className={`${mode === "create" ? "mt-4" : ""} w-full rounded-xl py-3 font-body font-bold text-primary transition-all hover:bg-surface-container-low`}
+          className={`${mode === "create" && canAddAnother ? "mt-4" : ""} w-full rounded-xl py-3 font-body font-bold text-primary transition-all hover:bg-surface-container-low`}
         >
           Back to Team
         </button>

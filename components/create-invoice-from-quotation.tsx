@@ -15,6 +15,7 @@ import { QuotationDocumentPreview } from "@/components/quotation-document-previe
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { printDocumentPreview } from "@/lib/pdf/print-document-preview";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -214,6 +215,7 @@ export function CreateInvoiceFromQuotation({
   const { user } = useAuth();
   const business = useBusinessProfile();
   const { requests } = useInspectionRequests();
+  const { customers: registeredCustomers } = useRegisteredCustomers();
   const timeZone = business?.timezone;
 
   const [tab, setTab] = useState<Tab>("create");
@@ -589,8 +591,8 @@ export function CreateInvoiceFromQuotation({
   const directMode = direct || isDirectDraftInvoice;
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests),
-    [requests],
+    () => buildCustomerOptions(requests, [], registeredCustomers),
+    [requests, registeredCustomers],
   );
 
   const filteredCustomers = useMemo(

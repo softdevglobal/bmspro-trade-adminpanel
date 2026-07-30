@@ -20,6 +20,7 @@ import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hou
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useBookings } from "@/lib/bookings/use-bookings";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -373,17 +374,6 @@ function FieldFeedback({
   return null;
 }
 
-function normalizeBudgetInput(value: string): string {
-  let cleaned = value.replace(/[^\d.]/g, "");
-  const dot = cleaned.indexOf(".");
-  if (dot !== -1) {
-    cleaned =
-      cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
-  }
-  const [whole, frac = ""] = cleaned.split(".");
-  return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
-}
-
 function StepHeader({
   step,
   title,
@@ -631,6 +621,17 @@ function RequestTypeCard({
 
 function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
   return sortInspectionSlots(slots);
+}
+
+function serviceTasksToInstructionTasks(
+  service: BusinessServiceDetail | null,
+): string[] {
+  if (!service) return [];
+  return normalizeInstructionTasksForSubmit(
+    [...service.tasks]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((task) => task.title),
+  );
 }
 
 function slotTimeIsSelected(slot: InspectionSlot): boolean {
@@ -1071,9 +1072,6 @@ function InspectionPreview({
         {form.customerNotes.trim() ? (
           <PreviewRow label="Notes" value={form.customerNotes.trim()} />
         ) : null}
-        {form.budgetAud.trim() ? (
-          <PreviewRow label="Budget" value={`Aus $ ${form.budgetAud.trim()}`} />
-        ) : null}
       </PreviewSection>
 
       <PreviewSection title="Service address" icon="location_on">
@@ -1232,8 +1230,12 @@ export function AddInspectionModal({
   const customerFirstFlow = true;
   const { user } = useAuth();
   const profile = useBusinessProfile();
-  const { requests, loading: customersLoading } = useInspectionRequests();
+  const { requests, loading: requestCustomersLoading } = useInspectionRequests();
   const { bookings } = useBookings();
+  const { customers: registeredCustomers, loading: registeredCustomersLoading } =
+    useRegisteredCustomers();
+  const customersLoading =
+    requestCustomersLoading || registeredCustomersLoading;
   const { staff, loading: staffLoading, reload: reloadStaff } =
     useBusinessStaffSummary();
   const { workingHours, loading: workingHoursLoading } =
@@ -1244,6 +1246,8 @@ export function AddInspectionModal({
   const [staffId, setStaffId] = useState("");
   const [instructionDescription, setInstructionDescription] = useState("");
   const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
+  const [instructionTaskSourceServiceId, setInstructionTaskSourceServiceId] =
+    useState<string | null>(null);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1263,8 +1267,8 @@ export function AddInspectionModal({
   const showAssignmentStep = stepFlow.some((entry) => entry.kind === "assign");
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests, bookings),
-    [requests, bookings],
+    () => buildCustomerOptions(requests, bookings, registeredCustomers),
+    [requests, bookings, registeredCustomers],
   );
   const filteredCustomers = useMemo(
     () => filterCustomerOptions(customerOptions, customerSearch),
@@ -1297,6 +1301,7 @@ export function AddInspectionModal({
       setStaffId("");
       setInstructionDescription("");
       setInstructionTasks([]);
+      setInstructionTaskSourceServiceId(null);
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -1374,6 +1379,41 @@ export function AddInspectionModal({
     if (!open || !showAssignmentStep) return;
     void reloadStaff();
   }, [open, showAssignmentStep, reloadStaff]);
+
+  useEffect(() => {
+    if (variant !== "job") return;
+
+    if (form.requestType !== "existing_service") {
+      setInstructionTaskSourceServiceId(null);
+      return;
+    }
+
+    const nextServiceId = selectedService?.id ?? null;
+    if (!nextServiceId) return;
+
+    const nextTasks = serviceTasksToInstructionTasks(selectedService);
+    const currentTasks = normalizeInstructionTasksForSubmit(instructionTasks);
+    const shouldReplaceTasks =
+      currentTasks.length === 0 ||
+      instructionTaskSourceServiceId !== nextServiceId;
+
+    if (shouldReplaceTasks) {
+      const unchanged =
+        currentTasks.length === nextTasks.length &&
+        currentTasks.every((task, index) => task === nextTasks[index]);
+      if (!unchanged) {
+        setInstructionTasks(nextTasks);
+      }
+    }
+
+    setInstructionTaskSourceServiceId(nextServiceId);
+  }, [
+    form.requestType,
+    instructionTaskSourceServiceId,
+    instructionTasks,
+    selectedService,
+    variant,
+  ]);
 
   const serviceValid =
     form.requestType === "existing_service"
@@ -2062,10 +2102,19 @@ export function AddInspectionModal({
                         invalid={showFieldError("serviceId")}
                         errorMessage={fieldErrorMessage("serviceId")}
                         onSelect={(serviceId) => {
+                        const nextService =
+                          activeServices.find((service) => service.id === serviceId) ??
+                          null;
                           setForm((prev) => ({
                             ...prev,
                             selectedServiceId: serviceId,
                           }));
+                        if (variant === "job") {
+                          setInstructionTasks(
+                            serviceTasksToInstructionTasks(nextService),
+                          );
+                          setInstructionTaskSourceServiceId(serviceId);
+                        }
                           touchField("serviceId");
                           setError(null);
                         }}
@@ -2164,43 +2213,6 @@ export function AddInspectionModal({
                           placeholder="Access instructions, urgency, materials, anything else we should know…"
                           className={`${INPUT_CLASS} resize-y`}
                           maxLength={2000}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className={LABEL_CLASS}>Budget</span>
-                        <div className="relative mt-1">
-                          <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 font-body text-[14px] font-semibold text-on-surface">
-                            Aus $
-                          </span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={form.budgetAud}
-                            onChange={(event) => {
-                              setForm((prev) => ({
-                                ...prev,
-                                budgetAud: normalizeBudgetInput(
-                                  event.target.value,
-                                ),
-                              }));
-                              setError(null);
-                            }}
-                            onBlur={() => touchField("budgetAud")}
-                            placeholder="e.g. 2500"
-                            className={`${inputClassName(showFieldError("budgetAud"))} mt-0 pl-[3.65rem] pr-3`}
-                            maxLength={12}
-                            aria-invalid={showFieldError("budgetAud")}
-                            aria-describedby="budgetAud-feedback"
-                          />
-                        </div>
-                        <FieldFeedback
-                          error={fieldErrorMessage("budgetAud")}
-                          hint={
-                            !fieldErrorMessage("budgetAud")
-                              ? "Rough amount the customer has in mind (optional)."
-                              : undefined
-                          }
-                          errorId="budgetAud-feedback"
                         />
                       </label>
                     </div>

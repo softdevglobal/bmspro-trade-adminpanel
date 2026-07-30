@@ -4,6 +4,10 @@ import { sendStaffWelcomeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import {
+  assertStaffSeatAvailable,
+  getBusinessStaffLimit,
+} from "@/lib/subscription-plans/tenant-subscription";
+import {
   findStaffOwnerPhoneConflict,
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
@@ -394,6 +398,19 @@ export async function POST(request: Request) {
     );
   }
 
+  const seatCheck = await assertStaffSeatAvailable(auth.businessId);
+  if (!seatCheck.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: seatCheck.error,
+        staffCount: seatCheck.staffCount,
+        staffLimit: seatCheck.staffLimit,
+      },
+      { status: 403 },
+    );
+  }
+
   let authUid: string | null = null;
   const now = FieldValue.serverTimestamp();
 
@@ -559,9 +576,13 @@ export async function GET(request: Request) {
       createdAt: member.createdAt,
     }));
 
+  const staffLimit = await getBusinessStaffLimit(auth.businessId);
+
   return NextResponse.json({
     ok: true,
     staff,
+    staffCount: staff.length,
+    staffLimit,
     serviceAreas: summaryOnly ? [] : serviceAreas,
   });
 }
