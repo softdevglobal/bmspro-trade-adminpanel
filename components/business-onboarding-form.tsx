@@ -6,7 +6,6 @@ import {
   BUSINESS_STRUCTURES,
   BUSINESS_TYPES,
   DEFAULT_AU_TIMEZONE,
-  MAX_SERVICE_AREAS,
   ADMIN_CREATED_DEFAULT_PASSWORD,
   iconForBusinessType,
   formatAbn,
@@ -373,10 +372,10 @@ export const BusinessOnboardingForm = forwardRef<
   }
 
   function addServiceArea() {
-    setForm((current) => {
-      if (current.serviceAreas.length >= MAX_SERVICE_AREAS) return current;
-      return { ...current, serviceAreas: [...current.serviceAreas, ""] };
-    });
+    setForm((current) => ({
+      ...current,
+      serviceAreas: [...current.serviceAreas, ""],
+    }));
   }
 
   function removeServiceArea(index: number) {

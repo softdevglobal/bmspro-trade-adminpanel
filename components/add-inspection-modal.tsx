@@ -9,6 +9,10 @@ import {
 } from "@/components/calendar-visit-time-range";
 import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { JobAssignPicker } from "@/components/job-assign-picker";
+import {
+  JobInstructionsFields,
+  normalizeInstructionTasksForSubmit,
+} from "@/components/job-instructions-fields";
 import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -16,6 +20,7 @@ import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hou
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useBookings } from "@/lib/bookings/use-bookings";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -255,16 +260,9 @@ function computeFieldErrors(
     }
   } else {
     const title = form.customTitle.trim();
-    if (!title) errors.customTitle = "Job title is required.";
+    if (!title) errors.customTitle = "Scope of Work is required.";
     else if (title.length < 3) {
       errors.customTitle = "Use at least 3 characters.";
-    }
-
-    const description = form.customDescription.trim();
-    if (!description) {
-      errors.customDescription = "Describe the work needed.";
-    } else if (description.length < 10) {
-      errors.customDescription = `Add more detail (${description.length}/10 characters minimum).`;
     }
   }
 
@@ -374,17 +372,6 @@ function FieldFeedback({
     );
   }
   return null;
-}
-
-function normalizeBudgetInput(value: string): string {
-  let cleaned = value.replace(/[^\d.]/g, "");
-  const dot = cleaned.indexOf(".");
-  if (dot !== -1) {
-    cleaned =
-      cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, "");
-  }
-  const [whole, frac = ""] = cleaned.split(".");
-  return frac ? `${whole}.${frac.slice(0, 2)}` : whole;
 }
 
 function StepHeader({
@@ -634,6 +621,17 @@ function RequestTypeCard({
 
 function sortPreferredSlots(slots: InspectionSlot[]): InspectionSlot[] {
   return sortInspectionSlots(slots);
+}
+
+function serviceTasksToInstructionTasks(
+  service: BusinessServiceDetail | null,
+): string[] {
+  if (!service) return [];
+  return normalizeInstructionTasksForSubmit(
+    [...service.tasks]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((task) => task.title),
+  );
 }
 
 function slotTimeIsSelected(slot: InspectionSlot): boolean {
@@ -1028,6 +1026,8 @@ function InspectionPreview({
   staffName = null,
   showAssignment = false,
   reviewStepNumber = 5,
+  instructionDescription = "",
+  instructionTasks = [],
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
@@ -1037,11 +1037,17 @@ function InspectionPreview({
   staffName?: string | null;
   showAssignment?: boolean;
   reviewStepNumber?: number;
+  instructionDescription?: string;
+  instructionTasks?: string[];
 }) {
   const jobSummary =
     form.requestType === "existing_service"
       ? selectedServiceName ?? "Selected service"
       : form.customTitle.trim();
+  const previewInstructionTasks =
+    normalizeInstructionTasksForSubmit(instructionTasks);
+  const hasInstructions =
+    Boolean(instructionDescription.trim()) || previewInstructionTasks.length > 0;
 
   return (
     <div className="space-y-4">
@@ -1065,9 +1071,6 @@ function InspectionPreview({
         ) : null}
         {form.customerNotes.trim() ? (
           <PreviewRow label="Notes" value={form.customerNotes.trim()} />
-        ) : null}
-        {form.budgetAud.trim() ? (
-          <PreviewRow label="Budget" value={`Aus $ ${form.budgetAud.trim()}`} />
         ) : null}
       </PreviewSection>
 
@@ -1126,6 +1129,25 @@ function InspectionPreview({
                     : "Unassigned — assign later from Requests"
             }
           />
+        </PreviewSection>
+      ) : null}
+
+      {variant === "job" && hasInstructions ? (
+        <PreviewSection title="Job instructions" icon="assignment">
+          {instructionDescription.trim() ? (
+            <PreviewRow
+              label="Description"
+              value={instructionDescription.trim()}
+            />
+          ) : null}
+          {previewInstructionTasks.length > 0 ? (
+            <PreviewRow
+              label="Tasks"
+              value={previewInstructionTasks
+                .map((task, index) => `${index + 1}. ${task}`)
+                .join("\n")}
+            />
+          ) : null}
         </PreviewSection>
       ) : null}
 
@@ -1208,8 +1230,12 @@ export function AddInspectionModal({
   const customerFirstFlow = true;
   const { user } = useAuth();
   const profile = useBusinessProfile();
-  const { requests, loading: customersLoading } = useInspectionRequests();
+  const { requests, loading: requestCustomersLoading } = useInspectionRequests();
   const { bookings } = useBookings();
+  const { customers: registeredCustomers, loading: registeredCustomersLoading } =
+    useRegisteredCustomers();
+  const customersLoading =
+    requestCustomersLoading || registeredCustomersLoading;
   const { staff, loading: staffLoading, reload: reloadStaff } =
     useBusinessStaffSummary();
   const { workingHours, loading: workingHoursLoading } =
@@ -1218,6 +1244,10 @@ export function AddInspectionModal({
   const [form, setForm] = useState(createInitialForm);
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
   const [staffId, setStaffId] = useState("");
+  const [instructionDescription, setInstructionDescription] = useState("");
+  const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
+  const [instructionTaskSourceServiceId, setInstructionTaskSourceServiceId] =
+    useState<string | null>(null);
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1237,8 +1267,8 @@ export function AddInspectionModal({
   const showAssignmentStep = stepFlow.some((entry) => entry.kind === "assign");
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests, bookings),
-    [requests, bookings],
+    () => buildCustomerOptions(requests, bookings, registeredCustomers),
+    [requests, bookings, registeredCustomers],
   );
   const filteredCustomers = useMemo(
     () => filterCustomerOptions(customerOptions, customerSearch),
@@ -1269,6 +1299,9 @@ export function AddInspectionModal({
       setForm(createInitialForm(calendarWindow ?? null, modalVariant));
       setAssignTo(null);
       setStaffId("");
+      setInstructionDescription("");
+      setInstructionTasks([]);
+      setInstructionTaskSourceServiceId(null);
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -1347,11 +1380,45 @@ export function AddInspectionModal({
     void reloadStaff();
   }, [open, showAssignmentStep, reloadStaff]);
 
+  useEffect(() => {
+    if (variant !== "job") return;
+
+    if (form.requestType !== "existing_service") {
+      setInstructionTaskSourceServiceId(null);
+      return;
+    }
+
+    const nextServiceId = selectedService?.id ?? null;
+    if (!nextServiceId) return;
+
+    const nextTasks = serviceTasksToInstructionTasks(selectedService);
+    const currentTasks = normalizeInstructionTasksForSubmit(instructionTasks);
+    const shouldReplaceTasks =
+      currentTasks.length === 0 ||
+      instructionTaskSourceServiceId !== nextServiceId;
+
+    if (shouldReplaceTasks) {
+      const unchanged =
+        currentTasks.length === nextTasks.length &&
+        currentTasks.every((task, index) => task === nextTasks[index]);
+      if (!unchanged) {
+        setInstructionTasks(nextTasks);
+      }
+    }
+
+    setInstructionTaskSourceServiceId(nextServiceId);
+  }, [
+    form.requestType,
+    instructionTaskSourceServiceId,
+    instructionTasks,
+    selectedService,
+    variant,
+  ]);
+
   const serviceValid =
     form.requestType === "existing_service"
       ? form.selectedServiceId !== null
-      : form.customTitle.trim().length >= 3 &&
-        form.customDescription.trim().length >= 10;
+      : form.customTitle.trim().length >= 3;
 
   const addressValid = isOptionalInspectionAddressValid(form.address);
 
@@ -1795,15 +1862,19 @@ export function AddInspectionModal({
     };
 
     const isJob = variant === "job";
-    const jobBody =
-      isJob && assignTo
-        ? {
-            assignTo,
-            ...(assignTo === "staff" ? { staffId } : {}),
-          }
-        : isJob
-          ? { assignTo: "none" }
-          : {};
+    const jobBody = isJob
+      ? {
+          ...(assignTo
+            ? {
+                assignTo,
+                ...(assignTo === "staff" ? { staffId } : {}),
+              }
+            : { assignTo: "none" }),
+          instructionDescription: instructionDescription.trim() || undefined,
+          instructionTasks:
+            normalizeInstructionTasksForSubmit(instructionTasks),
+        }
+      : {};
 
     try {
       const token = await user.getIdToken();
@@ -2031,10 +2102,19 @@ export function AddInspectionModal({
                         invalid={showFieldError("serviceId")}
                         errorMessage={fieldErrorMessage("serviceId")}
                         onSelect={(serviceId) => {
+                        const nextService =
+                          activeServices.find((service) => service.id === serviceId) ??
+                          null;
                           setForm((prev) => ({
                             ...prev,
                             selectedServiceId: serviceId,
                           }));
+                        if (variant === "job") {
+                          setInstructionTasks(
+                            serviceTasksToInstructionTasks(nextService),
+                          );
+                          setInstructionTaskSourceServiceId(serviceId);
+                        }
                           touchField("serviceId");
                           setError(null);
                         }}
@@ -2048,7 +2128,7 @@ export function AddInspectionModal({
                   ) : (
                     <div className="grid gap-3">
                       <label className="block">
-                        <span className={LABEL_CLASS}>Job title</span>
+                        <span className={LABEL_CLASS}>Scope of Work</span>
                         <input
                           type="text"
                           value={form.customTitle}
@@ -2076,7 +2156,12 @@ export function AddInspectionModal({
                         />
                       </label>
                       <label className="block">
-                        <span className={LABEL_CLASS}>What needs doing?</span>
+                        <span className={LABEL_CLASS}>
+                          What needs doing?{" "}
+                          <span className="font-normal normal-case tracking-normal text-outline">
+                            (optional)
+                          </span>
+                        </span>
                         <textarea
                           value={form.customDescription}
                           onChange={(event) => {
@@ -2098,7 +2183,7 @@ export function AddInspectionModal({
                           error={fieldErrorMessage("customDescription")}
                           hint={
                             !fieldErrorMessage("customDescription")
-                              ? `At least 10 characters (${form.customDescription.trim().length}/10).`
+                              ? "Optional — helps the team prepare for the visit."
                               : undefined
                           }
                           errorId="customDescription-feedback"
@@ -2128,43 +2213,6 @@ export function AddInspectionModal({
                           placeholder="Access instructions, urgency, materials, anything else we should know…"
                           className={`${INPUT_CLASS} resize-y`}
                           maxLength={2000}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className={LABEL_CLASS}>Budget</span>
-                        <div className="relative mt-1">
-                          <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 font-body text-[14px] font-semibold text-on-surface">
-                            Aus $
-                          </span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={form.budgetAud}
-                            onChange={(event) => {
-                              setForm((prev) => ({
-                                ...prev,
-                                budgetAud: normalizeBudgetInput(
-                                  event.target.value,
-                                ),
-                              }));
-                              setError(null);
-                            }}
-                            onBlur={() => touchField("budgetAud")}
-                            placeholder="e.g. 2500"
-                            className={`${inputClassName(showFieldError("budgetAud"))} mt-0 pl-[3.65rem] pr-3`}
-                            maxLength={12}
-                            aria-invalid={showFieldError("budgetAud")}
-                            aria-describedby="budgetAud-feedback"
-                          />
-                        </div>
-                        <FieldFeedback
-                          error={fieldErrorMessage("budgetAud")}
-                          hint={
-                            !fieldErrorMessage("budgetAud")
-                              ? "Rough amount the customer has in mind (optional)."
-                              : undefined
-                          }
-                          errorId="budgetAud-feedback"
                         />
                       </label>
                     </div>
@@ -2278,7 +2326,6 @@ export function AddInspectionModal({
                           }
                           dayStripLayout="fit"
                           timeZone={timeZone}
-                          allowPast
                         />
                         {variant === "job" ? (
                           <p className="mt-3 font-body text-[12px] text-on-surface-variant">
@@ -2341,6 +2388,8 @@ export function AddInspectionModal({
                   staffName={selectedStaffName}
                   showAssignment={showAssignmentStep}
                   reviewStepNumber={step}
+                  instructionDescription={instructionDescription}
+                  instructionTasks={instructionTasks}
                 />
               ) : null}
 
@@ -2365,6 +2414,15 @@ export function AddInspectionModal({
                     onAssignToChange={setAssignTo}
                     onStaffIdChange={setStaffId}
                   />
+                  {variant === "job" ? (
+                    <JobInstructionsFields
+                      description={instructionDescription}
+                      tasks={instructionTasks}
+                      disabled={submitting}
+                      onDescriptionChange={setInstructionDescription}
+                      onTasksChange={setInstructionTasks}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </>

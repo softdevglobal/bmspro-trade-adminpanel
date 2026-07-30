@@ -117,6 +117,8 @@ export function AdminDaySchedulePicker({
   disabled = false,
   hideTimeRangeFields = false,
   multiHourSlots = false,
+  excludeBookingId,
+  excludeRequestId,
   onStartTimeChange,
   onEndTimeChange,
   onWindowChange,
@@ -130,6 +132,10 @@ export function AdminDaySchedulePicker({
   hideTimeRangeFields?: boolean;
   /** Jobs: tap consecutive hourly slots; tap again to remove from the range. */
   multiHourSlots?: boolean;
+  /** When editing/rescheduling, omit this job from FULL occupancy counts. */
+  excludeBookingId?: string | null;
+  /** When editing/rescheduling, omit this request from FULL occupancy counts. */
+  excludeRequestId?: string | null;
   timeZone?: string | null;
   onStartTimeChange: (value: string) => void;
   onEndTimeChange: (value: string) => void;
@@ -158,9 +164,16 @@ export function AdminDaySchedulePicker({
     void (async () => {
       try {
         const token = await user.getIdToken();
+        const occupancyParams = new URLSearchParams({ date });
+        if (excludeBookingId?.trim()) {
+          occupancyParams.set("excludeBookingId", excludeBookingId.trim());
+        }
+        if (excludeRequestId?.trim()) {
+          occupancyParams.set("excludeRequestId", excludeRequestId.trim());
+        }
         const [occupancyResponse, closureResponse] = await Promise.all([
           fetch(
-            `/api/calendar/slot-occupancy?date=${encodeURIComponent(date)}`,
+            `/api/calendar/slot-occupancy?${occupancyParams.toString()}`,
             {
               headers: { Authorization: `Bearer ${token}` },
               cache: "no-store",
@@ -210,7 +223,7 @@ export function AdminDaySchedulePicker({
     return () => {
       cancelled = true;
     };
-  }, [user, date]);
+  }, [user, date, excludeBookingId, excludeRequestId]);
 
   const pickerDisabled = disabled || isBusinessClosed;
 

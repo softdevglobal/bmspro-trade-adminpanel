@@ -1,11 +1,17 @@
 "use client";
 
 import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
+import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { PaymentLinkButton } from "@/components/payment-link-button";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
+import {
+  formatInvoiceCopyText,
+  invoiceCopySections,
+} from "@/lib/copy-data/format";
 import type { InvoiceDetail } from "@/lib/invoices/types";
 import { formatAddress } from "@/lib/inspection/types";
 import { fetchAdminInvoicePdfBytes } from "@/lib/pdf/fetch-admin-document-pdf";
@@ -107,9 +113,11 @@ function InvoiceCardMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const editDraftHref = `/dashboard/invoices?invoice=${encodeURIComponent(
+  const editHref = `/dashboard/invoices?invoice=${encodeURIComponent(
     invoice.id,
   )}`;
+  const canEdit =
+    invoice.status === "draft" || invoice.status === "sent";
 
   useEffect(() => {
     if (!open) return;
@@ -146,9 +154,9 @@ function InvoiceCardMenu({
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
-          {invoice.status === "draft" ? (
+          {canEdit ? (
             <Link
-              href={editDraftHref}
+              href={editHref}
               role="menuitem"
               className={menuItemClass}
               onClick={() => setOpen(false)}
@@ -156,7 +164,7 @@ function InvoiceCardMenu({
               <span className="material-symbols-outlined text-[18px] text-primary">
                 edit_square
               </span>
-              Edit &amp; send draft
+              {invoice.status === "draft" ? "Edit & send draft" : "Edit invoice"}
             </Link>
           ) : null}
           {canCancelInvoice(invoice) ? (
@@ -318,17 +326,37 @@ function InvoicePreviewDrawer({
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [markPaidLoading, setMarkPaidLoading] = useState(false);
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
+  const [reviewRequestLoading, setReviewRequestLoading] = useState(false);
+  const [reviewRequestError, setReviewRequestError] = useState<string | null>(
+    null,
+  );
+  const [reviewRequestNotice, setReviewRequestNotice] = useState<string | null>(
+    null,
+  );
+  const [copyDataOpen, setCopyDataOpen] = useState(false);
   const open = invoice !== null;
   useRegisterRightDrawer(open, "lg");
-  const editDraftHref = invoice
+  const editHref = invoice
     ? `/dashboard/invoices?invoice=${encodeURIComponent(invoice.id)}`
     : "/dashboard/invoices";
+  const canEditInvoice =
+    invoice?.status === "draft" || invoice?.status === "sent";
   const displayPhone = invoice
     ? formatAuPhoneDisplay(invoice.customer.phone)
     : "";
   const contactLine = invoice
     ? [displayPhone, invoice.customer.email].filter(Boolean).join(" · ") || "—"
     : "—";
+  const copySections = useMemo(
+    () => (invoice ? invoiceCopySections(invoice) : []),
+    [invoice],
+  );
+
+  useEffect(() => {
+    setReviewRequestError(null);
+    setReviewRequestNotice(null);
+    setMarkPaidError(null);
+  }, [invoice?.id]);
 
   function closePdf() {
     setPdfOpen(false);
@@ -413,6 +441,45 @@ function InvoicePreviewDrawer({
       );
     } finally {
       setMarkPaidLoading(false);
+    }
+  }
+
+  async function sendReviewRequest() {
+    if (!invoice || !user) return;
+    setReviewRequestLoading(true);
+    setReviewRequestError(null);
+    setReviewRequestNotice(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/invoices", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "send_review_request",
+          invoiceId: invoice.id,
+        }),
+      });
+      const body = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !body.ok) {
+        throw new Error(body.error ?? "Could not send review request.");
+      }
+      setReviewRequestNotice(
+        "Review request sent to the customer by email and SMS.",
+      );
+    } catch (error) {
+      setReviewRequestError(
+        error instanceof Error
+          ? error.message
+          : "Could not send review request.",
+      );
+    } finally {
+      setReviewRequestLoading(false);
     }
   }
 
@@ -665,6 +732,16 @@ function InvoicePreviewDrawer({
             </div>
 
             <footer className="shrink-0 space-y-2 border-t border-outline-variant/40 px-4 py-4 sm:px-5">
+              <button
+                type="button"
+                onClick={() => setCopyDataOpen(true)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  content_copy
+                </span>
+                Copy data
+              </button>
               {invoice.status === "sent" ? (
                 <button
                   type="button"
@@ -682,16 +759,37 @@ function InvoicePreviewDrawer({
                   {markPaidLoading ? "Marking paid…" : "Mark as paid"}
                 </button>
               ) : null}
-              {invoice.status === "draft" ? (
+              {invoice.status === "paid" ? (
+                <button
+                  type="button"
+                  onClick={() => void sendReviewRequest()}
+                  disabled={reviewRequestLoading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span
+                    className={`material-symbols-outlined text-[20px] ${
+                      reviewRequestLoading ? "animate-spin" : ""
+                    }`}
+                  >
+                    {reviewRequestLoading ? "progress_activity" : "rate_review"}
+                  </span>
+                  {reviewRequestLoading
+                    ? "Sending review request…"
+                    : "Send review request"}
+                </button>
+              ) : null}
+              {canEditInvoice ? (
                 <Link
-                  href={editDraftHref}
+                  href={editHref}
                   onClick={onClose}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
                 >
                   <span className="material-symbols-outlined text-[20px]">
                     edit_square
                   </span>
-                  Edit &amp; send draft
+                  {invoice.status === "draft"
+                    ? "Edit & send draft"
+                    : "Edit invoice"}
                 </Link>
               ) : null}
               {markPaidError ? (
@@ -700,6 +798,22 @@ function InvoicePreviewDrawer({
                   className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-700"
                 >
                   {markPaidError}
+                </p>
+              ) : null}
+              {reviewRequestError ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-body text-[12px] text-rose-700"
+                >
+                  {reviewRequestError}
+                </p>
+              ) : null}
+              {reviewRequestNotice ? (
+                <p
+                  role="status"
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-body text-[12px] text-emerald-800"
+                >
+                  {reviewRequestNotice}
                 </p>
               ) : null}
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -792,6 +906,21 @@ function InvoicePreviewDrawer({
             .replace(/[^a-z0-9.\-]+/gi, "-")
             .toLowerCase()}.pdf`}
           loadPdfBytes={() => fetchAdminInvoicePdfBytes(user, invoice.id)}
+        />
+      ) : null}
+      {invoice ? (
+        <CopyDataModal
+          open={copyDataOpen}
+          title="Copy invoice data"
+          sections={copySections}
+          onClose={() => setCopyDataOpen(false)}
+          onCopy={async (selectedIds) => {
+            const text = formatInvoiceCopyText(invoice, selectedIds);
+            if (!text.trim()) {
+              throw new Error("Nothing to copy for the selected sections.");
+            }
+            await copyTextToClipboard(text);
+          }}
         />
       ) : null}
     </AnimatePresence>

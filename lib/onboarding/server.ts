@@ -351,6 +351,8 @@ export type BusinessProfile = {
   businessEmail: string | null;
   businessPhone: string | null;
   abn: string | null;
+  /** Google review / write-a-review URL sent to customers after paid invoices. */
+  googleReviewUrl: string | null;
   businessType: string | null;
   state: string | null;
   timezone: string | null;
@@ -423,6 +425,10 @@ export async function getBusinessProfile(
     businessPhone:
       typeof data.businessPhone === "string" ? data.businessPhone : null,
     abn: typeof data.abn === "string" ? data.abn : null,
+    googleReviewUrl:
+      typeof data.googleReviewUrl === "string" && data.googleReviewUrl.trim()
+        ? data.googleReviewUrl.trim()
+        : null,
     businessType:
       typeof data.businessType === "string" ? data.businessType : null,
     state: typeof data.state === "string" ? data.state : null,
@@ -466,6 +472,7 @@ export async function updateBusinessProfile(
     businessEmail?: string | null;
     businessPhone?: string | null;
     abn?: string | null;
+    googleReviewUrl?: string | null;
     timezone?: string;
     logoUrl?: string | null;
     registeredForGst?: boolean;
@@ -505,6 +512,10 @@ export async function updateBusinessProfile(
 
   if ("abn" in updates) {
     payload.abn = updates.abn;
+  }
+
+  if ("googleReviewUrl" in updates) {
+    payload.googleReviewUrl = updates.googleReviewUrl;
   }
 
   if ("timezone" in updates) {

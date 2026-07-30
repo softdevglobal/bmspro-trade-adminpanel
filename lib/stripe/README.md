@@ -24,15 +24,28 @@ STRIPE_SECRET_KEY=sk_test_...
 # Client — when set, UI uses Checkout instead of free direct top-up
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 
-# Redirect URLs for Checkout success/cancel (no trailing slash)
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+# Base origin for Checkout redirects and pay links (no trailing slash)
+APP_URL=http://localhost:3000
 ```
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `STRIPE_SECRET_KEY` | Yes (for billing) | Server Stripe SDK |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Recommended | Enables Checkout buttons in the UI |
-| `NEXT_PUBLIC_APP_URL` | Recommended | Checkout `success_url` / `cancel_url` base |
+| `APP_URL` | Recommended | Checkout `success_url` / `cancel_url` and pay-link base |
+
+### Setting the base URL on deployments
+
+Use **`APP_URL`**, not `NEXT_PUBLIC_APP_URL`. Public variables are inlined into the
+bundle at `next build`, so a `NEXT_PUBLIC_APP_URL` set only in `.env.local` is
+baked as `http://localhost:3000` and that value ends up in live quotation PDFs
+and customer emails. `APP_URL` is read at runtime, so it picks up whatever the
+deployment has configured.
+
+`NEXT_PUBLIC_APP_URL` is still honoured for backwards compatibility, and on
+Vercel the resolver falls back to `VERCEL_PROJECT_PRODUCTION_URL` (production) or
+`VERCEL_URL` (previews), so deployments stay correct even with nothing set. See
+[`lib/config/base-url.ts`](../config/base-url.ts).
 
 When `STRIPE_SECRET_KEY` is unset, Stripe API routes return `503` and SMS top-up falls back to the legacy free `POST /api/business/sms` path (non-production only).
 

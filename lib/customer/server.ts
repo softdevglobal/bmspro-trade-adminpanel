@@ -275,6 +275,8 @@ export async function ensureCustomerAccount(input: {
   logoUrl?: string | null;
   /** Adjust welcome copy (e.g. quotation vs inspection). */
   context?: "quotation" | "inspection" | null;
+  /** When false, skip the welcome email even for new accounts. Defaults to true. */
+  sendWelcomeEmail?: boolean;
 }): Promise<EnsuredCustomerAccount> {
   const email = normalizeEmail(input.email);
   const fullName = input.fullName.trim();
@@ -353,7 +355,8 @@ export async function ensureCustomerAccount(input: {
   const profileSnap = await ref.get();
   const profileData = profileSnap.data() ?? {};
   const welcomeAlreadySent = profileData.welcomeEmailSent === true;
-  const shouldSendWelcome = !welcomeAlreadySent;
+  const shouldSendWelcome =
+    input.sendWelcomeEmail !== false && !welcomeAlreadySent;
 
   let welcomeEmailSent = false;
   if (shouldSendWelcome) {
@@ -452,3 +455,18 @@ export async function updateCustomerProfile(
 
   return profile;
 }
+
+/** Lists customer profiles registered to a business (e.g. CSV import / booking signup). */
+export async function listBusinessCustomers(
+  businessId: string,
+): Promise<CustomerProfile[]> {
+  const snap = await adminDb
+    .collection(CUSTOMER_COLLECTION)
+    .where("registeredBusinessId", "==", businessId)
+    .get();
+
+  return snap.docs
+    .map((doc) => mapCustomerDoc(doc.id, doc.data() ?? {}))
+    .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
+}
+

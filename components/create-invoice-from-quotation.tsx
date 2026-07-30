@@ -15,6 +15,7 @@ import { QuotationDocumentPreview } from "@/components/quotation-document-previe
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { printDocumentPreview } from "@/lib/pdf/print-document-preview";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -214,6 +215,7 @@ export function CreateInvoiceFromQuotation({
   const { user } = useAuth();
   const business = useBusinessProfile();
   const { requests } = useInspectionRequests();
+  const { customers: registeredCustomers } = useRegisteredCustomers();
   const timeZone = business?.timezone;
 
   const [tab, setTab] = useState<Tab>("create");
@@ -271,7 +273,7 @@ export function CreateInvoiceFromQuotation({
   const [businessEmail, setBusinessEmail] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
-  const isEditingDraftInvoice = draftInvoiceId.trim().length > 0;
+  const isEditingInvoice = draftInvoiceId.trim().length > 0;
 
   const loadQuotation = useCallback(async () => {
     if (!user) return;
@@ -279,12 +281,12 @@ export function CreateInvoiceFromQuotation({
     setError(null);
     try {
       const token = await user.getIdToken();
-      const sourceQuotationId = isEditingDraftInvoice
+      const sourceQuotationId = isEditingInvoice
         ? draftInvoiceId.trim()
         : quotationId.trim();
       const [draftInvoiceRes, quotationRes, profileRes, itemsRes, servicesRes] =
         await Promise.all([
-          isEditingDraftInvoice
+          isEditingInvoice
             ? fetch(
                 `/api/invoices?invoiceId=${encodeURIComponent(
                   draftInvoiceId.trim(),
@@ -295,7 +297,7 @@ export function CreateInvoiceFromQuotation({
                 },
               )
             : Promise.resolve(null),
-          direct && !isEditingDraftInvoice
+          direct && !isEditingInvoice
             ? Promise.resolve(null)
             : fetch(
                 `/api/quotations?quotationId=${encodeURIComponent(
@@ -314,7 +316,7 @@ export function CreateInvoiceFromQuotation({
             headers: { Authorization: `Bearer ${token}` },
             cache: "no-store",
           }),
-          direct || isEditingDraftInvoice
+          direct || isEditingInvoice
             ? fetch("/api/services", {
                 headers: { Authorization: `Bearer ${token}` },
                 cache: "no-store",
@@ -333,8 +335,15 @@ export function CreateInvoiceFromQuotation({
         if (!draftInvoiceRes.ok || !invoiceBody.ok || !invoiceBody.invoice) {
           throw new Error(invoiceBody.error ?? "Could not load draft invoice.");
         }
-        if (invoiceBody.invoice.status !== "draft") {
-          throw new Error("Only draft invoices can be edited.");
+        if (
+          invoiceBody.invoice.status !== "draft" &&
+          invoiceBody.invoice.status !== "sent"
+        ) {
+          throw new Error(
+            invoiceBody.invoice.status === "paid"
+              ? "Paid invoices cannot be edited."
+              : "This invoice cannot be edited.",
+          );
         }
         loadedDraftInvoice = invoiceBody.invoice;
         setDraftInvoice(loadedDraftInvoice);
@@ -374,7 +383,7 @@ export function CreateInvoiceFromQuotation({
             }),
         );
         setPricingFromQuotation(
-          !isEditingDraftInvoice && q.createdSource !== "invoice_direct",
+          !isEditingInvoice && q.createdSource !== "invoice_direct",
         );
         if (q.discountAud > 0) {
           // The quotation stores only the discount amount. Re-derive the percent
@@ -514,7 +523,7 @@ export function CreateInvoiceFromQuotation({
         };
         const profile = profileBody.profile;
         if (profile) {
-          if (direct || isEditingDraftInvoice) {
+          if (direct || isEditingInvoice) {
             setGstEnabled(Boolean(profile.registeredForGst));
             if (profile.gstPercentage != null) {
               setGstPercentage(profile.gstPercentage);
@@ -530,7 +539,7 @@ export function CreateInvoiceFromQuotation({
         }
       }
 
-      if ((direct || isEditingDraftInvoice) && servicesRes) {
+      if ((direct || isEditingInvoice) && servicesRes) {
         setServicesLoading(true);
         const servicesData = (await servicesRes.json()) as {
           ok?: boolean;
@@ -554,7 +563,7 @@ export function CreateInvoiceFromQuotation({
     quotationId,
     draftInvoiceId,
     direct,
-    isEditingDraftInvoice,
+    isEditingInvoice,
     user,
     timeZone,
   ]);
@@ -578,12 +587,12 @@ export function CreateInvoiceFromQuotation({
     [activeServices, selectedServiceId],
   );
   const isDirectDraftInvoice =
-    isEditingDraftInvoice && quotation?.createdSource === "invoice_direct";
+    isEditingInvoice && quotation?.createdSource === "invoice_direct";
   const directMode = direct || isDirectDraftInvoice;
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests),
-    [requests],
+    () => buildCustomerOptions(requests, [], registeredCustomers),
+    [requests, registeredCustomers],
   );
 
   const filteredCustomers = useMemo(
@@ -633,14 +642,14 @@ export function CreateInvoiceFromQuotation({
   }, [catalog, itemDraft, catalogSuggestField]);
 
   const storedPricingLineItems = useMemo((): QuotationLineItem[] => {
-    if (isEditingDraftInvoice && draftInvoice) {
+    if (isEditingInvoice && draftInvoice) {
       return draftInvoice.lineItems;
     }
     if (quotation) {
       return quotation.lineItems;
     }
     return [];
-  }, [isEditingDraftInvoice, draftInvoice, quotation]);
+  }, [isEditingInvoice, draftInvoice, quotation]);
 
   const documentLineItems = useMemo((): QuotationDocumentLineItem[] => {
     if (pricingFromQuotation && storedPricingLineItems.length > 0) {
@@ -687,7 +696,7 @@ export function CreateInvoiceFromQuotation({
 
   const discountAud = useMemo(() => {
     if (pricingFromQuotation) {
-      if (isEditingDraftInvoice && draftInvoice) {
+      if (isEditingInvoice && draftInvoice) {
         return draftInvoice.discountAud;
       }
       if (quotation) {
@@ -702,7 +711,7 @@ export function CreateInvoiceFromQuotation({
     return Math.round(Math.min(Math.max(0, amount), subtotalRaw) * 100) / 100;
   }, [
     pricingFromQuotation,
-    isEditingDraftInvoice,
+    isEditingInvoice,
     draftInvoice,
     quotation,
     discount,
@@ -725,12 +734,12 @@ export function CreateInvoiceFromQuotation({
     });
     if (pricingFromQuotation) {
       const authoritativeTotal =
-        (isEditingDraftInvoice
+        (isEditingInvoice
           ? draftInvoice?.finalPriceAud
           : quotation?.finalPriceAud) ?? totals.totalAud;
       // Keep totals locked to the source quotation until the user edits pricing.
       const lockedGst =
-        isEditingDraftInvoice && typeof draftInvoice?.gstAud === "number"
+        isEditingInvoice && typeof draftInvoice?.gstAud === "number"
           ? draftInvoice.gstAud
           : totals.gstAud;
       return {
@@ -745,7 +754,7 @@ export function CreateInvoiceFromQuotation({
     discountAud,
     gstPricing,
     pricingFromQuotation,
-    isEditingDraftInvoice,
+    isEditingInvoice,
     draftInvoice,
     quotation,
   ]);
@@ -876,7 +885,7 @@ export function CreateInvoiceFromQuotation({
           return;
         }
       } else if (customServiceTitle.trim().length < 3) {
-        setError("Add a job title (at least 3 characters).");
+        setError("Add a scope of work (at least 3 characters).");
         setTab("create");
         return;
       }
@@ -935,14 +944,29 @@ export function CreateInvoiceFromQuotation({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          ...(direct && !isEditingDraftInvoice
+          ...(direct && !isEditingInvoice
             ? {
                 direct: true,
                 ...directPayload,
               }
             : {
                 quotationId: quotation!.id,
-                ...(isDirectDraftInvoice ? directPayload : {}),
+                ...(isDirectDraftInvoice
+                  ? directPayload
+                  : isEditingInvoice
+                    ? {
+                        customer: {
+                          fullName: customerName.trim(),
+                          email: customerEmail.trim(),
+                          phone: customerPhone.trim(),
+                        },
+                        address,
+                        serviceTitle:
+                          directServiceTitle ||
+                          quotation?.serviceTitle ||
+                          undefined,
+                      }
+                    : {}),
               }),
           lineItems:
             pricingFromQuotation && storedPricingLineItems.length > 0
@@ -1232,13 +1256,13 @@ export function CreateInvoiceFromQuotation({
           <div className="flex min-w-0 items-center gap-3">
             <Link
               href={
-                direct || isEditingDraftInvoice
+                direct || isEditingInvoice
                   ? "/dashboard/invoices"
                   : "/dashboard/quotations"
               }
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-low"
               aria-label={
-                direct || isEditingDraftInvoice
+                direct || isEditingInvoice
                   ? "Back to invoices"
                   : "Back to quotations"
               }
@@ -1247,8 +1271,8 @@ export function CreateInvoiceFromQuotation({
             </Link>
             <div className="min-w-0">
               <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
-                {isEditingDraftInvoice
-                  ? "Edit draft invoice"
+                {isEditingInvoice
+                  ? "Edit invoice"
                   : direct
                     ? "Create invoice"
                     : "Issue invoice"}
@@ -1268,8 +1292,8 @@ export function CreateInvoiceFromQuotation({
           >
             {submitting
               ? "Saving…"
-              : isEditingDraftInvoice
-                ? "Update draft"
+              : isEditingInvoice
+                ? "Save"
                 : "Save draft"}
           </button>
         </div>
@@ -1325,7 +1349,7 @@ export function CreateInvoiceFromQuotation({
 
                   <div className="mt-3 grid gap-3">
                     <label className="block">
-                      <span className={LABEL_CLASS}>Job title</span>
+                      <span className={LABEL_CLASS}>Scope of Work</span>
                       <input
                         type="text"
                         value={customServiceTitle}

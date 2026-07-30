@@ -8,7 +8,7 @@ import {
 import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
-import { platformBrandLogoDataUri } from "@/lib/email/templates/_shared/platform-logo";
+import { platformBrandLogoSrc } from "@/lib/email/templates/_shared/platform-logo";
 import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 import { buildBookingUrl } from "@/lib/onboarding/booking-slug";
 import { formatInspectionVisitReference } from "@/lib/inspection/types";
@@ -107,7 +107,7 @@ export async function sendInspectionCustomerNotificationEmail(
       tone: presentation?.tone ?? "brand",
       headerAlign: "center",
       headerHeadline: "BMS Pro Trade",
-      platformLogoUrl: platformBrandLogoDataUri(),
+      platformLogoUrl: platformBrandLogoSrc(),
       bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
       title: input.title,
       greetingName: firstName(input.customerName),

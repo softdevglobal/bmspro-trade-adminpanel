@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
+  buildLiveFeedActivity,
   computeDashboardOverview,
   type DashboardKpi,
 } from "@/lib/dashboard/stats";
@@ -20,6 +21,14 @@ import { useStripeCheckoutReturn } from "@/lib/stripe/use-stripe-checkout-return
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+
+type LiveFeedFilter = "all" | "customer" | "staff";
+
+const LIVE_FEED_FILTERS: { id: LiveFeedFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "customer", label: "Customer" },
+  { id: "staff", label: "Staff" },
+];
 
 const QUICK_ACTIONS = [
   {
@@ -66,6 +75,14 @@ const QUICK_ACTIONS = [
   },
 ] as const;
 
+const KPI_LINKS: Record<string, string> = {
+  today: "/dashboard/calendar",
+  unassigned: "/dashboard/jobs",
+  awaiting_invoice: "/dashboard/invoices",
+  messages: "/dashboard#live-feed",
+  team: "/dashboard/team",
+};
+
 const KPI_STYLES: Record<
   DashboardKpi["accent"],
   { shell: string; icon: string; glow: string }
@@ -103,10 +120,18 @@ const ACTIVITY_ICONS: Record<string, string> = {
   request_assigned: "person_check",
   request_cancelled: "event_busy",
   request_completed: "check_circle",
+  quotation_sent: "request_quote",
   quotation_accepted: "check_circle",
   quotation_rejected: "cancel",
   visit_on_the_way: "directions_car",
   booking_on_the_way: "engineering",
+  job_completed: "handyman",
+  invoice_sent: "receipt_long",
+  leave_requested: "event_busy",
+  leave_assignment_conflict: "warning",
+  staff_off_day: "event_busy",
+  schedule_reminder: "notifications_active",
+  system_message: "campaign",
 };
 
 function greetingForHour(hour: number): string {
@@ -161,6 +186,8 @@ export function DashboardOverview() {
 function BusinessDashboardOverview() {
   const profile = useBusinessProfile();
   const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+  const [liveFeedFilter, setLiveFeedFilter] = useState<LiveFeedFilter>("all");
+  const [staffNameFilter, setStaffNameFilter] = useState("");
   const { bookings, loading: bookingsLoading } = useBookings();
   const { requests, loading: requestsLoading } = useInspectionRequests();
   const { notifications, loading: notificationsLoading, unread } =
@@ -170,6 +197,15 @@ function BusinessDashboardOverview() {
 
   const loading =
     bookingsLoading || requestsLoading || notificationsLoading || staffLoading;
+
+  const staffNames = useMemo(
+    () =>
+      staff
+        .map((member) => member.fullName.trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b)),
+    [staff],
+  );
 
   const overview = useMemo(
     () =>
@@ -182,6 +218,29 @@ function BusinessDashboardOverview() {
       }),
     [bookings, requests, notifications, staff.length, timeZone],
   );
+
+  const liveFeedActivity = useMemo(
+    () =>
+      buildLiveFeedActivity(notifications, {
+        staffNames,
+        category: liveFeedFilter,
+        staffName: liveFeedFilter === "staff" ? staffNameFilter || null : null,
+        limit: 12,
+      }),
+    [notifications, staffNames, liveFeedFilter, staffNameFilter],
+  );
+
+  const liveFeedCounts = useMemo(() => {
+    const all = buildLiveFeedActivity(notifications, {
+      staffNames,
+      limit: Number.POSITIVE_INFINITY,
+    });
+    return {
+      all: all.length,
+      customer: all.filter((item) => item.category === "customer").length,
+      staff: all.filter((item) => item.category === "staff").length,
+    };
+  }, [notifications, staffNames]);
 
   const businessName = profile?.businessName?.trim() || "your business";
   const greeting = greetingForHour(currentHourInTimeZone(timeZone));
@@ -288,43 +347,50 @@ function BusinessDashboardOverview() {
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {overview.kpis.map((card, index) => {
             const style = KPI_STYLES[card.accent];
+            const href = KPI_LINKS[card.key] ?? "/dashboard";
             return (
-              <motion.div
+              <Link
                 key={card.key}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.08 * index }}
-                className={`relative overflow-hidden rounded-[22px] border p-5 ${style.shell}`}
+                href={href}
+                className="block rounded-[22px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               >
-                <div
-                  aria-hidden
-                  className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full blur-2xl ${style.glow}`}
-                />
-                <div className="relative flex items-start justify-between gap-3">
-                  <span
-                    className={`flex h-11 w-11 items-center justify-center rounded-2xl ${style.icon}`}
-                  >
-                    <span className="material-symbols-outlined text-[22px]">
-                      {card.icon}
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.08 * index }}
+                  className={`relative overflow-hidden rounded-[22px] border p-5 transition-transform hover:-translate-y-0.5 hover:shadow-md ${style.shell}`}
+                >
+                  <div
+                    aria-hidden
+                    className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full blur-2xl ${style.glow}`}
+                  />
+                  <div className="relative flex items-start justify-between gap-3">
+                    <span
+                      className={`flex h-11 w-11 items-center justify-center rounded-2xl ${style.icon}`}
+                    >
+                      <span className="material-symbols-outlined text-[22px]">
+                        {card.icon}
+                      </span>
                     </span>
-                  </span>
-                  <span className="rounded-full bg-white/70 px-2.5 py-1 text-right font-body text-[11px] font-semibold text-on-surface-variant">
-                    {loading ? "…" : card.trend}
-                  </span>
-                </div>
-                <p className="relative mt-5 font-display text-[34px] font-bold leading-none text-on-surface">
-                  {loading ? "—" : card.value}
-                </p>
-                <p className="relative mt-2 font-body text-[14px] font-medium text-on-surface-variant">
-                  {card.label}
-                </p>
-              </motion.div>
+                    <span className="rounded-full bg-white/70 px-2.5 py-1 text-right font-body text-[11px] font-semibold text-on-surface-variant">
+                      {loading ? "…" : card.trend}
+                    </span>
+                  </div>
+                  <p className="relative mt-5 font-display text-[34px] font-bold leading-none text-on-surface">
+                    {loading ? "—" : card.value}
+                  </p>
+                  <p className="relative mt-2 font-body text-[14px] font-medium text-on-surface-variant">
+                    {card.label}
+                  </p>
+                </motion.div>
+              </Link>
             );
           })}
         </section>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
           <motion.section
+            id="live-feed"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -336,13 +402,73 @@ function BusinessDashboardOverview() {
                   Live feed
                 </h2>
                 <p className="mt-1 font-body text-[13px] text-on-surface-variant">
-                  Latest customer and booking updates
+                  Latest customer and staff updates
                 </p>
               </div>
               {unread > 0 ? (
                 <span className="rounded-full bg-primary px-3 py-1 font-body text-[11px] font-bold uppercase tracking-wide text-on-primary">
                   {unread} new
                 </span>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div
+                className="flex flex-wrap gap-2"
+                role="tablist"
+                aria-label="Live feed filter"
+              >
+                {LIVE_FEED_FILTERS.map((tab) => {
+                  const active = liveFeedFilter === tab.id;
+                  const count = liveFeedCounts[tab.id];
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => {
+                        setLiveFeedFilter(tab.id);
+                        if (tab.id !== "staff") setStaffNameFilter("");
+                      }}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 font-body text-[13px] font-semibold transition-colors ${
+                        active
+                          ? "border-primary bg-primary text-on-primary shadow-sm"
+                          : "border-outline-variant/70 bg-surface-container-low text-on-surface hover:bg-surface-container-high"
+                      }`}
+                    >
+                      {tab.label}
+                      <span
+                        className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums ${
+                          active
+                            ? "bg-on-primary/20 text-on-primary"
+                            : "bg-surface-container-high text-on-surface-variant"
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {liveFeedFilter === "staff" ? (
+                <label className="flex min-w-0 flex-col gap-1 sm:w-56">
+                  <span className="sr-only">Filter by staff name</span>
+                  <select
+                    value={staffNameFilter}
+                    onChange={(event) => setStaffNameFilter(event.target.value)}
+                    className="h-10 w-full rounded-xl border border-outline-variant/70 bg-surface-container-low px-3 font-body text-[13px] font-semibold text-on-surface outline-none transition-colors hover:bg-surface-container-high focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    aria-label="Filter by staff name"
+                  >
+                    <option value="">All staff</option>
+                    {staffNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               ) : null}
             </div>
 
@@ -355,21 +481,26 @@ function BusinessDashboardOverview() {
                   />
                 ))}
               </div>
-            ) : overview.activity.length === 0 ? (
+            ) : liveFeedActivity.length === 0 ? (
               <div className="mt-6 rounded-2xl border border-dashed border-outline-variant bg-surface-container-low px-5 py-10 text-center">
                 <span className="material-symbols-outlined text-[32px] text-outline">
                   notifications_paused
                 </span>
                 <p className="mt-3 font-body text-[14px] text-on-surface-variant">
-                  Quiet for now. New requests and booking events will stream in
-                  here.
+                  {liveFeedFilter === "staff" && staffNameFilter
+                    ? `No staff updates for ${staffNameFilter} yet.`
+                    : liveFeedFilter === "staff"
+                      ? "No staff updates yet. Leave requests and assignments will show here."
+                      : liveFeedFilter === "customer"
+                        ? "No customer updates yet. New requests and booking events will show here."
+                        : "Quiet for now. Customer and staff updates will stream in here."}
                 </p>
               </div>
             ) : (
               <ul className="mt-6 space-y-0">
-                {overview.activity.map((item, index) => (
+                {liveFeedActivity.map((item, index) => (
                   <li key={item.id} className="relative flex gap-4 pb-5">
-                    {index < overview.activity.length - 1 ? (
+                    {index < liveFeedActivity.length - 1 ? (
                       <span
                         aria-hidden
                         className="absolute left-[18px] top-10 bottom-0 w-px bg-outline-variant/80"
@@ -387,11 +518,35 @@ function BusinessDashboardOverview() {
                       </span>
                     </span>
                     <div className="min-w-0 flex-1 pt-0.5">
-                      <p className="font-body text-[14px] font-medium text-on-surface">
-                        {item.text}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-body text-[14px] font-medium text-on-surface">
+                          {item.text}
+                        </p>
+                        {item.category === "staff" ||
+                        item.category === "customer" ? (
+                          <span
+                            className={`rounded-full px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wide ${
+                              item.category === "staff"
+                                ? "bg-teal-100 text-teal-800"
+                                : "bg-sky-100 text-sky-800"
+                            }`}
+                          >
+                            {item.category}
+                          </span>
+                        ) : null}
+                      </div>
+                      {item.body ? (
+                        <p className="mt-1 line-clamp-2 font-body text-[12px] text-on-surface-variant">
+                          {item.body}
+                        </p>
+                      ) : null}
                       <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                        {formatActivityTime(item.createdAt, timeZone)}
+                        {[
+                          item.staffName || item.customerName,
+                          formatActivityTime(item.createdAt, timeZone),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     </div>
                   </li>

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { resolveAppBaseUrl } from "@/lib/config/base-url";
+
 /** True when server-side Stripe calls are allowed. */
 export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
@@ -22,11 +24,19 @@ export function isStripeConnectConfigured(): boolean {
   return isStripeConfigured() && Boolean(getStripeConnectClientId());
 }
 
-/** Public site URL for Checkout success/cancel redirects. */
+/**
+ * Public site URL for Checkout success/cancel redirects and payment links.
+ *
+ * Throws when deployed without a usable origin rather than emitting a localhost
+ * link — pay-link callers catch this and drop the link, which is recoverable,
+ * whereas a dead link inside a customer's PDF is not.
+ */
 export function getAppBaseUrl(): string {
-  const url =
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.APP_URL?.trim() ||
-    "http://localhost:3000";
-  return url.replace(/\/$/, "");
+  const url = resolveAppBaseUrl();
+  if (!url) {
+    throw new Error(
+      "No public app URL configured. Set APP_URL to the live origin (e.g. https://app.bmspros.com.au).",
+    );
+  }
+  return url;
 }

@@ -1,7 +1,5 @@
 "use client";
 
-import { MAX_SERVICE_AREAS } from "@/lib/onboarding/types";
-
 type Props = {
   values: string[];
   onUpdate: (index: number, value: string) => void;
@@ -18,8 +16,6 @@ export function ServiceAreasField({
   disabled = false,
 }: Props) {
   const filled = values.filter((v) => v.trim().length >= 2).length;
-  const canAdd = values.length < MAX_SERVICE_AREAS;
-
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-fixed/30 px-3 py-2.5">
@@ -77,14 +73,14 @@ export function ServiceAreasField({
         <button
           type="button"
           onClick={onAdd}
-          disabled={disabled || !canAdd}
+          disabled={disabled}
           className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-primary/40 bg-primary-fixed/40 px-3 py-2 font-body text-[12px] font-semibold text-primary transition-colors hover:bg-primary-fixed/70 disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-[18px]">add</span>
           Add another area
         </button>
         <span className="font-body text-[11px] text-on-surface-variant">
-          {filled} added · max {MAX_SERVICE_AREAS}
+          {filled} added
         </span>
       </div>
     </div>

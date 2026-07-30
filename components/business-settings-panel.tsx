@@ -1,6 +1,7 @@
 "use client";
 
 import { BusinessModuleSettings } from "@/components/business-module-settings";
+import { BusinessDataExportSettings } from "@/components/business-data-export-settings";
 import { BusinessSlotCapacitySettings } from "@/components/business-slot-capacity-settings";
 import { BusinessWorkingHoursSettings } from "@/components/business-working-hours-settings";
 import { BookingLinkCard } from "@/components/booking-link-card";
@@ -27,6 +28,7 @@ export type ProfileFormState = {
   businessEmail: string;
   businessPhone: string;
   abn: string;
+  googleReviewUrl: string;
 };
 
 type ProfileMeta = {
@@ -64,6 +66,7 @@ export function BusinessSettingsPanel() {
     businessEmail: "",
     businessPhone: "",
     abn: "",
+    googleReviewUrl: "",
   });
 
   useEffect(() => {
@@ -90,6 +93,7 @@ export function BusinessSettingsPanel() {
             businessEmail?: string | null;
             businessPhone?: string | null;
             abn?: string | null;
+            googleReviewUrl?: string | null;
             businessType?: string | null;
             state?: string | null;
             timezone?: string | null;
@@ -111,6 +115,7 @@ export function BusinessSettingsPanel() {
           businessEmail: p.businessEmail ?? "",
           businessPhone: p.businessPhone ?? "",
           abn: p.abn ?? "",
+          googleReviewUrl: p.googleReviewUrl ?? "",
         });
         setMeta({
           businessType: p.businessType ?? null,
@@ -197,6 +202,8 @@ export function BusinessSettingsPanel() {
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
 
       <BookingLinkCard variant="permanent" />
+
+      <BusinessDataExportSettings />
 
       <BusinessModuleSettings
         enabledModules={meta.enabledModules}

@@ -1117,78 +1117,8 @@ export async function generateDocumentPdf(
     y -= 8;
   }
 
-  // ── Pay online (secure Stripe link) ──
-  const payUrl = data.payUrl?.trim();
-  if (payUrl) {
-    const boxH = 60;
-    ensureSpace(boxH + 12);
-    const boxTop = y;
-    page.drawRectangle({
-      x: MARGIN,
-      y: boxTop - boxH,
-      width: CONTENT_WIDTH,
-      height: boxH,
-      color: WHITE,
-      opacity: 0.92,
-      borderColor: BRAND,
-      borderWidth: 1,
-    });
-    page.drawRectangle({
-      x: MARGIN,
-      y: boxTop - boxH,
-      width: 4,
-      height: boxH,
-      color: BRAND,
-    });
-    const payHeading =
-      kind === "invoice" ? "Pay this invoice online" : "Pay your deposit online";
-    drawText(payHeading, MARGIN + 14, boxTop - 18, {
-      size: 11,
-      bold: true,
-      color: BRAND,
-    });
-    drawText(
-      "Pay securely by card - click the link below or open it in your browser:",
-      MARGIN + 14,
-      boxTop - 32,
-      { size: 8.5, color: MUTED, maxWidth: CONTENT_WIDTH - 28 },
-    );
-    const urlSize = 9;
-    const urlY = boxTop - 47;
-    drawText(payUrl, MARGIN + 14, urlY, {
-      size: urlSize,
-      bold: true,
-      color: BRAND,
-      maxWidth: CONTENT_WIDTH - 28,
-    });
-
-    // Clickable URI link annotation over the printed URL.
-    const urlWidth = Math.min(
-      fontBold.widthOfTextAtSize(pdfSafeText(payUrl), urlSize),
-      CONTENT_WIDTH - 28,
-    );
-    const linkAnnotation = doc.context.obj({
-      Type: "Annot",
-      Subtype: "Link",
-      Rect: [MARGIN + 12, urlY - 3, MARGIN + 16 + urlWidth, urlY + urlSize + 2],
-      Border: [0, 0, 0],
-      A: doc.context.obj({
-        Type: "Action",
-        S: "URI",
-        URI: PDFString.of(payUrl),
-      }),
-    });
-    const annotRef = doc.context.register(linkAnnotation);
-    const existingAnnots = page.node.Annots();
-    if (existingAnnots) {
-      existingAnnots.push(annotRef);
-    } else {
-      page.node.set(PDFName.of("Annots"), doc.context.obj([annotRef]));
-    }
-    y -= boxH + 14;
-  }
-
-  // Footer
+  // Footer is measured before it is drawn so the pay button can be anchored
+  // directly above it.
   const footerLines: { text: string; kind: "text" | "phone" | "abn" }[] = [];
   if (data.business.address) {
     footerLines.push({ text: data.business.address, kind: "text" });
@@ -1204,6 +1134,108 @@ export async function generateDocumentPdf(
   }
 
   const footerBlockH = footerLines.length * 12 + 20;
+
+  // ── Pay now (secure Stripe link) ──
+  // Pinned just above the footer instead of following the content flow, so the
+  // call to action always lands in the same spot on the final page.
+  const payUrl = data.payUrl?.trim();
+  if (payUrl) {
+    const boxH = 54;
+    const boxBottom = MARGIN + footerBlockH + 26;
+    const boxTop = boxBottom + boxH;
+    // Content that ran long would collide with the pinned box — spill over.
+    if (y < boxTop + 16) addDecoratedPage();
+
+    page.drawRectangle({
+      x: MARGIN,
+      y: boxBottom,
+      width: CONTENT_WIDTH,
+      height: boxH,
+      color: WHITE,
+      opacity: 0.92,
+      borderColor: BRAND,
+      borderWidth: 1,
+    });
+    page.drawRectangle({
+      x: MARGIN,
+      y: boxBottom,
+      width: 4,
+      height: boxH,
+      color: BRAND,
+    });
+
+    const buttonW = 104;
+    const buttonH = 30;
+    const buttonX = PAGE_WIDTH - MARGIN - 16 - buttonW;
+    const buttonY = boxBottom + (boxH - buttonH) / 2;
+
+    const payHeading =
+      kind === "invoice" ? "Pay this invoice online" : "Pay your deposit online";
+    drawText(payHeading, MARGIN + 14, boxTop - 20, {
+      size: 11,
+      bold: true,
+      color: BRAND,
+      maxWidth: buttonX - MARGIN - 26,
+    });
+    drawText(
+      "Pay securely by card - click Pay now to open the payment page.",
+      MARGIN + 14,
+      boxTop - 36,
+      { size: 8.5, color: MUTED, maxWidth: buttonX - MARGIN - 26 },
+    );
+
+    // Pill button: a body rectangle capped with a circle at each end.
+    const radius = buttonH / 2;
+    page.drawRectangle({
+      x: buttonX + radius,
+      y: buttonY,
+      width: buttonW - buttonH,
+      height: buttonH,
+      color: BRAND,
+    });
+    page.drawCircle({
+      x: buttonX + radius,
+      y: buttonY + radius,
+      size: radius,
+      color: BRAND,
+    });
+    page.drawCircle({
+      x: buttonX + buttonW - radius,
+      y: buttonY + radius,
+      size: radius,
+      color: BRAND,
+    });
+
+    const buttonLabel = "Pay now";
+    const buttonLabelSize = 12;
+    drawText(
+      buttonLabel,
+      buttonX + (buttonW - textWidth(buttonLabel, buttonLabelSize, true)) / 2,
+      buttonY + buttonH / 2 - buttonLabelSize * 0.36,
+      { size: buttonLabelSize, bold: true, color: WHITE },
+    );
+
+    // Clickable URI link annotation covering the button.
+    const linkAnnotation = doc.context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [buttonX, buttonY, buttonX + buttonW, buttonY + buttonH],
+      Border: [0, 0, 0],
+      A: doc.context.obj({
+        Type: "Action",
+        S: "URI",
+        URI: PDFString.of(payUrl),
+      }),
+    });
+    const annotRef = doc.context.register(linkAnnotation);
+    const existingAnnots = page.node.Annots();
+    if (existingAnnots) {
+      existingAnnots.push(annotRef);
+    } else {
+      page.node.set(PDFName.of("Annots"), doc.context.obj([annotRef]));
+    }
+  }
+
   let footerY = MARGIN + footerBlockH;
 
   page.drawLine({

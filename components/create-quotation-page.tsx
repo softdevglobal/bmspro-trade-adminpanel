@@ -14,6 +14,7 @@ import { MonthCalendarField } from "@/components/month-calendar-field";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { printDocumentPreview } from "@/lib/pdf/print-document-preview";
+import { useRegisteredCustomers } from "@/lib/customer/use-registered-customers";
 import {
   buildCustomerOptions,
   filterCustomerOptions,
@@ -283,6 +284,7 @@ export function CreateQuotationPage() {
   const { user } = useAuth();
   const business = useBusinessProfile();
   const { requests } = useInspectionRequests();
+  const { customers: registeredCustomers } = useRegisteredCustomers();
   const timeZone = business?.timezone;
 
   const [tab, setTab] = useState<Tab>("create");
@@ -464,8 +466,11 @@ export function CreateQuotationPage() {
           throw new Error(data.error ?? "Could not load draft quotation.");
         }
         const quotation = data.quotation;
-        if (quotation.status !== "draft") {
-          throw new Error("Only draft quotations can be edited.");
+        if (quotation.status === "cancelled") {
+          throw new Error("Cancelled quotations cannot be edited.");
+        }
+        if (quotation.status !== "draft" && quotation.status !== "sent") {
+          throw new Error("This quotation cannot be edited.");
         }
 
         inspectionPrefilledRef.current = true;
@@ -557,8 +562,8 @@ export function CreateQuotationPage() {
   }, [user, draftQuotationId, timeZone, requests]);
 
   const customerOptions = useMemo(
-    () => buildCustomerOptions(requests),
-    [requests],
+    () => buildCustomerOptions(requests, [], registeredCustomers),
+    [requests, registeredCustomers],
   );
 
   const filteredCustomers = useMemo(
@@ -1047,10 +1052,7 @@ export function CreateQuotationPage() {
       if (!selectedServiceId) return "Select a service from the list.";
     } else {
       if (customServiceTitle.trim().length < 3) {
-        return "Add a job title (at least 3 characters).";
-      }
-      if (customServiceDescription.trim().length < 10) {
-        return "Describe the work needed (at least 10 characters).";
+        return "Add a scope of work (at least 3 characters).";
       }
     }
     if (lineItems.length === 0) return "Add at least one line item.";
@@ -1061,7 +1063,6 @@ export function CreateQuotationPage() {
     requestType,
     selectedServiceId,
     customServiceTitle,
-    customServiceDescription,
   ]);
 
   async function save(sendToCustomer = false) {
@@ -1311,7 +1312,7 @@ export function CreateQuotationPage() {
             </Link>
             <h1 className="truncate font-display text-[18px] font-semibold text-on-surface sm:text-[20px]">
               {draftQuotationId
-                ? "Edit draft quotation"
+                ? "Edit quotation"
                 : boundInspection
                   ? "Quotation for visit"
                   : "Create a quotation"}
@@ -1333,7 +1334,7 @@ export function CreateQuotationPage() {
               {submitting || draftLoading ? (
                 <SaveSpinner label={draftLoading ? "Loading…" : "Saving…"} />
               ) : draftQuotationId ? (
-                "Update draft"
+                "Save"
               ) : (
                 "Save draft"
               )}
@@ -1712,7 +1713,7 @@ export function CreateQuotationPage() {
 
                 <div className="mt-3 grid gap-3">
                   <label className="block">
-                    <span className={LABEL_CLASS}>Job title</span>
+                    <span className={LABEL_CLASS}>Scope of Work</span>
                     <input
                       type="text"
                       value={customServiceTitle}
@@ -1726,7 +1727,12 @@ export function CreateQuotationPage() {
                     />
                   </label>
                   <label className="block">
-                    <span className={LABEL_CLASS}>What needs doing?</span>
+                    <span className={LABEL_CLASS}>
+                      What needs doing?{" "}
+                      <span className="font-normal normal-case tracking-normal text-outline">
+                        (optional)
+                      </span>
+                    </span>
                     <textarea
                       value={customServiceDescription}
                       onChange={(e) => {
@@ -1739,8 +1745,7 @@ export function CreateQuotationPage() {
                       maxLength={1500}
                     />
                     <p className="mt-1 font-body text-[11px] text-on-surface-variant">
-                      At least 10 characters (
-                      {customServiceDescription.trim().length}/10).
+                      Optional — helps describe the scope of work.
                     </p>
                   </label>
                 </div>

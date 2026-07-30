@@ -26,11 +26,17 @@ import {
 } from "@/lib/inspection/types";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
+import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
+import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
+import {
+  formatJobCopyText,
+  jobCopySections,
+} from "@/lib/copy-data/format";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { buildStaffAssignmentBlockMap } from "@/lib/team/staff-assign-blocks";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
@@ -105,10 +111,12 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
 }
 
 function BookingCardMenu({
+  editHref,
   onDelete,
   onCancel,
   onUndoCancel,
 }: {
+  editHref?: string | null;
   onDelete: () => void;
   onCancel?: () => void;
   onUndoCancel?: () => void;
@@ -151,6 +159,19 @@ function BookingCardMenu({
           role="menu"
           className="absolute right-0 top-full z-30 mt-1 min-w-[196px] overflow-hidden rounded-xl border border-outline-variant/80 bg-surface-container-lowest py-1 shadow-[0_12px_32px_-12px_rgba(15,23,42,0.28)]"
         >
+          {editHref ? (
+            <Link
+              href={editHref}
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => setOpen(false)}
+            >
+              <span className="material-symbols-outlined text-[18px] text-primary">
+                edit_square
+              </span>
+              Edit job
+            </Link>
+          ) : null}
           {onCancel ? (
             <button
               type="button"
@@ -282,6 +303,11 @@ function BookingCard({
           </p>
         </div>
         <BookingCardMenu
+          editHref={
+            canCancelBooking(booking)
+              ? `/dashboard/jobs?edit=${encodeURIComponent(booking.id)}`
+              : null
+          }
           onDelete={onDelete}
           onCancel={canCancelBooking(booking) ? onCancel : undefined}
           onUndoCancel={
@@ -612,6 +638,8 @@ function BookingPreviewContent({
   const [staffId, setStaffId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [copyDataOpen, setCopyDataOpen] = useState(false);
+  const copySections = useMemo(() => jobCopySections(booking), [booking]);
 
   useEffect(() => {
     if (mode === "assign") {
@@ -634,6 +662,7 @@ function BookingPreviewContent({
     Boolean(invoiceHref) &&
     booking.quotation?.status === "sent" &&
     booking.quotation.customerDecision !== "rejected";
+  const canEdit = booking.status !== "cancelled" && booking.status !== "completed";
 
   async function submitAssign() {
     if (!user) return;
@@ -1089,6 +1118,28 @@ function BookingPreviewContent({
 
         {mode === "review" ? (
           <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setCopyDataOpen(true)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-outline-variant/60 bg-white px-4 py-3 font-body text-[14px] font-semibold text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                content_copy
+              </span>
+              Copy data
+            </button>
+            {canEdit ? (
+              <Link
+                href={`/dashboard/jobs?edit=${encodeURIComponent(booking.id)}`}
+                onClick={onClose}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 font-body text-[14px] font-semibold text-primary transition-colors hover:bg-primary/10"
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  edit_calendar
+                </span>
+                Edit job
+              </Link>
+            ) : null}
             {booking.status === "cancelled" ? (
               <button
                 type="button"
@@ -1121,6 +1172,19 @@ function BookingPreviewContent({
           </div>
         ) : null}
       </div>
+      <CopyDataModal
+        open={copyDataOpen}
+        title="Copy job data"
+        sections={copySections}
+        onClose={() => setCopyDataOpen(false)}
+        onCopy={async (selectedIds) => {
+          const text = formatJobCopyText(booking, selectedIds, timeZone);
+          if (!text.trim()) {
+            throw new Error("Nothing to copy for the selected sections.");
+          }
+          await copyTextToClipboard(text);
+        }}
+      />
     </div>
   );
 }
@@ -1411,22 +1475,24 @@ export function JobsBoard({
   return (
     <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="font-body text-[12px] text-on-surface-variant">
+        <p className="font-body text-[12px] text-on-surface-variant sm:flex-1">
           {groupedBookings.active.length} active ·{" "}
           {groupedBookings.completed.length} completed ·{" "}
           {groupedBookings.cancelled.length} cancelled · tap a card to open the
           side preview
         </p>
-        <button
-          type="button"
-          onClick={() => setAddModalOpen(true)}
-          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
-        >
-          <span className="material-symbols-outlined text-[14px] leading-none">
-            add
-          </span>
-          Add job
-        </button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setAddModalOpen(true)}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 font-body text-[13px] font-semibold text-on-primary shadow-sm transition-colors hover:bg-primary/90 sm:w-auto"
+          >
+            <span className="material-symbols-outlined text-[14px] leading-none">
+              add
+            </span>
+            Add job
+          </button>
+        </div>
       </div>
 
       <div
