@@ -455,19 +455,24 @@ function BusinessDashboardOverview() {
               {liveFeedFilter === "staff" ? (
                 <label className="flex min-w-0 flex-col gap-1 sm:w-56">
                   <span className="sr-only">Filter by staff name</span>
-                  <select
-                    value={staffNameFilter}
-                    onChange={(event) => setStaffNameFilter(event.target.value)}
-                    className="h-10 w-full rounded-xl border border-outline-variant/70 bg-surface-container-low px-3 font-body text-[13px] font-semibold text-on-surface outline-none transition-colors hover:bg-surface-container-high focus:border-primary focus:ring-2 focus:ring-primary/20"
-                    aria-label="Filter by staff name"
-                  >
-                    <option value="">All staff</option>
-                    {staffNames.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={staffNameFilter}
+                      onChange={(event) => setStaffNameFilter(event.target.value)}
+                      className="h-10 w-full appearance-none rounded-xl border border-outline-variant/70 bg-surface-container-low px-3 pr-9 font-body text-[13px] font-semibold text-on-surface outline-none transition-colors hover:bg-surface-container-high focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      aria-label="Filter by staff name"
+                    >
+                      <option value="">All staff</option>
+                      {staffNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-outline">
+                      expand_more
+                    </span>
+                  </div>
                 </label>
               ) : null}
             </div>
