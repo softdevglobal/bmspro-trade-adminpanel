@@ -5,6 +5,7 @@ import {
   cancelBusinessBooking,
   completeBusinessBooking,
   deleteBusinessBooking,
+  notifyStaffOfJobAssignment,
   undoCancelBusinessBooking,
   updateBookingCompletionPhotos,
   updateBusinessBookingSchedule,
@@ -565,6 +566,12 @@ export async function PATCH(
       targetLabel: assignment.name,
       metadata: { assignedToUid: assignment.uid, assignedToType: assignment.type },
     });
+
+    try {
+      await notifyStaffOfJobAssignment(result.booking);
+    } catch (error) {
+      console.error("[jobs] staff assignment push failed:", error);
+    }
 
     return NextResponse.json({ ok: true, booking: result.booking });
   }

@@ -42,13 +42,45 @@ import {
   notifyCustomerOfJobScheduled,
   notifyCustomerOfJobRescheduled,
 } from "@/lib/notifications/server";
-import { resolveBusinessOwnerUid } from "@/lib/notifications/push";
+import {
+  resolveBusinessOwnerUid,
+  sendStaffMobilePush,
+} from "@/lib/notifications/push";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import type { BookingStatus } from "@/lib/bookings/types";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
 export const BOOKING_LIST_LIMIT = 80;
+
+/** Best-effort FCM push to a staff member freshly assigned to a job. */
+export async function notifyStaffOfJobAssignment(booking: BookingDetail): Promise<void> {
+  const assigned = booking.assignedTo;
+  if (assigned?.type !== "staff" || !assigned.uid) return;
+
+  const headline =
+    booking.serviceName ??
+    booking.customRequest?.title ??
+    booking.bookingCode ??
+    "a job";
+  const slot = booking.scheduledSlot;
+  const when = slot
+    ? `${slot.date}${booking.scheduledStartTime ? ` · ${booking.scheduledStartTime}` : ""}`
+    : null;
+
+  await sendStaffMobilePush({
+    uid: assigned.uid,
+    title: "Job assigned to you",
+    body: when
+      ? `You are scheduled for ${headline} on ${when}.`
+      : `You have been assigned to ${headline}.`,
+    data: {
+      type: "booking_assigned",
+      bookingId: booking.id,
+      audience: "staff",
+    },
+  });
+}
 
 export type CreateBookingInput = {
   inspectionRequestId: string;
@@ -251,9 +283,16 @@ export async function createBookingFromInspection(
     bookingStatusAt: now,
   });
 
+  const booking = mapBookingDoc(bookingRef.id, bookingSnap.data() ?? {});
+  try {
+    await notifyStaffOfJobAssignment(booking);
+  } catch (error) {
+    console.error("[booking] staff assignment push failed:", error);
+  }
+
   return {
     ok: true,
-    booking: mapBookingDoc(bookingRef.id, bookingSnap.data() ?? {}),
+    booking,
     request: mapInspectionDoc(requestSnap.id, requestSnap.data() ?? {}),
   };
 }
@@ -1341,6 +1380,11 @@ export async function createDirectJob(
     await notifyCustomerOfJobScheduled(booking, summary);
   } catch (error) {
     console.error("[direct-job] customer notification failed:", error);
+  }
+  try {
+    await notifyStaffOfJobAssignment(booking);
+  } catch (error) {
+    console.error("[direct-job] staff assignment push failed:", error);
   }
 
   if (audit) {
