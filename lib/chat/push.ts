@@ -44,7 +44,9 @@ export async function sendChatPush(input: PushInput): Promise<void> {
       android: { priority: "high" },
       apns: {
         headers: {
-          "apns-priority": "10",
+          // Background pushes must use priority 5 — APNs rejects the
+          // background push type at priority 10.
+          "apns-priority": "5",
           "apns-push-type": "background",
         },
         payload: { aps: { "content-available": 1 } },
