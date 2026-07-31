@@ -303,25 +303,8 @@ export function QuotationDocumentPreview({
           </div>
         ) : null}
 
-        {/* Terms + totals */}
-        <div
-          className={`mt-7 ${document.termsAndConditions?.trim() ? "flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between" : ""}`}
-        >
-          {document.termsAndConditions?.trim() ? (
-            <div className="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 p-4 shadow-sm backdrop-blur-[1px]">
-              <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
-              <p className="text-[13px] font-bold text-[#0b33a0]">
-                Terms and conditions
-              </p>
-              <p className="mt-2 whitespace-pre-line text-[12px] leading-relaxed text-[#1e2430]">
-                {document.termsAndConditions.trim()}
-              </p>
-            </div>
-          ) : null}
-
-          <div
-            className={`w-full max-w-[240px] shrink-0 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px] ${document.termsAndConditions?.trim() ? "sm:ml-2" : "mt-8 ml-auto"}`}
-          >
+        {/* Totals */}
+        <div className="mt-7 ml-auto w-full max-w-[240px] shrink-0 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 shadow-sm backdrop-blur-[1px]">
           <div className="space-y-2 px-4 py-3 text-[12px]">
             {hasLineDiscounts ? (
               <>
@@ -413,8 +396,20 @@ export function QuotationDocumentPreview({
               ) : null}
             </>
           ) : null}
-          </div>
         </div>
+
+        {/* Terms and conditions */}
+        {document.termsAndConditions?.trim() ? (
+          <div className="relative mt-6 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 p-4 shadow-sm backdrop-blur-[1px]">
+            <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
+            <p className="text-[13px] font-bold text-[#0b33a0]">
+              Terms and conditions
+            </p>
+            <p className="mt-2 whitespace-pre-line text-[10px] leading-relaxed text-[#1e2430]">
+              {document.termsAndConditions.trim()}
+            </p>
+          </div>
+        ) : null}
 
         {/* Comments */}
         {document.notes?.trim() ? (

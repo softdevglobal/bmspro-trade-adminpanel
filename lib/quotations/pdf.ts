@@ -863,7 +863,6 @@ export async function generateDocumentPdf(
 
   const panelW = 240;
   const panelX = PAGE_WIDTH - MARGIN - panelW;
-  const sectionGap = 14;
 
   const lineDiscountTotalAud = totalLineDiscountAud(data.lineItems);
   const itemsGrossSubtotalAud = grossSubtotalAud(data.lineItems);
@@ -1016,11 +1015,17 @@ export async function generateDocumentPdf(
     }
   };
 
+  // Totals panel gets its own row, right-aligned, before the terms block.
+  ensureSpace(panelH + 8);
+  drawTotalsPanel(y);
+  y -= panelH + 20;
+
   const termsText = data.termsAndConditions?.trim();
   if (termsText) {
-    const termsW = CONTENT_WIDTH - panelW - sectionGap;
-    const termsLines = wrapText(termsText, font, 10, termsW - 24);
-    const termsLineH = 13;
+    const termsW = CONTENT_WIDTH;
+    const termsBodySize = 8;
+    const termsLines = wrapText(termsText, font, termsBodySize, termsW - 24);
+    const termsLineH = 11;
     const termsHeaderH = 22;
     let remainingTermsLines = termsLines;
     let isFirstTermsPage = true;
@@ -1056,7 +1061,7 @@ export async function generateDocumentPdf(
       let termsY = sectionTopY - 32;
       for (const line of lines) {
         drawText(line, MARGIN + 12, termsY, {
-          size: 10,
+          size: termsBodySize,
           maxWidth: termsW - 24,
         });
         termsY -= termsLineH;
@@ -1066,7 +1071,7 @@ export async function generateDocumentPdf(
 
     while (remainingTermsLines.length > 0) {
       if (isFirstTermsPage) {
-        ensureSpace(panelH + 16);
+        ensureSpace(termsHeaderH + termsLineH * 3);
       } else {
         addDecoratedPage();
       }
@@ -1085,17 +1090,11 @@ export async function generateDocumentPdf(
           : "Terms and conditions (continued)",
         pageTermsLines,
       );
-      const sectionH = isFirstTermsPage ? Math.max(termsBoxH, panelH) : termsBoxH;
 
-      if (isFirstTermsPage) drawTotalsPanel(sectionTopY);
-      y = sectionTopY - sectionH - 20;
+      y = sectionTopY - termsBoxH - 20;
       remainingTermsLines = remainingTermsLines.slice(pageTermsLines.length);
       isFirstTermsPage = false;
     }
-  } else {
-    ensureSpace(panelH + 8);
-    drawTotalsPanel(y);
-    y -= panelH + 20;
   }
 
   if (data.notes?.trim()) {
