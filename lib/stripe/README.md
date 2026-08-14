@@ -4,7 +4,12 @@ Stripe powers **subscription plans** (recurring) and **SMS top-ups** (one-time p
 
 > **Customer payments** (quotation deposits & invoices via Stripe Connect Direct Charges) are documented separately in [`lib/payments/README.md`](../payments/README.md). That flow uses each tradie's **connected** account; the billing below uses the **platform** account.
 
-No webhook secret is required. After Checkout, Stripe redirects back to your app and the server confirms the session via the Stripe API.
+Checkout is confirmed synchronously on redirect via the Stripe API, but a webhook
+secret **is** required for subscription auto-renewal (`invoice.paid`),
+cancellation (`customer.subscription.deleted`), connected-account payments
+(`checkout.session.completed`) and Connect onboarding (`account.updated`). Those
+arrive from two separate event destinations, so `STRIPE_WEBHOOK_SECRET` accepts a
+comma-separated list of signing secrets and the route tries each.
 
 ## Quick summary
 

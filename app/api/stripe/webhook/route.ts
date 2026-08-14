@@ -1,7 +1,11 @@
 import { processStripeWebhookEvent, assertStripeWebhookReady } from "@/lib/stripe/webhook-handlers";
 import { getStripe } from "@/lib/stripe/client";
-import { isStripeWebhookConfigured } from "@/lib/stripe/config";
+import {
+  getStripeWebhookSecrets,
+  isStripeWebhookConfigured,
+} from "@/lib/stripe/config";
 import { NextResponse } from "next/server";
+import type Stripe from "stripe";
 
 export const runtime = "nodejs";
 
@@ -21,13 +25,23 @@ export async function POST(request: Request) {
 
   const body = await request.text();
   const stripe = getStripe();
-  const secret = process.env.STRIPE_WEBHOOK_SECRET!.trim();
 
-  let event;
-  try {
-    event = stripe.webhooks.constructEvent(body, signature, secret);
-  } catch (error) {
-    console.error("[stripe webhook] signature verification failed:", error);
+  // Each configured destination signs with its own secret, so a delivery is
+  // authentic if any one of them verifies. Only the last failure is reported —
+  // failing against the other secrets is the expected case, not an error.
+  let event: Stripe.Event | null = null;
+  let lastError: unknown = null;
+  for (const secret of getStripeWebhookSecrets()) {
+    try {
+      event = stripe.webhooks.constructEvent(body, signature, secret);
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!event) {
+    console.error("[stripe webhook] signature verification failed:", lastError);
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
   }
 

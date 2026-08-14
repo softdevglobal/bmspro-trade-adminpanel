@@ -7,11 +7,27 @@ export function isStripeConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
 }
 
+/**
+ * Webhook signing secrets, newest first.
+ *
+ * Stripe issues one secret per event destination, and this app needs two: a
+ * "Your account" destination for subscription billing (`invoice.paid`,
+ * `customer.subscription.deleted`) and a "Connected accounts" destination for
+ * customer payments and Connect onboarding (`checkout.session.completed`,
+ * `account.updated`). Both point at the same route, so `STRIPE_WEBHOOK_SECRET`
+ * accepts a comma-separated list and the route tries each. It also makes secret
+ * rotation a two-step change rather than a cutover with dropped events.
+ */
+export function getStripeWebhookSecrets(): string[] {
+  return (process.env.STRIPE_WEBHOOK_SECRET ?? "")
+    .split(",")
+    .map((secret) => secret.trim())
+    .filter(Boolean);
+}
+
 /** True when Stripe webhook signature verification is configured. */
 export function isStripeWebhookConfigured(): boolean {
-  return (
-    isStripeConfigured() && Boolean(process.env.STRIPE_WEBHOOK_SECRET?.trim())
-  );
+  return isStripeConfigured() && getStripeWebhookSecrets().length > 0;
 }
 
 /** Platform Connect client id (`ca_...`) used for Standard OAuth onboarding. */

@@ -18,7 +18,7 @@
  * emulator accepts tokens signed with it, so no real service account is needed.
  */
 import { spawn } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
+import { createHmac, generateKeyPairSync } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import { cert, initializeApp } from "firebase-admin/app";
@@ -149,6 +149,9 @@ function startServer() {
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: PROJECT_ID,
       FIREBASE_AUTH_EMULATOR_HOST: AUTH_EMULATOR,
       FIRESTORE_EMULATOR_HOST: FIRESTORE_EMULATOR,
+      // Two destinations sign with different secrets; the route must accept both.
+      STRIPE_SECRET_KEY: "sk_test_harness",
+      STRIPE_WEBHOOK_SECRET: "whsec_platform_secret, whsec_connected_secret",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -429,6 +432,61 @@ try {
     failed += 1;
     failures.push("no reset code is stored for an unknown address");
     console.log("  FAIL  no reset code is stored for an unknown address");
+  }
+
+  console.log("\nstripe webhook accepts every configured destination secret");
+  // Two event destinations (platform + connected accounts) point at this one
+  // route, each signing with its own secret. Sign the payload the way Stripe
+  // does so the route's verification is exercised for real.
+  const signedRequest = async (secret) => {
+    const payload = JSON.stringify({
+      id: "evt_test",
+      object: "event",
+      type: "ping.unhandled",
+      data: { object: {} },
+    });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = createHmac("sha256", secret)
+      .update(`${timestamp}.${payload}`)
+      .digest("hex");
+    return fetch(`${BASE_URL}/api/stripe/webhook`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "stripe-signature": `t=${timestamp},v1=${signature}`,
+      },
+      body: payload,
+    });
+  };
+
+  for (const [label, secret, expected] of [
+    ["platform destination secret", "whsec_platform_secret", 200],
+    ["connected-accounts destination secret", "whsec_connected_secret", 200],
+    ["an unknown secret", "whsec_not_configured", 400],
+  ]) {
+    const response = await signedRequest(secret);
+    if (response.status === expected) {
+      passed += 1;
+      console.log(`  PASS  ${label} -> ${expected}`);
+    } else {
+      failed += 1;
+      failures.push(`${label} -> ${expected}`);
+      console.log(`  FAIL  ${label} -> expected ${expected}, got ${response.status}`);
+    }
+  }
+
+  const unsigned = await fetch(`${BASE_URL}/api/stripe/webhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (unsigned.status === 400) {
+    passed += 1;
+    console.log("  PASS  unsigned delivery -> 400");
+  } else {
+    failed += 1;
+    failures.push("unsigned delivery -> 400");
+    console.log(`  FAIL  unsigned delivery -> expected 400, got ${unsigned.status}`);
   }
 
   console.log("\nadmin actions are recorded in the audit log");
