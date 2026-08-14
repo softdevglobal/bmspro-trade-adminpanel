@@ -49,11 +49,11 @@ export function LoginForm() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [forgotOpen, setForgotOpen] = useState(false);
 
-  async function handleLogin(email: string, password: string) {
+  async function handleLogin(email: string, password: string, remember: boolean) {
     setErrorMessage(null);
     setIsSubmitting(true);
     try {
-      await login(email, password);
+      await login(email, password, { remember });
     } catch (error) {
       setErrorMessage(describeAuthError(error));
     } finally {
@@ -68,7 +68,8 @@ export function LoginForm() {
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get("email") ?? "").trim();
     const password = String(formData.get("password") ?? "");
-    void handleLogin(email, password);
+    const remember = formData.get("remember") === "on";
+    void handleLogin(email, password, remember);
   }
 
   function submitFromEnter() {

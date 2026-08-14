@@ -1,3 +1,4 @@
+import { allowResetCodeRequest, generateResetCode } from "@/lib/auth/reset-codes";
 import { sendCustomerPasswordResetCodeEmail } from "@/lib/email/templates";
 import { CUSTOMER_COLLECTION } from "@/lib/customer/types";
 import {
@@ -10,10 +11,6 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 
 const COLLECTION = "customerPasswordResetCodes";
-
-function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
 
 async function resolveBusinessBranding(
   customerData: Record<string, unknown>,
@@ -92,6 +89,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Throttled before the account lookup, so a throttled response cannot be
+    // used to tell an existing address from an unknown one. Scoped per booking
+    // slug, matching how customer accounts are namespaced.
+    if (!(await allowResetCodeRequest(`customer:${bookingSlug}`, trimmed))) {
+      return NextResponse.json(
+        {
+          error:
+            "A code was already sent. Please wait 60 seconds before requesting another.",
+        },
+        { status: 429 },
+      );
+    }
+
     const authEmail = await buildCustomerAuthEmail(bookingSlug, trimmed);
 
     let authUid: string;
@@ -121,23 +131,7 @@ export async function POST(req: NextRequest) {
     const docRef = adminDb
       .collection(COLLECTION)
       .doc(customerPasswordResetDocId(bookingSlug, trimmed));
-    const existing = await docRef.get();
-    if (existing.exists) {
-      const data = existing.data();
-      const createdAt =
-        (data?.createdAt as Timestamp | undefined)?.toMillis() ?? 0;
-      if (Date.now() - createdAt < 60_000) {
-        return NextResponse.json(
-          {
-            error:
-              "A code was already sent. Please wait 60 seconds before requesting another.",
-          },
-          { status: 429 },
-        );
-      }
-    }
-
-    const code = generateCode();
+    const code = generateResetCode();
     const expiresAt = Timestamp.fromMillis(Date.now() + 2 * 60 * 1000);
 
     await docRef.set({

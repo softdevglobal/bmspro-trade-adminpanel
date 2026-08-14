@@ -9,7 +9,9 @@
     "lint": "eslint",
     "seed:super-admin": "tsx --env-file=.env.local scripts/seed-super-admin.ts",
     "cron:reminders": "tsx --env-file=.env scripts/run-schedule-reminders.ts",
-    "firebase:deploy-rules": "firebase deploy --only firestore:rules"
+    "firebase:deploy-rules": "firebase deploy --only firestore:rules",
+    "test:rules": "firebase emulators:exec --only firestore --project bms-rules-test \"node scripts/test-firestore-rules.mjs\"",
+    "test:api": "firebase emulators:exec --only auth,firestore --project bms-api-test \"node scripts/test-api-access.mjs\""
   },
   "dependencies": {
     "firebase": "^12.13.0",
@@ -26,6 +28,7 @@
     "zeptomail": "^8.0.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

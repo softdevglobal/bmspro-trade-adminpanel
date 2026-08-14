@@ -2,8 +2,12 @@
 
 import { postSessionAudit } from "@/lib/audit/log-session-client";
 import { auth, db } from "@/lib/firebase/client";
+import { clearLocalCaches } from "@/lib/offline/local-cache";
 import {
+  browserLocalPersistence,
+  browserSessionPersistence,
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
   type User,
@@ -32,7 +36,8 @@ type AuthContextValue = {
   login: (
     email: string,
     password: string,
-    options?: { skipRedirect?: boolean; redirectTo?: string },
+    /** `remember: false` ends the session when the browser closes. */
+    options?: { skipRedirect?: boolean; redirectTo?: string; remember?: boolean },
   ) => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -270,7 +275,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (
     email: string,
     password: string,
-    options?: { skipRedirect?: boolean; redirectTo?: string },
+    options?: { skipRedirect?: boolean; redirectTo?: string; remember?: boolean },
   ) => {
     clearAuthCache();
     setUser(null);
@@ -280,6 +285,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loginInProgressRef.current = true;
 
     try {
+      // Firebase defaults to local persistence, which outlives the browser
+      // session. "Keep me signed in" has to actually choose between the two, or
+      // declining it on a shared workshop machine changes nothing.
+      await setPersistence(
+        auth,
+        options?.remember === false
+          ? browserSessionPersistence
+          : browserLocalPersistence,
+      );
+
       const credential = await signInWithEmailAndPassword(
         auth,
         email.trim(),
@@ -352,8 +367,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(null);
     setBusinessId(null);
     setStatus("unauthenticated");
-    router.replace("/login");
-  }, [router, role]);
+    // Everything this device cached for the user goes with the session. Leaving
+    // via a full page load rather than router.replace is required, not a style
+    // choice: clearing Firestore's cache terminates the client, so the next
+    // page has to start from a fresh one.
+    await clearLocalCaches();
+    window.location.replace("/login");
+  }, [role]);
 
   const value = useMemo(
     () => ({ status, user, role, businessId, login, logout }),

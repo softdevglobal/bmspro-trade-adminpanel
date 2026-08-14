@@ -1,12 +1,9 @@
+import { allowResetCodeRequest, generateResetCode } from "@/lib/auth/reset-codes";
 import { sendPasswordResetCodeEmail } from "@/lib/email/templates";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
-
-function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +12,15 @@ export async function POST(req: NextRequest) {
 
     if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
       return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+    }
+
+    // Throttled before the account lookup, so a throttled response cannot be
+    // used to tell an existing address from an unknown one.
+    if (!(await allowResetCodeRequest("admin", trimmed))) {
+      return NextResponse.json(
+        { error: "A code was already sent. Please wait 60 seconds before requesting another." },
+        { status: 429 },
+      );
     }
 
     // Check the user exists in Firebase Auth
@@ -43,21 +49,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Rate-limit: only one code per email per 60 seconds
     const docRef = adminDb.collection("passwordResetCodes").doc(trimmed);
-    const existing = await docRef.get();
-    if (existing.exists) {
-      const data = existing.data();
-      const createdAt = (data?.createdAt as Timestamp | undefined)?.toMillis() ?? 0;
-      if (Date.now() - createdAt < 60_000) {
-        return NextResponse.json(
-          { error: "A code was already sent. Please wait 60 seconds before requesting another." },
-          { status: 429 },
-        );
-      }
-    }
-
-    const code = generateCode();
+    const code = generateResetCode();
     const expiresAt = Timestamp.fromMillis(Date.now() + 2 * 60 * 1000);
 
     await docRef.set({

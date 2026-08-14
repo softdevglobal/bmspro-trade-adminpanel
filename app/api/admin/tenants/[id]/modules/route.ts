@@ -3,6 +3,7 @@ import {
   normalizeModuleSettingsPatch,
   parseBusinessModuleSettings,
 } from "@/lib/business/module-settings";
+import { logAuditEvent } from "@/lib/audit/server";
 import { requireSuperAdmin, updateTenantModules } from "@/lib/onboarding/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
@@ -66,6 +67,25 @@ export async function PATCH(
   if (!result.ok) {
     return NextResponse.json(result, { status: 404 });
   }
+
+  // Recording the requested patch rather than the merged result keeps the log
+  // readable: it shows what the admin actually turned on or off.
+  await logAuditEvent({
+    businessId,
+    category: "auth",
+    action: "tenant.modules_updated",
+    actor: {
+      uid: auth.uid,
+      role: "super_admin",
+      name: null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: "Tenant modules updated by super admin.",
+    targetId: businessId,
+    targetLabel: null,
+    metadata: { changed: parsed.value },
+  });
 
   return NextResponse.json({
     ok: true,

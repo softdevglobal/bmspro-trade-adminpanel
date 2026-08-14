@@ -206,15 +206,15 @@ service cloud.firestore {
       allow create: if false;
     }
 
+    // Identity is the uid, never the token email. An account's email is set by
+    // whoever provisions it — a business owner can create a staff login with any
+    // address, including a customer's — and no account in this project is email
+    // verified, so matching a document's email field against the token would let
+    // one tenant read another tenant's customer records. Customers reach their
+    // own data through /api/customer/*, which resolves the email server-side
+    // from an authenticated profile.
     function ownsCustomerNotification() {
-      return isSignedIn()
-        && (
-          resource.data.customerId == request.auth.uid
-          || (
-            request.auth.token.email is string
-            && resource.data.customerEmail == request.auth.token.email
-          )
-        );
+      return isSignedIn() && resource.data.customerId == request.auth.uid;
     }
 
     match /customer_notifications/{notificationId} {
@@ -225,15 +225,9 @@ service cloud.firestore {
       allow create: if false;
     }
 
+    /** uid only — see the note on ownsCustomerNotification. */
     function ownsCustomerInspection() {
-      return isSignedIn()
-        && (
-          resource.data.customerId == request.auth.uid
-          || (
-            request.auth.token.email is string
-            && resource.data.customer.email == request.auth.token.email
-          )
-        );
+      return isSignedIn() && resource.data.customerId == request.auth.uid;
     }
 
     match /requests/{requestId} {
@@ -259,16 +253,9 @@ service cloud.firestore {
         && resource.data.assignedTo.uid == request.auth.uid;
     }
 
+    /** uid only — see the note on ownsCustomerNotification. */
     function ownsCustomerBooking() {
-      return isSignedIn()
-        && (
-          resource.data.customerId == request.auth.uid
-          || (
-            request.auth.token.email is string
-            && resource.data.customer is map
-            && resource.data.customer.email == request.auth.token.email
-          )
-        );
+      return isSignedIn() && resource.data.customerId == request.auth.uid;
     }
 
     function ownsOwnerUidJob() {
@@ -431,9 +418,16 @@ service cloud.firestore {
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
         || userOwnsBusiness(resource.data.businessId);
+      // businessId is optional because legacy salon staff documents predate it,
+      // but when present it must be the requester's own business — otherwise a
+      // staff member can file a request into another tenant's approval queue.
       allow create: if isSignedIn()
         && request.resource.data.requesterUid == request.auth.uid
-        && request.resource.data.status == 'pending';
+        && request.resource.data.status == 'pending'
+        && (
+          !('businessId' in request.resource.data)
+          || belongsToBusiness(request.resource.data.businessId)
+        );
       allow update, delete: if false;
     }
 

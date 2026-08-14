@@ -6,6 +6,7 @@
  * DELETE — Remove the template document (tasks are embedded).
  */
 
+import { logAuditEvent } from "@/lib/audit/server";
 import {
   deleteServiceTemplate,
   getServiceTemplate,
@@ -64,6 +65,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json(result, { status: 400 });
   }
 
+  await logAuditEvent({
+    businessId: null,
+    category: "service",
+    action: "service_template.updated",
+    actor: {
+      uid: auth.uid,
+      role: "super_admin",
+      name: null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: `Service template ${result.template.name} updated.`,
+    targetId: id,
+    targetLabel: result.template.name,
+  });
+
   return NextResponse.json({ ok: true, template: result.template });
 }
 
@@ -82,6 +99,22 @@ export async function DELETE(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }
+
+  await logAuditEvent({
+    businessId: null,
+    category: "service",
+    action: "service_template.deleted",
+    actor: {
+      uid: auth.uid,
+      role: "super_admin",
+      name: null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: "Service template deleted.",
+    targetId: id,
+    targetLabel: null,
+  });
 
   return NextResponse.json({ ok: true });
 }

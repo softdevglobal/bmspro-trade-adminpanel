@@ -1,7 +1,7 @@
 "use client";
 
 import { BookingLinkCard } from "@/components/booking-link-card";
-import { SuperAdminDashboardOverview } from "@/components/super-admin-dashboard-overview";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -173,6 +173,18 @@ function currentHourInTimeZone(timeZone?: string | null): number {
   );
   return Number.isFinite(hour) ? hour : new Date().getHours();
 }
+
+/**
+ * Platform-admin view, split out of the bundle: it renders for super admins
+ * only, and every business owner was downloading it to never use it.
+ */
+const SuperAdminDashboardOverview = dynamic(
+  () =>
+    import("@/components/super-admin-dashboard-overview").then(
+      (mod) => mod.SuperAdminDashboardOverview,
+    ),
+  { ssr: false },
+);
 
 export function DashboardOverview() {
   const { role } = useAuth();

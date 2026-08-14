@@ -1,8 +1,7 @@
 "use client";
 
+import { ServiceWorkerRegistrar } from "@/components/service-worker-registrar";
 import { AuthProvider } from "@/lib/auth/auth-context";
-import { CustomerAuthProvider } from "@/lib/customer-auth/customer-auth-context";
-import { CustomerNotificationsProvider } from "@/lib/notifications/customer-notifications-context";
 import { useEffect } from "react";
 
 const CHUNK_RELOAD_KEY = "bms.chunk-reload";
@@ -39,15 +38,20 @@ function ChunkLoadRecovery() {
   return null;
 }
 
+/**
+ * Root providers, mounted on every route — so only things every route needs
+ * belong here. The customer-portal providers used to sit alongside AuthProvider,
+ * which put a second Firebase app and the customer notification listener into
+ * the dashboard and login bundles even though no admin screen reads them. They
+ * now live in components/customer-providers.tsx, mounted by the /account and
+ * /booknow layouts.
+ */
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <CustomerAuthProvider>
-        <CustomerNotificationsProvider>
-          <ChunkLoadRecovery />
-          {children}
-        </CustomerNotificationsProvider>
-      </CustomerAuthProvider>
+      <ChunkLoadRecovery />
+      <ServiceWorkerRegistrar />
+      {children}
     </AuthProvider>
   );
 }

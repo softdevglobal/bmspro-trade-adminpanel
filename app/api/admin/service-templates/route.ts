@@ -5,6 +5,7 @@
  * POST — Create a new template with tasks and trade type.
  */
 
+import { logAuditEvent } from "@/lib/audit/server";
 import {
   createServiceTemplate,
   listServiceTemplates,
@@ -56,6 +57,24 @@ export async function POST(request: Request) {
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
   }
+
+  // Catalog templates are platform-wide, so there is no tenant to attribute
+  // this to — businessId stays null and the actor is the super admin.
+  await logAuditEvent({
+    businessId: null,
+    category: "service",
+    action: "service_template.created",
+    actor: {
+      uid: auth.uid,
+      role: "super_admin",
+      name: null,
+      email: auth.email ?? null,
+    },
+    source: "admin_panel",
+    summary: `Service template ${result.template.name} created.`,
+    targetId: result.templateId,
+    targetLabel: result.template.name,
+  });
 
   return NextResponse.json(result, { status: 201 });
 }
