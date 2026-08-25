@@ -57,6 +57,8 @@
  *         "description": "Standard labour rate per hour",
  *         "priceAud":    95.00,
  *         "imageUrl":    null,
+ *         "documentUrl": null,
+ *         "documentName": null,
  *         "createdAt":   1716000000000,
  *         "updatedAt":   1716100000000
  *       },
@@ -67,6 +69,8 @@
  *         "description": null,
  *         "priceAud":    120.00,
  *         "imageUrl":    null,
+ *         "documentUrl": null,
+ *         "documentName": null,
  *         "createdAt":   1716050000000,
  *         "updatedAt":   1716050000000
  *       }

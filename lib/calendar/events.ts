@@ -1,5 +1,6 @@
 import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types";
 import type { BookingDetail } from "@/lib/bookings/types";
+import { bookingScheduleDays } from "@/lib/bookings/map-booking-doc";
 import { BOOKING_STATUS_LABELS } from "@/lib/bookings/types";
 import {
   displayBookingCode,
@@ -121,26 +122,14 @@ export function datesForBookingOnCalendar(booking: BookingDetail): string[] {
     return [];
   }
 
-  const dates: string[] = [];
-  if (booking.scheduledSlot?.date) {
-    dates.push(booking.scheduledSlot.date);
-  }
-  for (const slot of booking.additionalJobDays) {
-    if (slot.date && !dates.includes(slot.date)) {
-      dates.push(slot.date);
-    }
-  }
-  return dates.sort();
+  return bookingScheduleDays(booking).map((day) => day.date);
 }
 
 export function bookingSlotOnDate(
   booking: BookingDetail,
   date: string,
 ): InspectionSlot | null {
-  if (booking.scheduledSlot?.date === date) {
-    return booking.scheduledSlot;
-  }
-  return booking.additionalJobDays.find((slot) => slot.date === date) ?? null;
+  return bookingScheduleDays(booking).find((day) => day.date === date)?.slot ?? null;
 }
 
 export function resolveBookingAdditionalJobDays(

@@ -13,6 +13,11 @@ import { PaymentLinkButton } from "@/components/payment-link-button";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useBookings } from "@/lib/bookings/use-bookings";
+import {
+  repeatingVisitCountForBookingId,
+  uniqueQuotationsForBoard,
+} from "@/lib/bookings/board-grouping";
 import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
@@ -218,18 +223,22 @@ function CustomerDecisionPill({
 
 function QuotationCardMenu({
   quotation,
+  open,
+  onOpenChange,
   onScheduleBooking,
   onCancelQuotation,
   onUndoCancel,
   onDeleteQuotation,
 }: {
   quotation: QuotationDetail;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onScheduleBooking: () => void;
   onCancelQuotation: () => void;
   onUndoCancel: () => void;
   onDeleteQuotation: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const setOpen = onOpenChange;
   const rootRef = useRef<HTMLDivElement>(null);
   const { canUseModule } = useBusinessModuleSettings();
   const jobsModuleEnabled = canUseModule("jobs");
@@ -282,7 +291,7 @@ function QuotationCardMenu({
         type="button"
         aria-label="Quotation actions"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
         className="inline-flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
       >
         <span className="material-symbols-outlined text-[20px]">more_vert</span>
@@ -472,6 +481,7 @@ function QuotationCard({
   onUndoCancel,
   onDelete,
   timeZone,
+  repeatCount = 0,
 }: {
   quotation: QuotationDetail;
   isPreviewOpen: boolean;
@@ -481,6 +491,7 @@ function QuotationCard({
   onUndoCancel: () => void;
   onDelete: () => void;
   timeZone?: string | null;
+  repeatCount?: number;
 }) {
   const { canUseModule } = useBusinessModuleSettings();
   const jobsModuleEnabled = canUseModule("jobs");
@@ -492,6 +503,7 @@ function QuotationCard({
     !awaitingCustomer;
   const waitHref = `/dashboard/requests?request=${encodeURIComponent(quotation.inspectionRequestId)}&action=awaiting-decision`;
   const displayPhone = formatAuPhoneDisplay(quotation.customer.phone);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div
@@ -505,6 +517,8 @@ function QuotationCard({
         }
       }}
       className={`group relative flex w-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl border bg-surface-container-lowest p-4 text-left shadow-sm transition-all sm:p-5 sm:hover:-translate-y-0.5 ${
+        menuOpen ? "z-30" : "z-0 hover:z-10"
+      } ${
         isPreviewOpen
           ? "border-primary/40 ring-2 ring-primary/15"
           : "border-outline-variant/60 hover:border-primary/30 hover:shadow-md"
@@ -522,9 +536,16 @@ function QuotationCard({
           ) : null}
           <CustomerDecisionPill quotation={quotation} />
           <CreatedSourcePill source={quotation.createdSource} />
+          {repeatCount > 1 ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-800">
+              Repeats · {repeatCount} visits
+            </span>
+          ) : null}
         </div>
         <QuotationCardMenu
           quotation={quotation}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
           onScheduleBooking={onBook}
           onCancelQuotation={onCancel}
           onUndoCancel={onUndoCancel}
@@ -1524,6 +1545,7 @@ export function QuotationsBoard() {
   const jobsModuleEnabled = canUseModule("jobs");
   const profile = useBusinessProfile();
   const { requests: inspectionRequests } = useInspectionRequests();
+  const { bookings } = useBookings();
   const [quotations, setQuotations] = useState<QuotationDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1583,51 +1605,76 @@ export function QuotationsBoard() {
     }
   }, [jobsModuleEnabled, modulesReady, previewMode]);
 
+  const bookingById = useMemo(() => {
+    const map = new Map<string, (typeof bookings)[number]>();
+    for (const booking of bookings) {
+      map.set(booking.id, booking);
+    }
+    return map;
+  }, [bookings]);
+  const requestById = useMemo(() => {
+    const map = new Map<
+      string,
+      (typeof inspectionRequests)[number]
+    >();
+    for (const request of inspectionRequests) {
+      map.set(request.id, request);
+    }
+    return map;
+  }, [inspectionRequests]);
+  const boardQuotations = useMemo(
+    () => uniqueQuotationsForBoard(quotations, bookingById, requestById),
+    [quotations, bookingById, requestById],
+  );
+
   const selected = useMemo(
-    () => quotations.find((quotation) => quotation.id === selectedId) ?? null,
-    [quotations, selectedId],
+    () =>
+      boardQuotations.find((quotation) => quotation.id === selectedId) ??
+      quotations.find((quotation) => quotation.id === selectedId) ??
+      null,
+    [boardQuotations, quotations, selectedId],
   );
 
   const counts = useMemo(
     () => ({
-      all: quotations.length,
-      pending: quotations.filter(isPendingQuotation).length,
-      completed: quotations.filter(isCompletedQuotation).length,
-      draft: quotations.filter(
+      all: boardQuotations.length,
+      pending: boardQuotations.filter(isPendingQuotation).length,
+      completed: boardQuotations.filter(isCompletedQuotation).length,
+      draft: boardQuotations.filter(
         (quotation) =>
           quotation.status === "draft" && !isCompletedQuotation(quotation),
       )
         .length,
-      sent: quotations.filter(
+      sent: boardQuotations.filter(
         (quotation) =>
           quotation.status === "sent" && !isCompletedQuotation(quotation),
       )
         .length,
-      cancelled: quotations.filter(
+      cancelled: boardQuotations.filter(
         (quotation) => quotation.status === "cancelled",
       ).length,
     }),
-    [quotations],
+    [boardQuotations],
   );
 
   const visibleQuotations = useMemo(
     () => {
-      if (filter === "all") return quotations;
+      if (filter === "all") return boardQuotations;
       if (filter === "pending") {
-        return quotations.filter(isPendingQuotation);
+        return boardQuotations.filter(isPendingQuotation);
       }
       if (filter === "completed") {
-        return quotations.filter(isCompletedQuotation);
+        return boardQuotations.filter(isCompletedQuotation);
       }
       if (filter === "cancelled") {
-        return quotations.filter((quotation) => quotation.status === filter);
+        return boardQuotations.filter((quotation) => quotation.status === filter);
       }
-      return quotations.filter(
+      return boardQuotations.filter(
         (quotation) =>
           quotation.status === filter && !isCompletedQuotation(quotation),
       );
     },
-    [filter, quotations],
+    [filter, boardQuotations],
   );
 
   const linkedInspection = useMemo(() => {
@@ -1939,6 +1986,11 @@ export function QuotationsBoard() {
                 onUndoCancel={() => void handleUndoCancel(quotation)}
                 onDelete={() => setDeleteTarget(quotation)}
                 timeZone={timeZone}
+                repeatCount={repeatingVisitCountForBookingId(
+                  quotation.bookingId ??
+                    requestById.get(quotation.inspectionRequestId)?.bookingId,
+                  bookingById,
+                )}
               />
             </li>
           ))}

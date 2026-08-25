@@ -5,6 +5,8 @@ import {
   formatIsoDateInPlatformTimeZone,
   platformTodayIso,
 } from "@/lib/platform/timezone";
+import { weekdayIdFromYmd } from "@/lib/bookings/recurrence";
+import type { WeekDayId } from "@/lib/team/staff-availability";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export const SLOT_DAYS_PER_PAGE_MOBILE = 3;
@@ -186,6 +188,16 @@ function isBeforeMinDate(iso: string, minDate: string): boolean {
   return iso < minDate;
 }
 
+function isAfterMaxDate(iso: string, maxDate?: string): boolean {
+  return maxDate ? iso > maxDate : false;
+}
+
+function monthPartsFromIso(iso: string): { year: number; month: number } | null {
+  const parsed = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return { year: parsed.getFullYear(), month: parsed.getMonth() };
+}
+
 function monthStartMondayOffset(year: number, month: number): number {
   const first = new Date(year, month, 1);
   return (first.getDay() + 6) % 7;
@@ -201,6 +213,7 @@ export function BookingMonthCalendar({
   mode = "single",
   maxSelections = 3,
   minDate,
+  maxDate,
   onSelect,
   onToggle,
   blockedCombos,
@@ -208,12 +221,19 @@ export function BookingMonthCalendar({
   className = "",
   timeZone,
   allowPast = false,
+  size = "compact",
+  disabled: allDisabled = false,
+  label,
+  enabledWeekdays,
+  enabledMonthDay,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
   mode?: "single" | "multiple";
   maxSelections?: number;
   minDate: string;
+  /** Inclusive last selectable day. Later dates are hidden. */
+  maxDate?: string;
   onSelect?: (iso: string) => void;
   onToggle?: (iso: string) => void;
   /** Date+time combos that cannot be chosen (e.g. customer's original picks). */
@@ -223,6 +243,18 @@ export function BookingMonthCalendar({
   timeZone?: string | null;
   /** Admin flows: allow scheduling on past dates (customer flows keep the block). */
   allowPast?: boolean;
+  /** "full" is a standalone, full-width month grid; "compact" is the popover under a day strip. */
+  size?: "compact" | "full";
+  disabled?: boolean;
+  /** Field label rendered above the grid (full size only). */
+  label?: string;
+  /** When set, only these weekdays are selectable; other days show but are disabled. */
+  enabledWeekdays?: WeekDayId[];
+  /**
+   * Monthly recurrence: only this day of the month is selectable. Months shorter
+   * than the chosen day fall back to their last day, matching `addMonthsYmd`.
+   */
+  enabledMonthDay?: number | null;
 }) {
   const initialView = selectedIso
     ? new Date(`${selectedIso}T12:00:00`)
@@ -237,21 +269,47 @@ export function BookingMonthCalendar({
     timeZone,
   );
 
-  const minView = useMemo(() => {
-    const parsed = new Date(`${minDate}T12:00:00`);
-    return { year: parsed.getFullYear(), month: parsed.getMonth() };
-  }, [minDate]);
+  const minView = useMemo(() => monthPartsFromIso(minDate), [minDate]);
+  const maxView = useMemo(
+    () => (maxDate ? monthPartsFromIso(maxDate) : null),
+    [maxDate],
+  );
+
+  useEffect(() => {
+    if (!maxView) return;
+    if (
+      viewYear > maxView.year ||
+      (viewYear === maxView.year && viewMonth > maxView.month)
+    ) {
+      setViewYear(maxView.year);
+      setViewMonth(maxView.month);
+    }
+  }, [maxView, viewYear, viewMonth]);
 
   const canGoPrev =
     allowPast ||
+    !minView ||
     viewYear > minView.year ||
     (viewYear === minView.year && viewMonth > minView.month);
+  const canGoNext =
+    !maxView ||
+    viewYear < maxView.year ||
+    (viewYear === maxView.year && viewMonth < maxView.month);
 
   function shiftMonth(delta: number) {
     const next = new Date(viewYear, viewMonth + delta, 1);
+    if (
+      maxView &&
+      (next.getFullYear() > maxView.year ||
+        (next.getFullYear() === maxView.year && next.getMonth() > maxView.month))
+    ) {
+      return;
+    }
     setViewYear(next.getFullYear());
     setViewMonth(next.getMonth());
   }
+
+  const monthLength = daysInMonth(viewYear, viewMonth);
 
   const gridCells = useMemo(() => {
     const offset = monthStartMondayOffset(viewYear, viewMonth);
@@ -266,65 +324,105 @@ export function BookingMonthCalendar({
     return cells;
   }, [viewYear, viewMonth]);
 
-  const weekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
+  const full = size === "full";
+  const weekdayLabels = full
+    ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    : ["M", "T", "W", "T", "F", "S", "S"];
 
   return (
     <div
-      className={`mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-3 shadow-sm ${className}`}
+      className={`${
+        full
+          ? "w-full rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4"
+          : "mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-3 shadow-sm"
+      } ${className}`}
     >
+      {full && label ? (
+        <span className="mb-3 block font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          {label}
+        </span>
+      ) : null}
       <div className="flex items-center justify-between gap-1">
         <button
           type="button"
-          disabled={!canGoPrev}
+          disabled={allDisabled || !canGoPrev}
           onClick={(event) => {
             event.stopPropagation();
             shiftMonth(-1);
           }}
           aria-label="Previous month"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          className={`inline-flex shrink-0 items-center justify-center rounded-full border border-outline-variant/60 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
+            full ? "h-9 w-9" : "h-6 w-6"
+          }`}
         >
-          <span className="material-symbols-outlined text-[16px]">
+          <span
+            className={`material-symbols-outlined ${full ? "text-[20px]" : "text-[16px]"}`}
+          >
             chevron_left
           </span>
         </button>
-        <p className="truncate font-body text-[12px] font-bold text-on-surface">
+        <p
+          className={`truncate font-body font-bold text-on-surface ${
+            full ? "text-[14px]" : "text-[12px]"
+          }`}
+        >
           {monthLabel}
         </p>
         <button
           type="button"
+          disabled={allDisabled || !canGoNext}
           onClick={(event) => {
             event.stopPropagation();
             shiftMonth(1);
           }}
           aria-label="Next month"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary"
+          className={`inline-flex shrink-0 items-center justify-center rounded-full border border-outline-variant/60 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
+            full ? "h-9 w-9" : "h-6 w-6"
+          }`}
         >
-          <span className="material-symbols-outlined text-[16px]">
+          <span
+            className={`material-symbols-outlined ${full ? "text-[20px]" : "text-[16px]"}`}
+          >
             chevron_right
           </span>
         </button>
       </div>
 
-      <div className="mt-1.5 grid grid-cols-7 gap-px">
-        {weekdayLabels.map((label, index) => (
+      <div className={`grid grid-cols-7 ${full ? "mt-3 gap-1" : "mt-1.5 gap-px"}`}>
+        {weekdayLabels.map((weekday, index) => (
           <span
-            key={`${label}-${index}`}
-            className="flex h-5 items-center justify-center font-body text-[9px] font-bold text-on-surface-variant"
+            key={`${weekday}-${index}`}
+            className={`flex items-center justify-center font-body font-bold text-on-surface-variant ${
+              full ? "h-7 text-[11px]" : "h-5 text-[9px]"
+            }`}
           >
-            {label}
+            {weekday}
           </span>
         ))}
         {gridCells.map((cell, index) => {
           if (!cell) {
             return (
-              <span key={`empty-${index}`} className="h-8" aria-hidden />
+              <span
+                key={`empty-${index}`}
+                className={full ? "h-11" : "h-8"}
+                aria-hidden
+              />
             );
           }
 
+          const weekday = weekdayIdFromYmd(cell.iso);
+          const weekdayBlocked =
+            enabledWeekdays != null &&
+            (!weekday || !enabledWeekdays.includes(weekday));
+          const monthDayBlocked =
+            enabledMonthDay != null &&
+            cell.dayNum !== Math.min(enabledMonthDay, monthLength);
           const past = !allowPast && isBeforeMinDate(cell.iso, minDate);
+          const afterEnd = isAfterMaxDate(cell.iso, maxDate);
           const comboBlocked =
             blockedCombos && isDayFullyBlocked(cell.iso, blockedCombos);
-          const disabled = past || comboBlocked;
+          const disabled =
+            past || comboBlocked || weekdayBlocked || monthDayBlocked || afterEnd;
           const selected =
             mode === "multiple"
               ? (selectedIsos ?? []).includes(cell.iso)
@@ -335,17 +433,33 @@ export function BookingMonthCalendar({
             (selectedIsos?.length ?? 0) >= maxSelections;
           const isToday = cell.iso === today;
 
+          if (afterEnd) {
+            return (
+              <span
+                key={cell.iso}
+                className={full ? "h-11" : "h-8"}
+                aria-hidden
+              />
+            );
+          }
+
           return (
             <button
               key={cell.iso}
               type="button"
-              disabled={disabled || atMax}
+              disabled={allDisabled || disabled || atMax}
               title={
                 comboBlocked
                   ? blockedDayHint
                   : past
                     ? "Past dates cannot be selected"
-                    : undefined
+                    : weekdayBlocked
+                      ? "This weekday is not available for this booking"
+                      : monthDayBlocked
+                        ? `This job repeats on the ${enabledMonthDay} of each month`
+                        : atMax
+                          ? `You can pick up to ${maxSelections} days — tap a selected day to remove it`
+                          : undefined
               }
               onClick={() => {
                 if (mode === "multiple") {
@@ -354,14 +468,18 @@ export function BookingMonthCalendar({
                 }
                 onSelect?.(cell.iso);
               }}
-              className={`flex h-8 w-full items-center justify-center rounded-md font-body text-[12px] font-semibold leading-none transition-colors ${
-                disabled
-                  ? "cursor-not-allowed text-stone-300"
+              className={`flex w-full items-center justify-center font-body font-semibold leading-none transition-colors disabled:cursor-not-allowed ${
+                full
+                  ? "h-11 rounded-xl text-[14px]"
+                  : "h-8 rounded-md text-[12px]"
+              } ${
+                disabled || atMax
+                  ? "text-on-surface-variant/35"
                   : selected
                     ? "bg-primary text-on-primary"
                     : isToday
                       ? "bg-primary/12 text-primary ring-1 ring-primary/25"
-                      : "text-on-surface hover:bg-stone-100"
+                      : "text-on-surface hover:bg-primary/8"
               }`}
             >
               {cell.dayNum}

@@ -548,6 +548,71 @@ export async function uploadItemImage(
   }
 }
 
+function sanitizeDocumentName(filename: string): string {
+  const base = filename.replace(/\\/g, "/").split("/").pop()?.trim() || "document.pdf";
+  const cleaned = base.replace(/[^\w.\- ()[\]]+/g, "_").replace(/^\.+/, "");
+  const withExt = cleaned.toLowerCase().endsWith(".pdf")
+    ? cleaned
+    : `${cleaned || "document"}.pdf`;
+  return withExt.slice(0, 200);
+}
+
+/**
+ * Uploads a catalog item document (PDF) to Firebase Storage.
+ */
+export async function uploadItemDocument(
+  file: Buffer,
+  contentType: string,
+  options: {
+    businessId: string;
+    uid: string;
+    filename?: string;
+  },
+): Promise<
+  | { ok: true; documentUrl: string; documentName: string }
+  | { ok: false; error: string }
+> {
+  const filename = options.filename ?? "document.pdf";
+  const resolved = resolvePdfContentType(contentType, filename, file);
+  if (!resolved) {
+    return { ok: false, error: "Unsupported file type. Use a PDF document." };
+  }
+
+  if (file.length > PDF_MAX_BYTES) {
+    return { ok: false, error: "PDF must be 10 MB or smaller." };
+  }
+
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const documentName = sanitizeDocumentName(filename);
+  const bucket = getStorage().bucket(bucketName);
+  const path = `items/${options.businessId}/${options.uid}/docs/${Date.now()}-${randomUUID()}-${documentName}`;
+  const token = randomUUID();
+
+  try {
+    await bucket.file(path).save(file, {
+      metadata: {
+        contentType: resolved,
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+          originalName: documentName,
+        },
+      },
+    });
+
+    const documentUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return { ok: true, documentUrl, documentName };
+  } catch (error) {
+    console.error("uploadItemDocument failed:", error);
+    return { ok: false, error: "Could not upload document." };
+  }
+}
+
 /**
  * Uploads a generated quotation PDF to Firebase Storage and returns a public
  * download URL.

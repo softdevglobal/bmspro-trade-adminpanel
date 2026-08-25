@@ -56,9 +56,9 @@ export function calendarVisitTimeRange(
   return timeRangeFromStartTime(startTime);
 }
 
-const SELECT_CLASS =
-  "w-full appearance-none rounded-lg border border-outline-variant/60 bg-white bg-[length:0.875rem] bg-[right_1.1rem_center] bg-no-repeat py-2.5 pl-3 pr-9 font-body text-[14px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60";
-const CHEVRON_BG =
+export const SCHEDULE_SELECT_CLASS =
+  "w-full min-w-0 appearance-none rounded-xl border border-outline-variant/60 bg-surface-container-lowest bg-[length:0.875rem] bg-[right_1.1rem_center] bg-no-repeat py-2.5 pl-3 pr-10 font-body text-[14px] text-on-surface focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 disabled:opacity-60";
+export const SCHEDULE_SELECT_CHEVRON =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='%236b7280'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E\")";
 
 export function CalendarVisitTimeRangeFields({
@@ -107,8 +107,8 @@ export function CalendarVisitTimeRangeFields({
           disabled={disabled}
           aria-label="Visit start time"
           onChange={(event) => onStartTimeChange(event.target.value)}
-          className={SELECT_CLASS}
-          style={{ backgroundImage: CHEVRON_BG }}
+          className={SCHEDULE_SELECT_CLASS}
+          style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
         >
           {options.slice(0, -1).map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -124,8 +124,8 @@ export function CalendarVisitTimeRangeFields({
           disabled={disabled || endOptions.length === 0}
           aria-label="Visit end time"
           onChange={(event) => onEndTimeChange(event.target.value)}
-          className={SELECT_CLASS}
-          style={{ backgroundImage: CHEVRON_BG }}
+          className={SCHEDULE_SELECT_CLASS}
+          style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
         >
           {endOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>

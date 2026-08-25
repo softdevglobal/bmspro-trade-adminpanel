@@ -326,6 +326,15 @@ function AvailableBadge({
  * Radar visualization (right side of hero)
  * ========================================================================== */
 
+/**
+ * Pin coordinates go straight into a style attribute, so server and client must
+ * produce the exact same string. Math.cos/sin can differ in their last bits
+ * between Node and the browser, which trips hydration — round them off first.
+ */
+function roundPercent(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
 function RadarVisualization({
   business,
   reducedMotion,
@@ -351,8 +360,8 @@ function RadarVisualization({
       const radius = 0.35 + ((idx % 2) * 0.05);
       return {
         area,
-        x: 50 + Math.cos(angle) * radius * 100,
-        y: 50 + Math.sin(angle) * radius * 100,
+        x: roundPercent(50 + Math.cos(angle) * radius * 100),
+        y: roundPercent(50 + Math.sin(angle) * radius * 100),
       };
     });
   }, [areas]);

@@ -6,6 +6,17 @@ import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
 import { defaultCalendarVisitEnd } from "@/components/calendar-visit-time-range";
 import { JobEstimateSelect } from "@/components/job-estimate-select";
 import {
+  JobRecurrenceBuilder,
+  SeriesUpdateScopePicker,
+} from "@/components/job-recurrence-builder";
+import {
+  emptyRecurrenceDraft,
+  pruneWeekdayTimes,
+  weekdayIdFromYmd,
+  type JobRecurrenceRule,
+  type SeriesUpdateMode,
+} from "@/lib/bookings/recurrence";
+import {
   JobInstructionsFields,
   normalizeInstructionTasksForSubmit,
 } from "@/components/job-instructions-fields";
@@ -33,6 +44,7 @@ import {
 import { timeRangeFromStartTime } from "@/lib/inspection/types";
 import type { InspectionRequestType } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import { SERVICE_SKILLS } from "@/lib/onboarding/services/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import { displayBookingCode } from "@/lib/reference-codes";
 import Link from "next/link";
@@ -354,6 +366,13 @@ export function EditJobPage({ jobId }: { jobId: string }) {
   const [ownerNote, setOwnerNote] = useState("");
   const [instructions, setInstructions] = useState("");
   const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState(false);
+  const [recurrenceRule, setRecurrenceRule] = useState<JobRecurrenceRule>(() =>
+    emptyRecurrenceDraft("", "10:00", "11:00"),
+  );
+  const [seriesUpdateMode, setSeriesUpdateMode] =
+    useState<SeriesUpdateMode>("this_visit");
+  const [requiredSkill, setRequiredSkill] = useState("");
 
   const customerOptions = useMemo(
     () => buildCustomerOptions(requests, bookings, registeredCustomers),
@@ -453,6 +472,18 @@ export function EditJobPage({ jobId }: { jobId: string }) {
       setInstructionTasks(
         job.jobInstructionsTasks.length > 0 ? [...job.jobInstructionsTasks] : [],
       );
+      const hasSeries = Boolean(job.seriesId && job.recurrence);
+      setRecurrenceEnabled(hasSeries);
+      setRecurrenceRule(
+        job.recurrence ??
+          emptyRecurrenceDraft(
+            job.scheduledSlot?.date ?? "",
+            job.scheduledStartTime ?? "10:00",
+            job.scheduledEndTime ?? "11:00",
+          ),
+      );
+      setSeriesUpdateMode(hasSeries ? "this_visit" : "this_visit");
+      setRequiredSkill(job.requiredSkill ?? "");
     } catch (loadError) {
       setError(
         loadError instanceof Error ? loadError.message : "Could not load job.",
@@ -588,6 +619,36 @@ export function EditJobPage({ jobId }: { jobId: string }) {
             jobInstructionsDescription: instructions,
             jobInstructionsTasks:
               normalizeInstructionTasksForSubmit(instructionTasks),
+            recurrence: recurrenceEnabled
+              ? {
+                  ...recurrenceRule,
+                  startDate: date || recurrenceRule.startDate,
+                  startTime,
+                  endTime,
+                  weekdayTimes: (() => {
+                    const weekdayTimes = pruneWeekdayTimes(
+                      recurrenceRule.weekdays,
+                      recurrenceRule.weekdayTimes,
+                    );
+                    const weekday = weekdayIdFromYmd(date);
+                    if (
+                      recurrenceRule.unit === "week" &&
+                      weekday &&
+                      recurrenceRule.weekdays.includes(weekday)
+                    ) {
+                      return {
+                        ...weekdayTimes,
+                        [weekday]: { startTime, endTime },
+                      };
+                    }
+                    return weekdayTimes;
+                  })(),
+                }
+              : false,
+            seriesUpdateMode: recurrenceEnabled || booking.seriesId
+              ? seriesUpdateMode
+              : "this_visit",
+            requiredSkill: requiredSkill || null,
           }),
         },
       );
@@ -994,7 +1055,50 @@ export function EditJobPage({ jobId }: { jobId: string }) {
             </label>
           </FormSection>
 
-          <FormSection step={4} title="Notes & instructions">
+          <FormSection
+            step={4}
+            title="Repeating visits"
+            hint={booking.seriesId ? "Series" : "Optional"}
+          >
+            {booking.seriesId ? (
+              <p className="rounded-lg bg-primary/5 px-3 py-2 font-body text-[12px] text-on-surface">
+                Repeats {booking.seriesCount ?? "?"} times on this job
+                {booking.seriesException ? " · this date is an exception" : ""}
+              </p>
+            ) : null}
+            <JobRecurrenceBuilder
+              enabled={recurrenceEnabled}
+              rule={{
+                ...recurrenceRule,
+                startDate: date || recurrenceRule.startDate,
+                startTime,
+                endTime,
+              }}
+              disabled={submitting}
+              startDate={date}
+              startTime={startTime}
+              endTime={endTime}
+              requiredSkill={requiredSkill}
+              skillOptions={[...SERVICE_SKILLS]}
+              onEnabledChange={(enabled) => {
+                setRecurrenceEnabled(enabled);
+                if (enabled && !booking.seriesId) {
+                  setSeriesUpdateMode("this_and_future");
+                }
+              }}
+              onChange={setRecurrenceRule}
+              onRequiredSkillChange={setRequiredSkill}
+            />
+            {booking.seriesId || recurrenceEnabled ? (
+              <SeriesUpdateScopePicker
+                value={seriesUpdateMode}
+                disabled={submitting}
+                onChange={setSeriesUpdateMode}
+              />
+            ) : null}
+          </FormSection>
+
+          <FormSection step={5} title="Notes & instructions">
             <JobInstructionsFields
               description={instructions}
               tasks={instructionTasks}

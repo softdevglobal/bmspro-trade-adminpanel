@@ -24,6 +24,12 @@ import {
   type InspectionSlot,
 } from "@/lib/inspection/types";
 import type { BookingDetail } from "@/lib/bookings/types";
+import {
+  formatRecurrenceEndLabel,
+  formatRecurrenceFrequencyLabel,
+  formatRecurrenceSentence,
+  formatRecurrenceTimeLabel,
+} from "@/lib/bookings/recurrence";
 import type { EmailDetailRow } from "@/lib/email/layout";
 import { sendInspectionCustomerNotificationEmail } from "@/lib/email/templates/inspection-customer-notification";
 import {
@@ -700,6 +706,49 @@ function bookingHeadline(booking: BookingDetail): string {
   );
 }
 
+/** "Visit 2 of 12" for a series member, or null for a one-off job. */
+function seriesPositionLabel(booking: BookingDetail): string | null {
+  if (!booking.seriesId || !booking.seriesIndex) return null;
+  return booking.seriesCount
+    ? `Visit ${booking.seriesIndex} of ${booking.seriesCount}`
+    : `Visit ${booking.seriesIndex}`;
+}
+
+/**
+ * Repeat pattern, on-site window and end rule for a visit that belongs to a
+ * recurring series — appended to the customer email so they can see the whole
+ * schedule, not just the one visit this notification is about.
+ */
+function recurrenceEmailDetails(
+  booking: BookingDetail,
+  timeZone?: string | null,
+): EmailDetailRow[] {
+  const rule = booking.recurrence;
+  if (!rule) return [];
+
+  const rows: EmailDetailRow[] = [
+    { label: "Repeats", value: formatRecurrenceFrequencyLabel(rule) },
+    { label: "On-site time", value: formatRecurrenceTimeLabel(rule) },
+    { label: "Series starts", value: formatSlotDate(rule.startDate, timeZone) },
+    { label: "Series ends", value: formatRecurrenceEndLabel(rule, timeZone) },
+  ];
+  const position = seriesPositionLabel(booking);
+  if (position) rows.push({ label: "This visit", value: position });
+  return rows;
+}
+
+/** Recurrence sentence appended to the notification body (and so to the SMS). */
+function recurrenceBodySuffix(
+  booking: BookingDetail,
+  timeZone?: string | null,
+): string {
+  const rule = booking.recurrence;
+  if (!rule) return "";
+  const position = seriesPositionLabel(booking);
+  const prefix = position ? `${position}. ` : "";
+  return ` ${prefix}This job repeats: ${formatRecurrenceSentence(rule, timeZone)}.`;
+}
+
 /** Notify the customer when the business confirms a job day after quotation acceptance. */
 export async function notifyCustomerOfJobScheduled(
   booking: BookingDetail,
@@ -716,11 +765,12 @@ export async function notifyCustomerOfJobScheduled(
     booking.scheduledEndTime,
   );
   const title = `${business} confirmed your job`;
-  const body = booking.scheduledSlot
+  const baseBody = booking.scheduledSlot
     ? visitWindow
       ? `Your job (${headline}) is scheduled for ${slotLabel(booking.scheduledSlot, timeZone)}, arriving ${visitWindow}.`
       : `Your job (${headline}) is scheduled for ${slotLabel(booking.scheduledSlot, timeZone)}. We'll confirm the exact arrival time shortly.`
     : `${headline} is now scheduled as a job.`;
+  const body = `${baseBody}${recurrenceBodySuffix(booking, timeZone)}`;
 
   const emailDetails: EmailDetailRow[] = [{ label: "Job", value: headline }];
   if (booking.bookingCode) {
@@ -736,6 +786,7 @@ export async function notifyCustomerOfJobScheduled(
       value: TIME_RANGE_LABELS[booking.scheduledSlot.timeRange],
     });
   }
+  emailDetails.push(...recurrenceEmailDetails(booking, timeZone));
 
   try {
     await createNotification({
@@ -789,9 +840,10 @@ export async function notifyCustomerOfJobRescheduled(
     booking.scheduledEndTime,
   );
   const title = `${business} rescheduled your job`;
-  const body = visitWindow
+  const baseBody = visitWindow
     ? `Your job (${headline}) has been moved to ${slotLabel(slot, timeZone)}, arriving ${visitWindow}.`
     : `Your job (${headline}) has been moved to ${slotLabel(slot, timeZone)}. We'll confirm the exact arrival time shortly.`;
+  const body = `${baseBody}${recurrenceBodySuffix(booking, timeZone)}`;
 
   const emailDetails: EmailDetailRow[] = [{ label: "Job", value: headline }];
   if (booking.bookingCode) {
@@ -805,6 +857,7 @@ export async function notifyCustomerOfJobRescheduled(
     label: "Time of day",
     value: TIME_RANGE_LABELS[slot.timeRange],
   });
+  emailDetails.push(...recurrenceEmailDetails(booking, timeZone));
 
   try {
     await createNotification({
@@ -864,10 +917,17 @@ export async function notifyCustomerOfBookingOnTheWay(
       value: formatSlotDate(booking.scheduledSlot.date, timeZone),
     });
   }
+  // Only the position — the full repeat pattern was already sent when the
+  // series was scheduled, and this alert should stay short.
+  const seriesPosition = seriesPositionLabel(booking);
+  if (seriesPosition) {
+    emailDetails.push({ label: "This visit", value: seriesPosition });
+  }
 
-  const body = visitWindow
+  const baseBody = visitWindow
     ? `${technician} from ${business} is on the way for your booked job (${headline}). Expected arrival: ${visitWindow}.`
     : `${technician} from ${business} is on the way for your booked job (${headline}).`;
+  const body = seriesPosition ? `${baseBody} ${seriesPosition}.` : baseBody;
 
   try {
     await createNotification({

@@ -11,6 +11,7 @@ import type { BookingDetail, BookingStatus } from "@/lib/bookings/types";
 import {
   bookingScheduleDays,
   sortBookingsBySchedule,
+  uniqueJobsForBoard,
 } from "@/lib/bookings/map-booking-doc";
 import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
 import { bookingForCalendar } from "@/lib/calendar/events";
@@ -98,6 +99,24 @@ function bookingTitle(booking: BookingDetail): string {
     return booking.serviceName ?? "Existing service";
   }
   return booking.customRequest?.title ?? "Custom quotation request";
+}
+
+function RecurringVisitPills({ booking }: { booking: BookingDetail }) {
+  if (!booking.seriesId && !booking.recurrence) return null;
+  const visitCount = booking.seriesCount ?? 0;
+  return (
+    <>
+      <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-800">
+        Repeats
+        {visitCount > 1 ? ` · ${visitCount} visits` : ""}
+      </span>
+      {booking.seriesException ? (
+        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-800">
+          Exception
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 function BookingStatusPill({ status }: { status: BookingStatus }) {
@@ -273,6 +292,7 @@ function BookingCard({
               {displayBookingCode(booking)}
             </span>
             <BookingStatusPill status={booking.status} />
+            <RecurringVisitPills booking={booking} />
             {booking.status === "scheduled" && !booking.assignedTo ? (
               <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-800">
                 Unassigned
@@ -332,6 +352,14 @@ function BookingCard({
                 schedule
               </span>
               Est. {estimate} on site
+            </span>
+          ) : null}
+          {booking.requiredSkill ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px] text-primary">
+                verified
+              </span>
+              {booking.requiredSkill}
             </span>
           ) : null}
           {booking.assignedTo ? (
@@ -724,6 +752,7 @@ function BookingPreviewContent({
               {displayBookingCode(booking)}
             </span>
             <BookingStatusPill status={booking.status} />
+            <RecurringVisitPills booking={booking} />
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
             {title}
@@ -837,7 +866,13 @@ function BookingPreviewContent({
                 ? ` · ${scheduleDays.length} days`
                 : null}
             </p>
-            <div className="mt-2 space-y-2">
+            <div
+              className={
+                scheduleDays.length > 1
+                  ? "mt-2 max-h-56 space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]"
+                  : "mt-2 space-y-2"
+              }
+            >
               {scheduleDays.map((day, index) => {
                 const dayWindow = formatVisitWindow(day.startTime, day.endTime);
                 const dayEstimate =
@@ -1243,9 +1278,9 @@ export function JobsBoard({
       },
     );
     return {
-      active: sortBookingsBySchedule(groups.active),
-      completed: sortBookingsBySchedule(groups.completed),
-      cancelled: sortBookingsBySchedule(groups.cancelled),
+      active: uniqueJobsForBoard(sortBookingsBySchedule(groups.active)),
+      completed: uniqueJobsForBoard(sortBookingsBySchedule(groups.completed)),
+      cancelled: uniqueJobsForBoard(sortBookingsBySchedule(groups.cancelled)),
     };
   }, [displayBookings]);
   const timeZone = profile?.timezone;

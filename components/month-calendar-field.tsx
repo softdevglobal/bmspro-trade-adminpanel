@@ -24,6 +24,7 @@ export function MonthCalendarField({
   label,
   placeholder = "Select date",
   disabled = false,
+  size = "compact",
 }: {
   selectedIso: string;
   minDate: string;
@@ -31,6 +32,8 @@ export function MonthCalendarField({
   label?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** "comfortable" matches the standard platform field metrics. */
+  size?: "compact" | "comfortable";
 }) {
   const [open, setOpen] = useState(false);
   const [popoverStyle, setPopoverStyle] = useState<CSSProperties | null>(null);
@@ -124,7 +127,11 @@ export function MonthCalendarField({
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((value) => !value)}
-        className={`${label ? "mt-0.5" : ""} flex w-full items-center justify-between gap-2 rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-1.5 font-body text-[13px] text-on-surface transition-colors hover:border-primary/30 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-50`}
+        className={`${label ? "mt-0.5" : ""} ${
+          size === "comfortable"
+            ? "rounded-xl py-2.5 text-[14px]"
+            : "rounded-lg py-1.5 text-[13px]"
+        } flex w-full items-center justify-between gap-2 border border-outline-variant/60 bg-surface-container-lowest px-3 font-body text-on-surface transition-colors hover:border-primary/30 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-50`}
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="material-symbols-outlined shrink-0 text-[18px] text-on-surface-variant">

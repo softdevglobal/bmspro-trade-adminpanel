@@ -6,6 +6,7 @@ import type {
   InspectionRequestType,
   InspectionSlot,
 } from "@/lib/inspection/types";
+import type { JobRecurrenceRule } from "@/lib/bookings/recurrence";
 
 export const JOBS_COLLECTION = "jobs";
 
@@ -74,6 +75,14 @@ export type BookingDetail = {
   /** Internal briefing for staff/admin — not shown to customers. */
   jobInstructionsDescription: string | null;
   jobInstructionsTasks: string[];
+  /** Shared id for visits generated from one recurrence rule. */
+  seriesId: string | null;
+  seriesIndex: number | null;
+  seriesCount: number | null;
+  recurrence: JobRecurrenceRule | null;
+  seriesException: boolean;
+  /** Qualification this visit requires when matching staff. */
+  requiredSkill: string | null;
   quotation: InspectionQuotationSummary | null;
   visitStartedAt: number | null;
   visitEndedAt: number | null;

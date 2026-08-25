@@ -9,11 +9,27 @@ import {
 } from "@/components/calendar-visit-time-range";
 import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { JobAssignPicker } from "@/components/job-assign-picker";
+import { JobRecurrenceBuilder } from "@/components/job-recurrence-builder";
+import {
+  emptyRecurrenceDraft,
+  firstWeekdayOnOrAfter,
+  formatMonthDayOrdinal,
+  formatRecurrenceSummary,
+  pruneWeekdayTimes,
+  WEEKDAY_LONG_LABELS,
+  weekdayIdFromYmd,
+  type JobRecurrenceRule,
+  type RecurrenceTimeWindow,
+} from "@/lib/bookings/recurrence";
 import {
   JobInstructionsFields,
   normalizeInstructionTasksForSubmit,
 } from "@/components/job-instructions-fields";
-import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
+import {
+  BookingMonthCalendar,
+  SlotDayPicker,
+  todayIso,
+} from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
@@ -45,11 +61,13 @@ import type {
   InspectionTimeRange,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import { SERVICE_SKILLS } from "@/lib/onboarding/services/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import {
   formatAuPhoneDisplay,
   toAuLocalPhoneDigits,
 } from "@/lib/phone/au-phone";
+import type { WeekDayId } from "@/lib/team/staff-availability";
 import {
   useCallback,
   useEffect,
@@ -251,6 +269,10 @@ function computeFieldErrors(
   workingHours: BusinessWorkingHours,
   variant: "inspection" | "job" = "inspection",
   workingHoursLoading = false,
+  weeklyRepeat: {
+    weekdays: WeekDayId[];
+    weekdayTimes: Partial<Record<WeekDayId, RecurrenceTimeWindow>>;
+  } | null = null,
 ): FieldErrors {
   const errors: FieldErrors = {};
 
@@ -286,6 +308,38 @@ function computeFieldErrors(
         workingHours,
       );
       if (windowError) errors.preferredSlots = windowError;
+    } else if (weeklyRepeat) {
+      const startSlot = sortInspectionSlots(form.preferredSlots)[0];
+      const startWeekday = startSlot?.date
+        ? weekdayIdFromYmd(startSlot.date)
+        : null;
+      if (!startSlot?.date || !startWeekday) {
+        errors.preferredSlots = "Pick a starting date on the calendar.";
+      } else if (!weeklyRepeat.weekdays.includes(startWeekday)) {
+        errors.preferredSlots =
+          "The starting date must fall on a selected repeat day.";
+      } else {
+        for (const day of weeklyRepeat.weekdays) {
+          const window = weeklyRepeat.weekdayTimes[day];
+          if (
+            !window ||
+            !isClockTime(window.startTime) ||
+            !isClockTime(window.endTime)
+          ) {
+            errors.preferredSlots = `Pick an hourly slot for ${WEEKDAY_LONG_LABELS[day]}.`;
+            break;
+          }
+          const windowError = validateCalendarVisitWindow(
+            window.startTime,
+            window.endTime,
+            workingHours,
+          );
+          if (windowError) {
+            errors.preferredSlots = windowError;
+            break;
+          }
+        }
+      }
     } else if (form.preferredSlots.length === 0) {
       errors.preferredSlots = "Pick at least one preferred date.";
     } else {
@@ -315,7 +369,9 @@ function computeFieldErrors(
       }
     }
   } else if (!form.calendarWindow && form.preferredSlots.length === 0) {
-    errors.preferredSlots = "Pick at least one preferred date.";
+    errors.preferredSlots = weeklyRepeat
+      ? "Pick a starting date on the calendar."
+      : "Pick at least one preferred date.";
   }
 
   const fullName = form.customer.fullName.trim();
@@ -643,11 +699,15 @@ function PreferredDayTimeRow({
   kind,
   onWindowChange,
   timeZone,
+  title,
+  subtitle,
 }: {
   slot: InspectionSlot;
   kind: "inspection" | "job";
   onWindowChange: (startTime: string | null, endTime: string | null) => void;
   timeZone?: string | null;
+  title?: string;
+  subtitle?: string;
 }) {
   const startTime =
     slot.startTime && isClockTime(slot.startTime) ? slot.startTime : null;
@@ -661,9 +721,13 @@ function PreferredDayTimeRow({
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
           <span className="material-symbols-outlined text-[14px]">schedule</span>
         </span>
-        {formatSlotDate(slot.date, timeZone)}
+        {title ?? formatSlotDate(slot.date, timeZone)}
       </p>
-      {isJob && !slotTimeIsSelected(slot) ? (
+      {subtitle ? (
+        <p className="mt-2 font-body text-[12px] text-on-surface-variant">
+          {subtitle}
+        </p>
+      ) : isJob && !slotTimeIsSelected(slot) ? (
         <p className="mt-2 font-body text-[12px] text-on-surface-variant">
           No time selected yet — tap an hourly slot below.
         </p>
@@ -690,11 +754,22 @@ function PreferredDayTimeRow({
   );
 }
 
+function formatWeekdayList(days: WeekDayId[]): string {
+  return new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(
+    days.map((day) => WEEKDAY_LONG_LABELS[day]),
+  );
+}
+
 function JobScheduleGuidelines({
   selectedDayCount,
+  weeklyRepeatDays = [],
 }: {
   selectedDayCount: number;
+  weeklyRepeatDays?: WeekDayId[];
 }) {
+  const weekly = weeklyRepeatDays.length > 0;
+  const dayList = formatWeekdayList(weeklyRepeatDays);
+
   return (
     <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
       <p className="flex items-start gap-2 font-body text-[13px] font-semibold text-on-surface">
@@ -705,12 +780,31 @@ function JobScheduleGuidelines({
       </p>
       <ul className="mt-2 space-y-1.5 pl-7 font-body text-[12px] leading-relaxed text-on-surface-variant">
         <li>Each hourly slot is one hour on site — select multiple slots for longer work.</li>
-        <li>You can select more than one day for multi-day jobs.</li>
-        <li>
-          Every selected day appears on the calendar with its own hourly slots.
-        </li>
+        {weekly ? (
+          <>
+            <li>
+              The calendar only shows {dayList} — pick the starting date from
+              those days.
+            </li>
+            <li>
+              Choose a time slot for each selected day of the week. Later visits
+              reuse that day’s time.
+            </li>
+          </>
+        ) : (
+          <>
+            <li>You can select more than one day for multi-day jobs.</li>
+            <li>
+              Every selected day appears on the calendar with its own hourly slots.
+            </li>
+          </>
+        )}
       </ul>
-      {selectedDayCount > 1 ? (
+      {weekly ? (
+        <p className="mt-2 rounded-lg border border-primary/15 bg-white/70 px-3 py-2 font-body text-[12px] text-primary">
+          Repeats on {dayList}.
+        </p>
+      ) : selectedDayCount > 1 ? (
         <p className="mt-2 rounded-lg border border-primary/15 bg-white/70 px-3 py-2 font-body text-[12px] text-primary">
           {selectedDayCount} days selected — each day will appear on the
           calendar.
@@ -1028,6 +1122,8 @@ function InspectionPreview({
   reviewStepNumber = 5,
   instructionDescription = "",
   instructionTasks = [],
+  recurrenceEnabled = false,
+  recurrence = null,
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
@@ -1039,6 +1135,8 @@ function InspectionPreview({
   reviewStepNumber?: number;
   instructionDescription?: string;
   instructionTasks?: string[];
+  recurrenceEnabled?: boolean | null;
+  recurrence?: JobRecurrenceRule | null;
 }) {
   const jobSummary =
     form.requestType === "existing_service"
@@ -1092,7 +1190,11 @@ function InspectionPreview({
                 {index + 1}
               </span>
               <span>
-                {variant === "job" && index === 0 ? (
+                {variant === "job" && recurrenceEnabled && recurrence?.unit === "week" && index === 0 ? (
+                  <span className="mr-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                    Starts
+                  </span>
+                ) : variant === "job" && index === 0 ? (
                   <span className="mr-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
                     Day {index + 1}
                   </span>
@@ -1108,9 +1210,35 @@ function InspectionPreview({
             </li>
           ))}
         </ul>
-        {variant === "job" && form.preferredSlots.length > 1 ? (
+        {variant === "job" &&
+        recurrenceEnabled &&
+        recurrence?.unit === "week" &&
+        recurrence.weekdays.length > 0 ? (
+          <ul className="mt-2 space-y-1.5">
+            {recurrence.weekdays.map((day) => {
+              const window = recurrence.weekdayTimes?.[day];
+              return (
+                <li
+                  key={day}
+                  className="font-body text-[12px] text-on-surface-variant"
+                >
+                  {WEEKDAY_LONG_LABELS[day]}
+                  {window
+                    ? ` · ${formatVisitWindow(window.startTime, window.endTime)}`
+                    : " · time not set"}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        {variant === "job" && form.preferredSlots.length > 1 && !recurrenceEnabled ? (
           <p className="mt-2 font-body text-[11px] text-on-surface-variant">
             All {form.preferredSlots.length} days will appear on the calendar.
+          </p>
+        ) : null}
+        {variant === "job" && recurrenceEnabled && recurrence ? (
+          <p className="mt-2 font-body text-[12px] text-on-surface">
+            Repeats: {formatRecurrenceSummary(recurrence)}
           </p>
         ) : null}
       </PreviewSection>
@@ -1248,6 +1376,13 @@ export function AddInspectionModal({
   const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [instructionTaskSourceServiceId, setInstructionTaskSourceServiceId] =
     useState<string | null>(null);
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState<boolean | null>(
+    variant === "job" ? null : false,
+  );
+  const [recurrenceRule, setRecurrenceRule] = useState<JobRecurrenceRule>(() =>
+    emptyRecurrenceDraft("", "09:00", "10:00"),
+  );
+  const [requiredSkill, setRequiredSkill] = useState("");
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1287,6 +1422,12 @@ export function AddInspectionModal({
     [activeServices, form.selectedServiceId],
   );
 
+  useEffect(() => {
+    if (selectedService?.requiredSkill) {
+      setRequiredSkill(selectedService.requiredSkill);
+    }
+  }, [selectedService]);
+
   const timeZone = profile?.timezone;
   const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
 
@@ -1302,6 +1443,9 @@ export function AddInspectionModal({
       setInstructionDescription("");
       setInstructionTasks([]);
       setInstructionTaskSourceServiceId(null);
+      setRecurrenceEnabled(modalVariant === "job" ? null : false);
+      setRecurrenceRule(emptyRecurrenceDraft("", "09:00", "10:00"));
+      setRequiredSkill("");
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -1427,13 +1571,77 @@ export function AddInspectionModal({
     EMAIL_REGEX.test(form.customer.email.trim()) &&
     form.customer.phone.replace(/\D/g, "").length >= 6;
 
+  const isWeeklyJobRepeat =
+    variant === "job" &&
+    recurrenceEnabled === true &&
+    recurrenceRule.unit === "week";
+
+  /** Day-of-month a monthly repeat is pinned to, so the calendar can offer only it. */
+  const monthlyRepeatDay =
+    variant === "job" &&
+    recurrenceEnabled === true &&
+    recurrenceRule.unit === "month"
+      ? (recurrenceRule.monthDay ?? null)
+      : null;
+
+  /** Weekly and monthly repeats both pick one starting date the rule dictates. */
+  const isJobRepeatStartPick = isWeeklyJobRepeat || monthlyRepeatDay != null;
+
+  const recurrenceEndDate =
+    variant === "job" &&
+    recurrenceEnabled === true &&
+    recurrenceRule.end.type === "on_date" &&
+    recurrenceRule.end.date
+      ? recurrenceRule.end.date
+      : undefined;
+
+  const weeklyRepeatContext = isWeeklyJobRepeat
+    ? {
+        weekdays: recurrenceRule.weekdays,
+        weekdayTimes: recurrenceRule.weekdayTimes ?? {},
+      }
+    : null;
+
+  const weeklyStartWeekday = useMemo(() => {
+    const first = sortInspectionSlots(form.preferredSlots)[0];
+    return first?.date ? weekdayIdFromYmd(first.date) : null;
+  }, [form.preferredSlots]);
+
+  const weeklyTimesComplete =
+    !weeklyRepeatContext ||
+    weeklyRepeatContext.weekdays.every((day) => {
+      const window = weeklyRepeatContext.weekdayTimes[day];
+      if (
+        !window ||
+        !isClockTime(window.startTime) ||
+        !isClockTime(window.endTime)
+      ) {
+        return false;
+      }
+      if (workingHoursLoading) return true;
+      return (
+        validateCalendarVisitWindow(
+          window.startTime,
+          window.endTime,
+          workingHours,
+        ) === null
+      );
+    });
+
+  const weeklyStartDateValid = Boolean(
+    weeklyStartWeekday &&
+      weeklyRepeatContext?.weekdays.includes(weeklyStartWeekday),
+  );
+
   const scheduleValid = workingHoursLoading
-    ? form.calendarWindow
+    ? form.calendarWindow && !isWeeklyJobRepeat
       ? isClockTime(form.calendarWindow.startTime) &&
         isClockTime(form.calendarWindow.endTime)
-      : form.preferredSlots.length > 0 &&
-        form.preferredSlots.every((slot) => Boolean(slot.date.trim()))
-    : form.calendarWindow
+      : isWeeklyJobRepeat
+        ? weeklyStartDateValid && weeklyTimesComplete
+        : form.preferredSlots.length > 0 &&
+          form.preferredSlots.every((slot) => Boolean(slot.date.trim()))
+    : form.calendarWindow && !isWeeklyJobRepeat
       ? variant === "job"
         ? isClockTime(form.calendarWindow.startTime) &&
           isClockTime(form.calendarWindow.endTime) &&
@@ -1447,16 +1655,18 @@ export function AddInspectionModal({
             form.calendarWindow.endTime,
             workingHours,
           ) === null
-      : form.preferredSlots.length > 0 &&
-        form.preferredSlots.every((slot) => {
-          if (!slot.date.trim()) return false;
-          if (variant === "job" && !slotTimeIsSelected(slot)) return false;
-          const start = slot.startTime ?? "08:00";
-          const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
-          return validateCalendarVisitWindow(start, end, workingHours) === null;
-        }) &&
-        new Set(form.preferredSlots.map((slot) => slot.date)).size ===
-          form.preferredSlots.length;
+      : isWeeklyJobRepeat
+        ? weeklyStartDateValid && weeklyTimesComplete
+        : form.preferredSlots.length > 0 &&
+          form.preferredSlots.every((slot) => {
+            if (!slot.date.trim()) return false;
+            if (variant === "job" && !slotTimeIsSelected(slot)) return false;
+            const start = slot.startTime ?? "08:00";
+            const end = slot.endTime ?? defaultCalendarVisitEnd(start, workingHours);
+            return validateCalendarVisitWindow(start, end, workingHours) === null;
+          }) &&
+          new Set(form.preferredSlots.map((slot) => slot.date)).size ===
+            form.preferredSlots.length;
 
   function updateCalendarWindowTimes(
     startTime: string | null,
@@ -1552,8 +1762,15 @@ export function AddInspectionModal({
   }, [assignTo, staff, staffId]);
 
   const fieldErrors = useMemo(
-    () => computeFieldErrors(form, workingHours, variant, workingHoursLoading),
-    [form, workingHours, variant, workingHoursLoading],
+    () =>
+      computeFieldErrors(
+        form,
+        workingHours,
+        variant,
+        workingHoursLoading,
+        weeklyRepeatContext,
+      ),
+    [form, workingHours, variant, workingHoursLoading, weeklyRepeatContext],
   );
 
   const showFieldError = useCallback(
@@ -1606,6 +1823,8 @@ export function AddInspectionModal({
     [form.requestType, form.budgetAud, stepFlow, customerFirstFlow],
   );
 
+  const recurrenceModeChosen = variant !== "job" || recurrenceEnabled !== null;
+
   const stepIsValid = useMemo(() => {
     switch (currentKind) {
       case "customer":
@@ -1617,7 +1836,7 @@ export function AddInspectionModal({
       case "address":
         return addressValid;
       case "schedule":
-        return scheduleValid;
+        return scheduleValid && recurrenceModeChosen;
       case "assign":
         return assignValid;
       case "review":
@@ -1632,6 +1851,7 @@ export function AddInspectionModal({
     serviceValid,
     addressValid,
     scheduleValid,
+    recurrenceModeChosen,
     assignValid,
   ]);
 
@@ -1702,6 +1922,7 @@ export function AddInspectionModal({
         };
       }
       if (prev.preferredSlots.length >= (variant === "job" ? 5 : 3)) return prev;
+      if (recurrenceEndDate && iso > recurrenceEndDate) return prev;
       const newSlot: InspectionSlot =
         variant === "job"
           ? {
@@ -1752,6 +1973,204 @@ export function AddInspectionModal({
     setError(null);
   }
 
+  function slotFromDateAndWindow(
+    iso: string,
+    startTime: string | null,
+    endTime: string | null,
+  ): InspectionSlot {
+    return startTime && endTime
+      ? {
+          date: iso,
+          timeRange: calendarVisitTimeRange(startTime),
+          startTime,
+          endTime,
+        }
+      : {
+          date: iso,
+          timeRange: "morning",
+          startTime: null,
+          endTime: null,
+        };
+  }
+
+  function keepWeeklyStartSlot(
+    slots: InspectionSlot[],
+    weekdays: WeekDayId[],
+    weekdayTimes: Partial<Record<WeekDayId, RecurrenceTimeWindow>>,
+    maxDate?: string,
+  ): InspectionSlot[] {
+    const first = sortPreferredSlots(slots)[0];
+    if (!first?.date) return [];
+    if (maxDate && first.date > maxDate) return [];
+    const weekday = weekdayIdFromYmd(first.date);
+    if (!weekday || !weekdays.includes(weekday)) return [];
+    const window = weekdayTimes[weekday];
+    if (window) {
+      return [slotFromDateAndWindow(first.date, window.startTime, window.endTime)];
+    }
+    return [first];
+  }
+
+  function handleRecurrenceEnabledChange(enabled: boolean) {
+    setRecurrenceEnabled(enabled);
+    if (!enabled) return;
+    setForm((prev) => {
+      if (prev.calendarWindow) {
+        const iso = prev.calendarWindow.date;
+        return {
+          ...prev,
+          calendarWindow: null,
+          preferredSlots: iso
+            ? [
+                slotFromDateAndWindow(
+                  iso,
+                  prev.calendarWindow.startTime || null,
+                  prev.calendarWindow.endTime || null,
+                ),
+              ]
+            : [],
+        };
+      }
+      const first = sortPreferredSlots(prev.preferredSlots)[0];
+      return {
+        ...prev,
+        preferredSlots: first ? [first] : [],
+      };
+    });
+  }
+
+  function handleRecurrenceRuleChange(next: JobRecurrenceRule) {
+    let weekdayTimes =
+      next.unit === "week"
+        ? pruneWeekdayTimes(next.weekdays, next.weekdayTimes)
+        : {};
+    const seedDate = form.calendarWindow?.date ?? sortPreferredSlots(form.preferredSlots)[0]?.date;
+    const seedStart =
+      form.calendarWindow?.startTime ??
+      sortPreferredSlots(form.preferredSlots)[0]?.startTime;
+    const seedEnd =
+      form.calendarWindow?.endTime ??
+      sortPreferredSlots(form.preferredSlots)[0]?.endTime;
+    const seedWeekday = seedDate ? weekdayIdFromYmd(seedDate) : null;
+    if (
+      next.unit === "week" &&
+      seedWeekday &&
+      next.weekdays.includes(seedWeekday) &&
+      !weekdayTimes[seedWeekday] &&
+      isClockTime(seedStart) &&
+      isClockTime(seedEnd)
+    ) {
+      weekdayTimes = {
+        ...weekdayTimes,
+        [seedWeekday]: { startTime: seedStart, endTime: seedEnd },
+      };
+    }
+
+    const pruned = { ...next, weekdayTimes };
+    const endDate = pruned.end.type === "on_date" ? pruned.end.date : undefined;
+    if (pruned.unit !== "week") {
+      setRecurrenceRule(pruned);
+      if (endDate) {
+        setForm((prev) => ({
+          ...prev,
+          preferredSlots: prev.preferredSlots.filter(
+            (slot) => !slot.date || slot.date <= endDate,
+          ),
+        }));
+      }
+      return;
+    }
+    const nextSlots = keepWeeklyStartSlot(
+      form.preferredSlots,
+      pruned.weekdays,
+      weekdayTimes,
+      endDate,
+    );
+    setRecurrenceRule({
+      ...pruned,
+      startDate:
+        endDate && pruned.startDate && pruned.startDate > endDate
+          ? (nextSlots[0]?.date ?? "")
+          : pruned.startDate,
+    });
+    setForm((prev) => ({
+      ...prev,
+      calendarWindow: null,
+      preferredSlots: keepWeeklyStartSlot(
+        prev.preferredSlots,
+        pruned.weekdays,
+        weekdayTimes,
+        endDate,
+      ),
+    }));
+  }
+
+  /**
+   * The single date a repeating job starts on. Weekly rules carry a per-weekday
+   * window; monthly rules keep the times already on the rule.
+   */
+  function setRepeatStartDate(iso: string) {
+    if (recurrenceEndDate && iso > recurrenceEndDate) return;
+    const weekday = weekdayIdFromYmd(iso);
+    const window =
+      recurrenceRule.unit === "week" && weekday
+        ? recurrenceRule.weekdayTimes?.[weekday]
+        : undefined;
+    setForm((prev) => ({
+      ...prev,
+      calendarWindow: null,
+      preferredSlots: [
+        slotFromDateAndWindow(
+          iso,
+          window?.startTime ?? null,
+          window?.endTime ?? null,
+        ),
+      ],
+    }));
+    setRecurrenceRule((prev) => ({
+      ...prev,
+      startDate: iso,
+      startTime: window?.startTime ?? prev.startTime,
+      endTime: window?.endTime ?? prev.endTime,
+    }));
+    setError(null);
+  }
+
+  function updateWeekdayWindow(
+    day: WeekDayId,
+    startTime: string | null,
+    endTime: string | null,
+  ) {
+    setRecurrenceRule((prev) => {
+      const weekdayTimes = { ...(prev.weekdayTimes ?? {}) };
+      if (startTime && endTime) {
+        weekdayTimes[day] = { startTime, endTime };
+      } else {
+        delete weekdayTimes[day];
+      }
+      const startWeekday =
+        weekdayIdFromYmd(prev.startDate) ?? weeklyStartWeekday;
+      const startWindow = startWeekday ? weekdayTimes[startWeekday] : undefined;
+      return {
+        ...prev,
+        weekdayTimes,
+        startTime: startWindow?.startTime ?? prev.startTime,
+        endTime: startWindow?.endTime ?? prev.endTime,
+      };
+    });
+    setForm((prev) => {
+      const first = prev.preferredSlots[0];
+      if (!first?.date) return prev;
+      const startWeekday = weekdayIdFromYmd(first.date);
+      if (startWeekday !== day) return prev;
+      return {
+        ...prev,
+        preferredSlots: [slotFromDateAndWindow(first.date, startTime, endTime)],
+      };
+    });
+    setError(null);
+  }
+
   function goNext() {
     if (!canContinue) {
       touchStepFields(step);
@@ -1767,7 +2186,10 @@ export function AddInspectionModal({
               fieldErrors.state ??
               fieldErrors.postcode
             : currentKind === "schedule"
-              ? fieldErrors.preferredSlots
+              ? fieldErrors.preferredSlots ??
+                (recurrenceModeChosen
+                  ? null
+                  : "Choose one visit or repeating for this job.")
               : currentKind === "customer"
                 ? fieldErrors.fullName ??
                   fieldErrors.email ??
@@ -1812,8 +2234,9 @@ export function AddInspectionModal({
     setSubmitting(true);
     setError(null);
 
-    const schedulePayload = form.calendarWindow
-      ? {
+    const schedulePayload =
+      form.calendarWindow && !isWeeklyJobRepeat
+        ? {
           calendarSchedule: form.calendarWindow,
           preferredSlots: [
             {
@@ -1873,6 +2296,18 @@ export function AddInspectionModal({
           instructionDescription: instructionDescription.trim() || undefined,
           instructionTasks:
             normalizeInstructionTasksForSubmit(instructionTasks),
+          ...(recurrenceEnabled
+            ? {
+                recurrence: {
+                  ...recurrenceRule,
+                  startDate: assignmentSchedule.date ?? recurrenceRule.startDate,
+                  startTime:
+                    assignmentSchedule.startTime ?? recurrenceRule.startTime,
+                  endTime: assignmentSchedule.endTime ?? recurrenceRule.endTime,
+                },
+                requiredSkill: requiredSkill || undefined,
+              }
+            : {}),
         }
       : {};
 
@@ -2244,17 +2679,49 @@ export function AddInspectionModal({
                     title={current.title}
                     hint={
                       variant === "job"
-                        ? form.calendarWindow
+                        ? form.calendarWindow && !isJobRepeatStartPick
                           ? "Calendar schedule"
-                          : `${selectedPreferredDates.length} day${selectedPreferredDates.length === 1 ? "" : "s"}`
+                          : isJobRepeatStartPick
+                            ? selectedPreferredDates.length
+                              ? "Starting date"
+                              : "Pick a starting date"
+                            : `${selectedPreferredDates.length} day${selectedPreferredDates.length === 1 ? "" : "s"}`
                         : form.calendarWindow
                           ? "Calendar schedule"
                           : `${selectedPreferredDates.length} of 3 days`
                     }
                   />
                   {variant === "job" ? (
+                    <JobRecurrenceBuilder
+                      enabled={recurrenceEnabled}
+                      rule={{
+                        ...recurrenceRule,
+                        startDate:
+                          assignmentSchedule.date ?? recurrenceRule.startDate,
+                        startTime:
+                          assignmentSchedule.startTime ??
+                          recurrenceRule.startTime,
+                        endTime:
+                          assignmentSchedule.endTime ?? recurrenceRule.endTime,
+                      }}
+                      disabled={submitting}
+                      invalid={Boolean(touched.preferredSlots) && !recurrenceModeChosen}
+                      startDate={assignmentSchedule.date ?? ""}
+                      startTime={assignmentSchedule.startTime ?? "09:00"}
+                      endTime={assignmentSchedule.endTime ?? "10:00"}
+                      requiredSkill={requiredSkill}
+                      skillOptions={[...SERVICE_SKILLS]}
+                      onEnabledChange={handleRecurrenceEnabledChange}
+                      onChange={handleRecurrenceRuleChange}
+                      onRequiredSkillChange={setRequiredSkill}
+                    />
+                  ) : null}
+                  {variant === "job" ? (
                     <JobScheduleGuidelines
                       selectedDayCount={selectedPreferredDates.length}
+                      weeklyRepeatDays={
+                        isWeeklyJobRepeat ? recurrenceRule.weekdays : []
+                      }
                     />
                   ) : null}
                   {fieldErrorMessage("preferredSlots") ? (
@@ -2264,7 +2731,7 @@ export function AddInspectionModal({
                     />
                   ) : null}
 
-                  {form.calendarWindow ? (
+                  {form.calendarWindow && !isJobRepeatStartPick ? (
                     <div className="space-y-4 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                       <div>
                         <span className={LABEL_CLASS}>Date</span>
@@ -2307,43 +2774,139 @@ export function AddInspectionModal({
                     </div>
                   ) : (
                     <>
-                      <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
-                        <SlotDayPicker
-                          mode="multiple"
-                          selectedIsos={selectedPreferredDates}
-                          maxSelections={variant === "job" ? 5 : 3}
-                          minDate={minDate}
-                          dayPage={workingDayPage}
-                          onDayPageChange={setWorkingDayPage}
-                          onToggle={(iso) => {
-                            touchField("preferredSlots");
-                            togglePreferredDay(iso);
-                          }}
-                          label={
-                            variant === "job"
-                              ? "Pick one or more days"
-                              : "Pick up to 3 days"
-                          }
-                          dayStripLayout="fit"
-                          timeZone={timeZone}
-                        />
-                        {variant === "job" ? (
-                          <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                            You can select more than one day for multi-day jobs.
-                            Tap a selected day again to remove it.
+                      {variant === "job" ? (
+                        <div className="space-y-2">
+                          <BookingMonthCalendar
+                            size="full"
+                            label={
+                              isJobRepeatStartPick
+                                ? "Pick the starting date"
+                                : "Pick one or more days"
+                            }
+                            mode={isJobRepeatStartPick ? "single" : "multiple"}
+                            selectedIso={
+                              isJobRepeatStartPick
+                                ? (selectedPreferredDates[0] ?? "")
+                                : undefined
+                            }
+                            selectedIsos={
+                              isJobRepeatStartPick
+                                ? undefined
+                                : selectedPreferredDates
+                            }
+                            maxSelections={5}
+                            minDate={minDate}
+                            maxDate={recurrenceEndDate}
+                            timeZone={timeZone}
+                            disabled={submitting}
+                            enabledWeekdays={
+                              isWeeklyJobRepeat
+                                ? recurrenceRule.weekdays
+                                : undefined
+                            }
+                            enabledMonthDay={monthlyRepeatDay}
+                            onSelect={(iso) => {
+                              touchField("preferredSlots");
+                              setRepeatStartDate(iso);
+                            }}
+                            onToggle={(iso) => {
+                              touchField("preferredSlots");
+                              togglePreferredDay(iso);
+                            }}
+                          />
+                          <p className="font-body text-[12px] text-on-surface-variant">
+                            {isWeeklyJobRepeat
+                              ? `Only ${formatWeekdayList(recurrenceRule.weekdays)} can be chosen as the starting date.${
+                                  recurrenceEndDate
+                                    ? " Dates after the end date are hidden."
+                                    : ""
+                                }`
+                              : monthlyRepeatDay != null
+                                ? `This job repeats on the ${formatMonthDayOrdinal(monthlyRepeatDay)} of each month, so only that day can be chosen as the starting date. Shorter months use their last day.${
+                                    recurrenceEndDate
+                                      ? " Dates after the end date are hidden."
+                                      : ""
+                                  }`
+                                : recurrenceEndDate
+                                  ? "Dates after the end date are hidden."
+                                  : "You can select more than one day for multi-day jobs. Tap a selected day again to remove it."}
                           </p>
-                        ) : selectedPreferredDates.length > 0 ? (
-                          <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                            Tap a selected day again to remove it.
-                          </p>
-                        ) : (
-                          <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
-                            Choose at least one day to continue.
-                          </p>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                          <SlotDayPicker
+                            mode="multiple"
+                            selectedIsos={selectedPreferredDates}
+                            maxSelections={3}
+                            minDate={minDate}
+                            dayPage={workingDayPage}
+                            onDayPageChange={setWorkingDayPage}
+                            onToggle={(iso) => {
+                              touchField("preferredSlots");
+                              togglePreferredDay(iso);
+                            }}
+                            label="Pick up to 3 days"
+                            dayStripLayout="fit"
+                            timeZone={timeZone}
+                          />
+                          {selectedPreferredDates.length > 0 ? (
+                            <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                              Tap a selected day again to remove it.
+                            </p>
+                          ) : (
+                            <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                              Choose at least one day to continue.
+                            </p>
+                          )}
+                        </div>
+                      )}
 
-                      {selectedPreferredDates.length > 0 ? (
+                      {isWeeklyJobRepeat && selectedPreferredDates.length > 0 ? (
+                        <div>
+                          <span className={LABEL_CLASS}>
+                            Pick a time slot for each repeat day
+                          </span>
+                          <ul className="mt-2 space-y-3">
+                            {recurrenceRule.weekdays.map((day) => {
+                              const occupancyDate =
+                                firstWeekdayOnOrAfter(
+                                  selectedPreferredDates[0] ?? minDate,
+                                  day,
+                                ) ?? minDate;
+                              const window = recurrenceRule.weekdayTimes?.[day];
+                              return (
+                                <PreferredDayTimeRow
+                                  key={day}
+                                  title={WEEKDAY_LONG_LABELS[day]}
+                                  subtitle={`${
+                                    occupancyDate === selectedPreferredDates[0]
+                                      ? "Starting date"
+                                      : "First visit"
+                                  } · ${formatSlotDate(occupancyDate, timeZone)}${
+                                    window
+                                      ? ""
+                                      : " — tap an hourly slot below."
+                                  }`}
+                                  slot={{
+                                    date: occupancyDate,
+                                    timeRange: window
+                                      ? calendarVisitTimeRange(window.startTime)
+                                      : "morning",
+                                    startTime: window?.startTime ?? null,
+                                    endTime: window?.endTime ?? null,
+                                  }}
+                                  kind="job"
+                                  timeZone={timeZone}
+                                  onWindowChange={(startTime, endTime) => {
+                                    touchField("preferredSlots");
+                                    updateWeekdayWindow(day, startTime, endTime);
+                                  }}
+                                />
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : selectedPreferredDates.length > 0 && !isWeeklyJobRepeat ? (
                         <div>
                           <span className={LABEL_CLASS}>
                             {variant === "job"
@@ -2390,6 +2953,8 @@ export function AddInspectionModal({
                   reviewStepNumber={step}
                   instructionDescription={instructionDescription}
                   instructionTasks={instructionTasks}
+                  recurrenceEnabled={recurrenceEnabled}
+                  recurrence={recurrenceEnabled ? recurrenceRule : null}
                 />
               ) : null}
 

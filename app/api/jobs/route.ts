@@ -1,6 +1,9 @@
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
-import { createDirectJob, listBusinessBookings } from "@/lib/bookings/server";
+import { createDirectJob, createDirectJobSeries, listBusinessBookings } from "@/lib/bookings/server";
+import {
+  parseJobRecurrenceRule,
+} from "@/lib/bookings/recurrence";
 import { resolveJobAssignmentFromPayload } from "@/lib/bookings/resolve-job-assignment";
 import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
 import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
@@ -237,37 +240,79 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await createDirectJob(
-    auth.businessId,
-    auth.uid,
-    {
-      requestType: parsed.value.requestType,
-      serviceId: parsed.value.serviceId,
-      customRequest: parsed.value.customRequest,
-      customer: parsed.value.customer,
-      address: parsed.value.address,
-      customerNotes: parsed.value.customerNotes,
-      budgetAud: parsed.value.budgetAud,
-      slot: jobSchedule.slot,
-      startTime: jobSchedule.startTime,
-      endTime: jobSchedule.endTime,
-      additionalJobDays: jobSchedule.additionalJobDays,
-      estimatedDurationMinutes,
-      note: note || null,
-      instructionDescription: instructionDescription || null,
-      instructionTasks,
-      assignedTo: assignmentResult.assignment,
-    },
-    {
-      actor: {
-        uid: auth.uid,
-        role: actorRoleFromClaim(auth.role),
-        name: auth.name,
-        email: auth.email,
-      },
-      source: "admin_panel",
-    },
-  );
+  const recurrence = parseJobRecurrenceRule({
+    ...(typeof payload.recurrence === "object" && payload.recurrence
+      ? (payload.recurrence as Record<string, unknown>)
+      : {}),
+    startDate: jobSchedule.slot.date,
+    startTime: jobSchedule.startTime,
+    endTime: jobSchedule.endTime,
+  });
+  const wantsRecurrence = payload.recurrence != null && payload.recurrence !== false;
+  if (wantsRecurrence && !recurrence) {
+    return NextResponse.json(
+      { ok: false, error: "Check the repeat rule — interval, days, and end condition are required." },
+      { status: 400 },
+    );
+  }
+
+  const jobInput = {
+    requestType: parsed.value.requestType,
+    serviceId: parsed.value.serviceId,
+    customRequest: parsed.value.customRequest,
+    customer: parsed.value.customer,
+    address: parsed.value.address,
+    customerNotes: parsed.value.customerNotes,
+    budgetAud: parsed.value.budgetAud,
+    estimatedDurationMinutes,
+    note: note || null,
+    instructionDescription: instructionDescription || null,
+    instructionTasks,
+    assignedTo: assignmentResult.assignment,
+  };
+
+  const result =
+    wantsRecurrence && recurrence
+      ? await createDirectJobSeries(
+          auth.businessId,
+          auth.uid,
+          jobInput,
+          {
+            ...recurrence,
+            startDate: jobSchedule.slot.date,
+            startTime: jobSchedule.startTime,
+            endTime: jobSchedule.endTime,
+          },
+          {
+            actor: {
+              uid: auth.uid,
+              role: actorRoleFromClaim(auth.role),
+              name: auth.name,
+              email: auth.email,
+            },
+            source: "admin_panel",
+          },
+        )
+      : await createDirectJob(
+          auth.businessId,
+          auth.uid,
+          {
+            ...jobInput,
+            slot: jobSchedule.slot,
+            startTime: jobSchedule.startTime,
+            endTime: jobSchedule.endTime,
+            additionalJobDays: jobSchedule.additionalJobDays,
+          },
+          {
+            actor: {
+              uid: auth.uid,
+              role: actorRoleFromClaim(auth.role),
+              name: auth.name,
+              email: auth.email,
+            },
+            source: "admin_panel",
+          },
+        );
 
   if (!result.ok) {
     return NextResponse.json(
@@ -308,6 +353,8 @@ export async function POST(request: Request) {
       jobId: result.booking.id,
       booking: result.booking,
       request: result.request,
+      createdCount: "createdCount" in result ? result.createdCount : 1,
+      skippedDates: "skippedDates" in result ? result.skippedDates : [],
     },
     { status: 201 },
   );
