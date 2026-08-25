@@ -19,7 +19,11 @@ import {
   JobInstructionsFields,
   normalizeInstructionTasksForSubmit,
 } from "@/components/job-instructions-fields";
-import { SlotDayPicker, todayIso } from "@/components/booking-slot-date-picker";
+import {
+  BookingMonthCalendar,
+  SlotDayPicker,
+  todayIso,
+} from "@/components/booking-slot-date-picker";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useBusinessWorkingHours } from "@/lib/calendar/use-business-working-hours";
@@ -1048,7 +1052,7 @@ function InspectionPreview({
   reviewStepNumber?: number;
   instructionDescription?: string;
   instructionTasks?: string[];
-  recurrenceEnabled?: boolean;
+  recurrenceEnabled?: boolean | null;
   recurrence?: JobRecurrenceRule | null;
 }) {
   const jobSummary =
@@ -1264,7 +1268,9 @@ export function AddInspectionModal({
   const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [instructionTaskSourceServiceId, setInstructionTaskSourceServiceId] =
     useState<string | null>(null);
-  const [recurrenceEnabled, setRecurrenceEnabled] = useState(false);
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState<boolean | null>(
+    variant === "job" ? null : false,
+  );
   const [recurrenceRule, setRecurrenceRule] = useState<JobRecurrenceRule>(() =>
     emptyRecurrenceDraft("", "09:00", "10:00"),
   );
@@ -1329,7 +1335,7 @@ export function AddInspectionModal({
       setInstructionDescription("");
       setInstructionTasks([]);
       setInstructionTaskSourceServiceId(null);
-      setRecurrenceEnabled(false);
+      setRecurrenceEnabled(modalVariant === "job" ? null : false);
       setRecurrenceRule(emptyRecurrenceDraft("", "09:00", "10:00"));
       setRequiredSkill("");
       setTouched({});
@@ -1636,6 +1642,8 @@ export function AddInspectionModal({
     [form.requestType, form.budgetAud, stepFlow, customerFirstFlow],
   );
 
+  const recurrenceModeChosen = variant !== "job" || recurrenceEnabled !== null;
+
   const stepIsValid = useMemo(() => {
     switch (currentKind) {
       case "customer":
@@ -1647,7 +1655,7 @@ export function AddInspectionModal({
       case "address":
         return addressValid;
       case "schedule":
-        return scheduleValid;
+        return scheduleValid && recurrenceModeChosen;
       case "assign":
         return assignValid;
       case "review":
@@ -1662,6 +1670,7 @@ export function AddInspectionModal({
     serviceValid,
     addressValid,
     scheduleValid,
+    recurrenceModeChosen,
     assignValid,
   ]);
 
@@ -1797,7 +1806,10 @@ export function AddInspectionModal({
               fieldErrors.state ??
               fieldErrors.postcode
             : currentKind === "schedule"
-              ? fieldErrors.preferredSlots
+              ? fieldErrors.preferredSlots ??
+                (recurrenceModeChosen
+                  ? null
+                  : "Choose one visit or repeating for this job.")
               : currentKind === "customer"
                 ? fieldErrors.fullName ??
                   fieldErrors.email ??
@@ -2295,6 +2307,31 @@ export function AddInspectionModal({
                     }
                   />
                   {variant === "job" ? (
+                    <JobRecurrenceBuilder
+                      enabled={recurrenceEnabled}
+                      rule={{
+                        ...recurrenceRule,
+                        startDate:
+                          assignmentSchedule.date ?? recurrenceRule.startDate,
+                        startTime:
+                          assignmentSchedule.startTime ??
+                          recurrenceRule.startTime,
+                        endTime:
+                          assignmentSchedule.endTime ?? recurrenceRule.endTime,
+                      }}
+                      disabled={submitting}
+                      invalid={Boolean(touched.preferredSlots) && !recurrenceModeChosen}
+                      startDate={assignmentSchedule.date ?? ""}
+                      startTime={assignmentSchedule.startTime ?? "09:00"}
+                      endTime={assignmentSchedule.endTime ?? "10:00"}
+                      requiredSkill={requiredSkill}
+                      skillOptions={[...SERVICE_SKILLS]}
+                      onEnabledChange={setRecurrenceEnabled}
+                      onChange={setRecurrenceRule}
+                      onRequiredSkillChange={setRequiredSkill}
+                    />
+                  ) : null}
+                  {variant === "job" ? (
                     <JobScheduleGuidelines
                       selectedDayCount={selectedPreferredDates.length}
                     />
@@ -2349,41 +2386,55 @@ export function AddInspectionModal({
                     </div>
                   ) : (
                     <>
-                      <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
-                        <SlotDayPicker
-                          mode="multiple"
-                          selectedIsos={selectedPreferredDates}
-                          maxSelections={variant === "job" ? 5 : 3}
-                          minDate={minDate}
-                          dayPage={workingDayPage}
-                          onDayPageChange={setWorkingDayPage}
-                          onToggle={(iso) => {
-                            touchField("preferredSlots");
-                            togglePreferredDay(iso);
-                          }}
-                          label={
-                            variant === "job"
-                              ? "Pick one or more days"
-                              : "Pick up to 3 days"
-                          }
-                          dayStripLayout="fit"
-                          timeZone={timeZone}
-                        />
-                        {variant === "job" ? (
-                          <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                      {variant === "job" ? (
+                        <div className="space-y-2">
+                          <BookingMonthCalendar
+                            size="full"
+                            label="Pick one or more days"
+                            mode="multiple"
+                            selectedIsos={selectedPreferredDates}
+                            maxSelections={5}
+                            minDate={minDate}
+                            timeZone={timeZone}
+                            disabled={submitting}
+                            onToggle={(iso) => {
+                              touchField("preferredSlots");
+                              togglePreferredDay(iso);
+                            }}
+                          />
+                          <p className="font-body text-[12px] text-on-surface-variant">
                             You can select more than one day for multi-day jobs.
                             Tap a selected day again to remove it.
                           </p>
-                        ) : selectedPreferredDates.length > 0 ? (
-                          <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                            Tap a selected day again to remove it.
-                          </p>
-                        ) : (
-                          <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
-                            Choose at least one day to continue.
-                          </p>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
+                          <SlotDayPicker
+                            mode="multiple"
+                            selectedIsos={selectedPreferredDates}
+                            maxSelections={3}
+                            minDate={minDate}
+                            dayPage={workingDayPage}
+                            onDayPageChange={setWorkingDayPage}
+                            onToggle={(iso) => {
+                              touchField("preferredSlots");
+                              togglePreferredDay(iso);
+                            }}
+                            label="Pick up to 3 days"
+                            dayStripLayout="fit"
+                            timeZone={timeZone}
+                          />
+                          {selectedPreferredDates.length > 0 ? (
+                            <p className="mt-3 font-body text-[12px] text-on-surface-variant">
+                              Tap a selected day again to remove it.
+                            </p>
+                          ) : (
+                            <p className="mt-3 rounded-xl border border-dashed border-outline-variant/60 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
+                              Choose at least one day to continue.
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       {selectedPreferredDates.length > 0 ? (
                         <div>
@@ -2417,30 +2468,6 @@ export function AddInspectionModal({
                       ) : null}
                     </>
                   )}
-                  {variant === "job" ? (
-                    <JobRecurrenceBuilder
-                      enabled={recurrenceEnabled}
-                      rule={{
-                        ...recurrenceRule,
-                        startDate:
-                          assignmentSchedule.date ?? recurrenceRule.startDate,
-                        startTime:
-                          assignmentSchedule.startTime ??
-                          recurrenceRule.startTime,
-                        endTime:
-                          assignmentSchedule.endTime ?? recurrenceRule.endTime,
-                      }}
-                      disabled={submitting}
-                      startDate={assignmentSchedule.date ?? ""}
-                      startTime={assignmentSchedule.startTime ?? "09:00"}
-                      endTime={assignmentSchedule.endTime ?? "10:00"}
-                      requiredSkill={requiredSkill}
-                      skillOptions={[...SERVICE_SKILLS]}
-                      onEnabledChange={setRecurrenceEnabled}
-                      onChange={setRecurrenceRule}
-                      onRequiredSkillChange={setRequiredSkill}
-                    />
-                  ) : null}
                 </div>
               ) : null}
 

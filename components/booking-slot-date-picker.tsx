@@ -208,6 +208,9 @@ export function BookingMonthCalendar({
   className = "",
   timeZone,
   allowPast = false,
+  size = "compact",
+  disabled: allDisabled = false,
+  label,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
@@ -223,6 +226,11 @@ export function BookingMonthCalendar({
   timeZone?: string | null;
   /** Admin flows: allow scheduling on past dates (customer flows keep the block). */
   allowPast?: boolean;
+  /** "full" is a standalone, full-width month grid; "compact" is the popover under a day strip. */
+  size?: "compact" | "full";
+  disabled?: boolean;
+  /** Field label rendered above the grid (full size only). */
+  label?: string;
 }) {
   const initialView = selectedIso
     ? new Date(`${selectedIso}T12:00:00`)
@@ -266,58 +274,89 @@ export function BookingMonthCalendar({
     return cells;
   }, [viewYear, viewMonth]);
 
-  const weekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
+  const full = size === "full";
+  const weekdayLabels = full
+    ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    : ["M", "T", "W", "T", "F", "S", "S"];
 
   return (
     <div
-      className={`mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-3 shadow-sm ${className}`}
+      className={`${
+        full
+          ? "w-full rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4"
+          : "mt-2 w-full max-w-[17.5rem] rounded-xl border border-stone-200 bg-white p-3 shadow-sm"
+      } ${className}`}
     >
+      {full && label ? (
+        <span className="mb-3 block font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          {label}
+        </span>
+      ) : null}
       <div className="flex items-center justify-between gap-1">
         <button
           type="button"
-          disabled={!canGoPrev}
+          disabled={allDisabled || !canGoPrev}
           onClick={(event) => {
             event.stopPropagation();
             shiftMonth(-1);
           }}
           aria-label="Previous month"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          className={`inline-flex shrink-0 items-center justify-center rounded-full border border-outline-variant/60 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
+            full ? "h-9 w-9" : "h-6 w-6"
+          }`}
         >
-          <span className="material-symbols-outlined text-[16px]">
+          <span
+            className={`material-symbols-outlined ${full ? "text-[20px]" : "text-[16px]"}`}
+          >
             chevron_left
           </span>
         </button>
-        <p className="truncate font-body text-[12px] font-bold text-on-surface">
+        <p
+          className={`truncate font-body font-bold text-on-surface ${
+            full ? "text-[14px]" : "text-[12px]"
+          }`}
+        >
           {monthLabel}
         </p>
         <button
           type="button"
+          disabled={allDisabled}
           onClick={(event) => {
             event.stopPropagation();
             shiftMonth(1);
           }}
           aria-label="Next month"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-stone-200 text-on-surface-variant transition-colors hover:border-primary/40 hover:text-primary"
+          className={`inline-flex shrink-0 items-center justify-center rounded-full border border-outline-variant/60 text-on-surface-variant transition-colors enabled:hover:border-primary/40 enabled:hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 ${
+            full ? "h-9 w-9" : "h-6 w-6"
+          }`}
         >
-          <span className="material-symbols-outlined text-[16px]">
+          <span
+            className={`material-symbols-outlined ${full ? "text-[20px]" : "text-[16px]"}`}
+          >
             chevron_right
           </span>
         </button>
       </div>
 
-      <div className="mt-1.5 grid grid-cols-7 gap-px">
-        {weekdayLabels.map((label, index) => (
+      <div className={`grid grid-cols-7 ${full ? "mt-3 gap-1" : "mt-1.5 gap-px"}`}>
+        {weekdayLabels.map((weekday, index) => (
           <span
-            key={`${label}-${index}`}
-            className="flex h-5 items-center justify-center font-body text-[9px] font-bold text-on-surface-variant"
+            key={`${weekday}-${index}`}
+            className={`flex items-center justify-center font-body font-bold text-on-surface-variant ${
+              full ? "h-7 text-[11px]" : "h-5 text-[9px]"
+            }`}
           >
-            {label}
+            {weekday}
           </span>
         ))}
         {gridCells.map((cell, index) => {
           if (!cell) {
             return (
-              <span key={`empty-${index}`} className="h-8" aria-hidden />
+              <span
+                key={`empty-${index}`}
+                className={full ? "h-11" : "h-8"}
+                aria-hidden
+              />
             );
           }
 
@@ -339,13 +378,15 @@ export function BookingMonthCalendar({
             <button
               key={cell.iso}
               type="button"
-              disabled={disabled || atMax}
+              disabled={allDisabled || disabled || atMax}
               title={
                 comboBlocked
                   ? blockedDayHint
                   : past
                     ? "Past dates cannot be selected"
-                    : undefined
+                    : atMax
+                      ? `You can pick up to ${maxSelections} days — tap a selected day to remove it`
+                      : undefined
               }
               onClick={() => {
                 if (mode === "multiple") {
@@ -354,14 +395,18 @@ export function BookingMonthCalendar({
                 }
                 onSelect?.(cell.iso);
               }}
-              className={`flex h-8 w-full items-center justify-center rounded-md font-body text-[12px] font-semibold leading-none transition-colors ${
-                disabled
-                  ? "cursor-not-allowed text-stone-300"
+              className={`flex w-full items-center justify-center font-body font-semibold leading-none transition-colors disabled:cursor-not-allowed ${
+                full
+                  ? "h-11 rounded-xl text-[14px]"
+                  : "h-8 rounded-md text-[12px]"
+              } ${
+                disabled || atMax
+                  ? "text-on-surface-variant/35"
                   : selected
                     ? "bg-primary text-on-primary"
                     : isToday
                       ? "bg-primary/12 text-primary ring-1 ring-primary/25"
-                      : "text-on-surface hover:bg-stone-100"
+                      : "text-on-surface hover:bg-primary/8"
               }`}
             >
               {cell.dayNum}
