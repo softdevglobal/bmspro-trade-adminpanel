@@ -51,6 +51,7 @@ import type { BookingStatus } from "@/lib/bookings/types";
 import {
   expandRecurrenceDates,
   recurrenceFirestorePayload,
+  recurrenceWindowForDate,
   type JobRecurrenceRule,
 } from "@/lib/bookings/recurrence";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
@@ -1531,6 +1532,8 @@ export async function createDirectJobSeries(
     };
   }
 
+  const firstWindow = recurrenceWindowForDate(rule, firstDate);
+
   const result = await createDirectJob(
     businessId,
     createdBy,
@@ -1538,12 +1541,12 @@ export async function createDirectJobSeries(
       ...input,
       slot: {
         date: firstDate,
-        timeRange: timeRangeFromStartTime(rule.startTime),
-        startTime: rule.startTime,
-        endTime: rule.endTime,
+        timeRange: timeRangeFromStartTime(firstWindow.startTime),
+        startTime: firstWindow.startTime,
+        endTime: firstWindow.endTime,
       },
-      startTime: rule.startTime,
-      endTime: rule.endTime,
+      startTime: firstWindow.startTime,
+      endTime: firstWindow.endTime,
       additionalJobDays: [],
       series: {
         seriesIndex: 1,
@@ -1594,18 +1597,20 @@ export async function realignSeriesVisits(
   for (let i = 0; i < keep; i++) {
     const booking = sorted[i];
     const date = dates[i];
+    if (!date) continue;
+    const window = recurrenceWindowForDate(rule, date);
     const result = await updateBusinessBookingSchedule(
       businessId,
       booking.id,
       {
         slot: {
           date,
-          timeRange: timeRangeFromStartTime(rule.startTime),
-          startTime: rule.startTime,
-          endTime: rule.endTime,
+          timeRange: timeRangeFromStartTime(window.startTime),
+          startTime: window.startTime,
+          endTime: window.endTime,
         },
-        startTime: rule.startTime,
-        endTime: rule.endTime,
+        startTime: window.startTime,
+        endTime: window.endTime,
         notifyCustomer: false,
       },
     );
@@ -1631,20 +1636,22 @@ export async function realignSeriesVisits(
 
   for (let i = keep; i < dates.length; i++) {
     const date = dates[i];
+    if (!date) continue;
     if (await isBusinessClosedOnDate(businessId, date)) {
       skippedDates.push(date);
       continue;
     }
+    const window = recurrenceWindowForDate(rule, date);
     const created = await createDirectJob(businessId, createdBy, {
       ...template,
       slot: {
         date,
-        timeRange: timeRangeFromStartTime(rule.startTime),
-        startTime: rule.startTime,
-        endTime: rule.endTime,
+        timeRange: timeRangeFromStartTime(window.startTime),
+        startTime: window.startTime,
+        endTime: window.endTime,
       },
-      startTime: rule.startTime,
-      endTime: rule.endTime,
+      startTime: window.startTime,
+      endTime: window.endTime,
       additionalJobDays: [],
       series: {
         seriesId,

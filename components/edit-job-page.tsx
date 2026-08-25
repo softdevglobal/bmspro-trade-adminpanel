@@ -11,6 +11,8 @@ import {
 } from "@/components/job-recurrence-builder";
 import {
   emptyRecurrenceDraft,
+  pruneWeekdayTimes,
+  weekdayIdFromYmd,
   type JobRecurrenceRule,
   type SeriesUpdateMode,
 } from "@/lib/bookings/recurrence";
@@ -623,6 +625,24 @@ export function EditJobPage({ jobId }: { jobId: string }) {
                   startDate: date || recurrenceRule.startDate,
                   startTime,
                   endTime,
+                  weekdayTimes: (() => {
+                    const weekdayTimes = pruneWeekdayTimes(
+                      recurrenceRule.weekdays,
+                      recurrenceRule.weekdayTimes,
+                    );
+                    const weekday = weekdayIdFromYmd(date);
+                    if (
+                      recurrenceRule.unit === "week" &&
+                      weekday &&
+                      recurrenceRule.weekdays.includes(weekday)
+                    ) {
+                      return {
+                        ...weekdayTimes,
+                        [weekday]: { startTime, endTime },
+                      };
+                    }
+                    return weekdayTimes;
+                  })(),
                 }
               : false,
             seriesUpdateMode: recurrenceEnabled || booking.seriesId

@@ -11,6 +11,8 @@ import {
   formatRecurrenceSummary,
   MAX_RECURRENCE_OCCURRENCES,
   parseYmd,
+  pruneWeekdayTimes,
+  WEEKDAY_SHORT_LABELS,
   type JobRecurrenceRule,
   type RecurrenceEnd,
   type RecurrenceUnit,
@@ -26,16 +28,6 @@ const RADIO_CLASS = "h-4 w-4 shrink-0 accent-primary";
 
 const OPTION_ROW_CLASS =
   "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border p-3 transition-colors";
-
-const WEEKDAY_LABELS: Record<WeekDayId, string> = {
-  monday: "Mon",
-  tuesday: "Tue",
-  wednesday: "Wed",
-  thursday: "Thu",
-  friday: "Fri",
-  saturday: "Sat",
-  sunday: "Sun",
-};
 
 const MONTH_DAYS = Array.from({ length: 31 }, (_, index) => index + 1);
 
@@ -253,6 +245,10 @@ export function JobRecurrenceBuilder({
                   onChange({
                     ...rule,
                     unit: event.target.value as RecurrenceUnit,
+                    weekdayTimes:
+                      event.target.value === "week"
+                        ? pruneWeekdayTimes(rule.weekdays, rule.weekdayTimes)
+                        : {},
                   })
                 }
                 className={`${SCHEDULE_SELECT_CLASS} mt-1`}
@@ -287,9 +283,14 @@ export function JobRecurrenceBuilder({
                         const next = checked
                           ? rule.weekdays.filter((item) => item !== day)
                           : [...rule.weekdays, day];
+                        const weekdays = next.length > 0 ? next : [day];
                         onChange({
                           ...rule,
-                          weekdays: next.length > 0 ? next : [day],
+                          weekdays,
+                          weekdayTimes: pruneWeekdayTimes(
+                            weekdays,
+                            rule.weekdayTimes,
+                          ),
                         });
                       }}
                       className={`h-10 min-w-[3rem] rounded-xl border px-3 font-body text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -298,7 +299,7 @@ export function JobRecurrenceBuilder({
                           : "border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:border-primary/40"
                       }`}
                     >
-                      {WEEKDAY_LABELS[day]}
+                      {WEEKDAY_SHORT_LABELS[day]}
                     </button>
                   );
                 })}

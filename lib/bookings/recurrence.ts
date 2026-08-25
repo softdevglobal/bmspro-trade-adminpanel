@@ -19,6 +19,17 @@ export type RecurrenceEnd =
   | { type: "on_date"; date: string }
   | { type: "after_count"; count: number };
 
+export type RecurrenceTimeWindow = {
+  startTime: string;
+  endTime: string;
+};
+
+export type RecurrenceVisit = {
+  date: string;
+  startTime: string;
+  endTime: string;
+};
+
 export type JobRecurrenceRule = {
   interval: number;
   unit: RecurrenceUnit;
@@ -27,7 +38,29 @@ export type JobRecurrenceRule = {
   startDate: string;
   startTime: string;
   endTime: string;
+  /** Weekly jobs can use a different on-site window for each selected weekday. */
+  weekdayTimes: Partial<Record<WeekDayId, RecurrenceTimeWindow>>;
   end: RecurrenceEnd;
+};
+
+export const WEEKDAY_SHORT_LABELS: Record<WeekDayId, string> = {
+  monday: "Mon",
+  tuesday: "Tue",
+  wednesday: "Wed",
+  thursday: "Thu",
+  friday: "Fri",
+  saturday: "Sat",
+  sunday: "Sun",
+};
+
+export const WEEKDAY_LONG_LABELS: Record<WeekDayId, string> = {
+  monday: "Monday",
+  tuesday: "Tuesday",
+  wednesday: "Wednesday",
+  thursday: "Thursday",
+  friday: "Friday",
+  saturday: "Saturday",
+  sunday: "Sunday",
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -137,6 +170,62 @@ function parseWeekdays(raw: unknown): WeekDayId[] {
   return WEEK_DAY_IDS.filter((day) => seen.has(day));
 }
 
+function parseTimeWindow(raw: unknown): RecurrenceTimeWindow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  const startTime =
+    typeof record.startTime === "string" ? record.startTime.trim() : "";
+  const endTime =
+    typeof record.endTime === "string" ? record.endTime.trim() : "";
+  if (!isClockTime(startTime) || !isClockTime(endTime) || startTime >= endTime) {
+    return null;
+  }
+  return { startTime, endTime };
+}
+
+function parseWeekdayTimes(
+  raw: unknown,
+): Partial<Record<WeekDayId, RecurrenceTimeWindow>> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const result: Partial<Record<WeekDayId, RecurrenceTimeWindow>> = {};
+  for (const day of WEEK_DAY_IDS) {
+    const window = parseTimeWindow(record[day]);
+    if (window) result[day] = window;
+  }
+  return result;
+}
+
+export function pruneWeekdayTimes(
+  weekdays: WeekDayId[],
+  weekdayTimes: Partial<Record<WeekDayId, RecurrenceTimeWindow>> | undefined,
+): Partial<Record<WeekDayId, RecurrenceTimeWindow>> {
+  const allowed = new Set(weekdays);
+  const result: Partial<Record<WeekDayId, RecurrenceTimeWindow>> = {};
+  for (const day of WEEK_DAY_IDS) {
+    const window = weekdayTimes?.[day];
+    if (window && allowed.has(day)) result[day] = window;
+  }
+  return result;
+}
+
+export function firstWeekdayOnOrAfter(
+  startDate: string,
+  weekday: WeekDayId,
+): string | null {
+  let cursor: string | null = startDate;
+  for (let step = 0; step < 7; step += 1) {
+    if (!cursor) return null;
+    if (weekdayIdFromYmd(cursor) === weekday) return cursor;
+    cursor = addDaysYmd(cursor, 1);
+  }
+  return null;
+}
+
+export function isWeeklyRecurrence(rule: JobRecurrenceRule): boolean {
+  return rule.unit === "week";
+}
+
 export function emptyRecurrenceDraft(
   startDate: string,
   startTime: string,
@@ -152,6 +241,7 @@ export function emptyRecurrenceDraft(
     startDate: isIsoDate(startDate) ? startDate : "",
     startTime: isClockTime(startTime) ? startTime : "09:00",
     endTime: isClockTime(endTime) ? endTime : "10:00",
+    weekdayTimes: {},
     end: { type: "never" },
   };
 }
@@ -186,7 +276,17 @@ export function parseJobRecurrenceRule(
   if (!end) return null;
   if (end.type === "on_date" && end.date < startDate) return null;
 
-  const weekdays = parseWeekdays(input.weekdays);
+  const parsedWeekdays = parseWeekdays(input.weekdays);
+  const weekdays =
+    parsedWeekdays.length > 0
+      ? parsedWeekdays
+      : weekdayIdFromYmd(startDate)
+        ? [weekdayIdFromYmd(startDate) as WeekDayId]
+        : ["monday"];
+  const weekdayTimes = pruneWeekdayTimes(
+    weekdays,
+    parseWeekdayTimes(input.weekdayTimes),
+  );
   const monthDayRaw = Number(input.monthDay);
   const startDay = parseYmd(startDate)?.day ?? 1;
   const monthDay =
@@ -197,13 +297,12 @@ export function parseJobRecurrenceRule(
   return {
     interval,
     unit,
-    weekdays: weekdays.length > 0 ? weekdays : weekdayIdFromYmd(startDate)
-      ? [weekdayIdFromYmd(startDate) as WeekDayId]
-      : ["monday"],
+    weekdays,
     monthDay,
     startDate,
     startTime,
     endTime,
+    weekdayTimes,
     end,
   };
 }
@@ -272,6 +371,25 @@ export function expandRecurrenceDates(rule: JobRecurrenceRule): string[] {
   return dates;
 }
 
+export function recurrenceWindowForDate(
+  rule: JobRecurrenceRule,
+  date: string,
+): RecurrenceTimeWindow {
+  if (rule.unit === "week") {
+    const weekday = weekdayIdFromYmd(date);
+    const window = weekday ? rule.weekdayTimes?.[weekday] : undefined;
+    if (window) return window;
+  }
+  return { startTime: rule.startTime, endTime: rule.endTime };
+}
+
+export function expandRecurrenceVisits(rule: JobRecurrenceRule): RecurrenceVisit[] {
+  return expandRecurrenceDates(rule).map((date) => ({
+    date,
+    ...recurrenceWindowForDate(rule, date),
+  }));
+}
+
 export function recurrenceRulesEqual(
   a: JobRecurrenceRule | null,
   b: JobRecurrenceRule | null,
@@ -291,12 +409,43 @@ function normalizeRecurrenceForCompare(rule: JobRecurrenceRule) {
     startDate: rule.startDate,
     startTime: rule.startTime,
     endTime: rule.endTime,
+    weekdayTimes: pruneWeekdayTimes(rule.weekdays, rule.weekdayTimes),
     end: rule.end,
   };
 }
 
 function weekdayShortLabel(day: WeekDayId): string {
-  return day.slice(0, 3).replace(/^./, (ch) => ch.toUpperCase());
+  return WEEKDAY_SHORT_LABELS[day];
+}
+
+function formatRuleTimeWindows(rule: JobRecurrenceRule): string {
+  if (rule.unit !== "week" || rule.weekdays.length === 0) {
+    return `${rule.startTime}–${rule.endTime}`;
+  }
+
+  const windows = rule.weekdays.map((day) => {
+    const window = rule.weekdayTimes?.[day] ?? {
+      startTime: rule.startTime,
+      endTime: rule.endTime,
+    };
+    return { day, window };
+  });
+  const unique = new Set(
+    windows.map((item) => `${item.window.startTime}-${item.window.endTime}`),
+  );
+  if (unique.size <= 1) {
+    const window = windows[0]?.window;
+    return window
+      ? `${window.startTime}–${window.endTime}`
+      : `${rule.startTime}–${rule.endTime}`;
+  }
+
+  return windows
+    .map(
+      (item) =>
+        `${weekdayShortLabel(item.day)} ${item.window.startTime}–${item.window.endTime}`,
+    )
+    .join(", ");
 }
 
 export function formatRecurrenceSummary(rule: JobRecurrenceRule): string {
@@ -325,7 +474,7 @@ export function formatRecurrenceSummary(rule: JobRecurrenceRule): string {
         ? `until ${rule.end.date}`
         : `for ${rule.end.count} visits`;
 
-  return `${pattern}, ${rule.startTime}–${rule.endTime}, ${end}`;
+  return `${pattern}, ${formatRuleTimeWindows(rule)}, ${end}`;
 }
 
 export function recurrenceFirestorePayload(rule: JobRecurrenceRule) {
@@ -337,6 +486,7 @@ export function recurrenceFirestorePayload(rule: JobRecurrenceRule) {
     startDate: rule.startDate,
     startTime: rule.startTime,
     endTime: rule.endTime,
+    weekdayTimes: pruneWeekdayTimes(rule.weekdays, rule.weekdayTimes),
     end: rule.end,
   };
 }

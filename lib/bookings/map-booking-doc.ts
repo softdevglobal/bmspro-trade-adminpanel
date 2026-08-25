@@ -1,5 +1,5 @@
 import { parseJobInstructionsFromDoc } from "@/lib/bookings/job-instructions";
-import { expandRecurrenceDates, parseJobRecurrenceRule } from "@/lib/bookings/recurrence";
+import { expandRecurrenceDates, parseJobRecurrenceRule, recurrenceWindowForDate } from "@/lib/bookings/recurrence";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   BOOKING_STATUSES,
@@ -277,20 +277,19 @@ export function bookingScheduleDays(booking: BookingDetail): BookingScheduleDay[
   }
 
   if (isRecurringJobAnchor(booking) && booking.recurrence) {
-    const startTime = booking.recurrence.startTime;
-    const endTime = booking.recurrence.endTime;
     for (const date of expandRecurrenceDates(booking.recurrence)) {
       if (days.some((day) => day.date === date)) continue;
+      const window = recurrenceWindowForDate(booking.recurrence, date);
       days.push({
         date,
         slot: {
           date,
-          timeRange: timeRangeFromStartTime(startTime),
-          startTime,
-          endTime,
+          timeRange: timeRangeFromStartTime(window.startTime),
+          startTime: window.startTime,
+          endTime: window.endTime,
         },
-        startTime,
-        endTime,
+        startTime: window.startTime,
+        endTime: window.endTime,
       });
     }
   }
