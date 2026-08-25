@@ -50,6 +50,7 @@ import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import type { BookingStatus } from "@/lib/bookings/types";
 import {
   expandRecurrenceDates,
+  formatRecurrenceSentence,
   recurrenceFirestorePayload,
   recurrenceWindowForDate,
   type JobRecurrenceRule,
@@ -73,12 +74,23 @@ export async function notifyStaffOfJobAssignment(booking: BookingDetail): Promis
     ? `${slot.date}${booking.scheduledStartTime ? ` · ${booking.scheduledStartTime}` : ""}`
     : null;
 
+  const base = when
+    ? `You are scheduled for ${headline} on ${when}.`
+    : `You have been assigned to ${headline}.`;
+  const repeats = booking.recurrence
+    ? ` Repeats: ${formatRecurrenceSentence(booking.recurrence, PLATFORM_TIME_ZONE)}.`
+    : "";
+  const position =
+    booking.seriesId && booking.seriesIndex
+      ? booking.seriesCount
+        ? ` Visit ${booking.seriesIndex} of ${booking.seriesCount}.`
+        : ` Visit ${booking.seriesIndex}.`
+      : "";
+
   await sendStaffMobilePush({
     uid: assigned.uid,
-    title: "Job assigned to you",
-    body: when
-      ? `You are scheduled for ${headline} on ${when}.`
-      : `You have been assigned to ${headline}.`,
+    title: booking.recurrence ? "Repeating job assigned to you" : "Job assigned to you",
+    body: `${base}${position}${repeats}`,
     data: {
       type: "booking_assigned",
       bookingId: booking.id,

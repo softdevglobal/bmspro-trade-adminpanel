@@ -8,6 +8,7 @@ import { MonthCalendarField } from "@/components/month-calendar-field";
 import {
   emptyRecurrenceDraft,
   expandRecurrenceDates,
+  formatMonthDayOrdinal,
   formatRecurrenceSummary,
   MAX_RECURRENCE_OCCURRENCES,
   parseYmd,
@@ -45,20 +46,6 @@ function withEnd(rule: JobRecurrenceRule, end: RecurrenceEnd): JobRecurrenceRule
   return { ...rule, end };
 }
 
-function ordinal(day: number): string {
-  const rem100 = day % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${day}th`;
-  switch (day % 10) {
-    case 1:
-      return `${day}st`;
-    case 2:
-      return `${day}nd`;
-    case 3:
-      return `${day}rd`;
-    default:
-      return `${day}th`;
-  }
-}
 
 function ScheduleTypeCard({
   selected,
@@ -321,7 +308,7 @@ export function JobRecurrenceBuilder({
               >
                 {MONTH_DAYS.map((day) => (
                   <option key={day} value={day}>
-                    {ordinal(day)}
+                    {formatMonthDayOrdinal(day)}
                   </option>
                 ))}
               </select>

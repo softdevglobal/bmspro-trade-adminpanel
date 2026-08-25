@@ -1,5 +1,9 @@
 import { WEEK_DAY_IDS, type WeekDayId } from "@/lib/team/staff-availability";
-import { isClockTime } from "@/lib/inspection/types";
+import {
+  formatClockTime,
+  formatSlotDate,
+  isClockTime,
+} from "@/lib/inspection/types";
 
 export const RECURRENCE_UNITS = ["day", "week", "month"] as const;
 export type RecurrenceUnit = (typeof RECURRENCE_UNITS)[number];
@@ -475,6 +479,119 @@ export function formatRecurrenceSummary(rule: JobRecurrenceRule): string {
         : `for ${rule.end.count} visits`;
 
   return `${pattern}, ${formatRuleTimeWindows(rule)}, ${end}`;
+}
+
+function weekdayLongLabel(day: WeekDayId): string {
+  return WEEKDAY_LONG_LABELS[day];
+}
+
+/** Day-of-month as an ordinal — "1st", "12th", "23rd". */
+export function formatMonthDayOrdinal(day: number): string {
+  const rest = day % 100;
+  if (rest >= 11 && rest <= 13) return `${day}th`;
+  switch (day % 10) {
+    case 1:
+      return `${day}st`;
+    case 2:
+      return `${day}nd`;
+    case 3:
+      return `${day}rd`;
+    default:
+      return `${day}th`;
+  }
+}
+
+function joinWithAnd(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * How often the series repeats, in customer-facing words —
+ * "Every week on Monday and Wednesday", "Every 2 months on the 15th".
+ */
+export function formatRecurrenceFrequencyLabel(rule: JobRecurrenceRule): string {
+  const unitLabel =
+    rule.interval === 1
+      ? rule.unit
+      : `${rule.interval} ${rule.unit}s`;
+  const every = `Every ${unitLabel}`;
+
+  if (rule.unit === "week" && rule.weekdays.length > 0) {
+    return `${every} on ${joinWithAnd(rule.weekdays.map(weekdayLongLabel))}`;
+  }
+  if (rule.unit === "month") {
+    const day = rule.monthDay ?? parseYmd(rule.startDate)?.day ?? 1;
+    return `${every} on the ${formatMonthDayOrdinal(day)}`;
+  }
+  return every;
+}
+
+/**
+ * The on-site window(s) in 12-hour form — a single "9 AM – 11 AM" when every
+ * visit shares one window, otherwise one entry per weekday.
+ */
+export function formatRecurrenceTimeLabel(rule: JobRecurrenceRule): string {
+  const fallback = { startTime: rule.startTime, endTime: rule.endTime };
+  const label = (window: RecurrenceTimeWindow) =>
+    `${formatClockTime(window.startTime) ?? window.startTime} – ${
+      formatClockTime(window.endTime) ?? window.endTime
+    }`;
+
+  if (rule.unit !== "week" || rule.weekdays.length === 0) {
+    return label(fallback);
+  }
+
+  const windows = rule.weekdays.map((day) => ({
+    day,
+    window: rule.weekdayTimes?.[day] ?? fallback,
+  }));
+  const unique = new Set(
+    windows.map((item) => `${item.window.startTime}-${item.window.endTime}`),
+  );
+  if (unique.size <= 1) {
+    return label(windows[0]?.window ?? fallback);
+  }
+
+  return windows
+    .map((item) => `${WEEKDAY_SHORT_LABELS[item.day]} ${label(item.window)}`)
+    .join(", ");
+}
+
+/** When the series stops — "Until Fri, 2 Oct 2026", "12 visits", "Ongoing". */
+export function formatRecurrenceEndLabel(
+  rule: JobRecurrenceRule,
+  timeZone?: string | null,
+): string {
+  if (rule.end.type === "on_date") {
+    return `Until ${formatSlotDate(rule.end.date, timeZone)}`;
+  }
+  if (rule.end.type === "after_count") {
+    return `${rule.end.count} visit${rule.end.count === 1 ? "" : "s"}`;
+  }
+  return "Ongoing — no end date";
+}
+
+/**
+ * One-line recurrence sentence for notification bodies and SMS, e.g.
+ * "Every week on Monday and Wednesday, 9 AM – 11 AM, until Fri, 2 Oct 2026".
+ */
+export function formatRecurrenceSentence(
+  rule: JobRecurrenceRule,
+  timeZone?: string | null,
+): string {
+  const end =
+    rule.end.type === "on_date"
+      ? `until ${formatSlotDate(rule.end.date, timeZone)}`
+      : rule.end.type === "after_count"
+        ? `for ${rule.end.count} visit${rule.end.count === 1 ? "" : "s"}`
+        : "with no end date";
+  return [
+    formatRecurrenceFrequencyLabel(rule),
+    formatRecurrenceTimeLabel(rule),
+    end,
+  ].join(", ");
 }
 
 export function recurrenceFirestorePayload(rule: JobRecurrenceRule) {

@@ -13,6 +13,7 @@ import { JobRecurrenceBuilder } from "@/components/job-recurrence-builder";
 import {
   emptyRecurrenceDraft,
   firstWeekdayOnOrAfter,
+  formatMonthDayOrdinal,
   formatRecurrenceSummary,
   pruneWeekdayTimes,
   WEEKDAY_LONG_LABELS,
@@ -1575,6 +1576,17 @@ export function AddInspectionModal({
     recurrenceEnabled === true &&
     recurrenceRule.unit === "week";
 
+  /** Day-of-month a monthly repeat is pinned to, so the calendar can offer only it. */
+  const monthlyRepeatDay =
+    variant === "job" &&
+    recurrenceEnabled === true &&
+    recurrenceRule.unit === "month"
+      ? (recurrenceRule.monthDay ?? null)
+      : null;
+
+  /** Weekly and monthly repeats both pick one starting date the rule dictates. */
+  const isJobRepeatStartPick = isWeeklyJobRepeat || monthlyRepeatDay != null;
+
   const recurrenceEndDate =
     variant === "job" &&
     recurrenceEnabled === true &&
@@ -2093,10 +2105,17 @@ export function AddInspectionModal({
     }));
   }
 
-  function setWeeklyStartDate(iso: string) {
+  /**
+   * The single date a repeating job starts on. Weekly rules carry a per-weekday
+   * window; monthly rules keep the times already on the rule.
+   */
+  function setRepeatStartDate(iso: string) {
     if (recurrenceEndDate && iso > recurrenceEndDate) return;
     const weekday = weekdayIdFromYmd(iso);
-    const window = weekday ? recurrenceRule.weekdayTimes?.[weekday] : undefined;
+    const window =
+      recurrenceRule.unit === "week" && weekday
+        ? recurrenceRule.weekdayTimes?.[weekday]
+        : undefined;
     setForm((prev) => ({
       ...prev,
       calendarWindow: null,
@@ -2660,9 +2679,9 @@ export function AddInspectionModal({
                     title={current.title}
                     hint={
                       variant === "job"
-                        ? form.calendarWindow && !isWeeklyJobRepeat
+                        ? form.calendarWindow && !isJobRepeatStartPick
                           ? "Calendar schedule"
-                          : isWeeklyJobRepeat
+                          : isJobRepeatStartPick
                             ? selectedPreferredDates.length
                               ? "Starting date"
                               : "Pick a starting date"
@@ -2712,7 +2731,7 @@ export function AddInspectionModal({
                     />
                   ) : null}
 
-                  {form.calendarWindow && !isWeeklyJobRepeat ? (
+                  {form.calendarWindow && !isJobRepeatStartPick ? (
                     <div className="space-y-4 rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4">
                       <div>
                         <span className={LABEL_CLASS}>Date</span>
@@ -2760,18 +2779,18 @@ export function AddInspectionModal({
                           <BookingMonthCalendar
                             size="full"
                             label={
-                              isWeeklyJobRepeat
+                              isJobRepeatStartPick
                                 ? "Pick the starting date"
                                 : "Pick one or more days"
                             }
-                            mode={isWeeklyJobRepeat ? "single" : "multiple"}
+                            mode={isJobRepeatStartPick ? "single" : "multiple"}
                             selectedIso={
-                              isWeeklyJobRepeat
+                              isJobRepeatStartPick
                                 ? (selectedPreferredDates[0] ?? "")
                                 : undefined
                             }
                             selectedIsos={
-                              isWeeklyJobRepeat
+                              isJobRepeatStartPick
                                 ? undefined
                                 : selectedPreferredDates
                             }
@@ -2785,9 +2804,10 @@ export function AddInspectionModal({
                                 ? recurrenceRule.weekdays
                                 : undefined
                             }
+                            enabledMonthDay={monthlyRepeatDay}
                             onSelect={(iso) => {
                               touchField("preferredSlots");
-                              setWeeklyStartDate(iso);
+                              setRepeatStartDate(iso);
                             }}
                             onToggle={(iso) => {
                               touchField("preferredSlots");
@@ -2801,9 +2821,15 @@ export function AddInspectionModal({
                                     ? " Dates after the end date are hidden."
                                     : ""
                                 }`
-                              : recurrenceEndDate
-                                ? "Dates after the end date are hidden."
-                                : "You can select more than one day for multi-day jobs. Tap a selected day again to remove it."}
+                              : monthlyRepeatDay != null
+                                ? `This job repeats on the ${formatMonthDayOrdinal(monthlyRepeatDay)} of each month, so only that day can be chosen as the starting date. Shorter months use their last day.${
+                                    recurrenceEndDate
+                                      ? " Dates after the end date are hidden."
+                                      : ""
+                                  }`
+                                : recurrenceEndDate
+                                  ? "Dates after the end date are hidden."
+                                  : "You can select more than one day for multi-day jobs. Tap a selected day again to remove it."}
                           </p>
                         </div>
                       ) : (

@@ -225,6 +225,7 @@ export function BookingMonthCalendar({
   disabled: allDisabled = false,
   label,
   enabledWeekdays,
+  enabledMonthDay,
 }: {
   selectedIso?: string;
   selectedIsos?: string[];
@@ -247,8 +248,13 @@ export function BookingMonthCalendar({
   disabled?: boolean;
   /** Field label rendered above the grid (full size only). */
   label?: string;
-  /** When set, only these weekdays are selectable; other day numbers are hidden. */
+  /** When set, only these weekdays are selectable; other days show but are disabled. */
   enabledWeekdays?: WeekDayId[];
+  /**
+   * Monthly recurrence: only this day of the month is selectable. Months shorter
+   * than the chosen day fall back to their last day, matching `addMonthsYmd`.
+   */
+  enabledMonthDay?: number | null;
 }) {
   const initialView = selectedIso
     ? new Date(`${selectedIso}T12:00:00`)
@@ -302,6 +308,8 @@ export function BookingMonthCalendar({
     setViewYear(next.getFullYear());
     setViewMonth(next.getMonth());
   }
+
+  const monthLength = daysInMonth(viewYear, viewMonth);
 
   const gridCells = useMemo(() => {
     const offset = monthStartMondayOffset(viewYear, viewMonth);
@@ -406,11 +414,15 @@ export function BookingMonthCalendar({
           const weekdayBlocked =
             enabledWeekdays != null &&
             (!weekday || !enabledWeekdays.includes(weekday));
+          const monthDayBlocked =
+            enabledMonthDay != null &&
+            cell.dayNum !== Math.min(enabledMonthDay, monthLength);
           const past = !allowPast && isBeforeMinDate(cell.iso, minDate);
           const afterEnd = isAfterMaxDate(cell.iso, maxDate);
           const comboBlocked =
             blockedCombos && isDayFullyBlocked(cell.iso, blockedCombos);
-          const disabled = past || comboBlocked || weekdayBlocked || afterEnd;
+          const disabled =
+            past || comboBlocked || weekdayBlocked || monthDayBlocked || afterEnd;
           const selected =
             mode === "multiple"
               ? (selectedIsos ?? []).includes(cell.iso)
@@ -421,7 +433,7 @@ export function BookingMonthCalendar({
             (selectedIsos?.length ?? 0) >= maxSelections;
           const isToday = cell.iso === today;
 
-          if (weekdayBlocked || afterEnd) {
+          if (afterEnd) {
             return (
               <span
                 key={cell.iso}
@@ -441,9 +453,13 @@ export function BookingMonthCalendar({
                   ? blockedDayHint
                   : past
                     ? "Past dates cannot be selected"
-                    : atMax
-                      ? `You can pick up to ${maxSelections} days — tap a selected day to remove it`
-                      : undefined
+                    : weekdayBlocked
+                      ? "This weekday is not available for this booking"
+                      : monthDayBlocked
+                        ? `This job repeats on the ${enabledMonthDay} of each month`
+                        : atMax
+                          ? `You can pick up to ${maxSelections} days — tap a selected day to remove it`
+                          : undefined
               }
               onClick={() => {
                 if (mode === "multiple") {
