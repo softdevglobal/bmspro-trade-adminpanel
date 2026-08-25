@@ -9,6 +9,12 @@ import {
 } from "@/components/calendar-visit-time-range";
 import type { CalendarSlotSelection } from "@/lib/calendar/time-slots";
 import { JobAssignPicker } from "@/components/job-assign-picker";
+import { JobRecurrenceBuilder } from "@/components/job-recurrence-builder";
+import {
+  emptyRecurrenceDraft,
+  formatRecurrenceSummary,
+  type JobRecurrenceRule,
+} from "@/lib/bookings/recurrence";
 import {
   JobInstructionsFields,
   normalizeInstructionTasksForSubmit,
@@ -45,6 +51,7 @@ import type {
   InspectionTimeRange,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
+import { SERVICE_SKILLS } from "@/lib/onboarding/services/types";
 import { iconForBusinessType } from "@/lib/onboarding/types";
 import {
   formatAuPhoneDisplay,
@@ -1028,6 +1035,8 @@ function InspectionPreview({
   reviewStepNumber = 5,
   instructionDescription = "",
   instructionTasks = [],
+  recurrenceEnabled = false,
+  recurrence = null,
 }: {
   form: InspectionFormState;
   selectedServiceName: string | null;
@@ -1039,6 +1048,8 @@ function InspectionPreview({
   reviewStepNumber?: number;
   instructionDescription?: string;
   instructionTasks?: string[];
+  recurrenceEnabled?: boolean;
+  recurrence?: JobRecurrenceRule | null;
 }) {
   const jobSummary =
     form.requestType === "existing_service"
@@ -1108,9 +1119,14 @@ function InspectionPreview({
             </li>
           ))}
         </ul>
-        {variant === "job" && form.preferredSlots.length > 1 ? (
+        {variant === "job" && form.preferredSlots.length > 1 && !recurrenceEnabled ? (
           <p className="mt-2 font-body text-[11px] text-on-surface-variant">
             All {form.preferredSlots.length} days will appear on the calendar.
+          </p>
+        ) : null}
+        {variant === "job" && recurrenceEnabled && recurrence ? (
+          <p className="mt-2 font-body text-[12px] text-on-surface">
+            Repeats: {formatRecurrenceSummary(recurrence)}
           </p>
         ) : null}
       </PreviewSection>
@@ -1248,6 +1264,11 @@ export function AddInspectionModal({
   const [instructionTasks, setInstructionTasks] = useState<string[]>([]);
   const [instructionTaskSourceServiceId, setInstructionTaskSourceServiceId] =
     useState<string | null>(null);
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState(false);
+  const [recurrenceRule, setRecurrenceRule] = useState<JobRecurrenceRule>(() =>
+    emptyRecurrenceDraft("", "09:00", "10:00"),
+  );
+  const [requiredSkill, setRequiredSkill] = useState("");
   const [services, setServices] = useState<BusinessServiceDetail[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1287,6 +1308,12 @@ export function AddInspectionModal({
     [activeServices, form.selectedServiceId],
   );
 
+  useEffect(() => {
+    if (selectedService?.requiredSkill) {
+      setRequiredSkill(selectedService.requiredSkill);
+    }
+  }, [selectedService]);
+
   const timeZone = profile?.timezone;
   const minDate = useMemo(() => todayIso(timeZone), [timeZone]);
 
@@ -1302,6 +1329,9 @@ export function AddInspectionModal({
       setInstructionDescription("");
       setInstructionTasks([]);
       setInstructionTaskSourceServiceId(null);
+      setRecurrenceEnabled(false);
+      setRecurrenceRule(emptyRecurrenceDraft("", "09:00", "10:00"));
+      setRequiredSkill("");
       setTouched({});
       setError(null);
       setSubmitting(false);
@@ -1873,6 +1903,18 @@ export function AddInspectionModal({
           instructionDescription: instructionDescription.trim() || undefined,
           instructionTasks:
             normalizeInstructionTasksForSubmit(instructionTasks),
+          ...(recurrenceEnabled
+            ? {
+                recurrence: {
+                  ...recurrenceRule,
+                  startDate: assignmentSchedule.date ?? recurrenceRule.startDate,
+                  startTime:
+                    assignmentSchedule.startTime ?? recurrenceRule.startTime,
+                  endTime: assignmentSchedule.endTime ?? recurrenceRule.endTime,
+                },
+                requiredSkill: requiredSkill || undefined,
+              }
+            : {}),
         }
       : {};
 
@@ -2375,6 +2417,30 @@ export function AddInspectionModal({
                       ) : null}
                     </>
                   )}
+                  {variant === "job" ? (
+                    <JobRecurrenceBuilder
+                      enabled={recurrenceEnabled}
+                      rule={{
+                        ...recurrenceRule,
+                        startDate:
+                          assignmentSchedule.date ?? recurrenceRule.startDate,
+                        startTime:
+                          assignmentSchedule.startTime ??
+                          recurrenceRule.startTime,
+                        endTime:
+                          assignmentSchedule.endTime ?? recurrenceRule.endTime,
+                      }}
+                      disabled={submitting}
+                      startDate={assignmentSchedule.date ?? ""}
+                      startTime={assignmentSchedule.startTime ?? "09:00"}
+                      endTime={assignmentSchedule.endTime ?? "10:00"}
+                      requiredSkill={requiredSkill}
+                      skillOptions={[...SERVICE_SKILLS]}
+                      onEnabledChange={setRecurrenceEnabled}
+                      onChange={setRecurrenceRule}
+                      onRequiredSkillChange={setRequiredSkill}
+                    />
+                  ) : null}
                 </div>
               ) : null}
 
@@ -2390,6 +2456,8 @@ export function AddInspectionModal({
                   reviewStepNumber={step}
                   instructionDescription={instructionDescription}
                   instructionTasks={instructionTasks}
+                  recurrenceEnabled={recurrenceEnabled}
+                  recurrence={recurrenceEnabled ? recurrenceRule : null}
                 />
               ) : null}
 

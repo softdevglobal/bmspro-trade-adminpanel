@@ -64,6 +64,11 @@ import {
   needsAdminJobDateProposal,
 } from "@/lib/inspection/types";
 import { sortInspectionRequestsForBoard } from "@/lib/inspection/map-inspection-doc";
+import {
+  canonicalRequestId,
+  uniqueRequestsForBoard,
+} from "@/lib/bookings/board-grouping";
+import { recurringVisitCount } from "@/lib/bookings/map-booking-doc";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 import {
@@ -245,7 +250,10 @@ export function RequestsBoard() {
 
   const isLoading = requestsLoading;
   const loadError = requestsError;
-  const boardRequests = requestsLocal;
+  const boardRequests = useMemo(
+    () => uniqueRequestsForBoard(requestsLocal, bookingById),
+    [requestsLocal, bookingById],
+  );
 
   const filtered = useMemo(() => {
     const list =
@@ -309,15 +317,21 @@ export function RequestsBoard() {
 
   useEffect(() => {
     if (!pendingOpenId) return;
-    if (boardRequests.some((req) => req.id === pendingOpenId)) {
-      setSelectedId(pendingOpenId);
+    const openId = canonicalRequestId(
+      pendingOpenId,
+      requestsLocal,
+      boardRequests,
+      bookingById,
+    );
+    if (boardRequests.some((req) => req.id === openId)) {
+      setSelectedId(openId);
       if (pendingDrawerMode) {
         setDrawerOpenMode(pendingDrawerMode);
         setPendingDrawerMode(null);
       }
       setPendingOpenId(null);
     }
-  }, [pendingOpenId, pendingDrawerMode, boardRequests]);
+  }, [pendingOpenId, pendingDrawerMode, boardRequests, requestsLocal, bookingById]);
 
   const selected = useMemo(
     () => boardRequests.find((req) => req.id === selectedId) ?? null,
@@ -850,6 +864,7 @@ function RequestCard({
     canFollowUpAfterQuotation(request) &&
     !cardQuotationAwaitingCustomer;
   const hasLinkedBooking = Boolean(request.bookingId);
+  const repeatCount = linkedJob ? recurringVisitCount(linkedJob) : 0;
 
   return (
     <div
@@ -881,6 +896,12 @@ function RequestCard({
               {serviceSubtitle}
             </span>
             <CreatedSourcePill source={request.createdSource} />
+            {linkedJob?.recurrence || repeatCount > 1 ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-800">
+                Repeats
+                {repeatCount > 1 ? ` · ${repeatCount} visits` : ""}
+              </span>
+            ) : null}
           </div>
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
             {customerName}

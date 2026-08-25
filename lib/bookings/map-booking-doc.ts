@@ -1,4 +1,5 @@
 import { parseJobInstructionsFromDoc } from "@/lib/bookings/job-instructions";
+import { expandRecurrenceDates, parseJobRecurrenceRule } from "@/lib/bookings/recurrence";
 import { toMillis } from "@/lib/onboarding/services/display";
 import {
   BOOKING_STATUSES,
@@ -10,6 +11,7 @@ import {
   isRequestType,
   isTimeRange,
   resolveSlotStartTime,
+  timeRangeFromStartTime,
   UNSCHEDULED_SORT_KEY,
   type InspectionAddress,
   type InspectionAssignment,
@@ -164,6 +166,24 @@ export function mapBookingDoc(
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
     jobInstructionsDescription: jobInstructions.jobInstructionsDescription,
     jobInstructionsTasks: jobInstructions.jobInstructionsTasks,
+    seriesId:
+      typeof data.seriesId === "string" && data.seriesId.trim()
+        ? data.seriesId.trim()
+        : null,
+    seriesIndex:
+      typeof data.seriesIndex === "number" && Number.isInteger(data.seriesIndex)
+        ? data.seriesIndex
+        : null,
+    seriesCount:
+      typeof data.seriesCount === "number" && Number.isInteger(data.seriesCount)
+        ? data.seriesCount
+        : null,
+    recurrence: parseJobRecurrenceRule(data.recurrence),
+    seriesException: data.seriesException === true,
+    requiredSkill:
+      typeof data.requiredSkill === "string" && data.requiredSkill.trim()
+        ? data.requiredSkill.trim()
+        : null,
     quotation: parseInspectionQuotation(data.quotation),
     visitStartedAt: toMillis(data.visitStartedAt),
     visitEndedAt: toMillis(data.visitEndedAt),
@@ -184,8 +204,56 @@ export type BookingScheduleDay = {
   endTime: string | null;
 };
 
-/** Primary scheduled day plus any additional on-site days for multi-day jobs. */
+/** Primary scheduled day plus extra on-site days and repeating visit dates. */
+export function isRecurringJobAnchor(booking: BookingDetail): boolean {
+  if (!booking.recurrence) return false;
+  if (!booking.seriesId) return true;
+  return booking.seriesIndex === 1 || booking.seriesId === booking.id;
+}
+
+export function recurringVisitCount(booking: BookingDetail): number {
+  if (!booking.recurrence) return booking.seriesCount ?? 0;
+  return expandRecurrenceDates(booking.recurrence).length;
+}
+
+/** One row per series on the jobs board — repeating work stays a single card. */
+export function uniqueJobsForBoard(bookings: BookingDetail[]): BookingDetail[] {
+  const seenSeries = new Set<string>();
+  const result: BookingDetail[] = [];
+
+  for (const booking of sortBookingsBySchedule(bookings)) {
+    if (!booking.seriesId) {
+      result.push(booking);
+      continue;
+    }
+    if (seenSeries.has(booking.seriesId)) continue;
+    seenSeries.add(booking.seriesId);
+
+    const members = bookings.filter((item) => item.seriesId === booking.seriesId);
+    const anchor =
+      members.find((item) => isRecurringJobAnchor(item)) ??
+      members.find((item) => item.seriesIndex === 1) ??
+      booking;
+    const visitCount = Math.max(recurringVisitCount(anchor), members.length);
+    result.push({
+      ...anchor,
+      seriesCount: visitCount > 0 ? visitCount : anchor.seriesCount,
+    });
+  }
+
+  return result;
+}
+
 export function bookingScheduleDays(booking: BookingDetail): BookingScheduleDay[] {
+  if (
+    booking.seriesId &&
+    booking.recurrence &&
+    !isRecurringJobAnchor(booking) &&
+    !booking.seriesException
+  ) {
+    return [];
+  }
+
   const days: BookingScheduleDay[] = [];
 
   if (booking.scheduledSlot?.date) {
@@ -206,6 +274,25 @@ export function bookingScheduleDays(booking: BookingDetail): BookingScheduleDay[
       startTime: slot.startTime ?? null,
       endTime: slot.endTime ?? null,
     });
+  }
+
+  if (isRecurringJobAnchor(booking) && booking.recurrence) {
+    const startTime = booking.recurrence.startTime;
+    const endTime = booking.recurrence.endTime;
+    for (const date of expandRecurrenceDates(booking.recurrence)) {
+      if (days.some((day) => day.date === date)) continue;
+      days.push({
+        date,
+        slot: {
+          date,
+          timeRange: timeRangeFromStartTime(startTime),
+          startTime,
+          endTime,
+        },
+        startTime,
+        endTime,
+      });
+    }
   }
 
   return days.sort((a, b) => a.date.localeCompare(b.date));

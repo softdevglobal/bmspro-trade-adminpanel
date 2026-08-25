@@ -5,6 +5,8 @@ import {
   cancelBusinessBooking,
   completeBusinessBooking,
   deleteBusinessBooking,
+  isSeriesScheduleLocked,
+  listBookingsInSeries,
   notifyStaffOfJobAssignment,
   undoCancelBusinessBooking,
   updateBookingCompletionPhotos,
@@ -13,6 +15,12 @@ import {
   startBusinessBookingJob,
   startBusinessBookingVisit,
 } from "@/lib/bookings/server";
+import {
+  expandRecurrenceDates,
+  parseJobRecurrenceRule,
+  parseSeriesUpdateMode,
+  recurrenceFirestorePayload,
+} from "@/lib/bookings/recurrence";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import {
   findApprovedLeaveBlocking,
@@ -55,7 +63,7 @@ function sanitizeJobInstructionTasks(raw: unknown): string[] {
 async function lookupBusinessService(
   businessId: string,
   serviceId: string,
-): Promise<{ name: string; businessType: string } | null> {
+): Promise<{ name: string; businessType: string; requiredSkill: string | null } | null> {
   const snap = await adminDb
     .collection(COLLECTIONS.SERVICES)
     .doc(serviceId)
@@ -70,7 +78,11 @@ async function lookupBusinessService(
       : typeof data.category === "string"
         ? data.category
         : "";
-  return name ? { name, businessType } : null;
+  const requiredSkill =
+    typeof data.requiredSkill === "string" && data.requiredSkill.trim()
+      ? data.requiredSkill.trim()
+      : null;
+  return name ? { name, businessType, requiredSkill } : null;
 }
 
 async function resolveStaffAssignment(
@@ -712,10 +724,12 @@ export async function PATCH(
       );
     }
 
+    const seriesModeEarly = parseSeriesUpdateMode(payload.seriesUpdateMode);
     const scheduleResult = await updateBusinessBookingSchedule(auth.businessId, id, {
       slot: { date, timeRange },
       startTime,
       endTime,
+      notifyCustomer: seriesModeEarly === "this_visit",
     });
     if (!scheduleResult.ok) {
       return NextResponse.json(
@@ -767,6 +781,7 @@ export async function PATCH(
     let serviceName = booking.serviceName;
     let serviceBusinessType = booking.serviceBusinessType;
     let customRequest = booking.customRequest;
+    let requiredSkillFromService = booking.requiredSkill;
 
     if (requestType === "existing_service") {
       const requestedServiceId =
@@ -791,6 +806,7 @@ export async function PATCH(
       serviceName = service.name;
       serviceBusinessType = service.businessType || null;
       customRequest = null;
+      requiredSkillFromService = service.requiredSkill;
     } else {
       const title =
         typeof customRequestRaw?.title === "string"
@@ -813,6 +829,9 @@ export async function PATCH(
           : title;
       serviceBusinessType = null;
       customRequest = { title, description };
+      if (typeof payload.requiredSkill === "string") {
+        requiredSkillFromService = payload.requiredSkill.trim() || null;
+      }
     }
 
     const ownerNote =
@@ -827,8 +846,45 @@ export async function PATCH(
       payload.jobInstructionsTasks !== undefined
         ? sanitizeJobInstructionTasks(payload.jobInstructionsTasks)
         : booking.jobInstructionsTasks;
+    const requiredSkill =
+      typeof payload.requiredSkill === "string" && payload.requiredSkill.trim()
+        ? payload.requiredSkill.trim()
+        : requiredSkillFromService;
 
-    const detailUpdates = {
+    const wantsRecurrence = payload.recurrence != null && payload.recurrence !== false;
+    const parsedRecurrence = wantsRecurrence
+      ? parseJobRecurrenceRule({
+          ...(typeof payload.recurrence === "object" && payload.recurrence
+            ? (payload.recurrence as Record<string, unknown>)
+            : {}),
+          startDate:
+            typeof (payload.recurrence as { startDate?: unknown } | null)?.startDate ===
+            "string"
+              ? (payload.recurrence as { startDate: string }).startDate
+              : date,
+          startTime,
+          endTime,
+        })
+      : null;
+    if (wantsRecurrence && !parsedRecurrence) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Check the repeat rule — interval, days, and end condition are required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const seriesMode = seriesModeEarly;
+    const cutoffDate = booking.scheduledSlot?.date ?? date;
+    const scheduleChanged =
+      date !== (booking.scheduledSlot?.date ?? "") ||
+      startTime !== (booking.scheduledStartTime ?? "") ||
+      endTime !== (booking.scheduledEndTime ?? "");
+
+    const detailUpdates: Record<string, unknown> = {
       customer,
       address,
       requestType,
@@ -839,10 +895,70 @@ export async function PATCH(
       ownerNote: ownerNote || null,
       jobInstructionsDescription: instructionDescription || null,
       jobInstructionsTasks: instructionTasks,
+      requiredSkill: requiredSkill || null,
       updatedAt: FieldValue.serverTimestamp(),
     };
 
     await adminDb.collection("jobs").doc(id).update(detailUpdates);
+
+    const seriesMembers = booking.seriesId
+      ? await listBookingsInSeries(auth.businessId, booking.seriesId)
+      : [];
+    const siblingJobs = seriesMembers.filter((member) => member.id !== id);
+
+    async function cancelOpenSiblings() {
+      for (const member of siblingJobs) {
+        if (isSeriesScheduleLocked(member)) continue;
+        await cancelBusinessBooking(auth.businessId, member.id);
+      }
+    }
+
+    if (seriesMode === "this_visit") {
+      if ((booking.seriesId || booking.recurrence) && scheduleChanged) {
+        await adminDb.collection("jobs").doc(id).update({
+          seriesException: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      if (!wantsRecurrence && (booking.seriesId || booking.recurrence)) {
+        await cancelOpenSiblings();
+        await adminDb.collection("jobs").doc(id).update({
+          seriesId: FieldValue.delete(),
+          seriesIndex: FieldValue.delete(),
+          seriesCount: FieldValue.delete(),
+          recurrence: FieldValue.delete(),
+          seriesException: false,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    } else if (wantsRecurrence && parsedRecurrence) {
+      const rule =
+        seriesMode === "this_and_future"
+          ? { ...parsedRecurrence, startDate: cutoffDate }
+          : parsedRecurrence;
+      const visitCount = expandRecurrenceDates(rule).length;
+      await cancelOpenSiblings();
+      await adminDb.collection("jobs").doc(id).update({
+        ...detailUpdates,
+        recurrence: recurrenceFirestorePayload(rule),
+        seriesId: booking.seriesId || id,
+        seriesIndex: 1,
+        seriesCount: visitCount,
+        seriesException: false,
+        additionalJobDays: [],
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else if (!wantsRecurrence && (booking.seriesId || booking.recurrence)) {
+      await cancelOpenSiblings();
+      await adminDb.collection("jobs").doc(id).update({
+        seriesId: FieldValue.delete(),
+        seriesIndex: FieldValue.delete(),
+        seriesCount: FieldValue.delete(),
+        recurrence: FieldValue.delete(),
+        seriesException: false,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
 
     if (booking.inspectionRequestId) {
       try {

@@ -6,16 +6,15 @@ import {
   JOBS_COLLECTION,
   type BookingDetail,
 } from "@/lib/bookings/types";
-import type {
-  InspectionAddress,
-  InspectionAssignment,
-  InspectionCustomer,
-  InspectionRequestDetail,
-  InspectionRequestType,
-  InspectionSlot,
-} from "@/lib/inspection/types";
 import {
   REQUESTS_COLLECTION,
+  timeRangeFromStartTime,
+  type InspectionAddress,
+  type InspectionAssignment,
+  type InspectionCustomer,
+  type InspectionRequestDetail,
+  type InspectionRequestType,
+  type InspectionSlot,
 } from "@/lib/inspection/types";
 import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
@@ -49,6 +48,11 @@ import {
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import type { BookingStatus } from "@/lib/bookings/types";
+import {
+  expandRecurrenceDates,
+  recurrenceFirestorePayload,
+  type JobRecurrenceRule,
+} from "@/lib/bookings/recurrence";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
 export const BOOKING_LIST_LIMIT = 80;
@@ -401,7 +405,12 @@ export async function assignBusinessBooking(
 export async function updateBusinessBookingSchedule(
   businessId: string,
   bookingId: string,
-  input: { slot: InspectionSlot; startTime: string; endTime: string },
+  input: {
+    slot: InspectionSlot;
+    startTime: string;
+    endTime: string;
+    notifyCustomer?: boolean;
+  },
 ): Promise<
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
@@ -462,9 +471,10 @@ export async function updateBusinessBookingSchedule(
   const updated = await ref.get();
   const booking = mapBookingDoc(updated.id, updated.data() ?? {});
 
-  // Tell the customer (in-portal + email + SMS) that their job moved.
-  const summary = await loadBusinessSummary(businessId);
-  await notifyCustomerOfJobRescheduled(booking, summary);
+  if (input.notifyCustomer !== false) {
+    const summary = await loadBusinessSummary(businessId);
+    await notifyCustomerOfJobRescheduled(booking, summary);
+  }
 
   return {
     ok: true,
@@ -1088,12 +1098,22 @@ export type CreateDirectJobInput = {
   instructionDescription?: string | null;
   instructionTasks?: string[];
   assignedTo?: InspectionAssignment | null;
+  requiredSkill?: string | null;
+  series?: {
+    seriesId?: string | null;
+    seriesIndex: number;
+    seriesCount: number;
+    recurrence: JobRecurrenceRule;
+    seriesException?: boolean;
+  };
+  skipCustomerNotify?: boolean;
+  skipStaffNotify?: boolean;
 };
 
 async function lookupBusinessServiceForJob(
   businessId: string,
   serviceId: string,
-): Promise<{ name: string; businessType: string } | null> {
+): Promise<{ name: string; businessType: string; requiredSkill: string | null } | null> {
   const snap = await adminDb.collection(COLLECTIONS.SERVICES).doc(serviceId).get();
   if (!snap.exists) return null;
   const data = snap.data();
@@ -1105,7 +1125,11 @@ async function lookupBusinessServiceForJob(
       : typeof data.category === "string"
         ? data.category
         : "";
-  return name ? { name, businessType } : null;
+  const requiredSkill =
+    typeof data.requiredSkill === "string" && data.requiredSkill.trim()
+      ? data.requiredSkill.trim()
+      : null;
+  return name ? { name, businessType, requiredSkill } : null;
 }
 
 /**
@@ -1170,6 +1194,9 @@ export async function createDirectJob(
     serviceName = service.name;
     serviceBusinessType = service.businessType;
     quotationTitle = service.name;
+    if (!input.requiredSkill) {
+      input.requiredSkill = service.requiredSkill;
+    }
   } else {
     const title = customRequest?.title?.trim() ?? "";
     const description = customRequest?.description?.trim() ?? "";
@@ -1357,6 +1384,14 @@ export async function createDirectJob(
         : null,
     jobInstructionsTasks: input.instructionTasks ?? [],
     quotation: quotationSummary,
+    requiredSkill: input.requiredSkill ?? null,
+    seriesId: input.series ? input.series.seriesId?.trim() || bookingRef.id : null,
+    seriesIndex: input.series?.seriesIndex ?? null,
+    seriesCount: input.series?.seriesCount ?? null,
+    recurrence: input.series
+      ? recurrenceFirestorePayload(input.series.recurrence)
+      : null,
+    seriesException: input.series?.seriesException === true,
     createdAt: now,
     updatedAt: now,
   };
@@ -1375,16 +1410,20 @@ export async function createDirectJob(
   const booking = mapBookingDoc(bookingRef.id, bookingSnap.data() ?? {});
   const request = mapInspectionDoc(requestSnap.id, requestSnap.data() ?? {});
 
-  const summary = await loadBusinessSummary(businessId);
-  try {
-    await notifyCustomerOfJobScheduled(booking, summary);
-  } catch (error) {
-    console.error("[direct-job] customer notification failed:", error);
+  if (!input.skipCustomerNotify) {
+    const summary = await loadBusinessSummary(businessId);
+    try {
+      await notifyCustomerOfJobScheduled(booking, summary);
+    } catch (error) {
+      console.error("[direct-job] customer notification failed:", error);
+    }
   }
-  try {
-    await notifyStaffOfJobAssignment(booking);
-  } catch (error) {
-    console.error("[direct-job] staff assignment push failed:", error);
+  if (!input.skipStaffNotify) {
+    try {
+      await notifyStaffOfJobAssignment(booking);
+    } catch (error) {
+      console.error("[direct-job] staff assignment push failed:", error);
+    }
   }
 
   if (audit) {
@@ -1411,6 +1450,217 @@ export async function createDirectJob(
   }
 
   return { ok: true, booking, request };
+}
+
+function seriesSortKey(booking: BookingDetail): string {
+  return `${booking.scheduledSlot?.date ?? ""}T${booking.scheduledStartTime ?? ""}`;
+}
+
+export async function listBookingsInSeries(
+  businessId: string,
+  seriesId: string,
+): Promise<BookingDetail[]> {
+  const id = seriesId.trim();
+  if (!id) return [];
+  const snapshot = await adminDb
+    .collection(JOBS_COLLECTION)
+    .where("seriesId", "==", id)
+    .get();
+  return snapshot.docs
+    .map((doc) => mapBookingDoc(doc.id, doc.data() ?? {}))
+    .filter((booking) => booking.businessId === businessId)
+    .sort((a, b) => seriesSortKey(a).localeCompare(seriesSortKey(b)));
+}
+
+async function rewriteSeriesIndexes(bookings: BookingDetail[]): Promise<void> {
+  const active = bookings.filter((booking) => booking.status !== "cancelled");
+  const count = active.length;
+  await Promise.all(
+    active.map((booking, index) =>
+      adminDb
+        .collection(JOBS_COLLECTION)
+        .doc(booking.id)
+        .update({
+          seriesIndex: index + 1,
+          seriesCount: count,
+          updatedAt: FieldValue.serverTimestamp(),
+        }),
+    ),
+  );
+}
+
+export function isSeriesScheduleLocked(booking: BookingDetail): boolean {
+  return (
+    booking.status === "completed" ||
+    booking.status === "cancelled" ||
+    booking.status === "ongoing"
+  );
+}
+
+export async function createDirectJobSeries(
+  businessId: string,
+  createdBy: string,
+  input: Omit<CreateDirectJobInput, "slot" | "startTime" | "endTime" | "series">,
+  rule: JobRecurrenceRule,
+  audit?: { actor: AuditActor; source: AuditSource },
+): Promise<
+  | {
+      ok: true;
+      booking: BookingDetail;
+      request: InspectionRequestDetail;
+      createdCount: number;
+      skippedDates: string[];
+    }
+  | { ok: false; status: number; error: string }
+> {
+  const dates = expandRecurrenceDates(rule);
+  if (dates.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "That recurrence does not produce any visits. Check the start date and end rule.",
+    };
+  }
+
+  const firstDate = dates[0];
+  if (!firstDate) {
+    return {
+      ok: false,
+      status: 400,
+      error: "That recurrence does not produce any visits. Check the start date and end rule.",
+    };
+  }
+
+  const result = await createDirectJob(
+    businessId,
+    createdBy,
+    {
+      ...input,
+      slot: {
+        date: firstDate,
+        timeRange: timeRangeFromStartTime(rule.startTime),
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+      },
+      startTime: rule.startTime,
+      endTime: rule.endTime,
+      additionalJobDays: [],
+      series: {
+        seriesIndex: 1,
+        seriesCount: dates.length,
+        recurrence: rule,
+      },
+    },
+    audit,
+  );
+
+  if (!result.ok) return result;
+
+  return {
+    ok: true,
+    booking: result.booking,
+    request: result.request,
+    createdCount: 1,
+    skippedDates: [],
+  };
+}
+
+export async function realignSeriesVisits(
+  businessId: string,
+  createdBy: string,
+  seriesId: string,
+  targets: BookingDetail[],
+  rule: JobRecurrenceRule,
+  template: Omit<
+    CreateDirectJobInput,
+    "slot" | "startTime" | "endTime" | "series" | "skipCustomerNotify" | "skipStaffNotify"
+  >,
+): Promise<{ ok: true; skippedDates: string[] } | { ok: false; status: number; error: string }> {
+  const dates = expandRecurrenceDates(rule);
+  if (dates.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "That recurrence does not produce any visits. Check the start date and end rule.",
+    };
+  }
+
+  const skippedDates: string[] = [];
+  const sorted = [...targets].sort((a, b) =>
+    seriesSortKey(a).localeCompare(seriesSortKey(b)),
+  );
+  const keep = Math.min(sorted.length, dates.length);
+
+  for (let i = 0; i < keep; i++) {
+    const booking = sorted[i];
+    const date = dates[i];
+    const result = await updateBusinessBookingSchedule(
+      businessId,
+      booking.id,
+      {
+        slot: {
+          date,
+          timeRange: timeRangeFromStartTime(rule.startTime),
+          startTime: rule.startTime,
+          endTime: rule.endTime,
+        },
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+        notifyCustomer: false,
+      },
+    );
+    if (!result.ok) {
+      skippedDates.push(date);
+      continue;
+    }
+    await adminDb.collection(JOBS_COLLECTION).doc(booking.id).update({
+      recurrence: recurrenceFirestorePayload(rule),
+      seriesId,
+      seriesException: false,
+      additionalJobDays: [],
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+
+  for (let i = keep; i < sorted.length; i++) {
+    const cancelResult = await cancelBusinessBooking(businessId, sorted[i].id);
+    if (!cancelResult.ok && cancelResult.status !== 400) {
+      return cancelResult;
+    }
+  }
+
+  for (let i = keep; i < dates.length; i++) {
+    const date = dates[i];
+    if (await isBusinessClosedOnDate(businessId, date)) {
+      skippedDates.push(date);
+      continue;
+    }
+    const created = await createDirectJob(businessId, createdBy, {
+      ...template,
+      slot: {
+        date,
+        timeRange: timeRangeFromStartTime(rule.startTime),
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+      },
+      startTime: rule.startTime,
+      endTime: rule.endTime,
+      additionalJobDays: [],
+      series: {
+        seriesId,
+        seriesIndex: i + 1,
+        seriesCount: dates.length,
+        recurrence: rule,
+      },
+      skipCustomerNotify: true,
+      skipStaffNotify: true,
+    });
+    if (!created.ok) skippedDates.push(date);
+  }
+
+  const refreshed = await listBookingsInSeries(businessId, seriesId);
+  await rewriteSeriesIndexes(refreshed);
+  return { ok: true, skippedDates };
 }
 
 async function clearBookingMirrors(
