@@ -12,6 +12,8 @@ export type CatalogItem = {
   description: string | null;
   priceAud: number;
   imageUrl: string | null;
+  documentUrl: string | null;
+  documentName: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
@@ -22,6 +24,8 @@ export type CatalogItemInput = {
   code?: string | null;
   description?: string | null;
   imageUrl?: string | null;
+  documentUrl?: string | null;
+  documentName?: string | null;
 };
 
 function toMillis(value: unknown): number | null {
@@ -57,6 +61,14 @@ function mapItemDoc(id: string, data: Record<string, unknown>): CatalogItem {
     imageUrl:
       typeof data.imageUrl === "string" && data.imageUrl.trim()
         ? data.imageUrl.trim()
+        : null,
+    documentUrl:
+      typeof data.documentUrl === "string" && data.documentUrl.trim()
+        ? data.documentUrl.trim()
+        : null,
+    documentName:
+      typeof data.documentName === "string" && data.documentName.trim()
+        ? data.documentName.trim()
         : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
@@ -100,6 +112,15 @@ function parseDescription(raw: unknown): string | null | undefined {
   return trimmed || null;
 }
 
+function parseDocumentName(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length > 200) return undefined;
+  return trimmed || null;
+}
+
 export function parseCatalogItemInput(raw: unknown): CatalogItemInput | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
@@ -128,6 +149,19 @@ export function parseCatalogItemInput(raw: unknown): CatalogItemInput | null {
     const imageUrl = parseImageUrl(item.imageUrl);
     if (imageUrl === undefined) return null;
     parsed.imageUrl = imageUrl;
+  }
+  if ("documentUrl" in item) {
+    const documentUrl = parseImageUrl(item.documentUrl);
+    if (documentUrl === undefined) return null;
+    parsed.documentUrl = documentUrl;
+  }
+  if ("documentName" in item) {
+    const documentName = parseDocumentName(item.documentName);
+    if (documentName === undefined) return null;
+    parsed.documentName = documentName;
+  }
+  if (parsed.documentUrl === null) {
+    parsed.documentName = null;
   }
   return parsed;
 }
@@ -174,6 +208,12 @@ export async function upsertCatalogItem(
     if (input.imageUrl !== undefined) {
       updates.imageUrl = input.imageUrl;
     }
+    if (input.documentUrl !== undefined) {
+      updates.documentUrl = input.documentUrl;
+    }
+    if (input.documentName !== undefined) {
+      updates.documentName = input.documentName;
+    }
     if (input.code !== undefined) {
       updates.code = input.code;
     }
@@ -197,6 +237,12 @@ export async function upsertCatalogItem(
   };
   if (input.imageUrl) {
     payload.imageUrl = input.imageUrl;
+  }
+  if (input.documentUrl) {
+    payload.documentUrl = input.documentUrl;
+  }
+  if (input.documentName) {
+    payload.documentName = input.documentName;
   }
   if (input.code) {
     payload.code = input.code;
@@ -284,6 +330,12 @@ export async function updateCatalogItem(
   };
   if (input.imageUrl !== undefined) {
     updates.imageUrl = input.imageUrl;
+  }
+  if (input.documentUrl !== undefined) {
+    updates.documentUrl = input.documentUrl;
+  }
+  if (input.documentName !== undefined) {
+    updates.documentName = input.documentName;
   }
   if (input.code !== undefined) {
     updates.code = input.code;

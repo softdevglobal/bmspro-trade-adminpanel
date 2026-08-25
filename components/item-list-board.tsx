@@ -11,6 +11,8 @@ type CatalogItem = {
   description: string | null;
   priceAud: number;
   imageUrl: string | null;
+  documentUrl: string | null;
+  documentName: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
@@ -101,6 +103,47 @@ async function uploadItemImageFile(
   }
 
   return { ok: true, imageUrl: data.imageUrl };
+}
+
+async function uploadItemDocumentFile(
+  file: File,
+): Promise<
+  | { ok: true; documentUrl: string; documentName: string }
+  | { ok: false; error: string }
+> {
+  const user = auth.currentUser;
+  if (!user) return { ok: false, error: "Please sign in again." };
+
+  const token = await user.getIdToken();
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/uploads/item-document", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  const data = await readJson<{
+    ok?: boolean;
+    error?: string;
+    documentUrl?: string;
+    documentName?: string;
+  }>(response);
+
+  if (!response.ok || !data.ok || !data.documentUrl) {
+    return {
+      ok: false,
+      error:
+        typeof data.error === "string" ? data.error : "Could not upload document.",
+    };
+  }
+
+  return {
+    ok: true,
+    documentUrl: data.documentUrl,
+    documentName: data.documentName?.trim() || file.name || "Document.pdf",
+  };
 }
 
 export function ItemListBoard() {
@@ -275,8 +318,31 @@ export function ItemListBoard() {
                 <p className="font-numeric mt-1 text-[15px] font-semibold text-primary">
                   {formatPrice(item.priceAud)}
                 </p>
+                {item.documentUrl ? (
+                  <p className="mt-1 flex items-center gap-1 truncate font-body text-[11px] text-on-surface-variant">
+                    <span className="material-symbols-outlined text-[14px]">
+                      description
+                    </span>
+                    <span className="truncate">
+                      {item.documentName ?? "Document"}
+                    </span>
+                  </p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                {item.documentUrl ? (
+                  <a
+                    href={item.documentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`View document for ${item.name}`}
+                    className="flex h-10 w-10 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
+                  >
+                    <span className="material-symbols-outlined text-[22px]">
+                      picture_as_pdf
+                    </span>
+                  </a>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => openEdit(item)}
@@ -355,7 +421,14 @@ function ItemEditorModal({
     item ? item.priceAud.toString() : "",
   );
   const [imageUrl, setImageUrl] = useState<string | null>(item?.imageUrl ?? null);
+  const [documentUrl, setDocumentUrl] = useState<string | null>(
+    item?.documentUrl ?? null,
+  );
+  const [documentName, setDocumentName] = useState<string | null>(
+    item?.documentName ?? null,
+  );
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -418,6 +491,8 @@ function ItemEditorModal({
         code: code.trim() || null,
         description: description.trim() || null,
         imageUrl,
+        documentUrl,
+        documentName,
       }),
     });
 
@@ -444,6 +519,29 @@ function ItemEditorModal({
       return;
     }
     setImageUrl(result.imageUrl);
+  }
+
+  async function handleDocumentChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setIsUploadingDocument(true);
+    setLocalError(null);
+    const result = await uploadItemDocumentFile(file);
+    setIsUploadingDocument(false);
+
+    if (!result.ok) {
+      setLocalError(result.error);
+      return;
+    }
+    setDocumentUrl(result.documentUrl);
+    setDocumentName(result.documentName);
+  }
+
+  function clearDocument() {
+    setDocumentUrl(null);
+    setDocumentName(null);
   }
 
   const parsedPreviewPrice = Number.parseFloat(price.trim());
@@ -479,7 +577,7 @@ function ItemEditorModal({
             </h2>
             <p className="mt-1 font-body text-[13px] text-on-surface-variant">
               {currentStep === 1
-                ? "Add the photo, name and price for your catalog item."
+                ? "Add the photo, name, price and an optional document for your catalog item."
                 : "Review how this item will appear in your list."}
             </p>
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-variant">
@@ -514,7 +612,7 @@ function ItemEditorModal({
               <ItemEditorHero
                 eyebrow="Step 1 · Item details"
                 title="Photo, name and price"
-                description="These details appear in your item catalog and quotations."
+                description="These details appear in your item catalog and quotations. You can also attach an optional PDF."
                 icon="inventory_2"
               />
 
@@ -636,13 +734,75 @@ function ItemEditorModal({
                   className={NUMBER_INPUT_CLASS}
                 />
               </label>
+
+              <div className="flex flex-col gap-2">
+                <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
+                  Document{" "}
+                  <span className="font-normal text-on-surface-variant/80">
+                    (optional)
+                  </span>
+                </span>
+                {documentUrl ? (
+                  <div className="flex items-center gap-3 rounded-xl border border-outline-variant bg-surface-container-low px-3 py-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-container text-on-primary">
+                      <span className="material-symbols-outlined text-[22px]">
+                        picture_as_pdf
+                      </span>
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-body text-[13px] font-semibold text-on-surface">
+                        {documentName ?? "Document.pdf"}
+                      </p>
+                      <a
+                        href={documentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-body text-[12px] font-semibold text-primary hover:underline"
+                      >
+                        View document
+                      </a>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearDocument}
+                      disabled={isUploadingDocument || isSaving}
+                      className="rounded-lg px-2 py-1.5 font-body text-[12px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-error disabled:opacity-60"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-4 py-2.5 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container-high">
+                    {isUploadingDocument ? (
+                      <span className="material-symbols-outlined animate-spin text-[18px]">
+                        progress_activity
+                      </span>
+                    ) : (
+                      <span className="material-symbols-outlined text-[18px]">
+                        attach_file
+                      </span>
+                    )}
+                    {isUploadingDocument ? "Uploading…" : "Upload document"}
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="sr-only"
+                      disabled={isUploadingDocument || isSaving}
+                      onChange={(event) => void handleDocumentChange(event)}
+                    />
+                  </label>
+                )}
+                <p className="font-body text-[11px] text-on-surface-variant">
+                  PDF · max 10 MB
+                </p>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
               <ItemEditorHero
                 eyebrow="Step 2 · Review"
                 title="Preview before saving"
-                description="Check the photo, name and price, then save this item."
+                description="Check the photo, name, price and document, then save this item."
                 icon="fact_check"
               />
 
@@ -652,6 +812,8 @@ function ItemEditorModal({
                 description={description.trim() || null}
                 priceAud={previewPrice}
                 imageUrl={imageUrl}
+                documentUrl={documentUrl}
+                documentName={documentName}
               />
             </div>
           )}
@@ -670,7 +832,7 @@ function ItemEditorModal({
             <button
               type="button"
               onClick={handleContinue}
-              disabled={isUploading}
+              disabled={isUploading || isUploadingDocument}
               className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
             >
               Continue
@@ -682,7 +844,7 @@ function ItemEditorModal({
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={isSaving || isUploading}
+              disabled={isSaving || isUploading || isUploadingDocument}
               className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-60"
             >
               {isSaving ? (
@@ -746,12 +908,16 @@ function ItemPreviewPanel({
   description,
   priceAud,
   imageUrl,
+  documentUrl,
+  documentName,
 }: {
   name: string;
   code: string | null;
   description: string | null;
   priceAud: number;
   imageUrl: string | null;
+  documentUrl: string | null;
+  documentName: string | null;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm">
@@ -819,6 +985,28 @@ function ItemPreviewPanel({
           <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
             {imageUrl ? "Photo added" : "No photo"}
           </p>
+        </div>
+        <div className="rounded-lg bg-surface-container-low/80 px-3 py-2.5 sm:col-span-2">
+          <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            Document
+          </p>
+          {documentUrl ? (
+            <a
+              href={documentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex max-w-full items-center gap-1.5 font-body text-[13px] font-semibold text-primary hover:underline"
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                picture_as_pdf
+              </span>
+              <span className="truncate">{documentName ?? "Document.pdf"}</span>
+            </a>
+          ) : (
+            <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
+              No document
+            </p>
+          )}
         </div>
       </div>
     </section>
