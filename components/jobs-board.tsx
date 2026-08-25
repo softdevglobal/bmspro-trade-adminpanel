@@ -14,6 +14,14 @@ import {
   uniqueJobsForBoard,
 } from "@/lib/bookings/map-booking-doc";
 import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
+import { formatRecurrenceTimeLabel } from "@/lib/bookings/recurrence";
+import {
+  buildSeriesProgress,
+  formatSeriesPatternLabel,
+  formatSeriesProgressLabel,
+  seriesEndDate,
+  type SeriesProgress,
+} from "@/lib/bookings/series-progress";
 import { bookingForCalendar } from "@/lib/calendar/events";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
@@ -101,21 +109,149 @@ function bookingTitle(booking: BookingDetail): string {
   return booking.customRequest?.title ?? "Custom quotation request";
 }
 
-function RecurringVisitPills({ booking }: { booking: BookingDetail }) {
+function RecurringVisitPills({
+  booking,
+  progress,
+}: {
+  booking: BookingDetail;
+  progress?: SeriesProgress | null;
+}) {
   if (!booking.seriesId && !booking.recurrence) return null;
-  const visitCount = booking.seriesCount ?? 0;
+  const visitCount = progress?.totalCount ?? booking.seriesCount ?? 0;
+  const position = booking.seriesIndex;
+
   return (
     <>
       <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-800">
         Repeats
         {visitCount > 1 ? ` · ${visitCount} visits` : ""}
       </span>
+      {position && visitCount > 1 ? (
+        <span className="inline-flex rounded-full border border-sky-200 bg-white px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-sky-800">
+          Visit {position} of {visitCount}
+        </span>
+      ) : null}
+      {progress && progress.completedCount > 0 ? (
+        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+          {formatSeriesProgressLabel(progress)}
+        </span>
+      ) : null}
       {booking.seriesException ? (
         <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-800">
           Exception
         </span>
       ) : null}
     </>
+  );
+}
+
+/** Full repeat breakdown for the preview drawer: pattern, progress, next, end. */
+function SeriesDetailsPanel({
+  booking,
+  progress,
+  timeZone,
+}: {
+  booking: BookingDetail;
+  progress?: SeriesProgress | null;
+  timeZone?: string | null;
+}) {
+  if (!booking.seriesId && !booking.recurrence) return null;
+
+  const pattern = formatSeriesPatternLabel(booking);
+  const endDate = seriesEndDate(booking, progress);
+  const total = progress?.totalCount ?? booking.seriesCount ?? 0;
+  const done = progress?.completedCount ?? 0;
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  const rows: { label: string; value: string }[] = [];
+  if (pattern) rows.push({ label: "Repeats", value: pattern });
+  if (booking.recurrence) {
+    rows.push({
+      label: "On-site time",
+      value: formatRecurrenceTimeLabel(booking.recurrence),
+    });
+  }
+  if (booking.seriesIndex && total > 0) {
+    rows.push({
+      label: "This visit",
+      value: `Visit ${booking.seriesIndex} of ${total}`,
+    });
+  }
+  if (progress) {
+    rows.push({
+      label: "Completed",
+      value: `${progress.completedCount} of ${total} visit${total === 1 ? "" : "s"}`,
+    });
+    rows.push({
+      label: "Remaining",
+      value: `${progress.remainingCount} visit${progress.remainingCount === 1 ? "" : "s"}`,
+    });
+    if (progress.cancelledCount > 0) {
+      rows.push({
+        label: "Cancelled",
+        value: `${progress.cancelledCount} visit${progress.cancelledCount === 1 ? "" : "s"}`,
+      });
+    }
+    rows.push({
+      label: "Next visit",
+      value: progress.nextVisitDate
+        ? formatSlotDate(progress.nextVisitDate, timeZone)
+        : "No visits left",
+    });
+  }
+  rows.push({
+    label: "Series ends",
+    value: endDate ? formatSlotDate(endDate, timeZone) : "No end date",
+  });
+
+  return (
+    <section className="rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+      <div className="flex items-center gap-2">
+        <span className="material-symbols-outlined text-[18px] text-sky-700">
+          event_repeat
+        </span>
+        <h4 className="font-display text-[14px] font-semibold text-on-surface">
+          Repeating job
+        </h4>
+      </div>
+
+      {total > 0 ? (
+        <div className="mt-3">
+          <div
+            className="h-2 w-full overflow-hidden rounded-full bg-sky-200/70"
+            role="progressbar"
+            aria-valuenow={done}
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-label="Visits completed"
+          >
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-[width]"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <p className="mt-1.5 font-body text-[11px] font-semibold text-on-surface-variant">
+            {done} of {total} done
+            {progress?.partial
+              ? " · counted from the visits loaded on this board"
+              : ""}
+          </p>
+        </div>
+      ) : null}
+
+      <dl className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.label} className="min-w-0">
+            <dt className="font-body text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+              {row.label}
+            </dt>
+            <dd className="mt-0.5 font-body text-[13px] text-on-surface">
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
@@ -251,6 +387,7 @@ function BookingCard({
   onCancel,
   onUndoCancel,
   timeZone,
+  seriesProgress,
 }: {
   booking: BookingDetail;
   isPreviewOpen: boolean;
@@ -259,6 +396,7 @@ function BookingCard({
   onCancel: () => void;
   onUndoCancel: () => void;
   timeZone?: string | null;
+  seriesProgress?: SeriesProgress | null;
 }) {
   const title = bookingTitle(booking);
   const visitWindow = formatVisitWindow(
@@ -292,7 +430,7 @@ function BookingCard({
               {displayBookingCode(booking)}
             </span>
             <BookingStatusPill status={booking.status} />
-            <RecurringVisitPills booking={booking} />
+            <RecurringVisitPills booking={booking} progress={seriesProgress} />
             {booking.status === "scheduled" && !booking.assignedTo ? (
               <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-800">
                 Unassigned
@@ -389,6 +527,7 @@ function BookingPreviewDrawer({
   onUndoCancel,
   timeZone,
   requestsById,
+  seriesProgress,
 }: {
   booking: BookingDetail | null;
   staff: StaffSummary[];
@@ -399,6 +538,7 @@ function BookingPreviewDrawer({
   onDelete: () => void;
   onCancel: () => void;
   onUndoCancel: () => void;
+  seriesProgress?: SeriesProgress | null;
   timeZone?: string | null;
   requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
@@ -441,6 +581,7 @@ function BookingPreviewDrawer({
               onUndoCancel={onUndoCancel}
               timeZone={timeZone}
               requestsById={requestsById}
+              seriesProgress={seriesProgress}
             />
           </motion.aside>
         </motion.div>
@@ -639,6 +780,7 @@ function BookingPreviewContent({
   onUndoCancel,
   timeZone,
   requestsById,
+  seriesProgress,
 }: {
   booking: BookingDetail;
   staff: StaffSummary[];
@@ -649,6 +791,7 @@ function BookingPreviewContent({
   onDelete: () => void;
   onCancel: () => void;
   onUndoCancel: () => void;
+  seriesProgress?: SeriesProgress | null;
   timeZone?: string | null;
   requestsById: ReadonlyMap<string, InspectionRequestDetail>;
 }) {
@@ -752,7 +895,7 @@ function BookingPreviewContent({
               {displayBookingCode(booking)}
             </span>
             <BookingStatusPill status={booking.status} />
-            <RecurringVisitPills booking={booking} />
+            <RecurringVisitPills booking={booking} progress={seriesProgress} />
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold text-on-surface">
             {title}
@@ -793,6 +936,11 @@ function BookingPreviewContent({
           />
         ) : (
           <>
+        <SeriesDetailsPanel
+          booking={booking}
+          progress={seriesProgress}
+          timeZone={timeZone}
+        />
         <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
           <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
             Customer
@@ -1285,6 +1433,13 @@ export function JobsBoard({
   }, [displayBookings]);
   const timeZone = profile?.timezone;
 
+  // Built from the unfiltered list so completed and cancelled visits count
+  // toward a series' progress even while the Active tab is showing.
+  const seriesProgressById = useMemo(
+    () => buildSeriesProgress(displayBookings, timeZone),
+    [displayBookings, timeZone],
+  );
+
   const selected = useMemo(
     () => displayBookings.find((booking) => booking.id === selectedId) ?? null,
     [displayBookings, selectedId],
@@ -1596,6 +1751,11 @@ export function JobsBoard({
                 onCancel={() => setCancelTarget(booking)}
                 onUndoCancel={() => void undoCancelJob(booking)}
                 timeZone={timeZone}
+                seriesProgress={
+                  booking.seriesId
+                    ? seriesProgressById.get(booking.seriesId)
+                    : null
+                }
               />
             </li>
           ))}
@@ -1629,6 +1789,11 @@ export function JobsBoard({
         }}
         timeZone={timeZone}
         requestsById={requestsById}
+        seriesProgress={
+          selected?.seriesId
+            ? seriesProgressById.get(selected.seriesId)
+            : null
+        }
       />
 
       <DeleteConfirmModal
