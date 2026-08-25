@@ -189,7 +189,7 @@ function isBeforeMinDate(iso: string, minDate: string): boolean {
 }
 
 function isAfterMaxDate(iso: string, maxDate?: string): boolean {
-  return Boolean(maxDate) && iso > maxDate;
+  return maxDate ? iso > maxDate : false;
 }
 
 function monthPartsFromIso(iso: string): { year: number; month: number } | null {

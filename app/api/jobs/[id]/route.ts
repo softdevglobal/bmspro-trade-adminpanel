@@ -906,10 +906,13 @@ export async function PATCH(
       : [];
     const siblingJobs = seriesMembers.filter((member) => member.id !== id);
 
+    // Hoisted function declarations lose the `auth.ok` narrowing above, so read
+    // the id once here.
+    const ownerBusinessId = auth.businessId;
     async function cancelOpenSiblings() {
       for (const member of siblingJobs) {
         if (isSeriesScheduleLocked(member)) continue;
-        await cancelBusinessBooking(auth.businessId, member.id);
+        await cancelBusinessBooking(ownerBusinessId, member.id);
       }
     }
 

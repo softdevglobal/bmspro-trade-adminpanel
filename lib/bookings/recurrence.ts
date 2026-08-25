@@ -277,7 +277,7 @@ export function parseJobRecurrenceRule(
   if (end.type === "on_date" && end.date < startDate) return null;
 
   const parsedWeekdays = parseWeekdays(input.weekdays);
-  const weekdays =
+  const weekdays: WeekDayId[] =
     parsedWeekdays.length > 0
       ? parsedWeekdays
       : weekdayIdFromYmd(startDate)
