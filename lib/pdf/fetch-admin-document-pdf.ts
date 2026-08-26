@@ -39,3 +39,15 @@ export async function fetchAdminQuotationPdfBytes(
     "Could not load quotation PDF.",
   );
 }
+
+/** Loads item document bytes through the admin API (avoids Firebase Storage CORS). */
+export async function fetchAdminItemDocumentBytes(
+  user: User,
+  itemId: string,
+): Promise<Uint8Array> {
+  return fetchAuthorizedPdfBytes(
+    user,
+    `/api/items/document?itemId=${encodeURIComponent(itemId)}`,
+    "Could not load item document.",
+  );
+}

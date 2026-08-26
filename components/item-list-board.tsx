@@ -1,7 +1,9 @@
 "use client";
 
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { auth } from "@/lib/firebase/client";
+import { fetchAdminItemDocumentBytes } from "@/lib/pdf/fetch-admin-document-pdf";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 
 type CatalogItem = {
@@ -15,6 +17,22 @@ type CatalogItem = {
   documentName: string | null;
   createdAt: number | null;
   updatedAt: number | null;
+};
+
+/**
+ * The item document currently open in the PDF popup.
+ *
+ * Bytes never come from the stored URL directly: Firebase Storage sends no CORS
+ * headers for this origin. A saved item is proxied through the API by id; a
+ * document just picked in the editor is read straight from the local file,
+ * which needs no network at all.
+ */
+type ItemDocumentPreview = {
+  source: { kind: "item"; itemId: string } | { kind: "file"; file: File };
+  /** Stored URL, used only by the viewer's open-in-new-tab fallback. */
+  url: string | null;
+  name: string | null;
+  itemName: string;
 };
 
 const INPUT_CLASS =
@@ -156,6 +174,10 @@ export function ItemListBoard() {
   const [editTarget, setEditTarget] = useState<CatalogItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CatalogItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Item documents open in the same in-app PDF popup as quotations and
+  // invoices, so viewing a spec sheet never navigates away from the catalog.
+  const [documentPreview, setDocumentPreview] =
+    useState<ItemDocumentPreview | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -331,17 +353,23 @@ export function ItemListBoard() {
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {item.documentUrl ? (
-                  <a
-                    href={item.documentUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDocumentPreview({
+                        source: { kind: "item", itemId: item.id },
+                        url: item.documentUrl,
+                        name: item.documentName,
+                        itemName: item.name,
+                      })
+                    }
                     aria-label={`View document for ${item.name}`}
                     className="flex h-10 w-10 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
                   >
                     <span className="material-symbols-outlined text-[22px]">
                       picture_as_pdf
                     </span>
-                  </a>
+                  </button>
                 ) : null}
                 <button
                   type="button"
@@ -378,6 +406,7 @@ export function ItemListBoard() {
             void load();
           }}
           onError={setErrorMessage}
+          onPreviewDocument={setDocumentPreview}
         />
       ) : null}
 
@@ -397,6 +426,25 @@ export function ItemListBoard() {
         }}
         onConfirm={() => void confirmDelete()}
       />
+
+      {documentPreview ? (
+        <QuotationPdfViewerModal
+          open
+          onClose={() => setDocumentPreview(null)}
+          pdfUrl={documentPreview.url ?? ""}
+          title={`${documentPreview.itemName} · ${documentPreview.name ?? "Document"}`}
+          downloadFilename={documentPreview.name ?? "item-document.pdf"}
+          loadPdfBytes={async () => {
+            const { source } = documentPreview;
+            if (source.kind === "file") {
+              return new Uint8Array(await source.file.arrayBuffer());
+            }
+            const user = auth.currentUser;
+            if (!user) throw new Error("Please sign in again.");
+            return fetchAdminItemDocumentBytes(user, source.itemId);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -406,11 +454,13 @@ function ItemEditorModal({
   onClose,
   onSaved,
   onError,
+  onPreviewDocument,
 }: {
   item: CatalogItem | null;
   onClose: () => void;
   onSaved: () => void;
   onError: (message: string | null) => void;
+  onPreviewDocument: (preview: ItemDocumentPreview) => void;
 }) {
   const isEdit = item !== null;
   const [currentStep, setCurrentStep] = useState(1);
@@ -427,6 +477,9 @@ function ItemEditorModal({
   const [documentName, setDocumentName] = useState<string | null>(
     item?.documentName ?? null,
   );
+  // Kept so a document picked in this session can be previewed from the local
+  // file — it has no catalog id to proxy by until the item is saved.
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -537,12 +590,25 @@ function ItemEditorModal({
     }
     setDocumentUrl(result.documentUrl);
     setDocumentName(result.documentName);
+    setDocumentFile(file);
   }
 
   function clearDocument() {
     setDocumentUrl(null);
     setDocumentName(null);
+    setDocumentFile(null);
   }
+
+  /**
+   * Where the editor's current document can be read from, or null when it can
+   * be neither proxied (unsaved item) nor read locally (untouched this session).
+   */
+  const documentPreviewSource: ItemDocumentPreview["source"] | null =
+    documentFile
+      ? { kind: "file", file: documentFile }
+      : item && documentUrl === item.documentUrl
+        ? { kind: "item", itemId: item.id }
+        : null;
 
   const parsedPreviewPrice = Number.parseFloat(price.trim());
   const previewPrice =
@@ -753,14 +819,22 @@ function ItemEditorModal({
                       <p className="truncate font-body text-[13px] font-semibold text-on-surface">
                         {documentName ?? "Document.pdf"}
                       </p>
-                      <a
-                        href={documentUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-body text-[12px] font-semibold text-primary hover:underline"
-                      >
-                        View document
-                      </a>
+                      {documentPreviewSource ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onPreviewDocument({
+                              source: documentPreviewSource,
+                              url: documentUrl,
+                              name: documentName,
+                              itemName: name.trim() || item?.name || "Item",
+                            })
+                          }
+                          className="font-body text-[12px] font-semibold text-primary hover:underline"
+                        >
+                          View document
+                        </button>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -814,6 +888,8 @@ function ItemEditorModal({
                 imageUrl={imageUrl}
                 documentUrl={documentUrl}
                 documentName={documentName}
+                documentSource={documentPreviewSource}
+                onPreviewDocument={onPreviewDocument}
               />
             </div>
           )}
@@ -910,6 +986,8 @@ function ItemPreviewPanel({
   imageUrl,
   documentUrl,
   documentName,
+  documentSource,
+  onPreviewDocument,
 }: {
   name: string;
   code: string | null;
@@ -918,6 +996,8 @@ function ItemPreviewPanel({
   imageUrl: string | null;
   documentUrl: string | null;
   documentName: string | null;
+  documentSource: ItemDocumentPreview["source"] | null;
+  onPreviewDocument: (preview: ItemDocumentPreview) => void;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-sm">
@@ -990,18 +1070,31 @@ function ItemPreviewPanel({
           <p className="font-body text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
             Document
           </p>
-          {documentUrl ? (
-            <a
-              href={documentUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+          {documentUrl && documentSource ? (
+            <button
+              type="button"
+              onClick={() =>
+                onPreviewDocument({
+                  source: documentSource,
+                  url: documentUrl,
+                  name: documentName,
+                  itemName: name,
+                })
+              }
               className="mt-1 inline-flex max-w-full items-center gap-1.5 font-body text-[13px] font-semibold text-primary hover:underline"
             >
               <span className="material-symbols-outlined text-[16px]">
                 picture_as_pdf
               </span>
               <span className="truncate">{documentName ?? "Document.pdf"}</span>
-            </a>
+            </button>
+          ) : documentUrl ? (
+            <p className="mt-1 flex items-center gap-1.5 font-body text-[13px] font-semibold text-on-surface">
+              <span className="material-symbols-outlined text-[16px]">
+                picture_as_pdf
+              </span>
+              <span className="truncate">{documentName ?? "Document.pdf"}</span>
+            </p>
           ) : (
             <p className="mt-1 font-body text-[13px] font-semibold text-on-surface">
               No document

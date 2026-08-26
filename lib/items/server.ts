@@ -348,3 +348,113 @@ export async function updateCatalogItem(
   const saved = await ref.get();
   return { ok: true, item: mapItemDoc(ref.id, saved.data() ?? {}) };
 }
+
+/**
+ * A catalog item's attached document, stripped of every pricing field.
+ *
+ * Staff are deliberately blocked from quotation pricing, so anything that
+ * reaches an assigned tradesperson must carry the document and nothing else.
+ */
+export type ItemDocumentRef = {
+  itemId: string;
+  name: string;
+  documentUrl: string;
+  documentName: string | null;
+};
+
+/**
+ * Resolves item names to the documents attached to the matching catalog items.
+ *
+ * Quotation line items store only a name and code — never a catalog id — so the
+ * link back to the catalog is the same case- and whitespace-insensitive name
+ * match `upsertCatalogItem` de-duplicates on.
+ *
+ * Returns documents in the order the names were given, with duplicate lines of
+ * the same item collapsed, and items without a document dropped.
+ */
+export async function resolveItemDocumentsByName(
+  businessId: string,
+  names: string[],
+): Promise<ItemDocumentRef[]> {
+  const wanted = new Set(
+    names.map(normalizeName).filter((name) => name.length > 0),
+  );
+  if (wanted.size === 0) return [];
+
+  const catalog = await listCatalogItems(businessId);
+
+  const byName = new Map<string, CatalogItem>();
+  for (const item of catalog) {
+    if (!item.documentUrl) continue;
+    const key = normalizeName(item.name);
+    // First match wins — the catalog is unique on normalized name per business.
+    if (!byName.has(key)) byName.set(key, item);
+  }
+
+  const seen = new Set<string>();
+  const documents: ItemDocumentRef[] = [];
+  for (const raw of names) {
+    const key = normalizeName(raw);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const item = byName.get(key);
+    if (!item?.documentUrl) continue;
+    documents.push({
+      itemId: item.id,
+      name: item.name,
+      documentUrl: item.documentUrl,
+      documentName: item.documentName,
+    });
+  }
+  return documents;
+}
+
+/**
+ * Downloads the PDF attached to a catalog item.
+ *
+ * Fetched here rather than in the browser because Firebase Storage does not
+ * send CORS headers for the app's origin — the same reason quotation and
+ * invoice PDFs are proxied through the API. Keyed by item id so a caller can
+ * never point the proxy at an arbitrary host.
+ */
+export async function getCatalogItemDocument(
+  businessId: string,
+  itemId: string,
+): Promise<
+  | { ok: true; pdfBytes: Buffer; fileName: string }
+  | { ok: false; status: number; error: string }
+> {
+  const id = itemId.trim();
+  if (!id) return { ok: false, status: 400, error: "Missing item id." };
+
+  const snap = await adminDb.collection(ITEM_COLLECTION).doc(id).get();
+  if (!snap.exists || snap.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Item not found." };
+  }
+
+  const item = mapItemDoc(snap.id, snap.data() ?? {});
+  if (!item.documentUrl) {
+    return { ok: false, status: 404, error: "This item has no document." };
+  }
+
+  let pdfBytes: Buffer;
+  try {
+    const response = await fetch(item.documentUrl);
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    pdfBytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    console.error("[item] document fetch failed:", error);
+    return { ok: false, status: 502, error: "Could not load this document." };
+  }
+
+  if (!pdfBytes.length) {
+    return { ok: false, status: 502, error: "Could not load this document." };
+  }
+
+  const name = item.documentName?.trim() || `${item.name} document.pdf`;
+  return {
+    ok: true,
+    pdfBytes,
+    fileName: name.replace(/[^a-z0-9.\-]+/gi, "-"),
+  };
+}
