@@ -33,7 +33,7 @@ export type ExportDatasetKey =
   | "customers";
 
 export const EXPORT_DATASET_LABELS: Record<ExportDatasetKey, string> = {
-  requests: "Requests",
+  requests: "Site inspections",
   quotations: "Quotations",
   jobs: "Jobs",
   invoices: "Invoices",

@@ -35,7 +35,7 @@ import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests"
 import type { InspectionRequestDetail } from "@/lib/inspection/types";
 import {
   CREATED_SOURCE_LABELS,
-  formatAddress,
+  formatAddressForDisplay,
   canAdminProposeJobDates,
   needsAdminJobDateProposal,
   type InspectionRequestCreatedSource,
@@ -186,10 +186,13 @@ function CustomerDecisionPill({
 }: {
   quotation: Pick<
     QuotationDetail,
-    "status" | "bookingId" | "customerDecision"
+    "status" | "bookingId" | "customerDecision" | "createdSource"
   >;
 }) {
   if (quotation.status !== "sent") return null;
+  // A direct invoice auto-accepts its own generated quotation, so the customer
+  // never actually made a decision - do not claim they accepted one.
+  if (quotation.createdSource === "invoice_direct") return null;
   if (quotation.customerDecision === "accepted") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-emerald-700">
@@ -567,7 +570,7 @@ function QuotationCard({
         {displayPhone || "—"}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
-        {formatAddress(quotation.address)}
+        {formatAddressForDisplay(quotation.address)}
       </p>
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
         <span className="font-numeric text-[15px] font-semibold text-primary">
@@ -956,7 +959,7 @@ function QuotationPreviewContent({
             {contactLine}
           </p>
           <p className="mt-2 font-body text-[13px] text-on-surface">
-            {formatAddress(quotation.address)}
+            {formatAddressForDisplay(quotation.address)}
           </p>
         </section>
 

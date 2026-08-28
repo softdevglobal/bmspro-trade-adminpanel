@@ -384,7 +384,7 @@ export function CustomerAuthModal({
             </h2>
             <p className="mt-0.5 font-body text-[13px] leading-snug text-on-surface-variant">
               {mode === "signin"
-                ? "Sign in to send your booking request."
+                ? "Sign in to send your inspection request."
                 : "Quick setup to submit your visit request."}
             </p>
           </header>

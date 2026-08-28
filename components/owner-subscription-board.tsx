@@ -477,7 +477,7 @@ function planFeatureItems(plan: AvailablePlanOption): string[] {
   const sms = plan.bundledSmsPackage;
   if (sms) {
     items.push(
-      `${formatMessageQuotaLabel(sms.messageQuota)} SMS included (${sms.name})`,
+      `${formatMessageQuotaLabel(sms.messageQuota)} included (${sms.name})`,
     );
   }
   items.push(formatRenewalLabel(plan.billingCycle, plan.validityDays));

@@ -8,12 +8,17 @@ import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
+import { ADMIN_COPY } from "@/lib/copy/product-language";
+import {
+  outstandingAmountAud,
+  resolveInvoicePaymentDue,
+} from "@/lib/invoices/payment-due";
 import {
   formatInvoiceCopyText,
   invoiceCopySections,
 } from "@/lib/copy-data/format";
 import type { InvoiceDetail } from "@/lib/invoices/types";
-import { formatAddress } from "@/lib/inspection/types";
+import { formatAddressForDisplay } from "@/lib/inspection/types";
 import { fetchAdminInvoicePdfBytes } from "@/lib/pdf/fetch-admin-document-pdf";
 import { pdfBytesToObjectUrl, printPdfBytes } from "@/lib/pdf/print-pdf";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
@@ -221,6 +226,7 @@ function InvoiceCardMenu({
 
 function InvoiceCard({
   invoice,
+  timeZone,
   isPreviewOpen,
   onOpen,
   onDelete,
@@ -228,6 +234,7 @@ function InvoiceCard({
   onUndoCancel,
 }: {
   invoice: InvoiceDetail;
+  timeZone?: string | null;
   isPreviewOpen: boolean;
   onOpen: () => void;
   onDelete: () => void;
@@ -235,6 +242,7 @@ function InvoiceCard({
   onUndoCancel: () => void;
 }) {
   const displayPhone = formatAuPhoneDisplay(invoice.customer.phone);
+  const paymentDue = resolveInvoicePaymentDue(invoice, timeZone);
   return (
     <div
       role="button"
@@ -282,20 +290,54 @@ function InvoiceCard({
         {displayPhone || "—"}
       </p>
       <p className="font-body text-[12px] text-on-surface-variant">
-        {formatAddress(invoice.address)}
+        {formatAddressForDisplay(invoice.address)}
       </p>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-outline-variant/40 pt-3">
         <span className="font-numeric text-[15px] font-semibold text-primary">
           {formatAud(invoice.finalPriceAud)}
         </span>
-        {invoice.depositRequest ? (
-          <span className="font-body text-[11px] text-on-surface-variant">
-            Balance {formatAud(invoice.balanceDueAud)}
+        {/*
+          A $0.00 invoice looks like a mistake without context: say whether it
+          is genuinely settled or an unfinished draft.
+        */}
+        {invoice.finalPriceAud <= 0 ? (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
+              invoice.status === "draft"
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-outline-variant bg-surface-container-low text-on-surface-variant"
+            }`}
+          >
+            {invoice.status === "draft"
+              ? ADMIN_COPY.draftIssue
+              : ADMIN_COPY.noAmountDue}
           </span>
         ) : null}
-        <span className="font-body text-[11px] text-on-surface-variant sm:ml-auto">
-          Due {formatQuoteDate(invoice.dueDate)}
+        {/*
+          Only show an outstanding amount when it differs from the total —
+          repeating the same figure as "Balance" adds noise.
+        */}
+        {paymentDue.isPayable &&
+        paymentDue.outstandingAud !== invoice.finalPriceAud ? (
+          <span className="font-body text-[11px] text-on-surface-variant">
+            {formatAud(paymentDue.outstandingAud)} outstanding
+          </span>
+        ) : null}
+        {/*
+          A due date only means something once the invoice is issued. Drafts,
+          paid and cancelled invoices state where they stand instead.
+        */}
+        <span
+          className={`font-body text-[11px] sm:ml-auto ${
+            paymentDue.isOverdue
+              ? "inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 font-bold uppercase tracking-wider text-red-700"
+              : "text-on-surface-variant"
+          }`}
+        >
+          {paymentDue.isPayable
+            ? `${paymentDue.label} ${formatQuoteDate(invoice.dueDate)}`
+            : paymentDue.label}
         </span>
       </div>
     </div>
@@ -350,6 +392,13 @@ function InvoicePreviewDrawer({
   const copySections = useMemo(
     () => (invoice ? invoiceCopySections(invoice) : []),
     [invoice],
+  );
+  const drawerPaymentDue = useMemo(
+    () =>
+      invoice
+        ? resolveInvoicePaymentDue(invoice, timeZone)
+        : { isPayable: false, isOverdue: false, outstandingAud: 0, label: "" },
+    [invoice, timeZone],
   );
 
   useEffect(() => {
@@ -527,9 +576,19 @@ function InvoicePreviewDrawer({
                   {invoice.serviceTitle || "Invoice"}
                 </h3>
                 <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                  Issued {formatQuoteDate(invoice.invoiceDate)} · Due{" "}
-                  {formatQuoteDate(invoice.dueDate)}
+                  {invoice.status === "draft"
+                    ? `Drafted ${formatQuoteDate(invoice.invoiceDate)} · Not issued yet`
+                    : `Issued ${formatQuoteDate(invoice.invoiceDate)} · Due ${formatQuoteDate(invoice.dueDate)}`}
                 </p>
+                {drawerPaymentDue.isOverdue ? (
+                  <p className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-red-700">
+                    <span className="material-symbols-outlined text-[14px] leading-none">
+                      schedule
+                    </span>
+                    Overdue · {formatAud(drawerPaymentDue.outstandingAud)}{" "}
+                    outstanding
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -553,7 +612,7 @@ function InvoicePreviewDrawer({
                   {contactLine}
                 </p>
                 <p className="mt-2 font-body text-[13px] text-on-surface">
-                  {formatAddress(invoice.address)}
+                  {formatAddressForDisplay(invoice.address)}
                 </p>
               </section>
 
@@ -669,11 +728,13 @@ function InvoicePreviewDrawer({
                       {formatAud(
                         invoice.status === "paid"
                           ? invoice.amountPaidAud || invoice.finalPriceAud
-                          : invoice.balanceDueAud,
+                          : // Net off payments already settled, otherwise a
+                            // part-paid invoice overstates what is owed.
+                            outstandingAmountAud(invoice),
                       )}
                     </span>
                   </div>
-                  {invoice.status === "sent" && invoice.balanceDueAud > 0 ? (
+                  {invoice.status === "sent" && drawerPaymentDue.isPayable ? (
                     <div className="mt-3">
                       <PaymentLinkButton
                         type="invoice"
@@ -683,7 +744,7 @@ function InvoicePreviewDrawer({
                       />
                       <p className="mt-1.5 font-body text-[11px] text-on-surface-variant">
                         Share this secure link for the customer to pay{" "}
-                        {formatAud(invoice.balanceDueAud)} online.
+                        {formatAud(drawerPaymentDue.outstandingAud)} online.
                       </p>
                     </div>
                   ) : null}
@@ -1285,6 +1346,7 @@ export function InvoicesBoard() {
             <li key={invoice.id}>
               <InvoiceCard
                 invoice={invoice}
+                timeZone={timeZone}
                 isPreviewOpen={selectedId === invoice.id}
                 onOpen={() => setSelectedId(invoice.id)}
                 onDelete={() => setDeleteTarget(invoice)}

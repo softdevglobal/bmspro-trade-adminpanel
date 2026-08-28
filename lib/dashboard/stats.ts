@@ -376,7 +376,7 @@ export function computeDashboardOverview(input: {
 
   let focusMessage: string | null = null;
   if (urgentPending > 0) {
-    focusMessage = `${urgentPending} new request${urgentPending === 1 ? "" : "s"} need your review.`;
+    focusMessage = `${urgentPending} new request${urgentPending === 1 ? " needs" : "s need"} your review.`;
   } else if (unassignedTotal > 0) {
     focusMessage = `${unassignedTotal} job${unassignedTotal === 1 ? "" : "s"} still need someone assigned.`;
   } else if (awaitingInvoice > 0) {

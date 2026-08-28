@@ -110,13 +110,17 @@ export async function fetchBusinessNotifications(
   return body.notifications;
 }
 
+/** `?bookingSlug=...` when known, so the API scopes to the right business. */
+function customerNotificationsQuery(bookingSlug?: string): string {
+  const slug = bookingSlug?.trim();
+  return slug ? `?bookingSlug=${encodeURIComponent(slug)}` : "";
+}
+
 export async function fetchCustomerNotifications(
   idToken: string,
   bookingSlug?: string,
 ): Promise<NotificationRecord[]> {
-  const qs = bookingSlug
-    ? `?bookingSlug=${encodeURIComponent(bookingSlug)}`
-    : "";
+  const qs = customerNotificationsQuery(bookingSlug);
   const response = await fetch(`/api/customer/notifications${qs}`, {
     headers: { authorization: `Bearer ${idToken}` },
     cache: "no-store",
@@ -218,11 +222,15 @@ export async function deleteAllBusinessNotificationsApi(
 
 export async function markAllCustomerNotificationsReadApi(
   idToken: string,
+  bookingSlug?: string,
 ): Promise<void> {
-  const response = await fetch("/api/customer/notifications", {
-    method: "PATCH",
-    headers: { authorization: `Bearer ${idToken}` },
-  });
+  const response = await fetch(
+    `/api/customer/notifications${customerNotificationsQuery(bookingSlug)}`,
+    {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${idToken}` },
+    },
+  );
   if (!response.ok) {
     throw new Error("Could not mark notifications read.");
   }
@@ -231,11 +239,15 @@ export async function markAllCustomerNotificationsReadApi(
 export async function deleteCustomerNotificationApi(
   idToken: string,
   id: string,
+  bookingSlug?: string,
 ): Promise<void> {
-  const response = await fetch(`/api/customer/notifications/${id}`, {
-    method: "DELETE",
-    headers: { authorization: `Bearer ${idToken}` },
-  });
+  const response = await fetch(
+    `/api/customer/notifications/${id}${customerNotificationsQuery(bookingSlug)}`,
+    {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${idToken}` },
+    },
+  );
   if (!response.ok) {
     throw new Error("Could not delete notification.");
   }
@@ -243,11 +255,15 @@ export async function deleteCustomerNotificationApi(
 
 export async function deleteAllCustomerNotificationsApi(
   idToken: string,
+  bookingSlug?: string,
 ): Promise<void> {
-  const response = await fetch("/api/customer/notifications", {
-    method: "DELETE",
-    headers: { authorization: `Bearer ${idToken}` },
-  });
+  const response = await fetch(
+    `/api/customer/notifications${customerNotificationsQuery(bookingSlug)}`,
+    {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${idToken}` },
+    },
+  );
   if (!response.ok) {
     throw new Error("Could not clear notifications.");
   }

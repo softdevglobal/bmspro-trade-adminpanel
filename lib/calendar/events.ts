@@ -23,7 +23,9 @@ export type DotColor =
   | "amber-500"
   | "green-500"
   | "sky-500"
-  | "violet-500";
+  | "violet-500"
+  | "grey-500"
+  | "red-500";
 
 export type CalendarEvent = {
   key: string;
@@ -43,15 +45,95 @@ export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
   personal: "Personal",
 };
 
-/** Day-drawer card chrome (light blue vs light green). */
+/**
+ * Day-drawer card chrome. Confirmed jobs read green; inspection requests read
+ * amber because their time is still only a preference.
+ */
 export const CALENDAR_SOURCE_CARD_CLASS: Record<CalendarSource, string> = {
   jobs:
-    "rounded-xl border border-primary/25 bg-primary/5 p-card-padding transition-all hover:border-primary/45 hover:shadow-md",
-  requests:
     "rounded-xl border border-green-200 bg-green-50 p-card-padding transition-all hover:border-green-400 hover:shadow-md",
+  requests:
+    "rounded-xl border border-amber-200 bg-amber-50 p-card-padding transition-all hover:border-amber-400 hover:shadow-md",
   personal:
     "rounded-xl border border-violet-200 bg-violet-50 p-card-padding transition-all hover:border-violet-400 hover:shadow-md",
 };
+
+/**
+ * One-line description of a calendar event, e.g.
+ * `Inspection request - Shams - AM preferred`.
+ *
+ * Used for the month-grid dot tooltips and screen-reader labels, where the
+ * colour alone does not say what the event is.
+ */
+export function calendarEventSummary(event: CalendarEvent): string {
+  const parts: string[] = [];
+
+  if (event.source === "personal") {
+    parts.push("Personal");
+    const title = event.personalEvent?.title?.trim();
+    if (title) parts.push(title);
+    return parts.join(" - ");
+  }
+
+  if (event.source === "jobs") {
+    const booking = event.booking;
+    parts.push(
+      booking?.status === "completed"
+        ? "Completed job"
+        : booking?.status === "cancelled"
+          ? "Cancelled job"
+          : "Confirmed job",
+    );
+    const name = booking?.customer.fullName?.trim();
+    if (name) parts.push(name);
+    const slot = booking?.scheduledSlot;
+    if (slot) {
+      parts.push(slot.timeRange === "morning" ? "AM" : "PM");
+    }
+    return parts.join(" - ");
+  }
+
+  const request = event.request;
+  parts.push(
+    request?.status === "scheduled"
+      ? "Confirmed inspection"
+      : request?.status === "cancelled"
+        ? "Cancelled request"
+        : request?.status === "completed"
+          ? "Completed inspection"
+          : "Inspection request",
+  );
+
+  const name = request?.customer.fullName?.trim();
+  if (name) parts.push(name);
+
+  // A confirmed inspection has a locked time; anything earlier is a preference.
+  const slot =
+    request?.scheduledSlot ??
+    request?.preferredSlots.find((entry) => entry.date === event.date) ??
+    null;
+  if (slot) {
+    const half = slot.timeRange === "morning" ? "AM" : "PM";
+    parts.push(
+      request?.status === "scheduled" ? half : `${half} preferred`,
+    );
+  }
+
+  return parts.join(" - ");
+}
+
+/** Legend shown above the calendar so every colour on the grid is explained. */
+export const CALENDAR_LEGEND: ReadonlyArray<{
+  dot: DotColor;
+  label: string;
+}> = [
+  { dot: "amber-500", label: "Inspection request" },
+  { dot: "primary", label: "Confirmed inspection" },
+  { dot: "green-500", label: "Confirmed job" },
+  { dot: "grey-500", label: "Completed" },
+  { dot: "red-500", label: "Cancelled" },
+  { dot: "violet-500", label: "Personal" },
+];
 
 export type CalendarStat = {
   label: string;
@@ -67,6 +149,8 @@ export const DOT_CLASS: Record<DotColor, string> = {
   "green-500": "bg-green-500",
   "sky-500": "bg-sky-500",
   "violet-500": "bg-violet-500",
+  "grey-500": "bg-outline",
+  "red-500": "bg-red-500",
 };
 
 export function toIsoDateLocal(date: Date): string {
@@ -89,15 +173,31 @@ export function requestTitle(request: InspectionRequestDetail): string {
     : request.customRequest?.title ?? "Custom quotation request";
 }
 
-/** Jobs = blue; completed jobs = sky; requests = green. */
+/**
+ * Status colour rules (see `lib/copy/product-language.ts`):
+ * amber = not confirmed yet, blue = confirmed inspection, green = confirmed
+ * job, grey = completed/archived, red = cancelled.
+ *
+ * Green is reserved for confirmed work, so an inspection request that is still
+ * awaiting the owner's confirmation is amber, never green.
+ */
 export function dotColorForCalendarSource(
   source: CalendarSource,
   bookingStatus?: BookingDetail["status"],
+  requestStatus?: InspectionRequestDetail["status"],
 ): DotColor {
-  if (source === "jobs" && bookingStatus === "completed") {
-    return "sky-500";
+  if (source === "jobs") {
+    if (bookingStatus === "completed") return "grey-500";
+    if (bookingStatus === "cancelled") return "red-500";
+    return "green-500";
   }
-  return source === "jobs" ? "primary" : "green-500";
+
+  if (requestStatus === "cancelled") return "red-500";
+  if (requestStatus === "completed") return "grey-500";
+  // A confirmed inspection has a locked-in time; everything else is a
+  // preference or is still waiting on someone.
+  if (requestStatus === "scheduled") return "primary";
+  return "amber-500";
 }
 
 /** Requests only (jobs use the `jobs` collection). */
@@ -396,7 +496,11 @@ export function buildInspectionCalendarEvents(
     const dates = datesForRequestOnCalendar(request);
     if (dates.length === 0) continue;
 
-    const dotColor = dotColorForCalendarSource(source);
+    const dotColor = dotColorForCalendarSource(
+      source,
+      undefined,
+      request.status,
+    );
 
     for (const date of dates) {
       events.push({

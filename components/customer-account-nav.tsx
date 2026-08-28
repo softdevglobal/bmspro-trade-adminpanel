@@ -151,7 +151,7 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
     return [
       {
         id: "requests",
-        label: "Requests",
+        label: "Inspections",
         icon: "forum",
         href: accountPath(slug, "requests"),
         isActive: onAccount && activeTab === "requests",
@@ -192,10 +192,10 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
     >
       <div className={NAV_PILL_OUTER}>
         <div className={`${NAV_PILL_INNER} gap-0.5`}>
-          {/* Book — wider + taller on desktop only */}
+          {/* Request — wider + taller on desktop only */}
           <Link
             href={booknowPath(slug)}
-            title="Book a visit"
+            title="Request a site inspection"
             className={`relative z-10 flex h-full shrink-0 items-center justify-center gap-1.5 rounded-full px-4 font-body font-bold text-on-primary transition-all active:scale-[0.98] sm:min-w-[11.5rem] sm:gap-2.5 sm:px-10 md:min-w-[13rem] md:px-12 ${
               bookActive
                 ? "bg-gradient-to-br from-primary via-primary to-primary-container shadow-md shadow-primary/25 ring-2 ring-primary/20 sm:shadow-lg sm:shadow-primary/30"
@@ -206,7 +206,7 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
               calendar_add_on
             </span>
             <span className="whitespace-nowrap text-[13px] sm:text-[17px] md:text-[18px]">
-              Book
+              Request
             </span>
           </Link>
 
@@ -330,7 +330,7 @@ export function CustomerSignOutButton({
         onCancel={() => setOpen(false)}
         onConfirm={() => void confirmSignOut()}
         isLoading={signingOut}
-        description="You will need to sign in again to book visits and view your requests."
+        description="You will need to sign in again to request site inspections and view your work."
       />
     </>
   );

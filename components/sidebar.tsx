@@ -81,7 +81,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/requests",
-    label: "Requests",
+    label: "Site inspections",
     icon: "event_available",
     businessOwner: true,
   },

@@ -17,7 +17,7 @@ export async function fetchBusinessInspectionRequests(
   });
   const body = (await response.json()) as InspectionListResponse;
   if (!response.ok || !body.ok || !body.requests) {
-    throw new Error(body.error ?? "Could not load requests.");
+    throw new Error(body.error ?? "Could not load site inspections.");
   }
   return body.requests;
 }

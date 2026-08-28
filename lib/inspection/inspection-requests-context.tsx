@@ -71,7 +71,7 @@ export function InspectionRequestsProvider({ children }: { children: ReactNode }
       () => {
         setSnapshotError({
           businessId,
-          message: "Could not load requests.",
+          message: "Could not load site inspections.",
         });
       },
     );

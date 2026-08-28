@@ -13,12 +13,13 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
   },
   "/dashboard/calendar": {
     title: "Calendar",
-    subtitle: "View requests and bookings by day, week or month.",
+    subtitle: "View site inspections and jobs by day, week or month.",
     icon: "calendar_month",
   },
   "/dashboard/requests": {
-    title: "Requests",
-    subtitle: "Review customer requests, schedule visits and assign an inspector.",
+    title: "Site inspections",
+    subtitle:
+      "Review site inspection requests, confirm times and assign an inspector.",
     icon: "event_available",
   },
   "/dashboard/quotations": {

@@ -4,6 +4,10 @@ import type { ChangeEvent } from "react";
 
 import type { BookingBusiness, BookingService } from "@/app/booknow/[slug]/page";
 import { iconForBusinessType } from "@/lib/onboarding/types";
+import {
+  CUSTOMER_COPY,
+  withBusinessName,
+} from "@/lib/copy/product-language";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -32,8 +36,8 @@ import { AuPhoneInput } from "@/components/au-phone-input";
 import {
   TIME_RANGES,
   formatAddress,
-  getOptionalInspectionAddressFieldErrors,
-  isOptionalInspectionAddressValid,
+  getSiteAddressFieldErrors,
+  isSiteAddressValid,
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import {
@@ -260,8 +264,8 @@ function HeroContent({
         variants={itemVariants}
         className="mt-2 hidden font-body text-body-lg text-on-surface-variant sm:block"
       >
-        Local trade pros, online booking, no callbacks. Pick a time and
-        we&apos;ll confirm in minutes.
+        Local trade pros, online inspection requests, no callbacks. Choose
+        the times that suit you and we&apos;ll confirm your appointment.
       </motion.p>
 
       {(location || business.businessAddress) && (
@@ -317,7 +321,7 @@ function AvailableBadge({
         )}
         <span className="relative h-full w-full rounded-full bg-emerald-500" />
       </span>
-      Booking now
+      {CUSTOMER_COPY.acceptingRequests}
     </span>
   );
 }
@@ -646,7 +650,9 @@ function BookingRequestExtras({
         </div>
 
         <label className="block">
-          <span className={BOOKING_LABEL_CLASS}>Your budget</span>
+          <span className={BOOKING_LABEL_CLASS}>
+            {CUSTOMER_COPY.budgetLabel}
+          </span>
           <div className="relative mt-1">
             <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 font-body text-[14px] font-semibold text-on-surface">
               Aus $
@@ -665,7 +671,7 @@ function BookingRequestExtras({
             />
           </div>
           <span className="mt-1 block font-body text-[11px] text-on-surface-variant">
-            Rough amount you have in mind (optional).
+            {CUSTOMER_COPY.budgetHelper}
           </span>
         </label>
       </div>
@@ -699,7 +705,7 @@ function collectBookingMissingRequirements(input: {
     }
   }
 
-  const addressErrors = getOptionalInspectionAddressFieldErrors(input.address);
+  const addressErrors = getSiteAddressFieldErrors(input.address);
   if (addressErrors.street) missing.push("Street address");
   if (addressErrors.suburb) missing.push("Suburb");
   if (addressErrors.state) missing.push("State");
@@ -987,7 +993,7 @@ function ServiceBookingFlow({
   const selectedService =
     services.find((service) => service.id === selectedServiceId) ?? null;
 
-  const addressValid = isOptionalInspectionAddressValid(address);
+  const addressValid = isSiteAddressValid(address);
 
   const requestStepValid =
     requestType === "existing_service"
@@ -1363,19 +1369,61 @@ function ServiceBookingFlow({
             Request
           </div>
           <h3 className="mt-2 font-display text-[20px] font-semibold leading-snug text-on-surface sm:mt-3 sm:text-headline-md">
-            Request a visit with {businessName}
+            {withBusinessName(
+              CUSTOMER_COPY.requestHeading,
+              businessName,
+            )}
           </h3>
           <p className="mt-1 font-body text-[14px] leading-snug text-on-surface-variant sm:text-body-md">
-            Tell us what you need and pick up to 3 dates that suit you. The
-            team will confirm a visit time and who will visit.
+            {withBusinessName(CUSTOMER_COPY.requestIntro, businessName)}
           </p>
+
+          {/*
+            Set the expectation before the form starts: picking a time is a
+            preference, and the business confirms the appointment.
+          */}
+          <ol className="mt-4 grid gap-2 sm:grid-cols-3 sm:gap-3">
+            {[
+              {
+                title: "Tell us what you need",
+                detail: "Choose a service, or ask for advice.",
+              },
+              {
+                title: "Pick preferred times",
+                detail: "These are preferences, not confirmed bookings.",
+              },
+              {
+                title: "We confirm with you",
+                detail: withBusinessName(
+                  "{business} confirms the inspection time.",
+                  businessName,
+                ),
+              },
+            ].map((entry, index) => (
+              <li
+                key={entry.title}
+                className="rounded-xl border border-stone-200 bg-white/70 p-3"
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-body text-[12px] font-bold text-on-primary">
+                  {index + 1}
+                </span>
+                <p className="mt-2 font-body text-[13px] font-bold text-on-surface">
+                  {entry.title}
+                </p>
+                <p className="mt-0.5 font-body text-[12px] leading-snug text-on-surface-variant">
+                  {entry.detail}
+                </p>
+              </li>
+            ))}
+          </ol>
         </div>
 
         {/* Step 1 — Request type */}
         <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader step={1} title="What do you need?" active />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Choose an existing service or describe a custom job for a quote.
+            Choose the closest option. You can explain the details further down —
+            you do not need to know the exact service.
           </p>
 
           <div className="mt-3 grid grid-cols-1 gap-2.5 sm:mt-4 sm:grid-cols-2 sm:gap-3">
@@ -1391,9 +1439,9 @@ function ServiceBookingFlow({
               }}
             />
             <RequestTypeOption
-              icon="request_quote"
-              label="Custom quotation request"
-              description="Describe the work and we'll inspect and quote."
+              icon="help"
+              label="Not sure / need advice"
+              description="Describe what you need and we'll recommend the right option."
               selected={requestType === "custom_quote"}
               onSelect={() => {
                 setRequestType("custom_quote");
@@ -1498,12 +1546,12 @@ function ServiceBookingFlow({
         <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader
             step={2}
-            title="Service address"
-            hint="Optional"
+            title={CUSTOMER_COPY.siteAddressLabel}
+            hint="Suburb & postcode required"
             active
           />
           <p className="mt-2 font-body text-[13px] text-on-surface-variant">
-            Where should we visit?
+            Where is the site we should inspect?
           </p>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -1522,7 +1570,7 @@ function ServiceBookingFlow({
             </label>
             <label className="block">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                Suburb (optional)
+                Suburb
               </span>
               <input
                 type="text"
@@ -1548,7 +1596,7 @@ function ServiceBookingFlow({
             </label>
             <label className="block sm:col-span-2 sm:max-w-[12rem] max-sm:w-full">
               <span className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                Postcode (optional)
+                Postcode
               </span>
               <input
                 type="text"
@@ -1567,7 +1615,7 @@ function ServiceBookingFlow({
         <div className={BOOKING_STEP_PANEL_CLASS}>
           <BookingStepHeader
             step={3}
-            title="Preferred dates & times"
+            title={CUSTOMER_COPY.preferredTimes}
             hint={`${selectedPreferredDates.length} of 3 days`}
             active
           />
@@ -1575,6 +1623,20 @@ function ServiceBookingFlow({
             First pick up to 3 days that work for you, then choose morning or
             afternoon for each. The owner will confirm one (or propose
             alternatives).
+          </p>
+
+          {/*
+            Stated before the picker, not just after selecting, so the customer
+            never reads a chosen date as a confirmed appointment.
+          */}
+          <p className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 font-body text-[12px] font-semibold leading-snug text-amber-900">
+            <span className="material-symbols-outlined shrink-0 text-[18px] leading-none">
+              info
+            </span>
+            {withBusinessName(
+              "Your selected date is not confirmed yet. It becomes confirmed only after {business} contacts you.",
+              businessName,
+            )}
           </p>
 
           <div className="mt-4 rounded-xl border border-stone-200 bg-white p-3 sm:p-4">
@@ -1609,10 +1671,18 @@ function ServiceBookingFlow({
                 {slotSelectionNotice}
               </p>
             ) : selectedPreferredDates.length > 0 ? (
-              <p className="mt-3 font-body text-[12px] text-on-surface-variant">
-                Tap a selected day again to remove it. Unavailable sessions are
-                greyed out when fully booked or when no one is available.
-              </p>
+              <div className="mt-3 space-y-2">
+                <p className="inline-flex items-start gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] font-semibold text-amber-900">
+                  <span className="material-symbols-outlined shrink-0 text-[16px] leading-none">
+                    schedule
+                  </span>
+                  {CUSTOMER_COPY.preferenceNotConfirmed}
+                </p>
+                <p className="font-body text-[12px] text-on-surface-variant">
+                  Tap a selected day again to remove it. Unavailable sessions
+                  are greyed out when fully booked or when no one is available.
+                </p>
+              </div>
             ) : (
               <p className="mt-3 rounded-xl border border-dashed border-stone-200 bg-white/60 px-3 py-2 font-body text-[12px] text-on-surface-variant">
                 Choose at least one day to continue.
@@ -1782,6 +1852,67 @@ function ServiceBookingFlow({
           </div>
         ) : null}
 
+        {/*
+          Recap what is about to be sent, and restate that this is a request
+          rather than a confirmed appointment.
+        */}
+        <section
+          aria-label="Request summary"
+          className="rounded-xl border border-stone-200 bg-white p-4"
+        >
+          <p className="font-display text-[15px] font-semibold text-on-surface">
+            Request summary
+          </p>
+          <p className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] font-semibold leading-snug text-amber-900">
+            <span className="material-symbols-outlined shrink-0 text-[16px] leading-none">
+              info
+            </span>
+            This is a site inspection request, not a confirmed appointment yet.
+          </p>
+          <dl className="mt-3 space-y-2">
+            <div className="flex flex-wrap justify-between gap-2 border-t border-stone-200 pt-2">
+              <dt className="font-body text-[12px] text-on-surface-variant">
+                Service
+              </dt>
+              <dd className="font-body text-[12px] font-semibold text-on-surface">
+                {requestType === "existing_service"
+                  ? (selectedService?.name ?? "Not chosen yet")
+                  : customTitle.trim() || "Not sure / need advice"}
+              </dd>
+            </div>
+            <div className="flex flex-wrap justify-between gap-2 border-t border-stone-200 pt-2">
+              <dt className="font-body text-[12px] text-on-surface-variant">
+                Preferred times
+              </dt>
+              <dd className="font-body text-[12px] font-semibold text-on-surface">
+                {preferredSlots.length === 0
+                  ? "Not chosen yet"
+                  : sortPreferredSlots(preferredSlots)
+                      .map(
+                        (slot) =>
+                          `${formatPrettyDate(slot.date, timeZone)}, ${
+                            TIME_RANGE_OPTIONS.find(
+                              (option) => option.id === slot.timeRange,
+                            )?.label ?? ""
+                          }`,
+                      )
+                      .join(" · ")}
+              </dd>
+            </div>
+            <div className="flex flex-wrap justify-between gap-2 border-t border-stone-200 pt-2">
+              <dt className="font-body text-[12px] text-on-surface-variant">
+                Next step
+              </dt>
+              <dd className="font-body text-[12px] font-semibold text-on-surface">
+                {withBusinessName(
+                  "{business} reviews and confirms",
+                  businessName,
+                )}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
         <div className="flex flex-col gap-3 border-t border-stone-200 pt-4 sm:flex-row sm:items-center sm:justify-between sm:pt-5">
           <div className="flex w-full flex-col gap-1.5 sm:w-auto">
             <motion.button
@@ -1814,8 +1945,8 @@ function ServiceBookingFlow({
               {submitting
                 ? "Sending request…"
                 : isAuthenticated
-                  ? "Submit request"
-                  : "Sign in & submit request"}
+                  ? CUSTOMER_COPY.submitRequest
+                  : `Sign in & ${CUSTOMER_COPY.submitRequest.toLowerCase()}`}
             </motion.button>
             {!submitting && missingRequirements.length > 0 ? (
               <div

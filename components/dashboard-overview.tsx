@@ -22,17 +22,23 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-type LiveFeedFilter = "all" | "customer" | "staff";
+type LiveFeedFilter = "all" | "customer" | "staff" | "other";
 
+/**
+ * The feed mixes customer actions with system notifications, so it is grouped
+ * by who the update came from. "Business" covers staff activity; "System"
+ * covers automated updates.
+ */
 const LIVE_FEED_FILTERS: { id: LiveFeedFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "customer", label: "Customer" },
-  { id: "staff", label: "Staff" },
+  { id: "staff", label: "Business" },
+  { id: "other", label: "System" },
 ];
 
 const QUICK_ACTIONS = [
   {
-    label: "Requests",
+    label: "Site inspections",
     desc: "Review & schedule",
     icon: "fact_check",
     href: "/dashboard/requests",
@@ -251,6 +257,7 @@ function BusinessDashboardOverview() {
       all: all.length,
       customer: all.filter((item) => item.category === "customer").length,
       staff: all.filter((item) => item.category === "staff").length,
+      other: all.filter((item) => item.category === "other").length,
     };
   }, [notifications, staffNames]);
 
@@ -509,8 +516,10 @@ function BusinessDashboardOverview() {
                     : liveFeedFilter === "staff"
                       ? "No staff updates yet. Leave requests and assignments will show here."
                       : liveFeedFilter === "customer"
-                        ? "No customer updates yet. New requests and booking events will show here."
-                        : "Quiet for now. Customer and staff updates will stream in here."}
+                        ? "No customer updates yet. New inspection requests and quote decisions will show here."
+                        : liveFeedFilter === "other"
+                          ? "No system updates yet. Automated updates will show here."
+                          : "Quiet for now. Customer, business and system updates will stream in here."}
                 </p>
               </div>
             ) : (

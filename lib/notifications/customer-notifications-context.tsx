@@ -72,6 +72,9 @@ export function CustomerNotificationsProvider({
         activeBookingSlug,
       );
       setNotifications(records);
+      // A later success must clear an earlier failure, otherwise a single
+      // transient error keeps showing over notifications we now hold.
+      setError(null);
     } catch {
       setError("Could not load notifications.");
     } finally {
@@ -130,11 +133,11 @@ export function CustomerNotificationsProvider({
     try {
       const token = await getIdToken();
       if (!token) throw new Error("Not signed in.");
-      await markAllCustomerNotificationsReadApi(token);
+      await markAllCustomerNotificationsReadApi(token, activeBookingSlug);
     } catch {
       setNotifications(previous);
     }
-  }, [notifications, getIdToken]);
+  }, [notifications, getIdToken, activeBookingSlug]);
 
   const clearOne = useCallback(
     async (id: string) => {
@@ -143,12 +146,12 @@ export function CustomerNotificationsProvider({
       try {
         const token = await getIdToken();
         if (!token) throw new Error("Not signed in.");
-        await deleteCustomerNotificationApi(token, id);
+        await deleteCustomerNotificationApi(token, id, activeBookingSlug);
       } catch {
         setNotifications(previous);
       }
     },
-    [notifications, getIdToken],
+    [notifications, getIdToken, activeBookingSlug],
   );
 
   const clearAll = useCallback(async () => {
@@ -157,11 +160,11 @@ export function CustomerNotificationsProvider({
     try {
       const token = await getIdToken();
       if (!token) throw new Error("Not signed in.");
-      await deleteAllCustomerNotificationsApi(token);
+      await deleteAllCustomerNotificationsApi(token, activeBookingSlug);
     } catch {
       setNotifications(previous);
     }
-  }, [notifications, getIdToken]);
+  }, [notifications, getIdToken, activeBookingSlug]);
 
   const unread = notifications.filter((note) => !note.read).length;
 
