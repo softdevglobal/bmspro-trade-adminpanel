@@ -15,12 +15,31 @@ const isDev = process.env.NODE_ENV === "development";
 const cspEnforced = process.env.CSP_MODE === "enforce";
 
 /**
+ * Firebase Auth keeps session state in a hidden iframe served from the
+ * project's `authDomain` (e.g. `bmspro-trade.firebaseapp.com`), so that origin
+ * has to be allowed in `frame-src`. Read from the same env var the client SDK
+ * uses so the policy follows the project rather than hard-coding a host.
+ */
+const firebaseAuthDomain =
+  process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN?.trim() || "";
+const firebaseAuthFrameSources = [
+  firebaseAuthDomain ? `https://${firebaseAuthDomain}` : "",
+  // Firebase also serves the auth helper from the *.web.app alias of a project.
+  firebaseAuthDomain.endsWith(".firebaseapp.com")
+    ? `https://${firebaseAuthDomain.replace(/\.firebaseapp\.com$/, ".web.app")}`
+    : "",
+]
+  .filter(Boolean)
+  .join(" ");
+
+/**
  * Third-party origins the browser legitimately talks to:
  * - fonts.googleapis.com / fonts.gstatic.com — Finlandica + Material Symbols in app/layout.tsx
  * - *.googleapis.com — Firebase Auth (identitytoolkit, securetoken), Firestore, Storage
  * - *.stripe.com — hosted checkout / billing portal redirects
  * - api.dicebear.com — generated staff + customer avatars
  * - unpkg.com — pdf.js worker in components/pdf-canvas-viewer.tsx
+ * - <project>.firebaseapp.com — Firebase Auth's hidden session-management iframe
  *
  * `'unsafe-inline'` and `'unsafe-eval'` are deliberate starting points, not the
  * end state: tighten script-src to nonces or hashes (see
@@ -49,7 +68,9 @@ const cspDirectives = [
     .filter(Boolean)
     .join(" "),
   "worker-src 'self' blob: https://unpkg.com",
-  "frame-src 'self' https://*.stripe.com",
+  ["frame-src 'self' https://*.stripe.com", firebaseAuthFrameSources]
+    .filter(Boolean)
+    .join(" "),
   "form-action 'self'",
   "base-uri 'self'",
   "object-src 'none'",

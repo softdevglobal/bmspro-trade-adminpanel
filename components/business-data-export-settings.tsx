@@ -159,7 +159,7 @@ export function BusinessDataExportSettings() {
                 (response) =>
                   readJson<{ requests?: InspectionRequestDetail[] }>(
                     response,
-                    "Could not load requests for export.",
+                    "Could not load site inspections for export.",
                   ),
               )
             : Promise.resolve<{ requests?: InspectionRequestDetail[] }>({

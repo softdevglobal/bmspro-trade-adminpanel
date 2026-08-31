@@ -5,6 +5,7 @@ import { PackageWizardStepIntro } from "@/components/package-wizard-step-intro";
 import {
   formatMessageQuotaLabel,
   formatSmsPriceLabel,
+  smsPackageNameQuotaWarning,
   validateSmsPackageDescription,
 } from "@/lib/sms-packages/helpers";
 import type { SmsPackage } from "@/lib/sms-packages/types";
@@ -46,6 +47,14 @@ function validateSmsPackageStep(
     if (!form.name.trim()) return "SMS package name is required.";
     const description = validateSmsPackageDescription(form.description);
     return description.ok ? null : description.error;
+  }
+  // The message count lives on step 2, so the title/quota cross-check runs
+  // once both values are actually set.
+  if (step === 2 && !form.unlimitedMessages) {
+    const quota = Number.parseInt(form.messageQuota, 10);
+    if (Number.isFinite(quota)) {
+      return smsPackageNameQuotaWarning(form.name, quota);
+    }
   }
   return null;
 }

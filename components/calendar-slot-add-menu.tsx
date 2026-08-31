@@ -27,7 +27,7 @@ const ADD_OPTIONS: {
     kind: "inspection",
     label: "Inspection request",
     hint: "Quote or site visit",
-    fullHint: "This hour is full for requests",
+    fullHint: "This hour is full for site inspections",
     icon: "assignment",
   },
   {

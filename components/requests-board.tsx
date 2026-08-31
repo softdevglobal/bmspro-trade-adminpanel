@@ -31,6 +31,8 @@ import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useBookings } from "@/lib/bookings/use-bookings";
+import { resolveRequestCardStatus } from "@/lib/inspection/card-status";
+import { STATUS_TONE_PILL_CLASSES } from "@/lib/copy/product-language";
 import {
   BOOKING_STATUS_LABELS,
   BOOKING_STATUS_TONE,
@@ -46,7 +48,7 @@ import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
 import {
-  formatAddress,
+  formatAddressForDisplay,
   formatBudgetAud,
   formatSlotDate,
   formatVisitWindow,
@@ -86,6 +88,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -600,7 +603,7 @@ function EmptyState({ filter }: { filter: StatusFilter }) {
       <p className="mt-1 font-body text-body-md text-on-surface-variant">
         {filter === "all"
           ? "Customer requests from your booking page will land here."
-          : "Switch filters to see other requests."}
+          : "Switch filters to see other site inspections."}
       </p>
     </div>
   );
@@ -865,6 +868,9 @@ function RequestCard({
     !cardQuotationAwaitingCustomer;
   const hasLinkedBooking = Boolean(request.bookingId);
   const repeatCount = linkedJob ? recurringVisitCount(linkedJob) : 0;
+  // One current status and one next action - the card no longer stacks every
+  // stage pill at once.
+  const cardStatus = resolveRequestCardStatus(request);
 
   return (
     <div
@@ -883,9 +889,9 @@ function RequestCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${STATUS_TONE[request.status]}`}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${STATUS_TONE_PILL_CLASSES[cardStatus.tone]}`}
             >
-              {STATUS_LABELS[request.status]}
+              {cardStatus.label}
             </span>
             <span className="inline-flex items-center gap-1 rounded-full border border-outline-variant/60 bg-surface-container-low px-2.5 py-1 font-body text-[11px] font-semibold text-on-surface-variant">
               <span className="material-symbols-outlined text-[12px] leading-none text-primary">
@@ -906,6 +912,14 @@ function RequestCard({
           <h4 className="mt-2 truncate font-display text-[16px] font-semibold text-on-surface">
             {customerName}
           </h4>
+          {cardStatus.nextStep ? (
+            <p className="mt-1 flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface">
+              <span className="material-symbols-outlined text-[14px] leading-none text-primary">
+                arrow_forward
+              </span>
+              Next step: {cardStatus.nextStep}
+            </p>
+          ) : null}
           <p className="mt-1">
             <InspectionRequestCode
               request={request}
@@ -919,7 +933,7 @@ function RequestCard({
             {displayPhone}
           </p>
           <p className="truncate font-body text-[12px] text-on-surface-variant">
-            {formatAddress(request.address)}
+            {formatAddressForDisplay(request.address)}
           </p>
         </div>
 
@@ -974,16 +988,6 @@ function RequestCard({
                   : `Assigned to ${request.assignedTo.name}`}
               </span>
             </span>
-          ) : request.status === "scheduled" ? (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider text-amber-700"
-              aria-label="Needs inspector"
-            >
-              <span className="material-symbols-outlined text-[12px] leading-none">
-                person_add
-              </span>
-              Needs inspector
-            </span>
           ) : null}
           {hasLinkedBooking ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
@@ -994,22 +998,6 @@ function RequestCard({
                 id: request.bookingId ?? "",
                 bookingCode: request.bookingCode,
               })}
-            </span>
-          ) : null}
-          {request.bookingStatus ? (
-            <BookingStatusPill status={request.bookingStatus} />
-          ) : null}
-          {cardQuotationAwaitingCustomer ? (
-            <span
-              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 font-body text-[11px] font-bold uppercase tracking-wider ${
-                request.quotation?.customerDecision === "rejected"
-                  ? "border-rose-200 bg-rose-50 text-rose-700"
-                  : "border-amber-200 bg-amber-50 text-amber-700"
-              }`}
-            >
-              {request.quotation?.customerDecision === "rejected"
-                ? "Customer rejected"
-                : "Awaiting customer"}
             </span>
           ) : null}
           {showPostQuoteActions ? (
@@ -2719,7 +2707,7 @@ function CustomerSection({ request }: { request: InspectionRequestDetail }) {
         <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[16px] text-primary">
           location_on
         </span>
-        {formatAddress(request.address)}
+        {formatAddressForDisplay(request.address)}
       </p>
     </section>
   );
@@ -3684,6 +3672,19 @@ function AcceptForm({
           placeholder={notePlaceholder}
           className="mt-1 w-full resize-y rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2 font-body text-[13px] text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
         />
+        {/*
+          Confirming a time is the moment the customer is waiting on, so
+          prompt for a message to send with it.
+        */}
+        {!note.trim() ? (
+          <span className="mt-1.5 flex items-start gap-1.5 font-body text-[12px] font-semibold text-amber-800">
+            <span className="material-symbols-outlined shrink-0 text-[14px] leading-none">
+              chat
+            </span>
+            Add a short message — the customer sees this with their
+            confirmation.
+          </span>
+        ) : null}
       </label>
       <FormActions
         confirmLabel={confirmLabel}

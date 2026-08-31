@@ -19,7 +19,7 @@ export const LEGACY_BUSINESS_MODULE_DEFAULTS: BusinessModuleSettings = {
 };
 
 export const BUSINESS_MODULE_LABELS: Record<BusinessModuleKey, string> = {
-  requests: "Requests",
+  requests: "Site inspections",
   quotations: "Quotations",
   invoices: "Invoices",
   jobs: "Jobs",

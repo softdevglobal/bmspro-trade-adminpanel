@@ -6,6 +6,11 @@ import { auth } from "@/lib/firebase/client";
 import { fetchAdminItemDocumentBytes } from "@/lib/pdf/fetch-admin-document-pdf";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 
+import {
+  duplicateItemCodeError,
+  nameQualityWarning,
+} from "@/lib/validation/data-quality";
+
 type CatalogItem = {
   id: string;
   name: string;
@@ -400,6 +405,7 @@ export function ItemListBoard() {
       {editorOpen ? (
         <ItemEditorModal
           item={editTarget}
+          existingItems={items}
           onClose={() => setEditorOpen(false)}
           onSaved={() => {
             setEditorOpen(false);
@@ -451,12 +457,14 @@ export function ItemListBoard() {
 
 function ItemEditorModal({
   item,
+  existingItems,
   onClose,
   onSaved,
   onError,
   onPreviewDocument,
 }: {
   item: CatalogItem | null;
+  existingItems: CatalogItem[];
   onClose: () => void;
   onSaved: () => void;
   onError: (message: string | null) => void;
@@ -510,9 +518,21 @@ function ItemEditorModal({
       setLocalError("Enter a valid price.");
       return false;
     }
+    const duplicateCode = duplicateItemCodeError(
+      code,
+      existingItems,
+      item?.id ?? null,
+    );
+    if (duplicateCode) {
+      setLocalError(duplicateCode);
+      return false;
+    }
     setLocalError(null);
     return true;
   }
+
+  // Advisory only — a sloppy-looking name never blocks saving.
+  const nameWarning = nameQualityWarning(name);
 
   function handleContinue() {
     if (!validateForm()) return;
@@ -769,6 +789,14 @@ function ItemEditorModal({
                   placeholder="e.g. Tap replacement"
                   className={INPUT_CLASS}
                 />
+                {nameWarning ? (
+                  <span className="flex items-start gap-1.5 font-body text-[12px] font-semibold text-amber-800">
+                    <span className="material-symbols-outlined shrink-0 text-[14px] leading-none">
+                      info
+                    </span>
+                    {nameWarning}
+                  </span>
+                ) : null}
               </label>
 
               <label className="flex flex-col gap-2">

@@ -447,6 +447,12 @@ export function BookingMonthCalendar({
             <button
               key={cell.iso}
               type="button"
+              aria-pressed={selected}
+              aria-label={
+                selected
+                  ? `${cell.iso} — preference selected, not confirmed yet`
+                  : cell.iso
+              }
               disabled={allDisabled || disabled || atMax}
               title={
                 comboBlocked
@@ -476,7 +482,7 @@ export function BookingMonthCalendar({
                 disabled || atMax
                   ? "text-on-surface-variant/35"
                   : selected
-                    ? "bg-primary text-on-primary"
+                    ? "bg-amber-500 text-white"
                     : isToday
                       ? "bg-primary/12 text-primary ring-1 ring-primary/25"
                       : "text-on-surface hover:bg-primary/8"
@@ -607,6 +613,12 @@ export function SlotDayPicker({
       <button
         key={day.iso}
         type="button"
+        aria-pressed={selected}
+        aria-label={
+          selected
+            ? `${day.weekdayShort} ${day.dayNum} ${day.monthShort} — preference selected, not confirmed yet`
+            : `${day.weekdayShort} ${day.dayNum} ${day.monthShort}`
+        }
         disabled={disabled || dayBlocked || tooEarly || atMax}
         title={
           atMax
@@ -632,13 +644,13 @@ export function SlotDayPicker({
           dayBlocked
             ? "border-stone-100 bg-stone-50 opacity-40"
             : selected
-              ? "border-primary bg-gradient-to-b from-primary/15 to-primary/5 shadow-[0_8px_20px_-12px_rgba(67,123,255,0.65)] ring-2 ring-primary/25"
+              ? "border-amber-400 bg-gradient-to-b from-amber-100 to-amber-50 shadow-[0_8px_20px_-12px_rgba(217,119,6,0.5)] ring-2 ring-amber-300/50"
               : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
         }`}
       >
         <span
           className={`font-body text-[10px] font-bold uppercase tracking-wide ${
-            selected ? "text-primary" : "text-on-surface-variant"
+            selected ? "text-amber-800" : "text-on-surface-variant"
           }`}
         >
           {day.weekdayShort}
@@ -646,21 +658,21 @@ export function SlotDayPicker({
         <span
           className={`font-display font-semibold leading-none ${
             fitStrip ? "text-[18px] sm:text-[22px]" : "text-[22px]"
-          } ${selected ? "text-primary" : "text-on-surface"}`}
+          } ${selected ? "text-amber-900" : "text-on-surface"}`}
         >
           {day.dayNum}
         </span>
         <span
           className={`font-body text-[10px] font-semibold ${
-            selected ? "text-primary/80" : "text-on-surface-variant"
+            selected ? "text-amber-800/80" : "text-on-surface-variant"
           }`}
         >
           {day.monthShort}
         </span>
         <span className="flex h-4 items-center justify-center">
           {selected ? (
-            <span className="material-symbols-outlined material-symbols-filled translate-y-px text-[14px] leading-none text-primary">
-              check_circle
+            <span className="material-symbols-outlined translate-y-px text-[14px] leading-none text-amber-700">
+              radio_button_checked
             </span>
           ) : relativeLabel ? (
             <span

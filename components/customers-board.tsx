@@ -22,7 +22,7 @@ import {
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   TIME_RANGE_LABELS,
-  formatAddress,
+  formatAddressForDisplay,
   formatSlotDate,
   formatVisitWindow,
   type InspectionRequestDetail,
@@ -207,7 +207,7 @@ function buildJourneySteps(
   steps.push({
     id: "request",
     icon: "assignment",
-    title: "Request submitted",
+    title: "Site inspection requested",
     detail: requestTitle(request),
     badge: CUSTOMER_WORK_STATUS_LABELS[workStatus],
     badgeTone: WORK_STATUS_TONE[workStatus],
@@ -804,7 +804,7 @@ function CustomerPreviewContent({
                             {requestTitle(request)}
                           </p>
                           <p className="mt-0.5 line-clamp-2 font-body text-[12px] text-on-surface-variant">
-                            {formatAddress(request.address)}
+                            {formatAddressForDisplay(request.address)}
                           </p>
                           <p className="mt-2">
                             <InspectionRequestCode request={request} />

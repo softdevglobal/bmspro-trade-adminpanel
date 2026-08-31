@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
+import { ADMIN_COPY } from "@/lib/copy/product-language";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -142,13 +143,13 @@ export function BookingLinkCard({
           </p>
           <h3 className="mt-0.5 font-display text-headline-sm font-semibold text-on-surface">
             {variant === "ephemeral"
-              ? "Your public booking link is live"
-              : "Public booking link"}
+              ? "Your public request link is live"
+              : "Public request link"}
           </h3>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">
             {variant === "ephemeral"
-              ? "Share this link with customers — bookings flow straight into your dashboard."
-              : "Share this with customers. They can request a booking and it will land in your dashboard."}
+              ? "Share this link with customers — site inspection requests flow straight into your dashboard."
+              : ADMIN_COPY.bookingLinkShare}
           </p>
         </div>
       </div>

@@ -106,7 +106,16 @@ export function formatLimitLabel(
   return `${value} ${pluralLabel}`;
 }
 
+/**
+ * One period label per plan.
+ *
+ * Showing "Monthly • 28-day renewal" puts two competing periods on the same
+ * card. The named cycle wins when the day count matches it; otherwise the
+ * exact day count is the honest answer and is shown on its own.
+ */
 export function formatRenewalLabel(cycle: "weekly" | "monthly", days: number): string {
-  const unit = cycle === "monthly" ? "Monthly" : "Weekly";
-  return `${unit} • ${days}-day renewal`;
+  if (cycle === "monthly" && days === 30) return "Renews monthly";
+  if (cycle === "weekly" && days === 7) return "Renews weekly";
+  if (days === 1) return "Renews daily";
+  return `Renews every ${days} days`;
 }

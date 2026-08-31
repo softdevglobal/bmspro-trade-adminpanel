@@ -116,7 +116,7 @@ export function BusinessModuleSettings({
   return (
     <SettingsSection
       title="Trade modules"
-      description="Turn on quotations, invoices, and jobs when your business is ready. Requests stay available so customers can book inspections."
+      description="Turn on quotations, invoices, and jobs when your business is ready. Site inspections stay available so customers can request them."
       icon="tune"
     >
       {loading ? (

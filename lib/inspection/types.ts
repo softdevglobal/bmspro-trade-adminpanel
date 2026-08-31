@@ -530,6 +530,34 @@ export function getOptionalInspectionAddressFieldErrors(
   return errors;
 }
 
+/**
+ * Site-address rules for an inspection request.
+ *
+ * An inspection happens at a place, so suburb and postcode are the minimum
+ * needed to know where to send someone. Street number stays optional - some
+ * sites are lots, units or acreage without a tidy street address.
+ */
+export function getSiteAddressFieldErrors(
+  address: InspectionAddress,
+): OptionalInspectionAddressFieldErrors {
+  const errors = getOptionalInspectionAddressFieldErrors(address);
+
+  if (!address.suburb.trim()) {
+    errors.suburb = "Enter the suburb so we know where to visit.";
+  }
+
+  if (!address.postcode.trim()) {
+    errors.postcode = "Enter a 4-digit postcode.";
+  }
+
+  return errors;
+}
+
+/** True when the address is usable as an inspection site address. */
+export function isSiteAddressValid(address: InspectionAddress): boolean {
+  return Object.keys(getSiteAddressFieldErrors(address)).length === 0;
+}
+
 export function normalizeInspectionAddress(
   address: InspectionAddress,
 ): InspectionAddress {
@@ -599,14 +627,14 @@ export function parseInspectionRequestInput(
   }
   const address = addressParsed.value;
 
-  if (
-    requireAddress &&
-    (address.street.length < 3 ||
-      address.suburb.length < 2 ||
-      address.state.length < 2 ||
-      address.postcode.length < 3)
-  ) {
-    return { ok: false, error: "Service address must be complete." };
+  // A site address needs enough detail to find the place: suburb and postcode
+  // are the minimum. Street is left optional because some sites are lots,
+  // units or acreage without a tidy street address.
+  if (requireAddress && !isSiteAddressValid(address)) {
+    return {
+      ok: false,
+      error: "Enter the site suburb and a 4-digit postcode.",
+    };
   }
 
   let serviceId: string | null = null;
@@ -729,6 +757,22 @@ export function formatInspectionVisitReference(
   inspectionRequestId: string,
 ): string {
   return legacyInspectionReferenceFromId(inspectionRequestId);
+}
+
+/**
+ * Address for display, with a placeholder when nothing was entered.
+ *
+ * `formatAddress` returns an empty string for a blank address, which leaves a
+ * bare location pin with no text beside it. Use this wherever the address is
+ * shown to a person; keep `formatAddress` for PDFs, clipboard exports and
+ * anything else that must stay empty when there is no address.
+ */
+export function formatAddressForDisplay(
+  address: InspectionAddress | null | undefined,
+  fallback = "Not set",
+): string {
+  if (!address) return fallback;
+  return formatAddress(address).trim() || fallback;
 }
 
 export function formatAddress(address: InspectionAddress): string {

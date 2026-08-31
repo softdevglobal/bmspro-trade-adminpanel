@@ -1,5 +1,6 @@
 import "server-only";
 
+
 import {
   computeDaySlotOccupancy,
   rangeOverlapsFullSlots,
@@ -257,6 +258,7 @@ export async function createInspectionRequest(
 
   const snap = await ref.get();
   const request = mapInspectionDoc(ref.id, snap.data() ?? {});
+
   const summary = await loadBusinessSummary(businessId);
   await notifyBusinessOfNewRequest(request, summary);
   await notifyCustomerOfNewRequest(request, summary);

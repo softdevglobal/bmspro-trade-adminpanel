@@ -9,6 +9,7 @@ import {
 import { useAuth } from "@/lib/auth/auth-context";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
+import { emailTypoWarning } from "@/lib/validation/data-quality";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const STEPS = ["Details", "Role & schedule", "Review"] as const;
@@ -707,6 +708,7 @@ function StaffSetupStepContent({
                 value={form.email}
                 onChange={(value) => onUpdateField("email", value)}
                 error={showDetailsErrors ? fieldErrors.email : undefined}
+                warning={emailTypoWarning(form.email) ?? undefined}
                 required
               />
             </div>
@@ -1029,6 +1031,7 @@ function TextField({
   inputMode,
   hint,
   error,
+  warning,
   maxLength,
   required = false,
 }: {
@@ -1040,6 +1043,8 @@ function TextField({
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   hint?: string;
   error?: string;
+  /** Advisory message (e.g. a likely typo). Does not block saving. */
+  warning?: string;
   maxLength?: number;
   required?: boolean;
 }) {
@@ -1067,6 +1072,13 @@ function TextField({
       {error ? (
         <span className="font-body text-[12px] font-semibold text-error">
           {error}
+        </span>
+      ) : warning ? (
+        <span className="flex items-start gap-1.5 font-body text-[12px] font-semibold text-amber-800">
+          <span className="material-symbols-outlined shrink-0 text-[14px] leading-none">
+            info
+          </span>
+          {warning}
         </span>
       ) : hint ? (
         <span className="font-body text-[12px] text-on-surface-variant">

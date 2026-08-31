@@ -16,11 +16,27 @@ export function useCalendarFilterOptions(enabled: boolean) {
   const [serviceAreas, setServiceAreas] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * False until a fetch has actually succeeded. Without this the UI cannot
+   * tell "this business has no services" from "we never loaded them", and
+   * wrongly claims there are none.
+   */
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user || !businessId || role !== "business_owner") {
+    if (!user || !businessId) {
       setServices([]);
       setServiceAreas([]);
+      setLoaded(false);
+      setError(null);
+      return;
+    }
+
+    if (role !== "business_owner") {
+      setServices([]);
+      setServiceAreas([]);
+      setLoaded(false);
+      setError("Only the business owner can filter by service or area.");
       return;
     }
 
@@ -81,7 +97,9 @@ export function useCalendarFilterOptions(enabled: boolean) {
               .filter(Boolean)
           : [],
       );
+      setLoaded(true);
     } catch (loadError) {
+      setLoaded(false);
       setError(
         loadError instanceof Error
           ? loadError.message
@@ -97,5 +115,5 @@ export function useCalendarFilterOptions(enabled: boolean) {
     void load();
   }, [enabled, load]);
 
-  return { services, serviceAreas, loading, error, reload: load };
+  return { services, serviceAreas, loading, loaded, error, reload: load };
 }

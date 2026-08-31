@@ -10,7 +10,7 @@ const PAGE_ICONS: Record<string, string> = {
   Dashboard: "dashboard",
   Calendar: "calendar_month",
   Jobs: "assignment",
-  "Requests": "event_available",
+  "Site inspections": "event_available",
   Team: "groups",
   "Team management": "manage_accounts",
   Attendance: "schedule",

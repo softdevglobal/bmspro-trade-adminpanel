@@ -71,9 +71,12 @@ function customerAccountUrl(
   tab: "requests" | "history" = "requests",
 ): string | null {
   if (!bookingSlug) return null;
-  const base = buildBookingUrl(bookingSlug);
-  if (!base) return null;
-  return `${base}/account/${tab}`;
+  // `buildBookingUrl` alone falls back to `NEXT_PUBLIC_BOOKING_BASE_URL`, which is
+  // inlined at build time and can ship a stale `localhost:3000`. Resolve the
+  // origin at runtime instead so the CTA points at the live booking engine.
+  const origin = appBaseUrl();
+  if (!origin) return null;
+  return `${buildBookingUrl(bookingSlug, origin)}/account/${tab}`;
 }
 
 /**
@@ -123,7 +126,7 @@ export async function sendInspectionCustomerNotificationEmail(
             ? "View job history"
             : input.type === "invoice_sent"
               ? "View your invoice"
-              : "View my request",
+              : "View site inspection",
       footnote:
         input.type === "booking_on_the_way"
           ? "You're receiving this about your scheduled job with BMS Pro Trade."

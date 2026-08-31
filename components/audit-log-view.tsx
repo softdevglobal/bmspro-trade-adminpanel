@@ -355,6 +355,7 @@ export function AuditLogView({
                   key={entry.id}
                   entry={entry}
                   showTenant={isPlatform && !businessId}
+                  customerView={isCustomer}
                   displayTimezone={displayTimezone}
                 />
               ))}
@@ -432,10 +433,16 @@ function AuditLogPagination({
 function AuditRow({
   entry,
   showTenant,
+  customerView = false,
   displayTimezone,
 }: {
   entry: AuditLogEntry;
   showTenant: boolean;
+  /**
+   * Customers see their own activity, not internal audit detail: the source
+   * badge and the actor role/email line stay staff-only.
+   */
+  customerView?: boolean;
   displayTimezone: string;
 }) {
   const actorLabel =
@@ -455,11 +462,13 @@ function AuditRow({
           <span className="inline-flex items-center rounded-full bg-surface-variant px-2 py-0.5 font-body text-[11px] font-semibold text-on-surface-variant">
             {CATEGORY_LABELS[entry.category]}
           </span>
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 font-body text-[11px] font-semibold ${SOURCE_BADGE[entry.source]}`}
-          >
-            {SOURCE_LABELS[entry.source]}
-          </span>
+          {!customerView ? (
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 font-body text-[11px] font-semibold ${SOURCE_BADGE[entry.source]}`}
+            >
+              {SOURCE_LABELS[entry.source]}
+            </span>
+          ) : null}
           {showTenant && entry.businessName ? (
             <span className="inline-flex items-center gap-1 font-body text-[11px] font-medium text-on-surface-variant">
               <span className="material-symbols-outlined text-[13px]">
@@ -472,9 +481,11 @@ function AuditRow({
         <p className="mt-1 font-body text-[14px] text-on-surface">
           {entry.summary}
         </p>
-        <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
-          {ACTOR_ROLE_LABELS[entry.actorRole]} · {actorLabel}
-        </p>
+        {!customerView ? (
+          <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+            {ACTOR_ROLE_LABELS[entry.actorRole]} · {actorLabel}
+          </p>
+        ) : null}
       </div>
       <div className="shrink-0 text-right">
         <p

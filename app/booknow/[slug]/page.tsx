@@ -71,11 +71,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const business = await loadBusinessBySlug(slug);
   if (!business) {
-    return { title: "Booking not found" };
+    return { title: "Business not found" };
   }
   return {
-    title: `Book ${business.businessName} — BMS Pro Trade`,
-    description: `Request a booking with ${business.businessName} (${business.businessType}).`,
+    title: `Request a site inspection with ${business.businessName} — BMS Pro Trade`,
+    description: `Request a site inspection with ${business.businessName} (${business.businessType}).`,
   };
 }
 

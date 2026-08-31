@@ -25,7 +25,7 @@ import {
 import { bookingForCalendar } from "@/lib/calendar/events";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
-  formatAddress,
+  formatAddressForDisplay,
   formatSlotDate,
   formatVisitWindow,
   isClockTime,
@@ -38,6 +38,7 @@ import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
+import { ADMIN_COPY } from "@/lib/copy/product-language";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
@@ -441,7 +442,7 @@ function BookingCard({
             {booking.customer.fullName || "Customer"}
           </h4>
           <p className="mt-1 font-body text-[11px] text-on-surface-variant">
-            Visit{" "}
+            {ADMIN_COPY.fromInspectionRequest}{" "}
             <InspectionRequestCode
               request={{
                 id: booking.inspectionRequestId,
@@ -457,7 +458,7 @@ function BookingCard({
             {displayPhone}
           </p>
           <p className="font-body text-[12px] text-on-surface-variant">
-            {formatAddress(booking.address)}
+            {formatAddressForDisplay(booking.address)}
           </p>
         </div>
         <BookingCardMenu
@@ -972,7 +973,7 @@ function BookingPreviewContent({
             <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[16px] text-primary">
               location_on
             </span>
-            {formatAddress(booking.address)}
+            {formatAddressForDisplay(booking.address)}
           </p>
         </section>
 

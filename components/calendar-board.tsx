@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  formatAddress,
+  formatAddressForDisplay,
   formatClockTime,
   TIME_RANGE_SHORT_LABELS,
   formatVisitWindow,
@@ -16,6 +16,8 @@ import {
   buildMonthGridCalendarEvents,
   calendarCardView,
   CALENDAR_SOURCE_CARD_CLASS,
+  CALENDAR_LEGEND,
+  calendarEventSummary,
   requestTitle,
   CALENDAR_SOURCE_LABELS,
   computeCombinedCalendarStats,
@@ -582,13 +584,23 @@ function CalendarDayEventCards({
 
         const timeLabel = eventTimeLabel(event, card, event.date);
         const assignee = card.assignedTo;
-        const sourceLabel = CALENDAR_SOURCE_LABELS[event.source];
+        // A request whose time the owner has confirmed is a "Confirmed
+        // inspection"; anything earlier is still just a request.
+        const requestConfirmed = event.request?.status === "scheduled";
+        const sourceLabel =
+          event.source === "requests"
+            ? requestConfirmed
+              ? "Confirmed inspection"
+              : "Inspection request"
+            : CALENDAR_SOURCE_LABELS[event.source];
         const sourceTone =
           event.source === "jobs"
-            ? "bg-primary/10 text-primary border border-primary/25"
+            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
             : event.source === "personal"
               ? "bg-violet-50 text-violet-800 border border-violet-200"
-              : "bg-green-50 text-green-700 border border-green-200";
+              : requestConfirmed
+                ? "bg-primary/10 text-primary border border-primary/25"
+                : "bg-amber-50 text-amber-800 border border-amber-200";
 
         return (
           <Link
@@ -642,7 +654,7 @@ function CalendarDayEventCards({
               {!compact ? (
                 <>
                   <CalendarDetailRow label="Address">
-                    {formatAddress(card.address)}
+                    {formatAddressForDisplay(card.address)}
                   </CalendarDetailRow>
 
                   <CalendarDetailRow label="Reference" mono>
@@ -891,6 +903,9 @@ export function CalendarBoard() {
     services: serviceOptions,
     serviceAreas,
     loading: filterOptionsLoading,
+    loaded: filterOptionsLoaded,
+    error: filterOptionsError,
+    reload: reloadFilterOptions,
   } = useCalendarFilterOptions(filterDrawerOpen);
 
   useEffect(() => {
@@ -1244,6 +1259,25 @@ export function CalendarBoard() {
         </button>
       </section>
 
+      {/* Legend — always visible so every colour on the grid is explained. */}
+      <section
+        aria-label="Calendar legend"
+        className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-outline-variant bg-surface-container-low px-4 py-2.5"
+      >
+        {CALENDAR_LEGEND.map((entry) => (
+          <span
+            key={entry.label}
+            className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface-variant"
+          >
+            <span
+              aria-hidden
+              className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT_CLASS[entry.dot]}`}
+            />
+            {entry.label}
+          </span>
+        ))}
+      </section>
+
       {/* Calendar */}
       <section className="relative flex flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
         {requestsLoading ? (
@@ -1281,7 +1315,7 @@ export function CalendarBoard() {
             {[
               { color: "bg-primary", label: "Jobs" },
               { color: "bg-sky-500", label: "Completed" },
-              { color: "bg-green-500", label: "Requests" },
+              { color: "bg-amber-500", label: "Site inspections" },
               { color: "bg-violet-500", label: "Personal" },
             ].map((item) => (
               <div
@@ -1367,12 +1401,20 @@ export function CalendarBoard() {
                   </div>
                   {dayEvents.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {dayEvents.map((event) => (
-                        <span
-                          key={event.key}
-                          className={`h-2 w-2 rounded-full ${DOT_CLASS[event.dotColor]}`}
-                        />
-                      ))}
+                      {dayEvents.map((event) => {
+                        // The dot alone does not say what the event is, so
+                        // carry the description for hover and screen readers.
+                        const summary = calendarEventSummary(event);
+                        return (
+                          <span
+                            key={event.key}
+                            title={summary}
+                            className={`h-2 w-2 rounded-full ${DOT_CLASS[event.dotColor]}`}
+                          >
+                            <span className="sr-only">{summary}</span>
+                          </span>
+                        );
+                      })}
                     </div>
                   ) : null}
                 </button>
@@ -1803,6 +1845,26 @@ export function CalendarBoard() {
           </div>
 
           <div className="flex-1 space-y-6 overflow-y-auto p-5">
+            {filterOptionsError ? (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-700">
+                  warning
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-body text-[12px] font-semibold text-amber-900">
+                    {filterOptionsError}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void reloadFilterOptions()}
+                    className="mt-1.5 font-body text-[12px] font-semibold text-amber-900 underline underline-offset-2 hover:text-amber-950"
+                  >
+                    Try again
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-3">
               <p className="font-body text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
                 Job status
@@ -1944,7 +2006,7 @@ export function CalendarBoard() {
                       {!service.isActive ? " (inactive)" : ""}
                     </button>
                   ))}
-                  {serviceOptions.length === 0 ? (
+                  {serviceOptions.length === 0 && filterOptionsLoaded ? (
                     <p className="font-body text-[13px] text-on-surface-variant">
                       No services yet. Add services from the Services page.
                     </p>
@@ -1962,9 +2024,11 @@ export function CalendarBoard() {
                   Loading areas…
                 </p>
               ) : serviceAreas.length === 0 ? (
-                <p className="font-body text-[13px] text-on-surface-variant">
-                  No service areas configured for your business yet.
-                </p>
+                filterOptionsLoaded ? (
+                  <p className="font-body text-[13px] text-on-surface-variant">
+                    No service areas configured for your business yet.
+                  </p>
+                ) : null
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {serviceAreas.map((area) => (

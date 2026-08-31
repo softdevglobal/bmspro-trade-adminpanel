@@ -47,7 +47,7 @@ import {
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import {
   TIME_RANGE_LABELS,
-  formatAddress,
+  formatAddressForDisplay,
   formatSlotDate,
   formatVisitWindow,
   getOptionalInspectionAddressFieldErrors,
@@ -119,7 +119,7 @@ const STEPS = [
   {
     title: "Review & create",
     subtitle:
-      "Check everything below, then create the request.",
+      "Check everything below, then create the site inspection.",
   },
 ] as const;
 
@@ -198,7 +198,7 @@ function buildStepFlow(
       title: isJob ? JOB_STEPS[4].title : "Assign inspector",
       subtitle: isJob
         ? JOB_STEPS[4].subtitle
-        : "Choose who will run this visit, or assign later from the Requests board.",
+        : "Choose who will run this visit, or assign later from the Site inspections board.",
     },
     {
       kind: "review",
@@ -1173,7 +1173,7 @@ function InspectionPreview({
       </PreviewSection>
 
       <PreviewSection title="Service address" icon="location_on">
-        <PreviewRow label="Address" value={formatAddress(form.address)} />
+        <PreviewRow label="Address" value={formatAddressForDisplay(form.address)} />
       </PreviewSection>
 
       <PreviewSection
@@ -1254,7 +1254,7 @@ function InspectionPreview({
                   ? staffName ?? "Selected team member"
                   : variant === "job"
                     ? "Unassigned — assign later from Jobs"
-                    : "Unassigned — assign later from Requests"
+                    : "Unassigned — assign later from Site inspections"
             }
           />
         </PreviewSection>
@@ -2451,7 +2451,7 @@ export function AddInspectionModal({
                   ? form.preferredSlots.length > 1
                     ? "The job is on your board and all selected days appear on the calendar. Inspection and quotation steps are already complete — issue an invoice after the work is done."
                     : "The job is scheduled on your board and calendar. The inspection and quotation steps are already marked complete — issue an invoice after the work is done."
-                  : "The visit is scheduled on your board. Assign an inspector from the request if you have not already."}
+                  : "The visit is scheduled on your board. Assign an inspector from the site inspection if you have not already."}
               </p>
             </div>
           ) : (
