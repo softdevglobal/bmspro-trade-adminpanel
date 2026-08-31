@@ -111,6 +111,14 @@ export const CUSTOMER_COPY = {
   /** Request state sentences shown at the top of a customer card. */
   awaitingConfirmation: "Your inspection request is waiting for confirmation",
   inspectionConfirmed: "Your inspection is confirmed",
+  /**
+   * Inspections tab title. These are *requests* until the business confirms a
+   * time, so the page says so — "My site inspections" reads as though every
+   * card is already booked.
+   */
+  requestsTitle: "My site inspection requests",
+  /** Short form for the nav pill, which truncates. */
+  requestsTabLabel: "Inspections",
   /** History page title — it holds future work and quotes too. */
   historyTitle: "My Requests & Jobs",
   /** Collapsed section holding the original submission. */

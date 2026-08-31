@@ -5,6 +5,7 @@ import {
   CUSTOMER_FIXED_NAV_INNER_CLASS,
   CustomerNavSpacer,
 } from "@/components/customer-booking-shell";
+import { CUSTOMER_COPY } from "@/lib/copy/product-language";
 import { useCustomerAuth } from "@/lib/customer-auth/customer-auth-context";
 import { useCustomerNotifications } from "@/lib/notifications/use-customer-notifications";
 import { customerAttentionCount } from "@/lib/notifications/customer-pending-actions";
@@ -151,7 +152,10 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
     return [
       {
         id: "requests",
-        label: "Inspections",
+        // The pill truncates, so it carries the short label and the tooltip
+        // carries the honest one — these are requests until they are confirmed.
+        label: CUSTOMER_COPY.requestsTabLabel,
+        fullLabel: CUSTOMER_COPY.requestsTitle,
         icon: "forum",
         href: accountPath(slug, "requests"),
         isActive: onAccount && activeTab === "requests",
@@ -159,6 +163,7 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
       {
         id: "jobs",
         label: "History",
+        fullLabel: CUSTOMER_COPY.historyTitle,
         icon: "receipt_long",
         href: accountPath(slug, "jobs"),
         isActive: onAccount && activeTab === "jobs",
@@ -216,8 +221,8 @@ function CustomerAccountNavInner({ className }: { className?: string }) {
               <Link
                 key={tab.id}
                 href={tab.href}
-                title={tab.label}
-                aria-label={tab.label}
+                title={tab.fullLabel ?? tab.label}
+                aria-label={tab.fullLabel ?? tab.label}
                 aria-current={tab.isActive ? "page" : undefined}
                 className={`relative z-10 flex h-full min-h-full min-w-0 flex-1 items-center justify-center gap-1 rounded-full px-2 py-0 font-body font-semibold transition-colors sm:gap-1.5 sm:px-4 ${
                   tab.isActive

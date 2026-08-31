@@ -468,24 +468,23 @@ function planCardTheme(color: string) {
   return map[id] ?? map.blue;
 }
 
-function formatBillingCycleLabel(cycle: "weekly" | "monthly"): string {
-  return cycle === "monthly" ? "Monthly billing" : "Weekly billing";
-}
-
 function planFeatureItems(plan: AvailablePlanOption): string[] {
   const items: string[] = [];
+  const renewalLabel = formatRenewalLabel(plan.billingCycle, plan.validityDays);
   const sms = plan.bundledSmsPackage;
   if (sms) {
     items.push(
       `${formatMessageQuotaLabel(sms.messageQuota)} included (${sms.name})`,
     );
   }
-  items.push(formatRenewalLabel(plan.billingCycle, plan.validityDays));
+  // The renewal label already sits under the price on this card; repeating it
+  // in the feature list is the second period label the handoff called out.
   for (const feature of plan.features) {
     const trimmed = feature.trim();
     if (!trimmed) continue;
     if (trimmed === plan.description?.trim()) continue;
     if (trimmed === plan.priceLabel.trim()) continue;
+    if (trimmed === renewalLabel) continue;
     items.push(trimmed);
   }
   return items.slice(0, 3);
@@ -575,9 +574,6 @@ function PlanChangeCard({
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1 font-body text-[11px] text-on-surface-variant">
-                {formatBillingCycleLabel(plan.billingCycle)}
-              </p>
             </div>
           </div>
 

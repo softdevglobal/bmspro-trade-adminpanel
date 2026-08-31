@@ -7,6 +7,7 @@ import {
 import type { ServiceTemplateDetail } from "@/lib/onboarding/services/display";
 import { formatServiceDuration } from "@/lib/onboarding/services/display";
 import { iconForServiceSkill } from "@/lib/onboarding/services/types";
+import { nameQualityWarning } from "@/lib/validation/data-quality";
 import { useState } from "react";
 
 const INPUT_CLASS =
@@ -344,6 +345,7 @@ export function ServiceOwnerDetailsStep({
   onError,
 }: DetailsStepProps) {
   const [isUploading, setIsUploading] = useState(false);
+  const serviceNameWarning = nameQualityWarning(form.name);
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -445,9 +447,22 @@ export function ServiceOwnerDetailsStep({
             type="text"
             value={form.name}
             onChange={(event) => onChange({ name: event.target.value })}
-            placeholder="e.g. Emergency pipe repair"
+            placeholder="e.g. Security Camera Site Inspection"
             className={INPUT_CLASS}
           />
+          {/* Advisory only — a sloppy-looking name never blocks saving. */}
+          {serviceNameWarning ? (
+            <span className="mt-1.5 flex items-start gap-1.5 font-body text-[12px] font-semibold text-amber-800">
+              <span className="material-symbols-outlined shrink-0 text-[14px] leading-none">
+                info
+              </span>
+              {serviceNameWarning}
+            </span>
+          ) : null}
+          <p className="mt-1.5 font-body text-[11px] text-on-surface-variant">
+            Customers see this name. Name it for what they are asking for — a
+            site inspection — rather than the installation work that follows.
+          </p>
         </label>
       </WizardSection>
 

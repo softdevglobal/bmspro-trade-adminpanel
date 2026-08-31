@@ -1,5 +1,6 @@
 import type { CustomerAccountTab } from "@/components/customer-account-nav";
 import { ACCOUNT_TAB_SEGMENT } from "@/lib/customer/booking-routes";
+import { CUSTOMER_COPY } from "@/lib/copy/product-language";
 import { adminDb } from "@/lib/firebase/admin";
 
 export async function loadBusinessName(slug: string): Promise<string | null> {
@@ -15,8 +16,8 @@ export async function loadBusinessName(slug: string): Promise<string | null> {
 
 const TAB_TITLES: Record<CustomerAccountTab, string> = {
   profile: "My profile",
-  requests: "My requests",
-  jobs: "Job history",
+  requests: CUSTOMER_COPY.requestsTitle,
+  jobs: CUSTOMER_COPY.historyTitle,
   notifications: "Notifications",
   activity: "My activity",
 };

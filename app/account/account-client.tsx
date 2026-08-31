@@ -1,7 +1,11 @@
 "use client";
 
 import { AuPhoneInput } from "@/components/au-phone-input";
-import { CUSTOMER_COPY } from "@/lib/copy/product-language";
+import {
+  CUSTOMER_COPY,
+  NOTIFICATION_SOURCE_LABELS,
+  withBusinessName,
+} from "@/lib/copy/product-language";
 import { AuditLogView } from "@/components/audit-log-view";
 import { CustomerSecuritySettings } from "@/components/customer-security-settings";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
@@ -494,7 +498,7 @@ function AuthedAccount({
 
   const titles: Record<CustomerAccountTab, string> = {
     profile: "My profile",
-    requests: "My site inspections",
+    requests: CUSTOMER_COPY.requestsTitle,
     jobs: CUSTOMER_COPY.historyTitle,
     notifications: "Notifications",
     activity: "My activity",
@@ -2368,20 +2372,26 @@ function notificationSource(
     note.type === "invoice_sent"
   ) {
     return {
-      label: "Action needed",
+      label: NOTIFICATION_SOURCE_LABELS.action,
       className: "border-amber-200 bg-amber-50 text-amber-900",
     };
   }
 
   if (note.type === "system_message" || note.type === "schedule_reminder") {
     return {
-      label: "System update",
+      label: NOTIFICATION_SOURCE_LABELS.system,
       className: "border-stone-200 bg-stone-50 text-stone-700",
     };
   }
 
+  // Name the business outright — "From Rhodium Security" tells the customer who
+  // sent it; "From your business" makes them work it out. Older notifications
+  // stored no business name, so keep the generic wording as the fallback.
+  const businessName = note.businessName?.trim();
   return {
-    label: "From your business",
+    label: businessName
+      ? withBusinessName(NOTIFICATION_SOURCE_LABELS.business, businessName)
+      : "From your business",
     className: "border-sky-200 bg-sky-50 text-sky-800",
   };
 }

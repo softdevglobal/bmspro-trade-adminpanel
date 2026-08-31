@@ -1,3 +1,4 @@
+import { formatRenewalLabel } from "@/lib/subscription-plans/theme";
 import type { BillingCycle } from "@/lib/subscription-plans/types";
 
 export function normalizeBillingCycle(value: unknown): BillingCycle {
@@ -17,9 +18,13 @@ export function formatPeriodLabel(validityDays: number): string {
   return `${validityDays}-day`;
 }
 
+/**
+ * One period label per plan. This used to render "Monthly • 28-day renewal",
+ * which put two competing periods on the same card; it now defers to the single
+ * renewal label so plan copy reads the same wherever it appears.
+ */
 export function formatBillingNote(cycle: BillingCycle, validityDays: number): string {
-  const unit = cycle === "monthly" ? "Monthly" : "Weekly";
-  return `${unit} • ${validityDays}-day renewal`;
+  return formatRenewalLabel(cycle, validityDays);
 }
 
 const PLAN_DESCRIPTION_MAX_LENGTH = 500;

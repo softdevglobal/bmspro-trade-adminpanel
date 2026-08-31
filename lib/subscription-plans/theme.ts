@@ -114,7 +114,11 @@ export function formatLimitLabel(
  * exact day count is the honest answer and is shown on its own.
  */
 export function formatRenewalLabel(cycle: "weekly" | "monthly", days: number): string {
-  if (cycle === "monthly" && days === 30) return "Renews monthly";
+  // A "monthly" plan bills on a 28-day cycle here (see `validityDaysForCycle`),
+  // so anything in the 28-31 day band is the named monthly cycle rather than an
+  // odd day count worth spelling out. Otherwise the price label ("AU$99/month")
+  // and the renewal note disagree on the same card.
+  if (cycle === "monthly" && days >= 28 && days <= 31) return "Renews monthly";
   if (cycle === "weekly" && days === 7) return "Renews weekly";
   if (days === 1) return "Renews daily";
   return `Renews every ${days} days`;
