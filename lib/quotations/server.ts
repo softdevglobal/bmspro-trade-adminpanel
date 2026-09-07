@@ -42,11 +42,11 @@ import {
 import { resolveQuotationPayUrl } from "@/lib/payments/document-pay-link";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
 import { toMillis } from "@/lib/onboarding/services/display";
+import { displayQuotationCode } from "@/lib/reference-codes";
 import {
-  buildQuotationCodeForInspection,
-  displayQuotationCode,
-} from "@/lib/reference-codes";
-import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+  allocateInspectionRequestCode,
+  allocateQuotationCode,
+} from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
@@ -706,13 +706,7 @@ export async function createQuotationForInspection(
   }
 
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
-  const quotationCode = buildQuotationCodeForInspection({
-    id: inspectionId,
-    requestCode:
-      typeof requestData.requestCode === "string"
-        ? requestData.requestCode
-        : null,
-  });
+  const quotationCode = await allocateQuotationCode(businessId);
 
   await requestSnap.ref.set(requestUpdate, { merge: true });
 
@@ -1206,13 +1200,7 @@ export async function updateDraftQuotation(
     typeof quotationData.quotationCode === "string" &&
     quotationData.quotationCode.trim()
       ? quotationData.quotationCode.trim()
-      : buildQuotationCodeForInspection({
-          id: inspectionId,
-          requestCode:
-            typeof requestData.requestCode === "string"
-              ? requestData.requestCode
-              : null,
-        });
+      : await allocateQuotationCode(businessId);
 
   const previousStatus =
     quotationData.status === "sent" ? "sent" : "draft";
@@ -1933,10 +1921,7 @@ export async function createStandaloneQuotation(
 
   // 2. Create the quotation document linked to that request.
   const ref = adminDb.collection(QUOTATION_COLLECTION).doc();
-  const quotationCode = buildQuotationCodeForInspection({
-    id: inspectionRef.id,
-    requestCode,
-  });
+  const quotationCode = await allocateQuotationCode(businessId);
 
   await ref.set({
     quotationCode,

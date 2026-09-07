@@ -20,6 +20,8 @@ export type TenantOwner = {
 export type TenantDetail = {
   /** Internal key only — never shown in the UI */
   id: string;
+  /** 3-digit code used in invoice/quotation numbers (`INV 011 …`). */
+  tenantNumber: number | null;
   businessName: string;
   businessEmail: string;
   businessPhone: string;

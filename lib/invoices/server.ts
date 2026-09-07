@@ -24,7 +24,7 @@ import {
 } from "@/lib/payments/types";
 import { resolveInvoicePayUrl } from "@/lib/payments/document-pay-link";
 import { getBusinessProfile } from "@/lib/onboarding/server";
-import { buildInvoiceCodeForQuotation } from "@/lib/reference-codes";
+import { allocateInvoiceCode } from "@/lib/reference-codes.server";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import { FieldValue } from "firebase-admin/firestore";
 import type {
@@ -1027,7 +1027,7 @@ export async function createInvoiceFromQuotation(
     };
   }
 
-  const invoiceCode = buildInvoiceCodeForQuotation(quotation);
+  const invoiceCode = await allocateInvoiceCode(businessId);
   const now = FieldValue.serverTimestamp();
 
   // Mark (or create) the linked booking as completed.

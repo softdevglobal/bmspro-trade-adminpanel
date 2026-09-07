@@ -8,4 +8,9 @@ export async function register() {
     "@/lib/scheduling/dev-reminder-poller"
   );
   startDevScheduleReminderPoller();
+
+  const { startDevCareplusOutboxPoller } = await import(
+    "@/lib/integrations/careplus/dev-poller"
+  );
+  startDevCareplusOutboxPoller();
 }

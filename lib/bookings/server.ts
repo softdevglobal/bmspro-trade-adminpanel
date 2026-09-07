@@ -23,11 +23,14 @@ import {
   rangeOverlapsFullSlots,
 } from "@/lib/calendar/slot-occupancy";
 import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
-import { allocateBookingCode } from "@/lib/reference-codes.server";
-import { buildQuotationCodeForInspection } from "@/lib/reference-codes";
-import { allocateInspectionRequestCode } from "@/lib/reference-codes.server";
+import {
+  allocateBookingCode,
+  allocateInspectionRequestCode,
+  allocateQuotationCode,
+} from "@/lib/reference-codes.server";
 import { getRequestDocumentRef } from "@/lib/inspection/request-document";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
+import { enqueueCareplusJobCompletedSafe } from "@/lib/integrations/careplus/enqueue";
 import {
   QUOTATION_COLLECTION,
   serializeLineItemsForFirestore,
@@ -797,6 +800,9 @@ export async function completeBookingForInvoicedQuotation(input: {
           },
         });
       }
+      if (completedNow) {
+        await enqueueCareplusJobCompletedSafe(current);
+      }
       return {
         bookingId: current.id,
         bookingCode: current.bookingCode,
@@ -930,6 +936,16 @@ export async function completeBookingForInvoicedQuotation(input: {
     });
   }
 
+  await enqueueCareplusJobCompletedSafe({
+    id: bookingRef.id,
+    businessId,
+    bookingCode,
+    serviceName: serviceName ?? quotation.serviceTitle,
+    customRequest,
+    customerId,
+    assignedTo: null,
+  });
+
   return {
     bookingId: bookingRef.id,
     bookingCode,
@@ -1020,6 +1036,7 @@ export async function completeBusinessBooking(
   const booking = mapBookingDoc(updated.id, updated.data() ?? {});
   const summary = await loadBusinessSummary(businessId);
   await notifyCustomerOfJobCompleted(booking, summary);
+  await enqueueCareplusJobCompletedSafe(booking);
 
   return {
     ok: true,
@@ -1277,10 +1294,7 @@ export async function createDirectJob(
   const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc();
   const bookingRef = adminDb.collection(JOBS_COLLECTION).doc();
   const requestCode = await allocateInspectionRequestCode();
-  const quotationCode = buildQuotationCodeForInspection({
-    id: inspectionRef.id,
-    requestCode,
-  });
+  const quotationCode = await allocateQuotationCode(businessId);
   const bookingCode = await allocateBookingCode();
   const ownerUid = await resolveBusinessOwnerUid(businessId);
 

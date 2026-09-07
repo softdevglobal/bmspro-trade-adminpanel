@@ -171,6 +171,22 @@
         { "fieldPath": "businessId", "order": "ASCENDING" },
         { "fieldPath": "fulfilledAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "careplus_integrations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "careplusProviderId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "careplus_staff_mappings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

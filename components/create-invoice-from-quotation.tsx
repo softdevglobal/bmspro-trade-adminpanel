@@ -49,10 +49,7 @@ import {
   type QuotationDocumentLineItem,
 } from "@/lib/quotations/document";
 import type { QuotationDetail, QuotationLineItem } from "@/lib/quotations/types";
-import {
-  buildInvoiceCodeForQuotation,
-  displayQuotationCode,
-} from "@/lib/reference-codes";
+import { displayQuotationCode } from "@/lib/reference-codes";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -792,11 +789,7 @@ export function CreateInvoiceFromQuotation({
       ? documentDeposit.balanceDueAud
       : totalAud;
 
-  const invoiceCode = useMemo(() => {
-    if (draftInvoice?.invoiceCode) return draftInvoice.invoiceCode;
-    if (!quotation) return "Draft";
-    return buildInvoiceCodeForQuotation(quotation);
-  }, [draftInvoice, quotation]);
+  const invoiceCode = draftInvoice?.invoiceCode || "Draft";
 
   const previewDocument = useMemo((): QuotationDocumentData => {
     return {

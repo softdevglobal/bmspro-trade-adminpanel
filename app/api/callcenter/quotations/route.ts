@@ -68,7 +68,7 @@
  *     "quotations": [
  *       {
  *         "id":                  "quo_abc123",
- *         "quotationCode":       "QUO-0042",
+ *         "quotationCode":       "QT 011 3847",
  *         "businessId":          "biz001",
  *         "inspectionRequestId": "insp_xyz789",
  *         "serviceTitle":        "Full Home Inspection",
