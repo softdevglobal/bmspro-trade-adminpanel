@@ -5,8 +5,10 @@ export const QUOTATION_CODE_PREFIX = "QT";
 export const INVOICE_CODE_PREFIX = "INV";
 export const BOOKING_CODE_PREFIX = "BK";
 
-/** Shared random suffix length for visit + quotation on the same request. */
+/** Shared random suffix length for visit + booking codes. */
 export const REFERENCE_CODE_SEGMENT_LENGTH = 9;
+
+const TENANT_CODE_DIGITS = 3;
 
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const SEGMENT_PATTERN = new RegExp(
@@ -23,19 +25,20 @@ function randomSegment(length: number = REFERENCE_CODE_SEGMENT_LENGTH): string {
   return out;
 }
 
-export function buildInspectionRequestCodeFromSegment(segment: string): string {
+function buildInspectionRequestCodeFromSegment(segment: string): string {
   return `${INSPECTION_REQUEST_CODE_PREFIX} ${segment}`;
 }
 
-export function buildQuotationCodeFromSegment(segment: string): string {
+function buildQuotationCodeFromSegment(segment: string): string {
   return `${QUOTATION_CODE_PREFIX} ${segment}`;
 }
 
-export function buildInvoiceCodeFromSegment(segment: string): string {
-  return `${INVOICE_CODE_PREFIX} ${segment}`;
+export function formatTenantNumber(n: number): string {
+  const value = Number.isFinite(n) ? Math.floor(n) : 0;
+  return String(Math.max(0, value)).padStart(TENANT_CODE_DIGITS, "0");
 }
 
-export function buildBookingCodeFromSegment(segment: string): string {
+function buildBookingCodeFromSegment(segment: string): string {
   return `${BOOKING_CODE_PREFIX} ${segment}`;
 }
 
@@ -52,8 +55,8 @@ export function normalizeInspectionRequestCodeDisplay(code: string): string {
   return code.replace(/^INS REQ /i, `${INSPECTION_REQUEST_CODE_PREFIX} `);
 }
 
-/** Pulls the 9-character suffix from a stored code (`INS-REQ …`, legacy `INS REQ …`, or `QT …`). */
-export function extractReferenceSegment(
+/** Pulls the 9-character suffix from a stored visit/booking code. */
+function extractReferenceSegment(
   code: string | null | undefined,
 ): string | null {
   const trimmed = code?.trim();
@@ -63,7 +66,7 @@ export function extractReferenceSegment(
 }
 
 /** Stable 9-char segment for older visits without `requestCode`. */
-export function legacySegmentFromInspectionId(
+function legacySegmentFromInspectionId(
   inspectionRequestId: string,
 ): string {
   const clean = inspectionRequestId
@@ -76,8 +79,8 @@ export function legacySegmentFromInspectionId(
   return (clean + "23456789ABC").slice(0, REFERENCE_CODE_SEGMENT_LENGTH);
 }
 
-/** Quotation uses the same 9 characters as its request. */
-export function buildQuotationCodeForInspection(request: {
+/** Legacy quotations without `quotationCode` reuse the visit's random suffix. */
+function buildQuotationCodeForInspection(request: {
   id: string;
   requestCode?: string | null;
 }): string {
@@ -153,16 +156,4 @@ export function displayQuotationCode(quotation: {
   const id = quotation.id.trim();
   if (!id) return "—";
   return buildQuotationCodeFromSegment(legacySegmentFromInspectionId(id));
-}
-
-/** Invoice uses the same 9 characters as its source quotation. */
-export function buildInvoiceCodeForQuotation(quotation: {
-  id: string;
-  quotationCode?: string | null;
-  inspectionRequestId?: string;
-}): string {
-  const segment =
-    extractReferenceSegment(displayQuotationCode(quotation)) ??
-    legacySegmentFromInspectionId(quotation.id);
-  return buildInvoiceCodeFromSegment(segment);
 }

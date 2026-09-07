@@ -42,6 +42,13 @@ const SUPER_ADMIN_QUICK_ACTIONS = [
     href: "/dashboard/settings",
     tone: "from-slate-500/10 to-slate-600/5 text-slate-700",
   },
+  {
+    label: "CarePlus",
+    desc: "Provider mapping and training",
+    icon: "hub",
+    href: "/dashboard/careplus",
+    tone: "from-cyan-500/15 to-sky-600/5 text-cyan-700",
+  },
 ] as const;
 
 const KPI_STYLES: Record<

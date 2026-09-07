@@ -5,6 +5,7 @@ import {
   timezoneLabel,
   type TenantDetail,
 } from "@/lib/onboarding/tenant-display";
+import { formatTenantNumber } from "@/lib/reference-codes";
 import {
   BUSINESS_MODULE_LABELS,
   OWNER_TOGGLEABLE_MODULES,
@@ -212,6 +213,14 @@ function DrawerPanel({
           className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
         >
           <DetailSection title="Business">
+            <DetailRow
+              label="Tenant no."
+              value={
+                tenant.tenantNumber
+                  ? formatTenantNumber(tenant.tenantNumber)
+                  : "—"
+              }
+            />
             <DetailRow label="Business name" value={tenant.businessName} />
             <DetailRow label="Trade type" value={tenant.businessType} />
             <DetailRow label="ABN" value={tenant.abn || "—"} />

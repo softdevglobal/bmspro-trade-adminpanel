@@ -237,6 +237,7 @@ export function AuditLogView({
     const categories = AUDIT_CATEGORIES.filter((cat) => {
       if (cat === "staff") return isTenantOwner;
       if (cat === "custom_notification") return isPlatform;
+      if (cat === "integration") return isPlatform;
       if (isCustomer) {
         return (
           cat === "auth" ||

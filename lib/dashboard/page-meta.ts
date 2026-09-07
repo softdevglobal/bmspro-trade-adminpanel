@@ -131,6 +131,12 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
       "Businesses onboarded onto BMS Pro Trade. View active and suspended tenants or onboard a new business directly.",
     icon: "domain",
   },
+  "/dashboard/careplus": {
+    title: "CarePlus",
+    subtitle:
+      "Map a care-provider tenant, send job-completed events, and read staff training.",
+    icon: "hub",
+  },
   "/dashboard/packages": {
     title: "Subscription Packages",
     subtitle: "Manage subscription plans for workshops.",

@@ -320,6 +320,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Invoice/quotation number claims — Admin SDK only.
+    match /document_counters/{id} {
+      allow read, write: if false;
+    }
+
     function canReadBusinessItem() {
       return resource.data.businessId is string
         && (
@@ -431,9 +436,21 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    function isCareplusCollection() {
+      return request.path[3] in [
+        'careplus_integrations',
+        'careplus_staff_mappings',
+        'careplus_outbox'
+      ];
+    }
+
+    function isAdminSdkOnlyCollection() {
+      return isCareplusCollection() || request.path[3] == 'document_counters';
+    }
+
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
-      allow read, write: if isSuperAdmin();
+      allow read, write: if isSuperAdmin() && !isAdminSdkOnlyCollection();
     }
   }
 }

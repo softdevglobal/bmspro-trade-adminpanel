@@ -33,6 +33,7 @@ import {
   PHONE_TAKEN_ERROR,
 } from "@/lib/users/phone-uniqueness";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
+import { allocateTenantNumber } from "@/lib/reference-codes.server";
 import {
   NEW_BUSINESS_MODULE_DEFAULTS,
   parseBusinessModuleSettings,
@@ -199,6 +200,7 @@ async function createTenantWithOwnerAccount(
     const tenantId = businessRef.id;
     const now = FieldValue.serverTimestamp();
     const bookingSlug = await reserveBookingSlug(value.businessName);
+    const tenantNumber = await allocateTenantNumber();
 
     await adminAuth.setCustomUserClaims(uid, {
       role: "owner",
@@ -222,6 +224,7 @@ async function createTenantWithOwnerAccount(
         bookingSlug,
         createdByUid: options.createdByUid ?? null,
         createdByEmail: options.createdByEmail ?? null,
+        tenantNumber,
         subscriptionFields: { ...subscriptionFields.business, ...smsFields },
       })
     );
@@ -289,6 +292,7 @@ function businessDocument(
     bookingSlug: string;
     createdByUid?: string | null;
     createdByEmail?: string | null;
+    tenantNumber: number;
     subscriptionFields: Record<string, unknown>;
   }
 ) {
@@ -326,6 +330,7 @@ function businessDocument(
     onboardingStep: "complete",
     createdByUid: options.createdByUid ?? null,
     createdByEmail: options.createdByEmail ?? null,
+    tenantNumber: options.tenantNumber,
     createdAt: now,
     updatedAt: now,
     workingHours: DEFAULT_WORKING_HOURS,

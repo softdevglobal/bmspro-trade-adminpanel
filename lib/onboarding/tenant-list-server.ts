@@ -38,6 +38,12 @@ function mapTenantDoc(doc: QueryDocumentSnapshot): TenantDetail {
 
   return {
     id: doc.id,
+    tenantNumber:
+      typeof data.tenantNumber === "number" &&
+      Number.isFinite(data.tenantNumber) &&
+      data.tenantNumber >= 1
+        ? Math.floor(data.tenantNumber)
+        : null,
     businessName: data.businessName ?? "",
     businessEmail: data.businessEmail ?? "",
     businessPhone: data.businessPhone ?? "",

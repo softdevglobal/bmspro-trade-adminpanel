@@ -26,6 +26,7 @@ export const AUDIT_CATEGORIES = [
   "item",
   "custom_notification",
   "customer_notification",
+  "integration",
 ] as const;
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
 
@@ -63,6 +64,7 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   item: "Item",
   custom_notification: "Platform messages",
   customer_notification: "Customer notifications",
+  integration: "CarePlus",
 };
 
 export const CATEGORY_ICONS: Record<AuditCategory, string> = {
@@ -77,6 +79,7 @@ export const CATEGORY_ICONS: Record<AuditCategory, string> = {
   item: "inventory_2",
   custom_notification: "campaign",
   customer_notification: "notifications",
+  integration: "hub",
 };
 
 export const ACTOR_ROLE_LABELS: Record<AuditActorRole, string> = {
@@ -276,6 +279,7 @@ export function matchesAuditCategoryFilter(
   category: AuditCategory | "all",
   tenantOwnerView: boolean,
 ): boolean {
+  if (tenantOwnerView && entry.category === "integration") return false;
   if (category === "all") return true;
   if (tenantOwnerView && category === "auth") {
     return isBusinessOwnerAuthEntry(entry);
