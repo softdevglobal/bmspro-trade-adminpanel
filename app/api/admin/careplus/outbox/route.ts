@@ -1,6 +1,7 @@
 import {
   listCareplusOutbox,
   processCareplusOutbox,
+  retryCareplusOutboxEvent,
 } from "@/lib/integrations/careplus/outbox";
 import { requireSuperAdmin } from "@/lib/onboarding/server";
 import { NextResponse } from "next/server";
@@ -31,22 +32,48 @@ export async function POST(request: Request) {
     );
   }
 
+  let action: string | undefined;
   let businessId: string | undefined;
+  let eventId: string | undefined;
   try {
-    const body = (await request.json()) as { businessId?: unknown };
+    const body = (await request.json()) as {
+      action?: unknown;
+      businessId?: unknown;
+      eventId?: unknown;
+    };
+    if (typeof body.action === "string") action = body.action.trim();
     if (typeof body.businessId === "string" && body.businessId.trim()) {
       businessId = body.businessId.trim();
     }
+    if (typeof body.eventId === "string") eventId = body.eventId.trim();
   } catch {
     businessId = undefined;
   }
 
   try {
-    const result = await processCareplusOutbox({ businessId });
+    if (action === "retry" && eventId) {
+      const outbox = await retryCareplusOutboxEvent(eventId);
+      const result = await processCareplusOutbox({
+        businessId: outbox.businessId,
+        ignoreBackoff: true,
+      });
+      return NextResponse.json({ ok: true, outbox, ...result });
+    }
+    const result = await processCareplusOutbox({
+      businessId,
+      ignoreBackoff: true,
+    });
     return NextResponse.json({ ok: true, ...result });
-  } catch {
+  } catch (error) {
+    console.error("[careplus] outbox POST failed", error);
     return NextResponse.json(
-      { ok: false, error: "Could not process the CarePlus outbox." },
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not process the CarePlus outbox.",
+      },
       { status: 500 },
     );
   }

@@ -440,6 +440,7 @@ service cloud.firestore {
       return request.path[3] in [
         'careplus_integrations',
         'careplus_staff_mappings',
+        'careplus_customer_mappings',
         'careplus_outbox'
       ];
     }

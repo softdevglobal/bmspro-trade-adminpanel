@@ -1,11 +1,11 @@
-import { enqueueCareplusDirectorySafe } from "@/lib/integrations/careplus/enqueue";
-import { CareplusClientError, fetchCareplusDirectory } from "@/lib/integrations/careplus/client";
 import { logAuditEvent } from "@/lib/audit/server";
+import { CareplusClientError, fetchCareplusDirectory } from "@/lib/integrations/careplus/client";
+import { enqueueCareplusDirectorySafe } from "@/lib/integrations/careplus/enqueue";
 import {
-  linkStaffWithCareplusDirectory,
-  listBusinessStaffDirectory,
-  listCareplusStaffMappings,
-  upsertCareplusStaffMapping,
+  linkCustomersWithCareplusDirectory,
+  listBusinessCustomers,
+  listCareplusCustomerMappings,
+  upsertCareplusCustomerMapping,
 } from "@/lib/integrations/careplus/mapping";
 import { requireSuperAdmin } from "@/lib/onboarding/server";
 import { NextResponse } from "next/server";
@@ -25,32 +25,32 @@ export async function GET(
   }
 
   const { businessId } = await context.params;
-  const [bmsStaff, mappings] = await Promise.all([
-    listBusinessStaffDirectory(businessId),
-    listCareplusStaffMappings(businessId),
+  const [bmsCustomers, mappings] = await Promise.all([
+    listBusinessCustomers(businessId),
+    listCareplusCustomerMappings(businessId),
   ]);
   let careplus: Awaited<ReturnType<typeof fetchCareplusDirectory>> = [];
   let directoryError: string | undefined;
   try {
     careplus = await fetchCareplusDirectory({
       businessId,
-      view: "staff",
+      view: "participants",
     });
   } catch (error) {
     directoryError =
       error instanceof CareplusClientError || error instanceof Error
         ? error.message
-        : "Could not load CarePlus staff.";
+        : "Could not load CarePlus participants.";
   }
-  const staff = linkStaffWithCareplusDirectory({
-    staff: bmsStaff,
+  const customers = linkCustomersWithCareplusDirectory({
+    customers: bmsCustomers,
     careplus,
     mappings,
     includeUnlinked: Boolean(directoryError),
   });
   return NextResponse.json({
     ok: true,
-    staff,
+    customers,
     mappings,
     careplusCount: careplus.length,
     ...(directoryError ? { directoryError } : {}),
@@ -81,27 +81,27 @@ export async function PUT(
   }
 
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const bmsStaffUid =
-    typeof record.bmsStaffUid === "string" ? record.bmsStaffUid.trim() : "";
-  const careplusStaffId =
-    typeof record.careplusStaffId === "string"
-      ? record.careplusStaffId.trim()
+  const bmsCustomerId =
+    typeof record.bmsCustomerId === "string" ? record.bmsCustomerId.trim() : "";
+  const careplusParticipantId =
+    typeof record.careplusParticipantId === "string"
+      ? record.careplusParticipantId.trim()
       : "";
-  const bmsStaffName =
-    typeof record.bmsStaffName === "string" ? record.bmsStaffName.trim() : null;
+  const bmsCustomerName =
+    typeof record.bmsCustomerName === "string" ? record.bmsCustomerName.trim() : null;
 
   try {
-    const mapping = await upsertCareplusStaffMapping({
+    const mapping = await upsertCareplusCustomerMapping({
       businessId,
-      bmsStaffUid,
-      bmsStaffName,
-      careplusStaffId,
+      bmsCustomerId,
+      bmsCustomerName,
+      careplusParticipantId,
       actorUid: auth.uid,
     });
     await logAuditEvent({
       businessId,
       category: "integration",
-      action: "careplus.staff_mapped",
+      action: "careplus.customer_mapped",
       actor: {
         uid: auth.uid,
         role: "super_admin",
@@ -109,18 +109,18 @@ export async function PUT(
         email: auth.email ?? null,
       },
       source: "admin_panel",
-      summary: `CarePlus staff mapping saved for ${bmsStaffUid}`,
+      summary: `CarePlus participant mapping saved for ${bmsCustomerId}`,
       targetId: mapping.id,
-      metadata: { bmsStaffUid },
+      metadata: { bmsCustomerId },
     });
     await enqueueCareplusDirectorySafe({
       businessId,
-      eventType: "directory.staff",
-      recordId: bmsStaffUid,
+      eventType: "directory.participant",
+      recordId: bmsCustomerId,
       record: {
-        staffId: bmsStaffUid,
-        careplusStaffId,
-        name: bmsStaffName || "",
+        customerId: bmsCustomerId,
+        careplusParticipantId,
+        name: bmsCustomerName || "",
       },
     });
     return NextResponse.json({ ok: true, mapping });
@@ -131,7 +131,7 @@ export async function PUT(
         error:
           error instanceof Error
             ? error.message
-            : "Could not save staff mapping.",
+            : "Could not save customer mapping.",
       },
       { status: 400 },
     );

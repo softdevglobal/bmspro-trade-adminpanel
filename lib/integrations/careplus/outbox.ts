@@ -6,6 +6,7 @@ import {
   CareplusClientError,
   retryAfterSecondsFromError,
   sendCareplusJobCompleted,
+  sendCareplusRecord,
 } from "@/lib/integrations/careplus/client";
 import {
   CAREPLUS_BACKOFF_SECONDS,
@@ -15,8 +16,11 @@ import {
 } from "@/lib/integrations/careplus/constants";
 import { touchCareplusIntegration } from "@/lib/integrations/careplus/mapping";
 import type {
+  CareplusJobCompletedPayload,
   CareplusOutboxRecord,
   CareplusOutboxStatus,
+  CareplusReceipt,
+  CareplusReceiptCorrection,
 } from "@/lib/integrations/careplus/types";
 import {
   FieldValue,
@@ -47,10 +51,22 @@ export function mapOutboxDoc(
   ).includes(data.status)
     ? (data.status as CareplusOutboxStatus)
     : "pending";
+  const corrections = Array.isArray(data.corrections)
+    ? data.corrections.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Record<string, unknown>;
+        if (typeof row.message !== "string") return [];
+        const correction: CareplusReceiptCorrection = {
+          field: typeof row.field === "string" ? row.field : "record",
+          message: row.message,
+        };
+        return [correction];
+      })
+    : [];
   return {
     eventId,
     businessId: asString(data.businessId) ?? "",
-    eventType: "job.completed",
+    eventType: asString(data.eventType) ?? "job.completed",
     jobId: asString(data.jobId) ?? "",
     payloadHash: asString(data.payloadHash) ?? "",
     rawBody: asString(data.rawBody) ?? "",
@@ -59,6 +75,10 @@ export function mapOutboxDoc(
     nextAttemptAt: toMillis(data.nextAttemptAt),
     lastStatus: typeof data.lastStatus === "number" ? data.lastStatus : null,
     lastErrorCode: asString(data.lastErrorCode),
+    processingStatus: asString(data.processingStatus),
+    careplusRecordId: asString(data.careplusRecordId),
+    careplusResource: asString(data.careplusResource),
+    corrections,
     createdAt: toMillis(data.createdAt),
     sentAt: toMillis(data.sentAt),
   };
@@ -74,6 +94,48 @@ function nextBackoffMs(attempts: number): number {
 
 function shouldRetryStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
+}
+
+function receiptStillPending(receipt: CareplusReceipt | null): boolean {
+  return !receipt || receipt.status === "accepted" || receipt.status === "";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** CarePlus /records is not live; send visit completions to the events API. */
+function eventsBodyForVisit(claimed: CareplusOutboxRecord): string {
+  if (claimed.eventType === "job.completed") return claimed.rawBody;
+
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = asRecord(JSON.parse(claimed.rawBody));
+  } catch {
+    parsed = {};
+  }
+  const source = asRecord(parsed.source);
+  const record = asRecord(parsed.record);
+  const jobId =
+    claimed.jobId ||
+    asString(source.jobId) ||
+    asString(source.recordId) ||
+    "";
+  const payload: CareplusJobCompletedPayload = {
+    eventId: `bms-${jobId}-completed-v1`,
+    eventType: "job.completed",
+    businessId: claimed.businessId,
+    jobId,
+    title: asString(record.title) || `Completed job ${jobId}`,
+    occurredAt: asString(parsed.occurredAt) || new Date().toISOString(),
+  };
+  const customerId = asString(record.customerId) || asString(source.customerId);
+  const staffId = asString(record.staffId) || asString(source.staffId);
+  if (customerId) payload.customerId = customerId;
+  if (staffId) payload.staffId = staffId;
+  return JSON.stringify(payload);
 }
 
 export async function listCareplusOutbox(
@@ -95,6 +157,7 @@ export async function listCareplusOutbox(
 export async function processCareplusOutbox(options?: {
   businessId?: string;
   limit?: number;
+  ignoreBackoff?: boolean;
 }): Promise<{ scanned: number; sent: number; failed: number; retried: number }> {
   const snap = await adminDb
     .collection(CAREPLUS_OUTBOX_COLLECTION)
@@ -111,6 +174,7 @@ export async function processCareplusOutbox(options?: {
     ) {
       return false;
     }
+    if (options?.ignoreBackoff) return true;
     const nextAttemptAt = toMillis(data.nextAttemptAt);
     return nextAttemptAt == null || nextAttemptAt <= now;
   });
@@ -120,20 +184,33 @@ export async function processCareplusOutbox(options?: {
   let retried = 0;
 
   for (const doc of due.slice(0, options?.limit ?? due.length)) {
-    const claimed = await claimOutboxEvent(doc.id);
+    const claimed = await claimOutboxEvent(doc.id, options?.ignoreBackoff);
     if (!claimed) continue;
 
     const started = Date.now();
     try {
-      const result = await sendCareplusJobCompleted({
-        businessId: claimed.businessId,
-        rawBody: claimed.rawBody,
-      });
-      await markOutboxSent(claimed.eventId, result.status);
+      const result =
+        claimed.eventType === "job.completed"
+          ? await sendCareplusJobCompleted({
+              businessId: claimed.businessId,
+              rawBody: eventsBodyForVisit(claimed),
+            })
+          : await sendCareplusRecord({
+              businessId: claimed.businessId,
+              rawBody: claimed.rawBody,
+            });
+      if (receiptStillPending(result.receipt)) {
+        throw new CareplusClientError(
+          503,
+          "processing_incomplete",
+          "CarePlus accepted the event but has not finished creating the record.",
+        );
+      }
+      await markOutboxSent(claimed.eventId, result.status, result.receipt);
       await touchCareplusIntegration(claimed.businessId, {
-        lastEventStatus: String(result.status),
+        lastEventStatus: result.receipt?.status || String(result.status),
         lastEventAt: FieldValue.serverTimestamp(),
-        lastErrorCode: null,
+        lastErrorCode: result.receipt?.corrections[0]?.message ?? null,
       });
       await logAuditEvent({
         businessId: claimed.businessId,
@@ -141,13 +218,15 @@ export async function processCareplusOutbox(options?: {
         action: "careplus.event_sent",
         actor: { uid: null, role: "system", name: "CarePlus outbox", email: null },
         source: "system",
-        summary: `CarePlus job.completed sent for ${claimed.jobId}`,
+        summary: `CarePlus ${claimed.eventType} sent for ${claimed.jobId}`,
         targetId: claimed.eventId,
         targetLabel: claimed.jobId,
         metadata: {
           eventId: claimed.eventId,
           jobId: claimed.jobId,
+          eventType: claimed.eventType,
           httpStatus: result.status,
+          processingStatus: result.receipt?.status ?? null,
           durationMs: Date.now() - started,
         },
       });
@@ -183,8 +262,8 @@ export async function processCareplusOutbox(options?: {
         actor: { uid: null, role: "system", name: "CarePlus outbox", email: null },
         source: "system",
         summary: willRetry
-          ? `CarePlus job.completed will retry for ${claimed.jobId}`
-          : `CarePlus job.completed failed for ${claimed.jobId}`,
+          ? `CarePlus ${claimed.eventType} will retry for ${claimed.jobId}`
+          : `CarePlus ${claimed.eventType} failed for ${claimed.jobId}`,
         targetId: claimed.eventId,
         targetLabel: claimed.jobId,
         metadata: {
@@ -205,6 +284,7 @@ export async function processCareplusOutbox(options?: {
 
 async function claimOutboxEvent(
   eventId: string,
+  ignoreBackoff = false,
 ): Promise<CareplusOutboxRecord | null> {
   const ref = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId);
   return adminDb.runTransaction(async (tx) => {
@@ -214,7 +294,11 @@ async function claimOutboxEvent(
     if (current.status !== "pending" && current.status !== "retry") {
       return null;
     }
-    if (current.nextAttemptAt && current.nextAttemptAt > Date.now()) {
+    if (
+      !ignoreBackoff &&
+      current.nextAttemptAt &&
+      current.nextAttemptAt > Date.now()
+    ) {
       return null;
     }
     tx.update(ref, {
@@ -225,11 +309,19 @@ async function claimOutboxEvent(
   });
 }
 
-async function markOutboxSent(eventId: string, httpStatus: number): Promise<void> {
+async function markOutboxSent(
+  eventId: string,
+  httpStatus: number,
+  receipt: CareplusReceipt | null,
+): Promise<void> {
   await adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId).update({
     status: "sent",
     lastStatus: httpStatus,
-    lastErrorCode: null,
+    lastErrorCode: receipt?.corrections[0]?.message ?? null,
+    processingStatus: receipt?.status ?? "processed",
+    careplusRecordId: receipt?.careplusRecordId ?? null,
+    careplusResource: receipt?.careplusResource ?? null,
+    corrections: receipt?.corrections ?? [],
     sentAt: FieldValue.serverTimestamp(),
     nextAttemptAt: null,
   });
@@ -255,4 +347,28 @@ async function markOutboxAttempt(input: {
       ? Timestamp.fromMillis(Date.now() + delayMs)
       : null,
   });
+}
+
+export async function retryCareplusOutboxEvent(eventId: string): Promise<CareplusOutboxRecord> {
+  const ref = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId.trim());
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("Outbox event not found.");
+  const current = mapOutboxDoc(snap.id, snap.data() ?? {});
+  if (
+    current.status !== "failed" &&
+    current.status !== "retry" &&
+    current.status !== "pending" &&
+    current.status !== "sent" &&
+    current.processingStatus !== "correction_required" &&
+    current.processingStatus !== "accepted"
+  ) {
+    throw new Error("Only failed, waiting, corrected, incomplete, or delivered events can be queued again.");
+  }
+  await ref.update({
+    status: "pending",
+    nextAttemptAt: Timestamp.fromMillis(Date.now()),
+    lastErrorCode: null,
+  });
+  const saved = await ref.get();
+  return mapOutboxDoc(saved.id, saved.data() ?? {});
 }
