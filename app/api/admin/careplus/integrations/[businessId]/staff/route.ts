@@ -1,5 +1,5 @@
 import { enqueueCareplusDirectorySafe } from "@/lib/integrations/careplus/enqueue";
-import { CareplusClientError, fetchCareplusDirectory } from "@/lib/integrations/careplus/client";
+import { fetchCareplusDirectorySafe } from "@/lib/integrations/careplus/client";
 import { logAuditEvent } from "@/lib/audit/server";
 import {
   linkStaffWithCareplusDirectory,
@@ -29,19 +29,12 @@ export async function GET(
     listBusinessStaffDirectory(businessId),
     listCareplusStaffMappings(businessId),
   ]);
-  let careplus: Awaited<ReturnType<typeof fetchCareplusDirectory>> = [];
-  let directoryError: string | undefined;
-  try {
-    careplus = await fetchCareplusDirectory({
-      businessId,
-      view: "staff",
-    });
-  } catch (error) {
-    directoryError =
-      error instanceof CareplusClientError || error instanceof Error
-        ? error.message
-        : "Could not load CarePlus staff.";
-  }
+  const directory = await fetchCareplusDirectorySafe(
+    { businessId, view: "staff" },
+    "Could not load CarePlus staff.",
+  );
+  const careplus = directory.people;
+  const directoryError = directory.error;
   const staff = linkStaffWithCareplusDirectory({
     staff: bmsStaff,
     careplus,
@@ -113,6 +106,10 @@ export async function PUT(
       targetId: mapping.id,
       metadata: { bmsStaffUid },
     });
+    const directory = await listBusinessStaffDirectory(businessId);
+    const person = directory.find((row) => row.uid === bmsStaffUid);
+    const inactive =
+      record.status === "inactive" || person?.isActive === false;
     await enqueueCareplusDirectorySafe({
       businessId,
       eventType: "directory.staff",
@@ -120,7 +117,11 @@ export async function PUT(
       record: {
         staffId: bmsStaffUid,
         careplusStaffId,
-        name: bmsStaffName || "",
+        name: bmsStaffName || person?.fullName || "",
+        status: inactive ? "inactive" : "active",
+        ...(typeof record.deactivatedReason === "string"
+          ? { deactivatedReason: record.deactivatedReason }
+          : {}),
       },
     });
     return NextResponse.json({ ok: true, mapping });

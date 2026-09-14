@@ -690,3 +690,67 @@ export async function uploadInvoicePdf(
     return { ok: false, error: "Could not upload PDF." };
   }
 }
+
+const CAREPLUS_EVIDENCE_MAX_BYTES = 3 * 1024 * 1024;
+const CAREPLUS_EVIDENCE_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+/** Uploads CarePlus evidence and returns a public URL plus file hash. */
+export async function uploadCareplusEvidenceFile(
+  file: Buffer,
+  contentType: string,
+  options: { businessId: string; filename?: string },
+): Promise<
+  | { ok: true; fileUrl: string; sha256: string; byteSize: number; filename: string }
+  | { ok: false; error: string }
+> {
+  const { createHash } = await import("node:crypto");
+  const type = contentType.trim().toLowerCase();
+  if (!CAREPLUS_EVIDENCE_TYPES.has(type)) {
+    return { ok: false, error: "Use a PDF, JPEG, PNG, or WebP file." };
+  }
+  if (file.length < 1 || file.length > CAREPLUS_EVIDENCE_MAX_BYTES) {
+    return { ok: false, error: "Evidence files must be 3 MB or smaller." };
+  }
+
+  let bucketName: string;
+  try {
+    bucketName = getStorageBucketName();
+  } catch {
+    return { ok: false, error: "Storage bucket is not configured." };
+  }
+
+  const ext =
+    type === "application/pdf"
+      ? "pdf"
+      : type.split("/")[1]?.replace("jpeg", "jpg") || "bin";
+  const filename =
+    options.filename?.trim().replace(/[^\w.\-]+/g, "_").slice(0, 150) ||
+    `evidence.${ext}`;
+  const path = `careplus-evidence/${options.businessId}/${Date.now()}-${randomUUID()}.${ext}`;
+  const token = randomUUID();
+
+  try {
+    await getStorage().bucket(bucketName).file(path).save(file, {
+      metadata: {
+        contentType: type,
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+    const fileUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+    return {
+      ok: true,
+      fileUrl,
+      sha256: createHash("sha256").update(file).digest("hex"),
+      byteSize: file.length,
+      filename,
+    };
+  } catch (error) {
+    console.error("uploadCareplusEvidenceFile failed:", error);
+    return { ok: false, error: "Could not upload evidence." };
+  }
+}

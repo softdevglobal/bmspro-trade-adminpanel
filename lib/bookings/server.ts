@@ -30,7 +30,7 @@ import {
 } from "@/lib/reference-codes.server";
 import { getRequestDocumentRef } from "@/lib/inspection/request-document";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
-import { enqueueCareplusJobCompletedSafe } from "@/lib/integrations/careplus/enqueue";
+import { enqueueCareplusActivitySafe, enqueueCareplusJobCompletedSafe } from "@/lib/integrations/careplus/enqueue";
 import {
   QUOTATION_COLLECTION,
   serializeLineItemsForFirestore,
@@ -309,6 +309,7 @@ export async function createBookingFromInspection(
   } catch (error) {
     console.error("[booking] staff assignment push failed:", error);
   }
+  await enqueueCareplusActivitySafe(booking, "activity.scheduled");
 
   return {
     ok: true,
@@ -406,9 +407,17 @@ export async function assignBusinessBooking(
   });
 
   const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  await enqueueCareplusActivitySafe(
+    {
+      ...booking,
+      amendmentReason: `Assigned to ${assignment.name || assignment.uid}.`,
+    },
+    "activity.amended",
+  );
   return {
     ok: true,
-    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+    booking,
   };
 }
 
@@ -426,6 +435,7 @@ export async function updateBusinessBookingSchedule(
     startTime: string;
     endTime: string;
     notifyCustomer?: boolean;
+    skipCareplus?: boolean;
   },
 ): Promise<
   | { ok: true; booking: BookingDetail }
@@ -490,6 +500,15 @@ export async function updateBusinessBookingSchedule(
   if (input.notifyCustomer !== false) {
     const summary = await loadBusinessSummary(businessId);
     await notifyCustomerOfJobRescheduled(booking, summary);
+  }
+  if (!input.skipCareplus) {
+    await enqueueCareplusActivitySafe(
+      {
+        ...booking,
+        amendmentReason: `Rescheduled to ${input.slot.date} ${input.startTime}–${input.endTime}.`,
+      },
+      "activity.scheduled",
+    );
   }
 
   return {
@@ -979,6 +998,13 @@ export async function completeBusinessBooking(
   if (current.status === "completed") {
     return { ok: true, booking: current };
   }
+  if (current.status === "missed" || current.status === "cancelled") {
+    return {
+      ok: false,
+      status: 400,
+      error: "This job can no longer be completed.",
+    };
+  }
 
   const canComplete =
     current.status === "ongoing" ||
@@ -1452,6 +1478,7 @@ export async function createDirectJob(
       console.error("[direct-job] staff assignment push failed:", error);
     }
   }
+  await enqueueCareplusActivitySafe(booking, "activity.scheduled");
 
   if (audit) {
     await logAuditEvent({
@@ -1520,6 +1547,7 @@ export function isSeriesScheduleLocked(booking: BookingDetail): boolean {
   return (
     booking.status === "completed" ||
     booking.status === "cancelled" ||
+    booking.status === "missed" ||
     booking.status === "ongoing"
   );
 }
@@ -1816,11 +1844,14 @@ export async function cancelBusinessBooking(
   if (current.status === "cancelled") {
     return { ok: true, booking: current };
   }
-  if (current.status === "completed") {
+  if (current.status === "completed" || current.status === "missed") {
     return {
       ok: false,
       status: 400,
-      error: "Completed jobs cannot be cancelled.",
+      error:
+        current.status === "missed"
+          ? "Missed jobs cannot be cancelled."
+          : "Completed jobs cannot be cancelled.",
     };
   }
 
@@ -1847,10 +1878,89 @@ export async function cancelBusinessBooking(
   }
 
   const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  await enqueueCareplusActivitySafe(booking, "activity.cancelled");
   return {
     ok: true,
-    booking: mapBookingDoc(updated.id, updated.data() ?? {}),
+    booking,
   };
+}
+
+export async function markBusinessBookingMissed(
+  businessId: string,
+  bookingId: string,
+  input: { reason: string; followUp?: string },
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const id = bookingId.trim();
+  const reason = input.reason.trim();
+  if (!id) {
+    return { ok: false, status: 400, error: "Job is required." };
+  }
+  if (reason.length < 3) {
+    return { ok: false, status: 400, error: "Enter a missed-visit reason." };
+  }
+
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+
+  const current = mapBookingDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Job not found." };
+  }
+  if (current.status === "missed") {
+    return { ok: true, booking: current };
+  }
+  if (
+    current.status === "completed" ||
+    current.status === "cancelled"
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Only active jobs can be marked missed.",
+    };
+  }
+
+  const followUp = input.followUp?.trim() || "";
+  await ref.update({
+    status: "missed",
+    missedReason: reason,
+    missedFollowUp: followUp || null,
+    missedAt: FieldValue.serverTimestamp(),
+    missedFromStatus: current.status,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  if (current.inspectionRequestId) {
+    await Promise.all([
+      mirrorBookingToQuotations(current.inspectionRequestId, {
+        bookingStatus: "missed",
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+      mirrorBookingStatusToInspection(current.inspectionRequestId, "missed", {
+        bookingId: current.id,
+        bookingCode: current.bookingCode,
+      }),
+    ]);
+  }
+
+  const updated = await ref.get();
+  const booking = mapBookingDoc(updated.id, updated.data() ?? {});
+  await enqueueCareplusActivitySafe(
+    {
+      ...booking,
+      missedReason: reason,
+    },
+    "activity.missed",
+  );
+  return { ok: true, booking };
 }
 
 const RESTORABLE_BOOKING_STATUSES: BookingStatus[] = [

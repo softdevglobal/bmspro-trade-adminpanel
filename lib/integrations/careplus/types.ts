@@ -8,6 +8,7 @@ export type CareplusIntegrationStatus =
 export const CAREPLUS_OUTBOX_STATUSES = [
   "pending",
   "retry",
+  "awaiting_receipt",
   "sent",
   "failed",
 ] as const;
@@ -21,10 +22,14 @@ export const CAREPLUS_EVENT_TYPES = [
   "activity.completed",
   "activity.amended",
   "activity.cancelled",
+  "activity.missed",
+  "staff.credential.submitted",
   "incident.captured",
   "incident.amended",
   "complaint.captured",
   "complaint.amended",
+  "risk.captured",
+  "risk.amended",
   "action.captured",
   "evidence.attached",
 ] as const;
@@ -90,6 +95,13 @@ export type CareplusLinkedCustomerRow = {
   careplusParticipantId: string;
 };
 
+export type CareplusOperationsCustomer = {
+  uid: string;
+  fullName: string;
+  email: string | null;
+  mapped: boolean;
+};
+
 export type CareplusCustomerMappingRecord = {
   id: string;
   businessId: string;
@@ -114,6 +126,13 @@ export type CareplusReceipt = {
   careplusResource: string;
   errors: string[];
   corrections: CareplusReceiptCorrection[];
+  sourceRecordId?: string;
+  sourceRevision?: number;
+  receivedAt?: string;
+  processedAt?: string;
+  mappedCarePlusRecordIds?: string[];
+  errorCode?: string;
+  actionMessage?: string;
 };
 
 export type CareplusJobCompletedPayload = {
@@ -178,7 +197,7 @@ export type CareplusEnqueueInput = {
   customRequest: { title: string; description?: string } | null;
   customerId: string | null;
   assignedTo: { uid: string } | null;
-  scheduledSlot?: { date: string; startTime?: string | null } | null;
+  scheduledSlot?: { date: string; startTime?: string | null; endTime?: string | null } | null;
   scheduledStartTime?: string | null;
   scheduledEndTime?: string | null;
   estimatedDurationMinutes?: number | null;
@@ -186,4 +205,10 @@ export type CareplusEnqueueInput = {
   visitEndedAt?: number | null;
   ownerNote?: string | null;
   jobInstructionsDescription?: string | null;
+  seriesId?: string | null;
+  timezone?: string | null;
+  careplusSourceRevision?: number | null;
+  careplusScheduled?: boolean;
+  amendmentReason?: string | null;
+  missedReason?: string | null;
 };

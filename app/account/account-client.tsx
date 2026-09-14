@@ -149,6 +149,7 @@ const JOB_STATUS_TONE: Record<BookingStatus, string> = {
   ongoing: "border-amber-200 bg-amber-50 text-amber-800",
   cancelled: "border-stone-200 bg-stone-100 text-stone-600",
   completed: "border-sky-200 bg-sky-50 text-sky-800",
+  missed: "border-rose-200 bg-rose-50 text-rose-800",
 };
 
 type CustomerJobDisplayStatus = BookingStatus | "pending_payment";
@@ -169,6 +170,7 @@ const CUSTOMER_JOB_STATUS_ICON: Record<CustomerJobDisplayStatus, string> = {
   ongoing: "engineering",
   cancelled: "cancel",
   completed: "check_circle",
+  missed: "event_busy",
   pending_payment: "pending_actions",
 };
 

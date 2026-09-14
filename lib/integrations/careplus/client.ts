@@ -249,6 +249,26 @@ export async function fetchCareplusDirectory(input: {
   return parseDirectoryPeople(body);
 }
 
+export async function fetchCareplusDirectorySafe(
+  input: {
+    businessId: string;
+    view: "staff" | "participants";
+  },
+  fallbackError: string,
+): Promise<{ people: CareplusDirectoryPerson[]; error?: string }> {
+  try {
+    return { people: await fetchCareplusDirectory(input) };
+  } catch (error) {
+    return {
+      people: [],
+      error:
+        error instanceof CareplusClientError || error instanceof Error
+          ? error.message
+          : fallbackError,
+    };
+  }
+}
+
 function parseReceipt(body: unknown): CareplusReceipt | null {
   if (!body || typeof body !== "object") return null;
   const root = body as Record<string, unknown>;
@@ -280,6 +300,20 @@ function parseReceipt(body: unknown): CareplusReceipt | null {
       ? receipt.errors.filter((item): item is string => typeof item === "string")
       : [],
     corrections,
+    sourceRecordId:
+      typeof receipt.sourceRecordId === "string" ? receipt.sourceRecordId : "",
+    sourceRevision:
+      typeof receipt.sourceRevision === "number" ? receipt.sourceRevision : 0,
+    receivedAt: typeof receipt.receivedAt === "string" ? receipt.receivedAt : "",
+    processedAt: typeof receipt.processedAt === "string" ? receipt.processedAt : "",
+    mappedCarePlusRecordIds: Array.isArray(receipt.mappedCarePlusRecordIds)
+      ? receipt.mappedCarePlusRecordIds.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [],
+    errorCode: typeof receipt.errorCode === "string" ? receipt.errorCode : "",
+    actionMessage:
+      typeof receipt.actionMessage === "string" ? receipt.actionMessage : "",
   };
 }
 

@@ -439,7 +439,11 @@ export function EditJobPage({ jobId }: { jobId: string }) {
         throw new Error(data.error ?? "Could not load job.");
       }
       const job = data.booking;
-      if (job.status === "cancelled" || job.status === "completed") {
+      if (
+        job.status === "cancelled" ||
+        job.status === "completed" ||
+        job.status === "missed"
+      ) {
         throw new Error("Only active jobs can be edited.");
       }
       setBooking(job);

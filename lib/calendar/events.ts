@@ -82,7 +82,9 @@ export function calendarEventSummary(event: CalendarEvent): string {
         ? "Completed job"
         : booking?.status === "cancelled"
           ? "Cancelled job"
-          : "Confirmed job",
+          : booking?.status === "missed"
+            ? "Missed job"
+            : "Confirmed job",
     );
     const name = booking?.customer.fullName?.trim();
     if (name) parts.push(name);
@@ -272,6 +274,7 @@ export const BOOKING_CALENDAR_STATUS_TONE: Record<
   ongoing: "bg-amber-50 text-amber-800 border border-amber-200",
   cancelled: "bg-stone-100 text-stone-600 border border-stone-200",
   completed: "bg-sky-50 text-sky-700 border border-sky-200",
+  missed: "bg-rose-50 text-rose-800 border border-rose-200",
 };
 
 export type CalendarCardView = {
