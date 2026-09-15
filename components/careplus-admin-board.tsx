@@ -3,6 +3,7 @@
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import type {
+  CareplusCustomerMappingRecord,
   CareplusIntegrationRecord,
   CareplusLearningView,
   CareplusOutboxRecord,
@@ -18,6 +19,14 @@ type StaffRow = {
   fullName: string | null;
   email: string | null;
   role: string;
+  careplusStaffId?: string;
+};
+
+type CustomerRow = {
+  uid: string;
+  fullName: string | null;
+  email: string | null;
+  careplusParticipantId?: string;
 };
 
 const INPUT_CLASS =
@@ -27,7 +36,7 @@ function statusBadge(status: string): string {
   if (status === "active" || status === "sent") {
     return "bg-emerald-50 text-emerald-800 border-emerald-200";
   }
-  if (status === "pending" || status === "retry") {
+  if (status === "pending" || status === "retry" || status === "correction_required") {
     return "bg-amber-50 text-amber-800 border-amber-200";
   }
   return "bg-stone-100 text-stone-600 border-stone-200";
@@ -83,9 +92,27 @@ export function CareplusAdminBoard() {
   const [selectedBusinessId, setSelectedBusinessId] = useState("");
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [mappings, setMappings] = useState<CareplusStaffMappingRecord[]>([]);
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [customerMappings, setCustomerMappings] = useState<
+    CareplusCustomerMappingRecord[]
+  >([]);
+  const [customerId, setCustomerId] = useState("");
+  const [careplusParticipantId, setCareplusParticipantId] = useState("");
+  const [customerSaving, setCustomerSaving] = useState(false);
   const [staffUid, setStaffUid] = useState("");
   const [careplusStaffId, setCareplusStaffId] = useState("");
+  const [staffSelectValue, setStaffSelectValue] = useState("");
+  const [customerSelectValue, setCustomerSelectValue] = useState("");
   const [staffSaving, setStaffSaving] = useState(false);
+  const [peopleLoading, setPeopleLoading] = useState(false);
+  const [staffDirectoryError, setStaffDirectoryError] = useState<string | null>(
+    null,
+  );
+  const [customerDirectoryError, setCustomerDirectoryError] = useState<
+    string | null
+  >(null);
+  const [staffCareplusCount, setStaffCareplusCount] = useState(0);
+  const [customerCareplusCount, setCustomerCareplusCount] = useState(0);
 
   const [learningView, setLearningView] =
     useState<CareplusLearningView>("catalogue");
@@ -95,6 +122,8 @@ export function CareplusAdminBoard() {
   const [learningLoading, setLearningLoading] = useState(false);
 
   const [processing, setProcessing] = useState(false);
+  const [deliveryMessage, setDeliveryMessage] = useState<string | null>(null);
+  const [deliveryError, setDeliveryError] = useState<string | null>(null);
 
   const authHeaders = useCallback(async () => {
     if (!user) throw new Error("Please sign in again.");
@@ -189,7 +218,7 @@ export function CareplusAdminBoard() {
       }
       setFormOk(
         data.integration?.secretConfigured
-          ? "Mapping saved. Job completions will queue for CarePlus."
+          ? "Mapping saved. Completed jobs, directory links and captured records will queue for CarePlus."
           : "Mapping saved, but no server secret is configured for this business yet.",
       );
       setProviderId("");
@@ -226,20 +255,64 @@ export function CareplusAdminBoard() {
       if (!id) {
         setStaff([]);
         setMappings([]);
+        setCustomers([]);
+        setCustomerMappings([]);
+        setStaffDirectoryError(null);
+        setCustomerDirectoryError(null);
+        setStaffCareplusCount(0);
+        setCustomerCareplusCount(0);
+        setStaffUid("");
+        setCareplusStaffId("");
+        setStaffSelectValue("");
+        setCustomerId("");
+        setCareplusParticipantId("");
+        setCustomerSelectValue("");
         return;
       }
-      const headers = await authHeaders();
-      const response = await fetch(
-        `/api/admin/careplus/integrations/${encodeURIComponent(id)}/staff`,
-        { headers, cache: "no-store" },
-      );
-      const data = await readJsonResponse<{
-        ok?: boolean;
-        staff?: StaffRow[];
-        mappings?: CareplusStaffMappingRecord[];
-      }>(response);
-      setStaff(data.staff ?? []);
-      setMappings(data.mappings ?? []);
+      setPeopleLoading(true);
+      try {
+        const headers = await authHeaders();
+        const [staffRes, customerRes] = await Promise.all([
+          fetch(
+            `/api/admin/careplus/integrations/${encodeURIComponent(id)}/staff`,
+            { headers, cache: "no-store" },
+          ),
+          fetch(
+            `/api/admin/careplus/integrations/${encodeURIComponent(id)}/customers`,
+            { headers, cache: "no-store" },
+          ),
+        ]);
+        const data = await readJsonResponse<{
+          ok?: boolean;
+          staff?: StaffRow[];
+          mappings?: CareplusStaffMappingRecord[];
+          directoryError?: string;
+          careplusCount?: number;
+        }>(staffRes);
+        const customerData = await readJsonResponse<{
+          ok?: boolean;
+          customers?: CustomerRow[];
+          mappings?: CareplusCustomerMappingRecord[];
+          directoryError?: string;
+          careplusCount?: number;
+        }>(customerRes);
+        setStaff(data.staff ?? []);
+        setMappings(data.mappings ?? []);
+        setCustomers(customerData.customers ?? []);
+        setCustomerMappings(customerData.mappings ?? []);
+        setStaffDirectoryError(data.directoryError ?? null);
+        setCustomerDirectoryError(customerData.directoryError ?? null);
+        setStaffCareplusCount(data.careplusCount ?? 0);
+        setCustomerCareplusCount(customerData.careplusCount ?? 0);
+        setStaffUid("");
+        setCareplusStaffId("");
+        setStaffSelectValue("");
+        setCustomerId("");
+        setCareplusParticipantId("");
+        setCustomerSelectValue("");
+      } finally {
+        setPeopleLoading(false);
+      }
     },
     [authHeaders],
   );
@@ -278,6 +351,41 @@ export function CareplusAdminBoard() {
       setFormError(err instanceof Error ? err.message : "Staff mapping failed.");
     } finally {
       setStaffSaving(false);
+    }
+  }
+
+  async function saveCustomerMapping() {
+    if (!selectedBusinessId) return;
+    setCustomerSaving(true);
+    try {
+      const headers = await authHeaders();
+      const chosen = customers.find((row) => row.uid === customerId);
+      const response = await fetch(
+        `/api/admin/careplus/integrations/${encodeURIComponent(selectedBusinessId)}/customers`,
+        {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bmsCustomerId: customerId,
+            bmsCustomerName: chosen?.fullName ?? null,
+            careplusParticipantId,
+          }),
+        },
+      );
+      const data = await readJsonResponse<{ ok?: boolean; error?: string }>(
+        response,
+      );
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not save customer mapping.");
+      }
+      setCareplusParticipantId("");
+      await loadStaff(selectedBusinessId);
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : "Customer mapping failed.",
+      );
+    } finally {
+      setCustomerSaving(false);
     }
   }
 
@@ -324,19 +432,87 @@ export function CareplusAdminBoard() {
 
   async function processOutbox() {
     setProcessing(true);
+    setDeliveryMessage(null);
+    setDeliveryError(null);
     try {
       const headers = await authHeaders();
-      await fetch("/api/admin/careplus/outbox", {
+      const response = await fetch("/api/admin/careplus/outbox", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          businessId: selectedBusinessId || undefined,
-        }),
+        body: JSON.stringify({}),
       });
+      const data = await readJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        scanned?: number;
+        sent?: number;
+        failed?: number;
+        retried?: number;
+      }>(response);
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not process the outbox.");
+      }
+      const sent = data.sent ?? 0;
+      const failed = data.failed ?? 0;
+      const retried = data.retried ?? 0;
+      const scanned = data.scanned ?? 0;
+      if (scanned === 0) {
+        setDeliveryMessage("No pending or retry events are in the outbox.");
+      } else if (failed > 0 || retried > 0) {
+        setDeliveryError(
+          `Processed ${scanned}: ${sent} sent, ${retried} will retry, ${failed} failed. Check the row status — CarePlus may have rejected the event.`,
+        );
+      } else {
+        setDeliveryMessage(
+          `Sent ${sent} event${sent === 1 ? "" : "s"} to CarePlus.`,
+        );
+      }
       await load();
+    } catch (err) {
+      setDeliveryError(
+        err instanceof Error ? err.message : "Could not process the outbox.",
+      );
     } finally {
       setProcessing(false);
     }
+  }
+
+  async function retryEvent(eventId: string) {
+    setDeliveryMessage(null);
+    setDeliveryError(null);
+    const headers = await authHeaders();
+    const response = await fetch("/api/admin/careplus/outbox", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "retry", eventId }),
+    });
+    const data = await readJsonResponse<{
+      ok?: boolean;
+      error?: string;
+      scanned?: number;
+      sent?: number;
+      failed?: number;
+      retried?: number;
+    }>(response);
+    if (!response.ok || !data.ok) {
+      setDeliveryError(data.error ?? "Could not retry that event.");
+      return;
+    }
+    const sent = data.sent ?? 0;
+    const failed = data.failed ?? 0;
+    const retried = data.retried ?? 0;
+    if (failed > 0 || retried > 0) {
+      setDeliveryError(
+        `Retry sent ${sent}, ${retried} will retry, ${failed} failed. CarePlus is still returning an error — check the CarePlus server log.`,
+      );
+    } else if (sent > 0) {
+      setDeliveryMessage(
+        `Sent ${sent} event${sent === 1 ? "" : "s"} to CarePlus.`,
+      );
+    } else {
+      setDeliveryMessage("Event queued again.");
+    }
+    await load();
   }
 
   const rows = learningRows(learningBody);
@@ -354,9 +530,10 @@ export function CareplusAdminBoard() {
   return (
     <div className="space-y-5">
       <p className="max-w-3xl font-body text-[14px] text-on-surface-variant">
-        Super Admin only. This does not copy inspections or invoices to CarePlus.
-        Connected tenants send a small <code>job.completed</code> event after a
-        job is saved here, and can read staff training metadata.
+        Super Admin only. Map a tenant, link staff and customers, then CarePlus
+        receives visits, incidents, complaints and actions. Training stays in
+        CarePlus. Regulatory notifications are recorded there, not submitted by
+        BMS.
       </p>
 
       {error ? (
@@ -395,8 +572,9 @@ export function CareplusAdminBoard() {
               Map a tenant
             </h2>
             <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-              Use the exact BMS business ID already verified in CarePlus. Keep
-              the 64-character secret in server env, not here.
+              Use the exact BMS business ID already verified in CarePlus. With
+              BMS_CAREPLUS_MASTER_SECRET set, every tenant can sign. Keep that
+              master on the server, not here.
             </p>
             <div className="mt-4 space-y-3">
               <label className="block font-body text-[12px] text-on-surface-variant">
@@ -504,14 +682,16 @@ export function CareplusAdminBoard() {
                 Staff mapping
               </h3>
               <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                IDs are not interchangeable. Map a BMS staff member to a CarePlus
-                staff ID only after review.
+                Select a mapped tenant to load staff already added in CarePlus.
+                Choosing a person fills their CarePlus staff ID.
               </p>
               <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <select
                   className={INPUT_CLASS}
                   value={selectedBusinessId}
-                  onChange={(event) => setSelectedBusinessId(event.target.value)}
+                  onChange={(event) =>
+                    setSelectedBusinessId(event.target.value)
+                  }
                 >
                   <option value="">Mapped tenant</option>
                   {activeIntegrations.map((row) => (
@@ -522,23 +702,64 @@ export function CareplusAdminBoard() {
                 </select>
                 <select
                   className={INPUT_CLASS}
-                  value={staffUid}
-                  onChange={(event) => setStaffUid(event.target.value)}
+                  value={staffSelectValue}
+                  disabled={!selectedBusinessId || peopleLoading}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const chosen = staff.find(
+                      (row) =>
+                        row.uid === value || row.careplusStaffId === value,
+                    );
+                    setStaffSelectValue(value);
+                    setStaffUid(chosen?.uid ?? "");
+                    setCareplusStaffId(chosen?.careplusStaffId ?? "");
+                  }}
                 >
-                  <option value="">BMS staff</option>
+                  <option value="">
+                    {peopleLoading
+                      ? "Loading CarePlus staff…"
+                      : "CarePlus staff"}
+                  </option>
                   {staff.map((row) => (
-                    <option key={row.uid} value={row.uid}>
-                      {row.fullName || row.email || row.uid}
+                    <option
+                      key={row.uid || row.careplusStaffId}
+                      value={row.uid || row.careplusStaffId}
+                    >
+                      {row.fullName || row.email || row.uid || row.careplusStaffId}
                     </option>
                   ))}
                 </select>
                 <input
                   className={INPUT_CLASS}
                   value={careplusStaffId}
+                  readOnly={!staffDirectoryError}
                   onChange={(event) => setCareplusStaffId(event.target.value)}
                   placeholder="CarePlus staff ID"
                 />
               </div>
+              {staffDirectoryError ? (
+                <p className="mt-2 font-body text-[12px] text-error">
+                  {staffDirectoryError} Staff from BMS are shown so you can type
+                  the CarePlus ID if needed.
+                </p>
+              ) : null}
+              {selectedBusinessId &&
+              !peopleLoading &&
+              !staffDirectoryError &&
+              staff.length === 0 ? (
+                <p className="mt-2 font-body text-[12px] text-on-surface-variant">
+                  {staffCareplusCount > 0
+                    ? "CarePlus has staff for this provider, but none match a BMS staff member by ID, email, or name."
+                    : "No staff have been added in CarePlus for this tenant yet."}
+                </p>
+              ) : null}
+              {careplusStaffId && !staffUid ? (
+                <p className="mt-2 font-body text-[12px] text-amber-800">
+                  This CarePlus staff member is not linked to a BMS user yet, so
+                  the mapping cannot be saved. Import them from Trade in
+                  CarePlus, or match their email or name to BMS staff.
+                </p>
+              ) : null}
               <button
                 type="button"
                 disabled={staffSaving || !selectedBusinessId || !staffUid || !careplusStaffId}
@@ -553,6 +774,123 @@ export function CareplusAdminBoard() {
                     <li key={row.id} className="text-on-surface-variant">
                       {row.bmsStaffName || row.bmsStaffUid} → {row.careplusStaffId}{" "}
                       ({row.status})
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-outline-variant/70 bg-surface-container-lowest p-5 shadow-sm">
+              <h3 className="font-headline text-[15px] text-on-surface">
+                Customer mapping
+              </h3>
+              <p className="mt-1 font-body text-[12px] text-on-surface-variant">
+                Select a mapped tenant to load participants already added in
+                CarePlus. Choosing a customer fills their CarePlus participant
+                ID.
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <select
+                  className={INPUT_CLASS}
+                  value={selectedBusinessId}
+                  onChange={(event) =>
+                    setSelectedBusinessId(event.target.value)
+                  }
+                >
+                  <option value="">Mapped tenant</option>
+                  {activeIntegrations.map((row) => (
+                    <option key={row.businessId} value={row.businessId}>
+                      {row.businessName || tenantName(row.businessId)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={INPUT_CLASS}
+                  value={customerSelectValue}
+                  disabled={!selectedBusinessId || peopleLoading}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const chosen = customers.find(
+                      (row) =>
+                        row.uid === value ||
+                        row.careplusParticipantId === value,
+                    );
+                    setCustomerSelectValue(value);
+                    setCustomerId(chosen?.uid ?? "");
+                    setCareplusParticipantId(
+                      chosen?.careplusParticipantId ?? "",
+                    );
+                  }}
+                >
+                  <option value="">
+                    {peopleLoading
+                      ? "Loading CarePlus participants…"
+                      : "CarePlus participant"}
+                  </option>
+                  {customers.map((row) => (
+                    <option
+                      key={row.uid || row.careplusParticipantId}
+                      value={row.uid || row.careplusParticipantId}
+                    >
+                      {row.fullName ||
+                        row.email ||
+                        row.uid ||
+                        row.careplusParticipantId}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={INPUT_CLASS}
+                  value={careplusParticipantId}
+                  readOnly={!customerDirectoryError}
+                  onChange={(event) =>
+                    setCareplusParticipantId(event.target.value)
+                  }
+                  placeholder="CarePlus participant ID"
+                />
+              </div>
+              {customerDirectoryError ? (
+                <p className="mt-2 font-body text-[12px] text-error">
+                  {customerDirectoryError} Customers from BMS are shown so you
+                  can type the CarePlus participant ID if needed.
+                </p>
+              ) : null}
+              {selectedBusinessId &&
+              !peopleLoading &&
+              !customerDirectoryError &&
+              customers.length === 0 ? (
+                <p className="mt-2 font-body text-[12px] text-on-surface-variant">
+                  {customerCareplusCount > 0
+                    ? "CarePlus has participants for this provider, but none match a BMS customer by ID, email, or name."
+                    : "No participants have been added in CarePlus for this tenant yet."}
+                </p>
+              ) : null}
+              {careplusParticipantId && !customerId ? (
+                <p className="mt-2 font-body text-[12px] text-amber-800">
+                  This CarePlus participant is not linked to a BMS customer yet,
+                  so the mapping cannot be saved. Import them from Trade in
+                  CarePlus, or match their email or name to a BMS customer.
+                </p>
+              ) : null}
+              <button
+                type="button"
+                disabled={
+                  customerSaving ||
+                  !selectedBusinessId ||
+                  !customerId ||
+                  !careplusParticipantId
+                }
+                onClick={() => void saveCustomerMapping()}
+                className="mt-3 rounded-lg border border-outline-variant px-4 py-2 font-body text-[13px] disabled:opacity-50"
+              >
+                {customerSaving ? "Saving…" : "Save customer link"}
+              </button>
+              {customerMappings.length > 0 ? (
+                <ul className="mt-4 space-y-2 font-body text-[13px]">
+                  {customerMappings.map((row) => (
+                    <li key={row.id} className="text-on-surface-variant">
+                      {row.bmsCustomerName || row.bmsCustomerId} →{" "}
+                      {row.careplusParticipantId} ({row.status})
                     </li>
                   ))}
                 </ul>
@@ -674,8 +1012,9 @@ export function CareplusAdminBoard() {
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-body text-[13px] text-on-surface-variant">
-              Completed jobs are queued here, then sent by cron. Processing does
-              not change the job in Firestore.
+              Completed jobs and captured records are queued here, then sent by
+              cron. Failed deliveries can be retried. Mapping corrections from
+              CarePlus are shown on the event.
             </p>
             <button
               type="button"
@@ -686,21 +1025,31 @@ export function CareplusAdminBoard() {
               {processing ? "Sending…" : "Process outbox now"}
             </button>
           </div>
+          {deliveryError ? (
+            <p className="font-body text-[13px] text-error">{deliveryError}</p>
+          ) : null}
+          {deliveryMessage ? (
+            <p className="font-body text-[13px] text-emerald-700">
+              {deliveryMessage}
+            </p>
+          ) : null}
           <div className="overflow-hidden rounded-2xl border border-outline-variant/70 bg-surface-container-lowest shadow-sm">
             <table className="w-full text-left">
               <thead className="bg-surface-container font-body text-[12px] text-on-surface-variant">
                 <tr>
                   <th className="px-4 py-3 font-medium">Event</th>
+                  <th className="px-4 py-3 font-medium">Type</th>
                   <th className="px-4 py-3 font-medium">Tenant</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">CarePlus</th>
                   <th className="px-4 py-3 font-medium">Attempts</th>
-                  <th className="px-4 py-3 font-medium">Updated</th>
+                  <th className="px-4 py-3 font-medium" />
                 </tr>
               </thead>
               <tbody className="font-body text-[13px]">
                 {outbox.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-on-surface-variant" colSpan={5}>
+                    <td className="px-4 py-6 text-on-surface-variant" colSpan={7}>
                       No queued CarePlus events.
                     </td>
                   </tr>
@@ -713,18 +1062,44 @@ export function CareplusAdminBoard() {
                       <td className="px-4 py-3 font-mono text-[12px]">
                         {row.eventId}
                       </td>
+                      <td className="px-4 py-3">{row.eventType}</td>
                       <td className="px-4 py-3">{tenantName(row.businessId)}</td>
                       <td className="px-4 py-3">
                         <span
-                          className={`rounded-full border px-2 py-0.5 text-[11px] ${statusBadge(row.status)}`}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] ${statusBadge(row.processingStatus || row.status)}`}
                         >
-                          {row.status}
+                          {row.processingStatus || row.status}
                           {row.lastErrorCode ? ` · ${row.lastErrorCode}` : ""}
                         </span>
+                        {row.corrections.length > 0 ? (
+                          <p className="mt-1 text-[12px] text-amber-800">
+                            {row.corrections.map((item) => item.message).join(" ")}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-[12px]">
+                        {row.careplusResource || "—"}
                       </td>
                       <td className="px-4 py-3">{row.attempts}</td>
-                      <td className="px-4 py-3 text-on-surface-variant">
-                        {formatWhen(row.sentAt ?? row.createdAt)}
+                      <td className="px-4 py-3 text-right">
+                        {row.status === "failed" ||
+                        row.status === "retry" ||
+                        row.processingStatus === "correction_required" ||
+                        (row.status === "sent" &&
+                          row.processingStatus === "accepted" &&
+                          !row.careplusResource) ? (
+                          <button
+                            type="button"
+                            onClick={() => void retryEvent(row.eventId)}
+                            className="font-body text-[12px] text-primary"
+                          >
+                            Retry
+                          </button>
+                        ) : (
+                          <span className="text-on-surface-variant">
+                            {formatWhen(row.sentAt ?? row.createdAt)}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))

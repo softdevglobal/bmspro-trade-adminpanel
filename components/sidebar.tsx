@@ -203,6 +203,12 @@ const NAV_ITEMS: NavItem[] = [
     superAdmin: true,
   },
   {
+    href: "/dashboard/careplus-records",
+    label: "CarePlus records",
+    icon: "health_and_safety",
+    roles: ["business_owner", "staff"],
+  },
+  {
     href: "/dashboard/packages",
     label: "Packages",
     icon: "inventory_2",
