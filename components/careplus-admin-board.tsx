@@ -2,6 +2,7 @@
 
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
+import { summarizeCareplusOutbox } from "@/lib/integrations/careplus/outbox-summary";
 import type {
   CareplusCustomerMappingRecord,
   CareplusIntegrationRecord,
@@ -33,11 +34,20 @@ const INPUT_CLASS =
   "w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
 function statusBadge(status: string): string {
-  if (status === "active" || status === "sent") {
+  if (status === "active" || status === "sent" || status === "applied") {
     return "bg-emerald-50 text-emerald-800 border-emerald-200";
   }
-  if (status === "pending" || status === "retry" || status === "correction_required") {
+  if (
+    status === "pending" ||
+    status === "retry" ||
+    status === "correction_required" ||
+    status === "pending_mapping" ||
+    status === "pending_review"
+  ) {
     return "bg-amber-50 text-amber-800 border-amber-200";
+  }
+  if (status === "revoked" || status === "rejected" || status === "failed") {
+    return "bg-red-50 text-red-800 border-red-200";
   }
   return "bg-stone-100 text-stone-600 border-stone-200";
 }
@@ -131,6 +141,23 @@ export function CareplusAdminBoard() {
     return { Authorization: `Bearer ${token}` };
   }, [user]);
 
+  const loadOutbox = useCallback(async () => {
+    const headers = await authHeaders();
+    const outboxRes = await fetch("/api/admin/careplus/outbox", {
+      headers,
+      cache: "no-store",
+    });
+    const outboxData = await readJsonResponse<{
+      ok?: boolean;
+      error?: string;
+      outbox?: CareplusOutboxRecord[];
+    }>(outboxRes);
+    if (!outboxRes.ok || !outboxData.ok) {
+      throw new Error(outboxData.error ?? "Could not load the outbox.");
+    }
+    setOutbox(outboxData.outbox ?? []);
+  }, [authHeaders]);
+
   const load = useCallback(async () => {
     if (!user) {
       setLoading(false);
@@ -140,13 +167,12 @@ export function CareplusAdminBoard() {
     setError(null);
     try {
       const headers = await authHeaders();
-      const [tenantsRes, integrationsRes, outboxRes] = await Promise.all([
+      const [tenantsRes, integrationsRes] = await Promise.all([
         fetch("/api/admin/tenants", { headers, cache: "no-store" }),
         fetch("/api/admin/careplus/integrations", {
           headers,
           cache: "no-store",
         }),
-        fetch("/api/admin/careplus/outbox", { headers, cache: "no-store" }),
       ]);
       const tenantsData = await readJsonResponse<{
         ok?: boolean;
@@ -158,11 +184,6 @@ export function CareplusAdminBoard() {
         error?: string;
         integrations?: CareplusIntegrationRecord[];
       }>(integrationsRes);
-      const outboxData = await readJsonResponse<{
-        ok?: boolean;
-        error?: string;
-        outbox?: CareplusOutboxRecord[];
-      }>(outboxRes);
       if (!tenantsRes.ok || !tenantsData.ok) {
         throw new Error(tenantsData.error ?? "Could not load tenants.");
       }
@@ -171,7 +192,6 @@ export function CareplusAdminBoard() {
       }
       setTenants(tenantsData.tenants ?? []);
       setIntegrations(integrationsData.integrations ?? []);
-      setOutbox(outboxData.outbox ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load CarePlus.");
     } finally {
@@ -183,10 +203,38 @@ export function CareplusAdminBoard() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (tab !== "delivery" || !user) return;
+    void loadOutbox().catch((err) => {
+      setDeliveryError(
+        err instanceof Error ? err.message : "Could not load the outbox.",
+      );
+    });
+  }, [loadOutbox, tab, user]);
+
   const activeIntegrations = useMemo(
     () => integrations.filter((row) => row.status === "active"),
     [integrations],
   );
+  const revokedIntegrations = useMemo(
+    () => integrations.filter((row) => row.status === "revoked"),
+    [integrations],
+  );
+  const deliveryCounts = useMemo(() => {
+    const summary = summarizeCareplusOutbox(outbox);
+    return {
+      ...summary,
+      lastSuccess:
+        outbox
+          .filter(
+            (row) =>
+              row.status === "sent" || row.processingStatus === "applied",
+          )
+          .map((row) => row.sentAt)
+          .filter((value): value is number => typeof value === "number")
+          .sort((a, b) => b - a)[0] ?? null,
+    };
+  }, [outbox]);
 
   const tenantName = useCallback(
     (id: string) =>
@@ -318,8 +366,9 @@ export function CareplusAdminBoard() {
   );
 
   useEffect(() => {
+    if (tab !== "connections") return;
     if (selectedBusinessId) void loadStaff(selectedBusinessId);
-  }, [loadStaff, selectedBusinessId]);
+  }, [loadStaff, selectedBusinessId, tab]);
 
   async function saveStaffMapping() {
     if (!selectedBusinessId) return;
@@ -467,7 +516,7 @@ export function CareplusAdminBoard() {
           `Sent ${sent} event${sent === 1 ? "" : "s"} to CarePlus.`,
         );
       }
-      await load();
+      await loadOutbox();
     } catch (err) {
       setDeliveryError(
         err instanceof Error ? err.message : "Could not process the outbox.",
@@ -512,7 +561,13 @@ export function CareplusAdminBoard() {
     } else {
       setDeliveryMessage("Event queued again.");
     }
-    await load();
+    try {
+      await loadOutbox();
+    } catch (err) {
+      setDeliveryError(
+        err instanceof Error ? err.message : "Could not refresh the outbox.",
+      );
+    }
   }
 
   const rows = learningRows(learningBody);
@@ -1010,6 +1065,33 @@ export function CareplusAdminBoard() {
 
       {tab === "delivery" ? (
         <section className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              ["Pending / retry", deliveryCounts.pending],
+              ["Applied", deliveryCounts.applied],
+              ["Waiting for mapping", deliveryCounts.awaiting],
+              ["Rejected / correction", deliveryCounts.rejected],
+            ].map(([label, count]) => (
+              <div
+                key={label}
+                className="rounded-xl border border-outline-variant/70 bg-surface-container-lowest px-4 py-3"
+              >
+                <p className="font-body text-[12px] text-on-surface-variant">{label}</p>
+                <p className="font-headline text-[22px] text-on-surface">{count}</p>
+              </div>
+            ))}
+          </div>
+          <p className="font-body text-[13px] text-on-surface-variant">
+            Last successful send: {formatWhen(deliveryCounts.lastSuccess)}
+          </p>
+          {revokedIntegrations.length > 0 ? (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[13px] text-amber-900">
+              Delivery is paused for revoked mappings (
+              {revokedIntegrations.map((row) => tenantName(row.businessId)).join(", ")}
+              ). Queued events stay pending until the mapping is restored. They
+              are not retried as transport failures.
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-body text-[13px] text-on-surface-variant">
               Completed jobs and captured records are queued here, then sent by
@@ -1085,6 +1167,7 @@ export function CareplusAdminBoard() {
                         {row.status === "failed" ||
                         row.status === "retry" ||
                         row.processingStatus === "correction_required" ||
+                        row.processingStatus === "pending_mapping" ||
                         (row.status === "sent" &&
                           row.processingStatus === "accepted" &&
                           !row.careplusResource) ? (

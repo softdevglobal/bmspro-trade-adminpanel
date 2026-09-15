@@ -14,6 +14,7 @@ import type {
   CareplusIntegrationStatus,
   CareplusLinkedCustomerRow,
   CareplusLinkedStaffRow,
+  CareplusOperationsCustomer,
   CareplusStaffMappingRecord,
 } from "@/lib/integrations/careplus/types";
 import { FieldValue, type DocumentData } from "firebase-admin/firestore";
@@ -262,7 +263,13 @@ export async function upsertCareplusStaffMapping(input: {
 }
 
 export async function listBusinessStaffDirectory(businessId: string): Promise<
-  Array<{ uid: string; fullName: string | null; email: string | null; role: string }>
+  Array<{
+    uid: string;
+    fullName: string | null;
+    email: string | null;
+    role: string;
+    isActive: boolean;
+  }>
 > {
   const snap = await adminDb
     .collection("users")
@@ -278,6 +285,7 @@ export async function listBusinessStaffDirectory(businessId: string): Promise<
         fullName: asString(data.fullName) ?? asString(data.name),
         email: asString(data.email),
         role,
+        isActive: data.isActive !== false && data.status !== "inactive" && data.status !== "disabled",
       };
     })
     .filter((row) =>
@@ -379,6 +387,50 @@ export async function listBusinessCustomers(businessId: string): Promise<
       };
     })
     .sort((a, b) => (a.fullName ?? a.uid).localeCompare(b.fullName ?? b.uid));
+}
+
+export async function listCareplusOperationsCustomers(
+  businessId: string,
+): Promise<CareplusOperationsCustomer[]> {
+  const [customers, mappings] = await Promise.all([
+    listBusinessCustomers(businessId),
+    listCareplusCustomerMappings(businessId),
+  ]);
+  const mappingByUid = new Map(
+    mappings
+      .filter((row) => row.status === "active" && row.bmsCustomerId)
+      .map((row) => [row.bmsCustomerId, row]),
+  );
+  const seen = new Set<string>();
+  const rows: CareplusOperationsCustomer[] = [];
+
+  for (const customer of customers) {
+    seen.add(customer.uid);
+    rows.push({
+      uid: customer.uid,
+      fullName:
+        customer.fullName ||
+        mappingByUid.get(customer.uid)?.bmsCustomerName ||
+        customer.uid,
+      email: customer.email,
+      mapped: mappingByUid.has(customer.uid),
+    });
+  }
+
+  for (const mapping of mappingByUid.values()) {
+    if (seen.has(mapping.bmsCustomerId)) continue;
+    rows.push({
+      uid: mapping.bmsCustomerId,
+      fullName: mapping.bmsCustomerName || mapping.bmsCustomerId,
+      email: null,
+      mapped: true,
+    });
+  }
+
+  return rows.sort((a, b) => {
+    if (a.mapped !== b.mapped) return a.mapped ? -1 : 1;
+    return a.fullName.localeCompare(b.fullName);
+  });
 }
 
 function emailsMatch(

@@ -192,6 +192,22 @@ export function mapBookingDoc(
     beforeImageUrls: parseImageUrlList(data.beforeImageUrls),
     afterImageUrls: parseImageUrlList(data.afterImageUrls),
     cancelledAt: toMillis(data.cancelledAt),
+    missedReason:
+      typeof data.missedReason === "string" && data.missedReason.trim()
+        ? data.missedReason.trim()
+        : null,
+    missedFollowUp:
+      typeof data.missedFollowUp === "string" && data.missedFollowUp.trim()
+        ? data.missedFollowUp.trim()
+        : null,
+    missedAt: toMillis(data.missedAt),
+    careplusSourceRevision:
+      typeof data.careplusSourceRevision === "number" &&
+      Number.isInteger(data.careplusSourceRevision) &&
+      data.careplusSourceRevision > 0
+        ? data.careplusSourceRevision
+        : 0,
+    careplusScheduled: data.careplusScheduled === true,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };

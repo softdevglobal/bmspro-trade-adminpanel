@@ -18,6 +18,15 @@ import type {
 } from "@/lib/integrations/careplus/types";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
+type CareplusActivityEvent = Extract<
+  CareplusEventType,
+  | "activity.scheduled"
+  | "activity.completed"
+  | "activity.amended"
+  | "activity.cancelled"
+  | "activity.missed"
+>;
+
 function jobTitle(input: CareplusEnqueueInput): string {
   const custom = input.customRequest?.title?.trim();
   return (
@@ -37,42 +46,114 @@ function clockFromInstant(value: number | null | undefined): {
   return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
 }
 
-function visitDuration(input: CareplusEnqueueInput): number {
-  if (
-    typeof input.estimatedDurationMinutes === "number" &&
+function minutesBetween(start: string, end: string): number | null {
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  if (![startHour, startMinute, endHour, endMinute].every(Number.isFinite)) return null;
+  const minutes = endHour * 60 + endMinute - (startHour * 60 + startMinute);
+  if (minutes < 5) return null;
+  return Math.min(1440, minutes);
+}
+
+function plannedClock(input: CareplusEnqueueInput): {
+  date: string;
+  time: string;
+  duration: number;
+} {
+  const date =
+    input.scheduledSlot?.date ||
+    clockFromInstant(input.visitStartedAt)?.date ||
+    new Date().toISOString().slice(0, 10);
+  const time =
+    input.scheduledStartTime?.slice(0, 5) ||
+    input.scheduledSlot?.startTime?.slice(0, 5) ||
+    clockFromInstant(input.visitStartedAt)?.time ||
+    "09:00";
+  const end =
+    input.scheduledEndTime?.slice(0, 5) ||
+    input.scheduledSlot?.endTime?.slice(0, 5) ||
+    "";
+  const duration =
+    (typeof input.estimatedDurationMinutes === "number" &&
     input.estimatedDurationMinutes >= 5
-  ) {
-    return Math.min(1440, Math.round(input.estimatedDurationMinutes));
-  }
-  if (input.visitStartedAt && input.visitEndedAt) {
-    const minutes = Math.round((input.visitEndedAt - input.visitStartedAt) / 60000);
-    if (minutes >= 5) return Math.min(1440, minutes);
-  }
-  return 60;
+      ? Math.min(1440, Math.round(input.estimatedDurationMinutes))
+      : null) ||
+    (end ? minutesBetween(time, end) : null) ||
+    60;
+  return { date, time, duration };
 }
 
-export function buildCareplusJobCompletedPayload(
-  input: CareplusEnqueueInput,
-): CareplusJobCompletedPayload {
-  const payload: CareplusJobCompletedPayload = {
-    eventId: `bms-${input.id}-completed-v1`,
-    eventType: "job.completed",
-    businessId: input.businessId,
-    jobId: input.id,
-    title: jobTitle(input),
-    occurredAt: new Date().toISOString(),
-  };
-  if (input.customerId?.trim()) {
-    payload.customerId = input.customerId.trim();
-  }
-  if (input.assignedTo?.uid?.trim()) {
-    payload.staffId = input.assignedTo.uid.trim();
-  }
-  return payload;
+function actualClock(input: CareplusEnqueueInput): {
+  date: string;
+  time: string;
+  duration: number;
+} | null {
+  const started = clockFromInstant(input.visitStartedAt);
+  const ended = clockFromInstant(input.visitEndedAt);
+  if (!started && !ended) return null;
+  const date = started?.date || ended?.date || "";
+  const time = started?.time || ended?.time || "09:00";
+  const duration =
+    input.visitStartedAt && input.visitEndedAt
+      ? Math.min(
+          1440,
+          Math.max(5, Math.round((input.visitEndedAt - input.visitStartedAt) / 60000)),
+        )
+      : plannedClock(input).duration;
+  return { date, time, duration };
 }
 
-export async function buildCareplusActivityCompletedPayload(
+function visitNotes(input: CareplusEnqueueInput, eventType: CareplusActivityEvent): string {
+  const recorded =
+    input.jobInstructionsDescription?.trim() ||
+    input.ownerNote?.trim() ||
+    input.customRequest?.description?.trim() ||
+    "";
+  if (recorded) return recorded;
+  if (eventType === "activity.completed") {
+    return `BMS job ${input.bookingCode || input.id} completed.`;
+  }
+  if (eventType === "activity.missed") {
+    return input.missedReason?.trim() || `BMS job ${input.bookingCode || input.id} was missed.`;
+  }
+  return "";
+}
+
+function nextRevision(input: CareplusEnqueueInput): number {
+  const current = input.careplusSourceRevision;
+  if (typeof current === "number" && Number.isInteger(current) && current > 0) {
+    return current + 1;
+  }
+  return 1;
+}
+
+function activityEventId(input: CareplusEnqueueInput, eventType: CareplusActivityEvent): string {
+  if (eventType === "activity.scheduled") return `bms-${input.id}-activity-scheduled-v1`;
+  if (eventType === "activity.completed") return `bms-${input.id}-activity-completed-v1`;
+  if (eventType === "activity.cancelled") return `bms-${input.id}-activity-cancelled-v1`;
+  if (eventType === "activity.missed") return `bms-${input.id}-activity-missed-v1`;
+  return `bms-${input.id}-activity-amended-r${nextRevision(input)}`;
+}
+
+async function persistJobCareplusRevision(
+  jobId: string,
+  revision: number,
+  scheduled: boolean,
+): Promise<void> {
+  if (!jobId || revision < 1) return;
+  try {
+    await adminDb.collection("jobs").doc(jobId).update({
+      careplusSourceRevision: revision,
+      ...(scheduled ? { careplusScheduled: true } : {}),
+    });
+  } catch (error) {
+    console.error("[careplus] failed to persist source revision", error);
+  }
+}
+
+export async function buildCareplusActivityPayload(
   input: CareplusEnqueueInput,
+  eventType: CareplusActivityEvent,
 ): Promise<CareplusRecordPayload> {
   const customerId =
     (await activeCustomerCareplusId(input.businessId, input.customerId)) ||
@@ -82,22 +163,23 @@ export async function buildCareplusActivityCompletedPayload(
     (await activeStaffCareplusId(input.businessId, input.assignedTo?.uid)) ||
     input.assignedTo?.uid?.trim() ||
     "";
-  const fromVisit =
-    clockFromInstant(input.visitEndedAt) || clockFromInstant(input.visitStartedAt);
-  const date = input.scheduledSlot?.date || fromVisit?.date || new Date().toISOString().slice(0, 10);
-  const time =
-    input.scheduledStartTime?.slice(0, 5) ||
-    input.scheduledSlot?.startTime?.slice(0, 5) ||
-    fromVisit?.time ||
-    "09:00";
-  const notes =
-    input.jobInstructionsDescription?.trim() ||
-    input.ownerNote?.trim() ||
-    input.customRequest?.description?.trim() ||
-    `BMS job ${input.bookingCode || input.id} completed.`;
+  const planned = plannedClock(input);
+  const actual = eventType === "activity.completed" ? actualClock(input) : null;
+  const display = actual || planned;
+  const revision = nextRevision(input);
+  const status =
+    eventType === "activity.cancelled"
+      ? "cancelled"
+      : eventType === "activity.missed"
+        ? "missed"
+        : eventType === "activity.scheduled"
+          ? "scheduled"
+          : eventType === "activity.amended"
+            ? "scheduled"
+            : "completed";
   return {
-    eventId: `bms-${input.id}-activity-completed-v1`,
-    eventType: "activity.completed",
+    eventId: activityEventId(input, eventType),
+    eventType,
     businessId: input.businessId,
     occurredAt: new Date().toISOString(),
     source: {
@@ -105,19 +187,40 @@ export async function buildCareplusActivityCompletedPayload(
       jobId: input.id,
       customerId,
       staffId,
-      revision: 1,
+      revision,
     },
     record: {
       title: jobTitle(input),
       customerId,
       staffId,
+      staffIds: staffId ? [staffId] : [],
       serviceName: input.serviceName?.trim() || "",
-      date,
-      time,
-      duration: visitDuration(input),
-      notes,
+      date: display.date,
+      time: display.time,
+      duration: display.duration,
+      timezone: input.timezone?.trim() || "Australia/Sydney",
+      plannedDate: planned.date,
+      plannedTime: planned.time,
+      plannedDuration: planned.duration,
+      actualDate: actual?.date || "",
+      actualTime: actual?.time || "",
+      actualDuration: actual?.duration || 0,
+      seriesId: input.seriesId?.trim() || "",
+      occurrenceId: input.id,
+      notes: visitNotes(input, eventType),
+      missedReason: input.missedReason?.trim() || "",
+      amendmentReason:
+        input.amendmentReason?.trim() ||
+        (eventType === "activity.amended" ? "Visit details updated from BMS." : ""),
+      status,
     },
   };
+}
+
+export async function buildCareplusActivityCompletedPayload(
+  input: CareplusEnqueueInput,
+): Promise<CareplusRecordPayload> {
+  return buildCareplusActivityPayload(input, "activity.completed");
 }
 
 export async function enqueueCareplusRecord(
@@ -170,10 +273,12 @@ export async function enqueueCareplusJobCompleted(
   input: CareplusEnqueueInput,
 ): Promise<"queued" | "skipped" | "exists"> {
   if (!input.id || !input.businessId) return "skipped";
-  return enqueueCareplusRecord(
-    await buildCareplusActivityCompletedPayload(input),
-    input.id,
-  );
+  const payload = await buildCareplusActivityCompletedPayload(input);
+  const queued = await enqueueCareplusRecord(payload, input.id);
+  if (queued === "queued") {
+    await persistJobCareplusRevision(input.id, payload.source.revision, true);
+  }
+  return queued;
 }
 
 export async function enqueueCareplusJobCompletedSafe(
@@ -183,6 +288,40 @@ export async function enqueueCareplusJobCompletedSafe(
     await enqueueCareplusJobCompleted(input);
   } catch (error) {
     console.error("[careplus] failed to enqueue job.completed", error);
+  }
+}
+
+export function resolveCareplusVisitEvent(
+  input: Pick<CareplusEnqueueInput, "careplusScheduled">,
+  preferred: CareplusActivityEvent,
+): CareplusActivityEvent {
+  if (
+    preferred === "activity.scheduled" &&
+    input.careplusScheduled
+  ) {
+    return "activity.amended";
+  }
+  return preferred;
+}
+
+export async function enqueueCareplusActivitySafe(
+  input: CareplusEnqueueInput,
+  eventType: CareplusActivityEvent,
+): Promise<void> {
+  if (!input.id || !input.businessId) return;
+  try {
+    const resolved = resolveCareplusVisitEvent(input, eventType);
+    const payload = await buildCareplusActivityPayload(input, resolved);
+    const queued = await enqueueCareplusRecord(payload, input.id);
+    if (queued === "queued") {
+      await persistJobCareplusRevision(
+        input.id,
+        payload.source.revision,
+        resolved === "activity.scheduled" || Boolean(input.careplusScheduled),
+      );
+    }
+  } catch (error) {
+    console.error(`[careplus] failed to enqueue ${eventType}`, error);
   }
 }
 
@@ -210,7 +349,12 @@ export async function enqueueCareplusCaptureSafe(input: {
   businessId: string;
   eventType: Extract<
     CareplusEventType,
-    "incident.captured" | "complaint.captured" | "action.captured" | "evidence.attached"
+    | "incident.captured"
+    | "complaint.captured"
+    | "risk.captured"
+    | "action.captured"
+    | "evidence.attached"
+    | "staff.credential.submitted"
   >;
   recordId: string;
   customerId?: string;

@@ -1,5 +1,5 @@
 import { logAuditEvent } from "@/lib/audit/server";
-import { CareplusClientError, fetchCareplusDirectory } from "@/lib/integrations/careplus/client";
+import { fetchCareplusDirectorySafe } from "@/lib/integrations/careplus/client";
 import { enqueueCareplusDirectorySafe } from "@/lib/integrations/careplus/enqueue";
 import {
   linkCustomersWithCareplusDirectory,
@@ -29,19 +29,12 @@ export async function GET(
     listBusinessCustomers(businessId),
     listCareplusCustomerMappings(businessId),
   ]);
-  let careplus: Awaited<ReturnType<typeof fetchCareplusDirectory>> = [];
-  let directoryError: string | undefined;
-  try {
-    careplus = await fetchCareplusDirectory({
-      businessId,
-      view: "participants",
-    });
-  } catch (error) {
-    directoryError =
-      error instanceof CareplusClientError || error instanceof Error
-        ? error.message
-        : "Could not load CarePlus participants.";
-  }
+  const directory = await fetchCareplusDirectorySafe(
+    { businessId, view: "participants" },
+    "Could not load CarePlus participants.",
+  );
+  const careplus = directory.people;
+  const directoryError = directory.error;
   const customers = linkCustomersWithCareplusDirectory({
     customers: bmsCustomers,
     careplus,

@@ -65,17 +65,26 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type PreviewMode = "review" | "assign";
-type JobsFilter = "active" | "completed" | "cancelled";
+type JobsFilter = "active" | "completed" | "cancelled" | "missed";
 
 const JOB_TABS: { id: JobsFilter; label: string }[] = [
   { id: "active", label: "Active" },
   { id: "completed", label: "Completed" },
   { id: "cancelled", label: "Cancelled" },
+  { id: "missed", label: "Missed" },
 ];
 
-/** A job can be cancelled while it is still open (not completed/cancelled). */
+/** A job can be cancelled while it is still open (not completed/cancelled/missed). */
 function canCancelBooking(booking: BookingDetail): boolean {
-  return booking.status !== "completed" && booking.status !== "cancelled";
+  return (
+    booking.status !== "completed" &&
+    booking.status !== "cancelled" &&
+    booking.status !== "missed"
+  );
+}
+
+function canMarkMissed(booking: BookingDetail): boolean {
+  return canCancelBooking(booking);
 }
 
 function formatEstimatedMinutes(minutes: number | null): string | null {
@@ -270,11 +279,13 @@ function BookingCardMenu({
   editHref,
   onDelete,
   onCancel,
+  onMarkMissed,
   onUndoCancel,
 }: {
   editHref?: string | null;
   onDelete: () => void;
   onCancel?: () => void;
+  onMarkMissed?: () => void;
   onUndoCancel?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -344,6 +355,22 @@ function BookingCardMenu({
               Cancel job
             </button>
           ) : null}
+          {onMarkMissed ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItemClass}
+              onClick={() => {
+                setOpen(false);
+                onMarkMissed();
+              }}
+            >
+              <span className="material-symbols-outlined text-[18px] text-rose-600">
+                event_busy
+              </span>
+              Mark missed
+            </button>
+          ) : null}
           {onUndoCancel ? (
             <button
               type="button"
@@ -386,6 +413,7 @@ function BookingCard({
   onOpen,
   onDelete,
   onCancel,
+  onMarkMissed,
   onUndoCancel,
   timeZone,
   seriesProgress,
@@ -395,6 +423,7 @@ function BookingCard({
   onOpen: () => void;
   onDelete: () => void;
   onCancel: () => void;
+  onMarkMissed: () => void;
   onUndoCancel: () => void;
   timeZone?: string | null;
   seriesProgress?: SeriesProgress | null;
@@ -469,6 +498,7 @@ function BookingCard({
           }
           onDelete={onDelete}
           onCancel={canCancelBooking(booking) ? onCancel : undefined}
+          onMarkMissed={canMarkMissed(booking) ? onMarkMissed : undefined}
           onUndoCancel={
             booking.status === "cancelled" ? onUndoCancel : undefined
           }
@@ -525,6 +555,7 @@ function BookingPreviewDrawer({
   onUpdated,
   onDelete,
   onCancel,
+  onMarkMissed,
   onUndoCancel,
   timeZone,
   requestsById,
@@ -538,6 +569,7 @@ function BookingPreviewDrawer({
   onUpdated: (next: BookingDetail) => void;
   onDelete: () => void;
   onCancel: () => void;
+  onMarkMissed: () => void;
   onUndoCancel: () => void;
   seriesProgress?: SeriesProgress | null;
   timeZone?: string | null;
@@ -579,6 +611,7 @@ function BookingPreviewDrawer({
               onUpdated={onUpdated}
               onDelete={onDelete}
               onCancel={onCancel}
+              onMarkMissed={onMarkMissed}
               onUndoCancel={onUndoCancel}
               timeZone={timeZone}
               requestsById={requestsById}
@@ -778,6 +811,7 @@ function BookingPreviewContent({
   onUpdated,
   onDelete,
   onCancel,
+  onMarkMissed,
   onUndoCancel,
   timeZone,
   requestsById,
@@ -791,6 +825,7 @@ function BookingPreviewContent({
   onUpdated: (next: BookingDetail) => void;
   onDelete: () => void;
   onCancel: () => void;
+  onMarkMissed: () => void;
   onUndoCancel: () => void;
   seriesProgress?: SeriesProgress | null;
   timeZone?: string | null;
@@ -834,7 +869,10 @@ function BookingPreviewContent({
     Boolean(invoiceHref) &&
     booking.quotation?.status === "sent" &&
     booking.quotation.customerDecision !== "rejected";
-  const canEdit = booking.status !== "cancelled" && booking.status !== "completed";
+  const canEdit =
+    booking.status !== "cancelled" &&
+    booking.status !== "completed" &&
+    booking.status !== "missed";
 
   async function submitAssign() {
     if (!user) return;
@@ -1156,6 +1194,22 @@ function BookingPreviewContent({
           </section>
         ) : null}
 
+        {booking.status === "missed" ? (
+          <section className="rounded-xl border border-rose-200 bg-rose-50/70 p-3">
+            <p className="font-body text-[11px] font-bold uppercase tracking-wider text-rose-800">
+              Missed visit
+            </p>
+            <p className="mt-1 font-body text-[14px] text-on-surface">
+              {booking.missedReason || "No reason recorded."}
+            </p>
+            {booking.missedFollowUp ? (
+              <p className="mt-1 font-body text-[13px] text-on-surface-variant">
+                Follow-up: {booking.missedFollowUp}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         {booking.quotation ? (
           <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
@@ -1334,16 +1388,30 @@ function BookingPreviewContent({
                 Undo cancellation
               </button>
             ) : canCancelBooking(booking) ? (
-              <button
-                type="button"
-                onClick={onCancel}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[14px] font-semibold text-amber-800 transition-colors hover:bg-amber-100"
-              >
-                <span className="material-symbols-outlined text-[20px]">
-                  cancel
-                </span>
-                Cancel job
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-body text-[14px] font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    cancel
+                  </span>
+                  Cancel job
+                </button>
+                {canMarkMissed(booking) ? (
+                  <button
+                    type="button"
+                    onClick={onMarkMissed}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-800 transition-colors hover:bg-rose-100"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">
+                      event_busy
+                    </span>
+                    Mark missed
+                  </button>
+                ) : null}
+              </>
             ) : null}
             <button
               type="button"
@@ -1397,6 +1465,11 @@ export function JobsBoard({
   const [cancelTarget, setCancelTarget] = useState<BookingDetail | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [missedTarget, setMissedTarget] = useState<BookingDetail | null>(null);
+  const [missedReason, setMissedReason] = useState("");
+  const [missedFollowUp, setMissedFollowUp] = useState("");
+  const [missing, setMissing] = useState(false);
+  const [missedError, setMissedError] = useState<string | null>(null);
   const [localBookingState, setLocalBookingState] = useState<{
     source: BookingDetail[];
     bookings: BookingDetail[];
@@ -1415,6 +1488,8 @@ export function JobsBoard({
           groups.completed.push(booking);
         } else if (booking.status === "cancelled") {
           groups.cancelled.push(booking);
+        } else if (booking.status === "missed") {
+          groups.missed.push(booking);
         } else {
           groups.active.push(booking);
         }
@@ -1424,12 +1499,14 @@ export function JobsBoard({
         active: [] as BookingDetail[],
         completed: [] as BookingDetail[],
         cancelled: [] as BookingDetail[],
+        missed: [] as BookingDetail[],
       },
     );
     return {
       active: uniqueJobsForBoard(sortBookingsBySchedule(groups.active)),
       completed: uniqueJobsForBoard(sortBookingsBySchedule(groups.completed)),
       cancelled: uniqueJobsForBoard(sortBookingsBySchedule(groups.cancelled)),
+      missed: uniqueJobsForBoard(sortBookingsBySchedule(groups.missed)),
     };
   }, [displayBookings]);
   const timeZone = profile?.timezone;
@@ -1451,7 +1528,9 @@ export function JobsBoard({
         ? "completed"
         : selected.status === "cancelled"
           ? "cancelled"
-          : filter
+          : selected.status === "missed"
+            ? "missed"
+            : filter
       : filter;
   const visibleBookings = groupedBookings[activeFilter];
 
@@ -1544,6 +1623,48 @@ export function JobsBoard({
       );
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function confirmMissedJob() {
+    if (!user || !missedTarget) return;
+    setMissing(true);
+    setMissedError(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(missedTarget.id)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            action: "mark_missed",
+            reason: missedReason,
+            followUp: missedFollowUp,
+          }),
+        },
+      );
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        booking?: BookingDetail;
+      };
+      if (!response.ok || !data.ok || !data.booking) {
+        throw new Error(data.error ?? "Could not mark the visit missed.");
+      }
+      handleBookingUpdated(data.booking);
+      setMissedTarget(null);
+    } catch (missedErr) {
+      setMissedError(
+        missedErr instanceof Error
+          ? missedErr.message
+          : "Could not mark the visit missed.",
+      );
+    } finally {
+      setMissing(false);
     }
   }
 
@@ -1740,6 +1861,15 @@ export function JobsBoard({
         </div>
       ) : null}
 
+      {missedError ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[13px] text-rose-800"
+        >
+          {missedError}
+        </div>
+      ) : null}
+
       {visibleBookings.length > 0 ? (
         <ul className="space-y-3">
           {visibleBookings.map((booking) => (
@@ -1750,6 +1880,12 @@ export function JobsBoard({
                 onOpen={() => setSelectedId(booking.id)}
                 onDelete={() => setDeleteTarget(booking)}
                 onCancel={() => setCancelTarget(booking)}
+                onMarkMissed={() => {
+                  setMissedTarget(booking);
+                  setMissedReason("");
+                  setMissedFollowUp("");
+                  setMissedError(null);
+                }}
                 onUndoCancel={() => void undoCancelJob(booking)}
                 timeZone={timeZone}
                 seriesProgress={
@@ -1784,6 +1920,13 @@ export function JobsBoard({
         }}
         onCancel={() => {
           if (selected) setCancelTarget(selected);
+        }}
+        onMarkMissed={() => {
+          if (!selected) return;
+          setMissedTarget(selected);
+          setMissedReason("");
+          setMissedFollowUp("");
+          setMissedError(null);
         }}
         onUndoCancel={() => {
           if (selected) void undoCancelJob(selected);
@@ -1847,6 +1990,66 @@ export function JobsBoard({
         onConfirm={() => void confirmCancelJob()}
         isLoading={cancelling}
       />
+
+      {missedTarget ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close dialog"
+            onClick={() => {
+              if (!missing) setMissedTarget(null);
+            }}
+            className="absolute inset-0 bg-on-background/50 backdrop-blur-sm"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative w-full max-w-[440px] rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 shadow-2xl"
+          >
+            <h2 className="font-display text-[20px] font-semibold text-on-surface">
+              Mark this visit missed?
+            </h2>
+            <p className="mt-2 font-body text-[13px] text-on-surface-variant">
+              {displayBookingCode(missedTarget)} will move to the Missed tab and
+              CarePlus will receive a missed-visit record.
+            </p>
+            <label className="mt-4 block font-body text-[12px] text-on-surface-variant">
+              Reason
+              <textarea
+                className="mt-1 min-h-[80px] w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 font-body text-[14px] text-on-surface"
+                value={missedReason}
+                onChange={(event) => setMissedReason(event.target.value)}
+              />
+            </label>
+            <label className="mt-3 block font-body text-[12px] text-on-surface-variant">
+              Follow-up note (optional)
+              <textarea
+                className="mt-1 min-h-[64px] w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 font-body text-[14px] text-on-surface"
+                value={missedFollowUp}
+                onChange={(event) => setMissedFollowUp(event.target.value)}
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={missing}
+                onClick={() => setMissedTarget(null)}
+                className="rounded-lg border border-outline-variant px-4 py-2 font-body text-[13px] font-semibold"
+              >
+                Keep job
+              </button>
+              <button
+                type="button"
+                disabled={missing}
+                onClick={() => void confirmMissedJob()}
+                className="rounded-lg bg-rose-600 px-4 py-2 font-body text-[13px] font-semibold text-white disabled:opacity-50"
+              >
+                {missing ? "Saving…" : "Mark missed"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {addJobModal}
     </>

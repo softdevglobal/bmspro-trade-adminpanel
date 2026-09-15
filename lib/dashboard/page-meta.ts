@@ -98,11 +98,6 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
       "Send a text message — like seasonal greetings — to your customers.",
     icon: "campaign",
   },
-  "/dashboard/sms/logs": {
-    title: "SMS logs",
-    subtitle: "A history of the SMS messages sent from your business.",
-    icon: "history",
-  },
   "/dashboard/sms-packages": {
     title: "SMS Packages",
     subtitle: "Manage SMS add-on packages for workshops.",

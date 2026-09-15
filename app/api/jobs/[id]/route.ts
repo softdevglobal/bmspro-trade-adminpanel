@@ -4,6 +4,7 @@ import {
   assignBusinessBooking,
   cancelBusinessBooking,
   completeBusinessBooking,
+  markBusinessBookingMissed,
   deleteBusinessBooking,
   isSeriesScheduleLocked,
   listBookingsInSeries,
@@ -35,6 +36,7 @@ import {
   notifyBusinessOfStaffOffDayAssignment,
   notifyBusinessOfStaffOnLeaveAssignment,
 } from "@/lib/notifications/server";
+import { enqueueCareplusActivitySafe } from "@/lib/integrations/careplus/enqueue";
 import { staffIsOffOnDate } from "@/lib/team/staff-off-day-server";
 import { getRequestDocumentRef } from "@/lib/inspection/request-document";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
@@ -673,7 +675,11 @@ export async function PATCH(
         { status: 404 },
       );
     }
-    if (booking.status === "cancelled" || booking.status === "completed") {
+    if (
+      booking.status === "cancelled" ||
+      booking.status === "completed" ||
+      booking.status === "missed"
+    ) {
       return NextResponse.json(
         { ok: false, error: "Only active jobs can be edited." },
         { status: 400 },
@@ -730,6 +736,7 @@ export async function PATCH(
       startTime,
       endTime,
       notifyCustomer: seriesModeEarly === "this_visit",
+      skipCareplus: true,
     });
     if (!scheduleResult.ok) {
       return NextResponse.json(
@@ -1016,7 +1023,67 @@ export async function PATCH(
       );
     }
 
+    await enqueueCareplusActivitySafe(
+      {
+        ...updated,
+        amendmentReason: "Job details updated in BMS.",
+      },
+      "activity.amended",
+    );
+
     return NextResponse.json({ ok: true, booking: updated });
+  }
+
+  if (action === "mark_missed") {
+    const reason =
+      typeof payload.reason === "string" ? payload.reason.trim() : "";
+    const followUp =
+      typeof payload.followUp === "string" ? payload.followUp.trim() : "";
+    const result = await markBusinessBookingMissed(auth.businessId, id, {
+      reason,
+      followUp,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error },
+        { status: result.status },
+      );
+    }
+
+    let actorUid = "";
+    let actorEmail: string | undefined;
+    let actorRole = "";
+    try {
+      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      actorUid = decoded.uid;
+      actorEmail = decoded.email;
+      actorRole = typeof decoded.role === "string" ? decoded.role : "";
+    } catch {
+      // Best-effort actor metadata; the missed visit already succeeded.
+    }
+
+    await logAuditEvent({
+      businessId: auth.businessId,
+      category: "booking",
+      action: "booking.missed",
+      actor: {
+        uid: actorUid,
+        role: actorRoleFromClaim(actorRole),
+        name: actorEmail ?? null,
+        email: actorEmail ?? null,
+      },
+      source: "admin_panel",
+      summary: `Job ${result.booking.bookingCode ?? id} marked missed`,
+      targetId: id,
+      targetLabel: result.booking.bookingCode ?? null,
+      metadata: {
+        bookingCode: result.booking.bookingCode,
+        reason,
+        followUp: followUp || null,
+      },
+    });
+
+    return NextResponse.json({ ok: true, booking: result.booking });
   }
 
   if (action === "cancel") {

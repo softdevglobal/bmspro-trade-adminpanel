@@ -4,6 +4,7 @@ import { logAuditEvent } from "@/lib/audit/server";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   CareplusClientError,
+  fetchCareplusReceipt,
   retryAfterSecondsFromError,
   sendCareplusJobCompleted,
   sendCareplusRecord,
@@ -14,9 +15,11 @@ import {
   CAREPLUS_OUTBOX_COLLECTION,
   CAREPLUS_OUTBOX_MAX_ATTEMPTS,
 } from "@/lib/integrations/careplus/constants";
-import { touchCareplusIntegration } from "@/lib/integrations/careplus/mapping";
+import {
+  getCareplusIntegration,
+  touchCareplusIntegration,
+} from "@/lib/integrations/careplus/mapping";
 import type {
-  CareplusJobCompletedPayload,
   CareplusOutboxRecord,
   CareplusOutboxStatus,
   CareplusReceipt,
@@ -47,7 +50,7 @@ export function mapOutboxDoc(
   data: DocumentData,
 ): CareplusOutboxRecord {
   const status = (
-    ["pending", "retry", "sent", "failed"] as CareplusOutboxStatus[]
+    ["pending", "retry", "awaiting_receipt", "sent", "failed"] as CareplusOutboxStatus[]
   ).includes(data.status)
     ? (data.status as CareplusOutboxStatus)
     : "pending";
@@ -96,46 +99,25 @@ function shouldRetryStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
 
-function receiptStillPending(receipt: CareplusReceipt | null): boolean {
-  return !receipt || receipt.status === "accepted" || receipt.status === "";
-}
+const OPEN_RECEIPT_STATUSES = new Set([
+  "",
+  "accepted",
+  "received",
+  "pending_mapping",
+]);
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : {};
-}
+const TERMINAL_RECEIPT_STATUSES = new Set([
+  "applied",
+  "pending_review",
+  "rejected",
+  "correction_required",
+  "processed",
+  "duplicate",
+]);
 
-/** CarePlus /records is not live; send visit completions to the events API. */
-function eventsBodyForVisit(claimed: CareplusOutboxRecord): string {
-  if (claimed.eventType === "job.completed") return claimed.rawBody;
-
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = asRecord(JSON.parse(claimed.rawBody));
-  } catch {
-    parsed = {};
-  }
-  const source = asRecord(parsed.source);
-  const record = asRecord(parsed.record);
-  const jobId =
-    claimed.jobId ||
-    asString(source.jobId) ||
-    asString(source.recordId) ||
-    "";
-  const payload: CareplusJobCompletedPayload = {
-    eventId: `bms-${jobId}-completed-v1`,
-    eventType: "job.completed",
-    businessId: claimed.businessId,
-    jobId,
-    title: asString(record.title) || `Completed job ${jobId}`,
-    occurredAt: asString(parsed.occurredAt) || new Date().toISOString(),
-  };
-  const customerId = asString(record.customerId) || asString(source.customerId);
-  const staffId = asString(record.staffId) || asString(source.staffId);
-  if (customerId) payload.customerId = customerId;
-  if (staffId) payload.staffId = staffId;
-  return JSON.stringify(payload);
+function receiptStillOpen(receipt: CareplusReceipt | null): boolean {
+  if (!receipt) return true;
+  return OPEN_RECEIPT_STATUSES.has(receipt.status);
 }
 
 export async function listCareplusOutbox(
@@ -161,7 +143,7 @@ export async function processCareplusOutbox(options?: {
 }): Promise<{ scanned: number; sent: number; failed: number; retried: number }> {
   const snap = await adminDb
     .collection(CAREPLUS_OUTBOX_COLLECTION)
-    .where("status", "in", ["pending", "retry"])
+    .where("status", "in", ["pending", "retry", "awaiting_receipt"])
     .limit(CAREPLUS_OUTBOX_BATCH_SIZE)
     .get();
 
@@ -182,29 +164,50 @@ export async function processCareplusOutbox(options?: {
   let sent = 0;
   let failed = 0;
   let retried = 0;
+  const mappingCache = new Map<string, Awaited<ReturnType<typeof getCareplusIntegration>>>();
 
   for (const doc of due.slice(0, options?.limit ?? due.length)) {
+    const businessId = asString(doc.data()?.businessId) ?? "";
+    if (businessId && !mappingCache.has(businessId)) {
+      mappingCache.set(businessId, await getCareplusIntegration(businessId));
+    }
+    const mapping = businessId ? mappingCache.get(businessId) : null;
+    if (!mapping || mapping.status !== "active") continue;
+
     const claimed = await claimOutboxEvent(doc.id, options?.ignoreBackoff);
     if (!claimed) continue;
 
     const started = Date.now();
     try {
+      if (claimed.status === "awaiting_receipt") {
+        const receipt = await fetchCareplusReceipt({
+          businessId: claimed.businessId,
+          eventId: claimed.eventId,
+        });
+        if (receiptStillOpen(receipt) && !TERMINAL_RECEIPT_STATUSES.has(receipt.status)) {
+          await markOutboxAwaitingReceipt(claimed.eventId, claimed.lastStatus ?? 202, receipt);
+          retried += 1;
+          continue;
+        }
+        await markOutboxSent(claimed.eventId, claimed.lastStatus ?? 200, receipt);
+        sent += 1;
+        continue;
+      }
+
       const result =
         claimed.eventType === "job.completed"
           ? await sendCareplusJobCompleted({
               businessId: claimed.businessId,
-              rawBody: eventsBodyForVisit(claimed),
+              rawBody: claimed.rawBody,
             })
           : await sendCareplusRecord({
               businessId: claimed.businessId,
               rawBody: claimed.rawBody,
             });
-      if (receiptStillPending(result.receipt)) {
-        throw new CareplusClientError(
-          503,
-          "processing_incomplete",
-          "CarePlus accepted the event but has not finished creating the record.",
-        );
+      if (receiptStillOpen(result.receipt)) {
+        await markOutboxAwaitingReceipt(claimed.eventId, result.status, result.receipt);
+        retried += 1;
+        continue;
       }
       await markOutboxSent(claimed.eventId, result.status, result.receipt);
       await touchCareplusIntegration(claimed.businessId, {
@@ -291,7 +294,11 @@ async function claimOutboxEvent(
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
     const current = mapOutboxDoc(snap.id, snap.data() ?? {});
-    if (current.status !== "pending" && current.status !== "retry") {
+    if (
+      current.status !== "pending" &&
+      current.status !== "retry" &&
+      current.status !== "awaiting_receipt"
+    ) {
       return null;
     }
     if (
@@ -317,13 +324,30 @@ async function markOutboxSent(
   await adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId).update({
     status: "sent",
     lastStatus: httpStatus,
-    lastErrorCode: receipt?.corrections[0]?.message ?? null,
+    lastErrorCode: receipt?.corrections[0]?.message ?? receipt?.actionMessage ?? null,
     processingStatus: receipt?.status ?? "processed",
     careplusRecordId: receipt?.careplusRecordId ?? null,
     careplusResource: receipt?.careplusResource ?? null,
     corrections: receipt?.corrections ?? [],
     sentAt: FieldValue.serverTimestamp(),
     nextAttemptAt: null,
+  });
+}
+
+async function markOutboxAwaitingReceipt(
+  eventId: string,
+  httpStatus: number,
+  receipt: CareplusReceipt | null,
+): Promise<void> {
+  await adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId).update({
+    status: "awaiting_receipt",
+    lastStatus: httpStatus,
+    lastErrorCode: receipt?.corrections[0]?.message ?? receipt?.actionMessage ?? null,
+    processingStatus: receipt?.status ?? "accepted",
+    careplusRecordId: receipt?.careplusRecordId ?? null,
+    careplusResource: receipt?.careplusResource ?? null,
+    corrections: receipt?.corrections ?? [],
+    nextAttemptAt: Timestamp.fromMillis(Date.now() + nextBackoffMs(1)),
   });
 }
 
@@ -359,6 +383,7 @@ export async function retryCareplusOutboxEvent(eventId: string): Promise<Careplu
     current.status !== "retry" &&
     current.status !== "pending" &&
     current.status !== "sent" &&
+    current.status !== "awaiting_receipt" &&
     current.processingStatus !== "correction_required" &&
     current.processingStatus !== "accepted"
   ) {

@@ -16,6 +16,7 @@ export const BOOKING_STATUSES = [
   "ongoing",
   "cancelled",
   "completed",
+  "missed",
 ] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
@@ -25,6 +26,7 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   ongoing: "Ongoing",
   cancelled: "Cancelled",
   completed: "Completed",
+  missed: "Missed",
 };
 
 export const BOOKING_STATUS_TONE: Record<BookingStatus, string> = {
@@ -36,6 +38,7 @@ export const BOOKING_STATUS_TONE: Record<BookingStatus, string> = {
   cancelled:
     "bg-stone-100 text-stone-600 border border-stone-200",
   completed: "bg-sky-50 text-sky-700 border border-sky-200",
+  missed: "bg-rose-50 text-rose-800 border border-rose-200",
 };
 
 export function parseBookingStatus(raw: unknown): BookingStatus | null {
@@ -95,6 +98,11 @@ export type BookingDetail = {
   afterImageUrls: string[];
   /** When the job was cancelled (null unless status is `cancelled`). */
   cancelledAt: number | null;
+  missedReason: string | null;
+  missedFollowUp: string | null;
+  missedAt: number | null;
+  careplusSourceRevision: number;
+  careplusScheduled: boolean;
   createdAt: number | null;
   updatedAt: number | null;
 };
