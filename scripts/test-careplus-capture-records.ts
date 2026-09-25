@@ -211,7 +211,7 @@ describe("risk.captured / risk.amended", () => {
       hazard: "Updated after inspection.",
       likelihood: "low",
       consequence: "medium",
-      status: "monitoring",
+      status: "assessed",
     });
     const envelope = buildCaptureEnvelope({
       businessId: "biz-a",
