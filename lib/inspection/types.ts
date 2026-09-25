@@ -66,6 +66,7 @@ export const INSPECTION_CREATED_SOURCES = [
   "quotation_direct",
   "invoice_direct",
   "job_direct",
+  "command_center_ai",
 ] as const;
 export type InspectionRequestCreatedSource =
   (typeof INSPECTION_CREATED_SOURCES)[number];
@@ -80,6 +81,7 @@ export const CREATED_SOURCE_LABELS: Record<
   quotation_direct: "Quotation",
   invoice_direct: "Invoice",
   job_direct: "Direct job",
+  command_center_ai: "Command Center AI",
 };
 
 export function isCreatedSource(

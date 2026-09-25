@@ -171,11 +171,35 @@ export async function createInspectionRequest(
     customerId?: string | null;
     createdSource: InspectionRequestCreatedSource;
     scheduleOnCreate?: CalendarScheduleInput;
+    /**
+     * Caller-chosen document id for idempotent creates (e.g. the Command
+     * Center AI receptionist). When the document already exists it is
+     * returned unchanged with `alreadyExisted: true` and no notifications.
+     */
+    requestId?: string;
   },
 ): Promise<
-  | { ok: true; request: InspectionRequestDetail }
+  | { ok: true; request: InspectionRequestDetail; alreadyExisted?: boolean }
   | { ok: false; error: string }
 > {
+  if (options.requestId) {
+    const existing = await adminDb
+      .collection(REQUESTS_COLLECTION)
+      .doc(options.requestId)
+      .get();
+    if (existing.exists) {
+      const data = existing.data() ?? {};
+      if (data.businessId !== businessId) {
+        return { ok: false, error: "Request id is already in use." };
+      }
+      return {
+        ok: true,
+        request: mapInspectionDoc(existing.id, data),
+        alreadyExisted: true,
+      };
+    }
+  }
+
   let serviceName: string | null = null;
   let serviceBusinessType: string | null = null;
 
@@ -188,7 +212,9 @@ export async function createInspectionRequest(
     serviceBusinessType = service.businessType;
   }
 
-  const ref = adminDb.collection(REQUESTS_COLLECTION).doc();
+  const ref = options.requestId
+    ? adminDb.collection(REQUESTS_COLLECTION).doc(options.requestId)
+    : adminDb.collection(REQUESTS_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
   const requestCode = await allocateInspectionRequestCode();
 
@@ -226,7 +252,7 @@ export async function createInspectionRequest(
       }
     : null;
 
-  await ref.set({
+  const doc = {
     id: ref.id,
     businessId,
     requestCode,
@@ -254,7 +280,26 @@ export async function createInspectionRequest(
     customerImageUrls: input.customerImageUrls,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+
+  if (options.requestId) {
+    try {
+      await ref.create(doc);
+    } catch (error) {
+      // gRPC ALREADY_EXISTS — a concurrent retry won the race; return its result.
+      if ((error as { code?: unknown }).code === 6) {
+        const raced = await ref.get();
+        return {
+          ok: true,
+          request: mapInspectionDoc(ref.id, raced.data() ?? {}),
+          alreadyExisted: true,
+        };
+      }
+      throw error;
+    }
+  } else {
+    await ref.set(doc);
+  }
 
   const snap = await ref.get();
   const request = mapInspectionDoc(ref.id, snap.data() ?? {});
