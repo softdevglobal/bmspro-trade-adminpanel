@@ -187,6 +187,14 @@ function asTrimmed(value: string | undefined | null): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** CarePlus accepts HH:MM; some browsers submit HH:MM:SS from <input type="time">. */
+export function normalizeCaptureTime(value: string | undefined | null): string {
+  const trimmed = asTrimmed(value);
+  const match = trimmed.match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) return trimmed;
+  return `${match[1]}:${match[2]}`;
+}
+
 function omitEmpty<T extends Record<string, unknown>>(
   value: T,
 ): Record<string, unknown> {
@@ -276,7 +284,7 @@ export function buildIncidentRecord(
     title: asTrimmed(fields.title),
     customerId: asTrimmed(fields.customerId),
     date: asTrimmed(fields.date),
-    incidentTime: asTrimmed(fields.incidentTime),
+    incidentTime: normalizeCaptureTime(fields.incidentTime),
     awarenessAt: asTrimmed(fields.awarenessAt),
     incidentType: asTrimmed(fields.incidentType),
     severity: fields.severity,
@@ -373,13 +381,13 @@ export function buildCaptureEnvelope(input: {
     eventType: input.eventType,
     businessId,
     occurredAt: input.occurredAt?.trim() || new Date().toISOString(),
-    source: omitEmpty({
+    source: {
       recordId,
       customerId: anonymous ? "" : customerId,
       staffId,
       jobId,
       revision: input.revision,
-    }) as CareplusCaptureEnvelope["source"],
+    },
     record: input.record,
   };
 }

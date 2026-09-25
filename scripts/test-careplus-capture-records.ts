@@ -79,7 +79,7 @@ describe("incident.captured / incident.amended", () => {
     assert.equal(envelope.eventId, "bms-inc-1-incident.captured-v1");
     assert.equal(envelope.source.recordId, "inc-1");
     assert.equal(envelope.source.revision, 1);
-    assert.equal(envelope.source.customerId, undefined);
+    assert.equal(envelope.source.customerId, "");
     assert.equal(envelope.record.title, "Fall in hallway");
   });
 
@@ -138,7 +138,7 @@ describe("complaint.captured / complaint.amended", () => {
       record,
     });
     assert.equal(envelope.eventType, "complaint.captured");
-    assert.equal(envelope.source.customerId, undefined);
+    assert.equal(envelope.source.customerId, "");
     assert.equal(envelope.source.staffId, "staff-1");
     assert.equal(envelope.record.anonymous, true);
   });
@@ -222,7 +222,7 @@ describe("risk.captured / risk.amended", () => {
     });
     assert.equal(envelope.eventType, "risk.amended");
     assert.equal(envelope.eventId, "bms-risk-1-risk.amended-r2");
-    assert.equal(envelope.source.customerId, undefined);
+    assert.equal(envelope.source.customerId, "");
   });
 });
 
