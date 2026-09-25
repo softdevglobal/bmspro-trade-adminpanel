@@ -311,7 +311,6 @@ export function CareplusOperationsBoard() {
           requestedOutcome,
           actionTaken,
           due,
-          safetyOrHarm,
           safetyConcern: safetyOrHarm,
           riskLevel: isComplaint ? complaintRiskLevel : undefined,
           riskNotes,
