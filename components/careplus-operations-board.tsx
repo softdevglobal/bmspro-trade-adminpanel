@@ -520,30 +520,69 @@ export function CareplusOperationsBoard() {
 
   return (
     <div className="space-y-5">
-      <p className="font-body text-[14px] text-on-surface-variant">
-        Capture an incident, complaint or risk in Trade and send it to CarePlus.
-        CarePlus then owns assessment, follow-up actions and closure. Trade only
-        records what happened and shows delivery status (
-        <span className="font-semibold text-on-surface">applied</span>,{" "}
-        <span className="font-semibold text-on-surface">pending_mapping</span>,{" "}
-        <span className="font-semibold text-on-surface">pending_review</span>,{" "}
-        <span className="font-semibold text-on-surface">rejected</span>,{" "}
-        <span className="font-semibold text-on-surface">correction_required</span>
-        ). Unmapped customers or staff stay pending — Trade does not invent
-        CarePlus IDs. Also available from{" "}
-        <Link href="/dashboard/jobs" className="text-primary underline-offset-2 hover:underline">
-          Jobs
-        </Link>
-        ,{" "}
-        <Link href="/dashboard/customers" className="text-primary underline-offset-2 hover:underline">
-          Customers
-        </Link>{" "}
-        and{" "}
-        <Link href="/dashboard/team/management" className="text-primary underline-offset-2 hover:underline">
-          Staff
-        </Link>
-        .
-      </p>
+      <section className="rounded-2xl border border-outline-variant/70 bg-surface-container-lowest p-4 shadow-sm sm:p-5">
+        <ol className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              icon: "edit_note",
+              title: "Capture it here",
+              body: "Record an incident, complaint or risk as it happened.",
+            },
+            {
+              icon: "send",
+              title: "Trade sends it to CarePlus",
+              body: "Track delivery below and retry if anything fails.",
+            },
+            {
+              icon: "verified_user",
+              title: "CarePlus takes it from there",
+              body: "Assessment, follow-up actions and closure happen in CarePlus.",
+            },
+          ].map((step, index) => (
+            <li
+              key={step.title}
+              className="flex items-start gap-3 rounded-xl bg-surface-container-low px-3.5 py-3"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <span className="material-symbols-outlined text-[20px]">
+                  {step.icon}
+                </span>
+              </span>
+              <div className="min-w-0">
+                <p className="font-body text-[13px] font-semibold text-on-surface">
+                  <span className="text-on-surface-variant">{index + 1}.</span>{" "}
+                  {step.title}
+                </p>
+                <p className="mt-0.5 font-body text-[12px] leading-snug text-on-surface-variant">
+                  {step.body}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-outline-variant/50 pt-3">
+          <p className="font-body text-[12px] text-on-surface-variant">
+            People not yet linked in CarePlus stay pending until they are
+            matched.
+          </p>
+          <div className="flex flex-wrap items-center gap-2 font-body text-[12px]">
+            <span className="text-on-surface-variant">Also from</span>
+            {[
+              ["Jobs", "/dashboard/jobs"],
+              ["Customers", "/dashboard/customers"],
+              ["Staff", "/dashboard/team/management"],
+            ].map(([label, href]) => (
+              <Link
+                key={href}
+                href={href}
+                className="rounded-full border border-outline-variant px-2.5 py-0.5 font-semibold text-primary transition-colors hover:bg-primary/5"
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
       {error ? (
         <div className="rounded-xl border border-error/30 bg-error-container px-4 py-3 font-body text-[13px] text-on-error-container">
           {error}
