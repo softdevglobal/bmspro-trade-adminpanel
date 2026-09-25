@@ -255,7 +255,9 @@ export async function deliverCareplusOutboxEvent(
 
     const status = error instanceof CareplusClientError ? error.status : 0;
     const code =
-      error instanceof CareplusClientError ? error.code : "network_error";
+      error instanceof CareplusClientError
+        ? error.message || error.code
+        : "network_error";
     const retryAfter = retryAfterSecondsFromError(error);
     const willRetry =
       shouldRetryStatus(status || 503) &&

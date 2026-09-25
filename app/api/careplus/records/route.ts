@@ -308,11 +308,19 @@ export async function POST(request: Request) {
         jobId,
         record,
       });
+      let deliveryError: string | null = null;
+      if (queued === "failed" || queued === "retry") {
+        const eventId = `bms-${recordId}-${resolvedType}-v1`;
+        const rows = await listCareplusOutbox(auth.businessId);
+        const row = rows.find((item) => item.eventId === eventId);
+        deliveryError = row?.lastErrorCode ?? null;
+      }
       return NextResponse.json({
         ok: true,
         queued,
         recordId,
         eventType: resolvedType,
+        deliveryError,
       });
     } catch (error) {
       const message =

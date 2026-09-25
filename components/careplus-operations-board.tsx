@@ -347,15 +347,20 @@ export function CareplusOperationsBoard() {
         error?: string;
         queued?: string;
         recordId?: string;
+        deliveryError?: string | null;
       }>(response);
       if (!response.ok || !data.ok) {
         throw new Error(data.error ?? "Could not send the record.");
       }
       setOk(
         data.queued === "failed"
-          ? "Could not deliver to CarePlus yet. Use Retry in Delivery below when the connection is ready."
+          ? data.deliveryError
+            ? `Could not deliver to CarePlus: ${data.deliveryError}`
+            : "Could not deliver to CarePlus yet. Use Retry in Delivery below when the connection is ready."
           : data.queued === "retry"
-            ? "CarePlus did not confirm yet. Trade will retry automatically, or use Retry below."
+            ? data.deliveryError
+              ? `CarePlus did not confirm yet (${data.deliveryError}). Trade will retry automatically, or use Retry below.`
+              : "CarePlus did not confirm yet. Trade will retry automatically, or use Retry below."
             : data.queued === "exists"
               ? "This record was already sent (identical retry)."
               : data.queued === "queued"
