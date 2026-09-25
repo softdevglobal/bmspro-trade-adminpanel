@@ -12,6 +12,7 @@ import {
   CAREPLUS_LEARNING_CANONICAL_PATH,
   CAREPLUS_LEARNING_PREFIX,
   CAREPLUS_MAX_RESPONSE_BYTES,
+  CAREPLUS_RECEIPT_TIMEOUT_MS,
   CAREPLUS_REQUEST_TIMEOUT_MS,
 } from "@/lib/integrations/careplus/constants";
 import type {
@@ -56,7 +57,7 @@ function userMessageForStatus(status: number): string {
       return "CarePlus rate-limited the request. It will retry automatically.";
     default:
       return status >= 500
-        ? "CarePlus is unavailable. The outbox will retry."
+        ? "CarePlus is unavailable. Trade will retry automatically."
         : `CarePlus returned HTTP ${status}.`;
   }
 }
@@ -350,6 +351,10 @@ function signEventPayload(secret: string, timestamp: string, payload: string): s
   return createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+}
+
 async function signedCareplusPost(input: {
   businessId: string;
   rawBody: string;
@@ -371,19 +376,38 @@ async function signedCareplusPost(input: {
   const timestamp = eventTimestampMs();
   const signature = signEventPayload(secret, timestamp, input.rawBody);
 
-  const response = await fetch(input.endpoint, {
-    method: "POST",
-    redirect: "error",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json",
-      "x-bms-business-id": input.businessId,
-      "x-bms-timestamp": timestamp,
-      "x-bms-signature": signature,
-    },
-    body: input.rawBody,
-    signal: AbortSignal.timeout(CAREPLUS_REQUEST_TIMEOUT_MS),
-  });
+  let response: Response;
+  try {
+    response = await fetch(input.endpoint, {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-bms-business-id": input.businessId,
+        "x-bms-timestamp": timestamp,
+        "x-bms-signature": signature,
+      },
+      body: input.rawBody,
+      signal: AbortSignal.timeout(CAREPLUS_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new CareplusClientError(
+        408,
+        "timeout",
+        "CarePlus took too long to respond. Trade will retry shortly.",
+      );
+    }
+    if (error instanceof TypeError || (error instanceof Error && /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(error.message))) {
+      throw new CareplusClientError(
+        503,
+        "unreachable",
+        "Could not reach CarePlus. Check that CarePlus is running and BMS_CAREPLUS_RECORDS_ENDPOINT points to it.",
+      );
+    }
+    throw error;
+  }
 
   const body = await readCappedJson(response).catch(() => null);
 
@@ -458,7 +482,7 @@ export async function fetchCareplusReceipt(input: {
       "x-bms-timestamp": timestamp,
       "x-bms-signature": signature,
     },
-    signal: AbortSignal.timeout(CAREPLUS_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(CAREPLUS_RECEIPT_TIMEOUT_MS),
   });
   const body = await readCappedJson(response);
   throwIfUnsuccessful(response.status);

@@ -14,6 +14,16 @@ export const CAREPLUS_OUTBOX_STATUSES = [
 ] as const;
 export type CareplusOutboxStatus = (typeof CAREPLUS_OUTBOX_STATUSES)[number];
 
+export const CAREPLUS_ENQUEUE_RESULTS = [
+  "sent",
+  "queued",
+  "retry",
+  "skipped",
+  "exists",
+  "failed",
+] as const;
+export type CareplusEnqueueResult = (typeof CAREPLUS_ENQUEUE_RESULTS)[number];
+
 export const CAREPLUS_EVENT_TYPES = [
   "job.completed",
   "directory.participant",
@@ -179,6 +189,7 @@ export type CareplusOutboxRecord = {
   careplusRecordId: string | null;
   careplusResource: string | null;
   corrections: CareplusReceiptCorrection[];
+  origin: "tenant" | "system";
   createdAt: number | null;
   sentAt: number | null;
 };

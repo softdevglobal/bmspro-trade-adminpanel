@@ -3,6 +3,7 @@ export const CAREPLUS_STAFF_MAPPINGS_COLLECTION = "careplus_staff_mappings";
 export const CAREPLUS_CUSTOMER_MAPPINGS_COLLECTION =
   "careplus_customer_mappings";
 export const CAREPLUS_OUTBOX_COLLECTION = "careplus_outbox";
+export const CAREPLUS_CAPTURES_COLLECTION = "careplus_captures";
 
 export const CAREPLUS_LEARNING_CANONICAL_PATH =
   "/api/integrations/bms/learning";
@@ -23,7 +24,8 @@ export const CAREPLUS_DIRECTORY_CANONICAL_PATH =
   "/api/integrations/careplus/directory";
 export const CAREPLUS_DIRECTORY_PREFIX = "careplus-trade-directory:v1";
 export const CAREPLUS_MAX_RESPONSE_BYTES = 256 * 1024;
-export const CAREPLUS_REQUEST_TIMEOUT_MS = 15_000;
+export const CAREPLUS_REQUEST_TIMEOUT_MS = 30_000;
+export const CAREPLUS_RECEIPT_TIMEOUT_MS = 8_000;
 export const CAREPLUS_OUTBOX_MAX_ATTEMPTS = 8;
 export const CAREPLUS_OUTBOX_BATCH_SIZE = 20;
 

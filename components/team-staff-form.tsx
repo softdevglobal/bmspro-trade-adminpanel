@@ -1,6 +1,7 @@
 "use client";
 
 import { AuPhoneInput } from "@/components/au-phone-input";
+import { CareplusCaptureShortcut } from "@/components/careplus-capture-shortcut";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import {
   formatAuPhoneDisplay,
@@ -1296,6 +1297,7 @@ function StaffMembersList({
 }) {
   return (
     <section className="flex flex-col gap-4">
+      <CareplusCaptureShortcut context="Staff can be named as complaint owners or risk owners" />
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <h3 className="font-display text-headline-sm text-headline-sm font-semibold text-on-surface">

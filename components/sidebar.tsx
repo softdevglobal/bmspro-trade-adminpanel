@@ -198,8 +198,8 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/careplus",
-    label: "CarePlus",
-    icon: "hub",
+    label: "CarePlus records",
+    icon: "health_and_safety",
     superAdmin: true,
   },
   {
