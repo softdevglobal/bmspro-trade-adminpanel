@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  SCHEDULE_SELECT_CHEVRON,
+  SCHEDULE_SELECT_CLASS,
+} from "@/components/calendar-visit-time-range";
+import { todayIso } from "@/components/booking-slot-date-picker";
+import { MonthCalendarField } from "@/components/month-calendar-field";
 import { readJsonResponse } from "@/lib/api/read-json-response";
 import { useAuth } from "@/lib/auth/auth-context";
 import { summarizeCareplusOutbox } from "@/lib/integrations/careplus/outbox-summary";
@@ -7,8 +13,9 @@ import type {
   CareplusOperationsCustomer,
   CareplusOutboxRecord,
 } from "@/lib/integrations/careplus/types";
+import { formatClockTime } from "@/lib/inspection/types";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 function deliveryStatusLabel(row: CareplusOutboxRecord): string {
   if (row.processingStatus === "pending_mapping") return "pending_mapping";
@@ -30,7 +37,62 @@ function deliveryStatusLabel(row: CareplusOutboxRecord): string {
 }
 
 const INPUT_CLASS =
-  "w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+  "w-full rounded-lg border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10";
+
+const LABEL_CLASS =
+  "font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant";
+
+const SELECT_CLASS = SCHEDULE_SELECT_CLASS;
+
+const CAPTURE_TIME_OPTIONS: { value: string; label: string }[] = (() => {
+  const options: { value: string; label: string }[] = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += 30) {
+    const hour = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    const label = formatClockTime(value);
+    if (label) options.push({ value, label });
+  }
+  return options;
+})();
+
+function FieldLabel({ children }: { children: ReactNode }) {
+  return <span className={LABEL_CLASS}>{children}</span>;
+}
+
+function CaptureTimeSelect({
+  value,
+  onChange,
+  label,
+  optional = false,
+  "aria-label": ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  optional?: boolean;
+  "aria-label"?: string;
+}) {
+  return (
+    <label className="block space-y-1">
+      <FieldLabel>{label}</FieldLabel>
+      <select
+        aria-label={ariaLabel ?? label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={SELECT_CLASS}
+        style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
+      >
+        {optional ? <option value="">Not set</option> : null}
+        {CAPTURE_TIME_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 type CaptureType =
   | "incident.captured"
@@ -47,8 +109,11 @@ type StaffRow = {
   role: string;
 };
 
-function todayDate(): string {
-  return new Date().toISOString().slice(0, 10);
+function toAwarenessIso(date: string, time: string): string {
+  if (!date) return "";
+  const clock = time || "12:00";
+  const parsed = new Date(`${date}T${clock}:00`);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
 }
 
 export function CareplusOperationsBoard() {
@@ -69,7 +134,7 @@ export function CareplusOperationsBoard() {
   const [stableRecordId, setStableRecordId] = useState(() => crypto.randomUUID());
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState(todayDate);
+  const [date, setDate] = useState(() => todayIso());
   const [customerId, setCustomerId] = useState("");
   const [staffId, setStaffId] = useState("");
   const [severity, setSeverity] = useState("medium");
@@ -77,8 +142,10 @@ export function CareplusOperationsBoard() {
   const [anonymous, setAnonymous] = useState(false);
   const [safetyOrHarm, setSafetyOrHarm] = useState(false);
   const [openIncidentPrompt, setOpenIncidentPrompt] = useState(false);
-  const [awarenessAt, setAwarenessAt] = useState("");
+  const [awarenessDate, setAwarenessDate] = useState("");
+  const [awarenessTime, setAwarenessTime] = useState("");
   const [incidentTime, setIncidentTime] = useState("");
+  const minCalendarDate = useMemo(() => todayIso(), []);
   const [incidentType, setIncidentType] = useState("");
   const [location, setLocation] = useState("");
   const [reporterNote, setReporterNote] = useState("");
@@ -192,11 +259,12 @@ export function CareplusOperationsBoard() {
   function resetFormFields() {
     setTitle("");
     setDescription("");
-    setDate(todayDate());
+    setDate(todayIso());
     setImmediateAction("");
     setAnonymous(false);
     setSafetyOrHarm(false);
-    setAwarenessAt("");
+    setAwarenessDate("");
+    setAwarenessTime("");
     setIncidentTime("");
     setIncidentType("");
     setLocation("");
@@ -294,9 +362,7 @@ export function CareplusOperationsBoard() {
           immediateAction,
           anonymous,
           safetyOrHarm,
-          awarenessAt: awarenessAt
-            ? new Date(awarenessAt).toISOString()
-            : "",
+          awarenessAt: toAwarenessIso(awarenessDate, awarenessTime),
           incidentTime,
           incidentType,
           location,
@@ -454,7 +520,7 @@ export function CareplusOperationsBoard() {
 
   return (
     <div className="space-y-5">
-      <p className="max-w-3xl font-body text-[14px] text-on-surface-variant">
+      <p className="font-body text-[14px] text-on-surface-variant">
         Capture an incident, complaint or risk in Trade and send it to CarePlus.
         CarePlus then owns assessment, follow-up actions and closure. Trade only
         records what happened and shows delivery status (
@@ -521,10 +587,11 @@ export function CareplusOperationsBoard() {
             Send a record to CarePlus
           </h2>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <label className="font-body text-[12px] text-on-surface-variant">
-              Type
+            <label className="block space-y-1">
+              <FieldLabel>Type</FieldLabel>
               <select
-                className={`${INPUT_CLASS} mt-1`}
+                className={SELECT_CLASS}
+                style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                 value={eventType}
                 onChange={(event) => {
                   setEventType(event.target.value as CaptureType);
@@ -539,50 +606,51 @@ export function CareplusOperationsBoard() {
                 <option value="staff.credential.submitted">Staff credential</option>
               </select>
             </label>
-            <label className="font-body text-[12px] text-on-surface-variant">
-              {isIncident
-                ? "Incident title"
-                : isComplaint
-                  ? "Subject"
-                  : isRisk
-                    ? "Risk title"
-                    : "Title"}
+            <label className="block space-y-1">
+              <FieldLabel>
+                {isIncident
+                  ? "Incident title"
+                  : isComplaint
+                    ? "Subject"
+                    : isRisk
+                      ? "Risk title"
+                      : "Title"}
+              </FieldLabel>
               <input
-                className={`${INPUT_CLASS} mt-1`}
+                className={INPUT_CLASS}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </label>
             {isIncident || isComplaint ? (
-              <label className="font-body text-[12px] text-on-surface-variant">
-                {isIncident
-                  ? "Date it happened"
-                  : isComplaint
-                    ? "Date received"
-                    : "Date"}
-                <input
-                  className={`${INPUT_CLASS} mt-1`}
-                  type="date"
-                  value={date}
-                  onChange={(event) => setDate(event.target.value)}
-                />
-              </label>
+              <MonthCalendarField
+                size="comfortable"
+                allowPast
+                label={
+                  isIncident
+                    ? "Date it happened"
+                    : isComplaint
+                      ? "Date received"
+                      : "Date"
+                }
+                selectedIso={date}
+                minDate={minCalendarDate}
+                onSelect={setDate}
+              />
             ) : null}
             {isIncident ? (
               <>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Time (approximate is fine)
-                  <input
-                    className={`${INPUT_CLASS} mt-1`}
-                    type="time"
-                    value={incidentTime}
-                    onChange={(event) => setIncidentTime(event.target.value)}
-                  />
-                </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Type of incident
+                <CaptureTimeSelect
+                  optional
+                  label="Time (approximate is fine)"
+                  value={incidentTime}
+                  onChange={setIncidentTime}
+                />
+                <label className="block space-y-1">
+                  <FieldLabel>Type of incident</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={incidentType}
                     onChange={(event) => setIncidentType(event.target.value)}
                   >
@@ -603,10 +671,11 @@ export function CareplusOperationsBoard() {
                     <option value="Other">Other</option>
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Severity
+                <label className="block space-y-1">
+                  <FieldLabel>Severity</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={severity}
                     onChange={(event) => setSeverity(event.target.value)}
                   >
@@ -616,24 +685,32 @@ export function CareplusOperationsBoard() {
                     <option value="critical">Critical</option>
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                  Where did it happen?
+                <label className="block space-y-1 md:col-span-2">
+                  <FieldLabel>Where did it happen?</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={location}
                     onChange={(event) => setLocation(event.target.value)}
                     placeholder="Participant’s home, vehicle, community venue…"
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                  When did the provider become aware? (optional)
-                  <input
-                    className={`${INPUT_CLASS} mt-1`}
-                    type="datetime-local"
-                    value={awarenessAt}
-                    onChange={(event) => setAwarenessAt(event.target.value)}
+                <div className="grid gap-3 md:col-span-2 md:grid-cols-2">
+                  <MonthCalendarField
+                    size="comfortable"
+                    allowPast
+                    label="Aware date (optional)"
+                    placeholder="Select date"
+                    selectedIso={awarenessDate}
+                    minDate={minCalendarDate}
+                    onSelect={setAwarenessDate}
                   />
-                </label>
+                  <CaptureTimeSelect
+                    optional
+                    label="Aware time (optional)"
+                    value={awarenessTime}
+                    onChange={setAwarenessTime}
+                  />
+                </div>
                 <p className="md:col-span-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[12px] text-on-surface-variant">
                   Capture what happened here. CarePlus owns reportability,
                   investigation and Commission notification — Trade does not
@@ -643,10 +720,11 @@ export function CareplusOperationsBoard() {
             ) : null}
             {isRisk ? (
               <>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Likelihood
+                <label className="block space-y-1">
+                  <FieldLabel>Likelihood</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={likelihood}
                     onChange={(event) => setLikelihood(event.target.value)}
                   >
@@ -655,10 +733,11 @@ export function CareplusOperationsBoard() {
                     <option value="high">High</option>
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Consequence
+                <label className="block space-y-1">
+                  <FieldLabel>Consequence</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={consequence}
                     onChange={(event) => setConsequence(event.target.value)}
                   >
@@ -668,18 +747,19 @@ export function CareplusOperationsBoard() {
                     <option value="critical">Critical</option>
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Site or asset
+                <label className="block space-y-1">
+                  <FieldLabel>Site or asset</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={siteOrAsset}
                     onChange={(event) => setSiteOrAsset(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Review owner
+                <label className="block space-y-1">
+                  <FieldLabel>Review owner</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={proposedOwner}
                     onChange={(event) => setProposedOwner(event.target.value)}
                   >
@@ -691,19 +771,19 @@ export function CareplusOperationsBoard() {
                     ))}
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Review date
-                  <input
-                    className={`${INPUT_CLASS} mt-1`}
-                    type="date"
-                    value={reviewDate}
-                    onChange={(event) => setReviewDate(event.target.value)}
-                  />
-                </label>
-                <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                  Existing controls
+                <MonthCalendarField
+                  size="comfortable"
+                  allowPast
+                  label="Review date"
+                  placeholder="Select date"
+                  selectedIso={reviewDate}
+                  minDate={minCalendarDate}
+                  onSelect={setReviewDate}
+                />
+                <label className="block space-y-1 md:col-span-2">
+                  <FieldLabel>Existing controls</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={existingControls}
                     onChange={(event) => setExistingControls(event.target.value)}
                   />
@@ -715,12 +795,15 @@ export function CareplusOperationsBoard() {
                 </p>
               </>
             ) : null}
-            <label className="font-body text-[12px] text-on-surface-variant">
-              {isIncident || isComplaint || isRisk
-                ? "Participant (optional)"
-                : "Customer"}
+            <label className="block space-y-1">
+              <FieldLabel>
+                {isIncident || isComplaint || isRisk
+                  ? "Participant (optional)"
+                  : "Customer"}
+              </FieldLabel>
               <select
-                className={`${INPUT_CLASS} mt-1`}
+                className={SELECT_CLASS}
+                style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                 value={customerId}
                 disabled={isComplaint && anonymous}
                 onChange={(event) => setCustomerId(event.target.value)}
@@ -783,10 +866,11 @@ export function CareplusOperationsBoard() {
             {eventType === "staff.credential.submitted" ||
             eventType === "action.captured" ||
             isComplaint ? (
-              <label className="font-body text-[12px] text-on-surface-variant">
-                {isComplaint ? "Owner (staff)" : "Staff"}
+              <label className="block space-y-1">
+                <FieldLabel>{isComplaint ? "Owner (staff)" : "Staff"}</FieldLabel>
                 <select
-                  className={`${INPUT_CLASS} mt-1`}
+                  className={SELECT_CLASS}
+                  style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                   value={staffId}
                   onChange={(event) => setStaffId(event.target.value)}
                 >
@@ -801,10 +885,11 @@ export function CareplusOperationsBoard() {
             ) : null}
             {isComplaint ? (
               <>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Category
+                <label className="block space-y-1">
+                  <FieldLabel>Category</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={category}
                     onChange={(event) => setCategory(event.target.value)}
                   >
@@ -844,10 +929,11 @@ export function CareplusOperationsBoard() {
                 </label>
                 {safetyOrHarm ? (
                   <>
-                    <label className="font-body text-[12px] text-on-surface-variant">
-                      Risk level
+                    <label className="block space-y-1">
+                      <FieldLabel>Risk level</FieldLabel>
                       <select
-                        className={`${INPUT_CLASS} mt-1`}
+                        className={SELECT_CLASS}
+                        style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                         value={complaintRiskLevel}
                         onChange={(event) =>
                           setComplaintRiskLevel(event.target.value)
@@ -860,20 +946,21 @@ export function CareplusOperationsBoard() {
                         <option value="critical">Critical</option>
                       </select>
                     </label>
-                    <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                      Risk assessment notes
+                    <label className="md:col-span-2 block space-y-1">
+                      <FieldLabel>Risk assessment notes</FieldLabel>
                       <textarea
-                        className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                        className={`${INPUT_CLASS} min-h-[72px]`}
                         value={riskNotes}
                         onChange={(event) => setRiskNotes(event.target.value)}
                       />
                     </label>
                   </>
                 ) : null}
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  How it was received
+                <label className="block space-y-1">
+                  <FieldLabel>How it was received</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={channel}
                     onChange={(event) => setChannel(event.target.value)}
                   >
@@ -886,20 +973,21 @@ export function CareplusOperationsBoard() {
                 </label>
                 {!anonymous ? (
                   <>
-                    <label className="font-body text-[12px] text-on-surface-variant">
-                      Person making the complaint
-                      <input
-                        className={`${INPUT_CLASS} mt-1`}
+                    <label className="block space-y-1">
+                  <FieldLabel>Person making the complaint</FieldLabel>
+                  <input
+                        className={INPUT_CLASS}
                         value={complainantName}
                         onChange={(event) =>
                           setComplainantName(event.target.value)
                         }
                       />
                     </label>
-                    <label className="font-body text-[12px] text-on-surface-variant">
-                      Relationship to the participant
-                      <select
-                        className={`${INPUT_CLASS} mt-1`}
+                    <label className="block space-y-1">
+                  <FieldLabel>Relationship to the participant</FieldLabel>
+                  <select
+                        className={SELECT_CLASS}
+                        style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                         value={complainantRelationship}
                         onChange={(event) =>
                           setComplainantRelationship(event.target.value)
@@ -914,10 +1002,10 @@ export function CareplusOperationsBoard() {
                         <option value="Other">Other</option>
                       </select>
                     </label>
-                    <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                      Preferred contact details
-                      <input
-                        className={`${INPUT_CLASS} mt-1`}
+                    <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Preferred contact details</FieldLabel>
+                  <input
+                        className={INPUT_CLASS}
                         value={complainantContact}
                         onChange={(event) =>
                           setComplainantContact(event.target.value)
@@ -927,76 +1015,78 @@ export function CareplusOperationsBoard() {
                     </label>
                   </>
                 ) : null}
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Representative or advocate
+                <label className="block space-y-1">
+                  <FieldLabel>Representative or advocate</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={representativeName}
                     onChange={(event) => setRepresentativeName(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Representative contact details
+                <label className="block space-y-1">
+                  <FieldLabel>Representative contact details</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={representativeContact}
                     onChange={(event) =>
                       setRepresentativeContact(event.target.value)
                     }
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                  Communication or advocacy support offered
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Communication or advocacy support offered</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={supportOffered}
                     onChange={(event) => setSupportOffered(event.target.value)}
                     placeholder="Interpreter, Easy Read, independent advocate…"
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                  What would they like to happen?
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>What would they like to happen?</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={requestedOutcome}
                     onChange={(event) => setRequestedOutcome(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant md:col-span-2">
-                  Action already taken
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Action already taken</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={actionTaken}
                     onChange={(event) => setActionTaken(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Response due
-                  <input
-                    className={`${INPUT_CLASS} mt-1`}
-                    type="date"
-                    value={due}
-                    onChange={(event) => setDue(event.target.value)}
-                  />
-                </label>
+                <MonthCalendarField
+                  size="comfortable"
+                  allowPast
+                  label="Response due"
+                  placeholder="Select date"
+                  selectedIso={due}
+                  minDate={minCalendarDate}
+                  onSelect={setDue}
+                />
                 <p className="md:col-span-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[12px] text-on-surface-variant">
                   CarePlus owns acknowledgement, investigation, resolution and
                   Commission options. Trade only captures the complaint.
                 </p>
               </>
             ) : null}
-            <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-              {isRisk
-                ? "Hazard or situation"
-                : isIncident
-                  ? "What happened?"
-                  : isComplaint
-                    ? "Feedback or concern"
-                    : eventType === "staff.credential.submitted"
-                      ? "Notes"
-                      : "What happened"}
+            <label className="md:col-span-2 block space-y-1">
+              <FieldLabel>
+                {isRisk
+                  ? "Hazard or situation"
+                  : isIncident
+                    ? "What happened?"
+                    : isComplaint
+                      ? "Feedback or concern"
+                      : eventType === "staff.credential.submitted"
+                        ? "Notes"
+                        : "What happened"}
+              </FieldLabel>
               <textarea
-                className={`${INPUT_CLASS} mt-1 min-h-[96px]`}
+                className={`${INPUT_CLASS} min-h-[96px]`}
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder={
@@ -1010,10 +1100,10 @@ export function CareplusOperationsBoard() {
             </label>
             {isIncident ? (
               <>
-                <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-                  Witnesses and their contact details
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Witnesses and their contact details</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={witnesses}
                     onChange={(event) => {
                       setWitnesses(event.target.value);
@@ -1021,19 +1111,19 @@ export function CareplusOperationsBoard() {
                     }}
                   />
                 </label>
-                <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-                  Injuries or harm
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Injuries or harm</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={injuryDetails}
                     onChange={(event) => setInjuryDetails(event.target.value)}
                     placeholder='Describe any injury and treatment. Write "none observed" if there was none.'
                   />
                 </label>
-                <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-                  Immediate action taken
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Immediate action taken</FieldLabel>
                   <textarea
-                    className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+                    className={`${INPUT_CLASS} min-h-[72px]`}
                     value={immediateAction}
                     onChange={(event) => setImmediateAction(event.target.value)}
                     placeholder="How was everyone made safe? Include first aid and support given."
@@ -1075,10 +1165,10 @@ export function CareplusOperationsBoard() {
                     })}
                   </div>
                 </fieldset>
-                <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-                  Escalation already made
+                <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Escalation already made</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={escalationMade}
                     onChange={(event) => setEscalationMade(event.target.value)}
                     placeholder="For example supervisor notified, 000 called"
@@ -1087,10 +1177,10 @@ export function CareplusOperationsBoard() {
               </>
             ) : null}
             {isRisk ? (
-              <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-                Suggested treatment
-                <textarea
-                  className={`${INPUT_CLASS} mt-1 min-h-[72px]`}
+              <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Suggested treatment</FieldLabel>
+                  <textarea
+                  className={`${INPUT_CLASS} min-h-[72px]`}
                   value={treatment}
                   onChange={(event) => setTreatment(event.target.value)}
                 />
@@ -1098,10 +1188,11 @@ export function CareplusOperationsBoard() {
             ) : null}
             {eventType === "action.captured" ? (
               <>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Source type
+                <label className="block space-y-1">
+                  <FieldLabel>Source type</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={sourceType}
                     onChange={(event) => setSourceType(event.target.value)}
                   >
@@ -1111,23 +1202,23 @@ export function CareplusOperationsBoard() {
                     <option value="complaint">Complaint</option>
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Source record ID
+                <label className="block space-y-1">
+                  <FieldLabel>Source record ID</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={sourceRecordId}
                     onChange={(event) => setSourceRecordId(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Due date
-                  <input
-                    className={`${INPUT_CLASS} mt-1`}
-                    type="date"
-                    value={due}
-                    onChange={(event) => setDue(event.target.value)}
-                  />
-                </label>
+                <MonthCalendarField
+                  size="comfortable"
+                  allowPast
+                  label="Due date"
+                  placeholder="Select date"
+                  selectedIso={due}
+                  minDate={minCalendarDate}
+                  onSelect={setDue}
+                />
                 <p className="md:col-span-2 rounded-lg border border-outline-variant/60 bg-surface-container-low px-3 py-2 font-body text-[12px] text-on-surface-variant">
                   CarePlus owns follow-up for linked risks, incidents and
                   complaints. Completing this Trade note does not close the
@@ -1137,10 +1228,11 @@ export function CareplusOperationsBoard() {
             ) : null}
             {eventType === "staff.credential.submitted" ? (
               <>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Credential type
+                <label className="block space-y-1">
+                  <FieldLabel>Credential type</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={credentialType}
                     onChange={(event) => setCredentialType(event.target.value)}
                   >
@@ -1150,35 +1242,36 @@ export function CareplusOperationsBoard() {
                     <option value="Trade licence">Trade licence</option>
                   </select>
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Issuer
+                <label className="block space-y-1">
+                  <FieldLabel>Issuer</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={issuer}
                     onChange={(event) => setIssuer(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Reference
+                <label className="block space-y-1">
+                  <FieldLabel>Reference</FieldLabel>
                   <input
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={INPUT_CLASS}
                     value={reference}
                     onChange={(event) => setReference(event.target.value)}
                   />
                 </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  Expiry
-                  <input
-                    className={`${INPUT_CLASS} mt-1`}
-                    type="date"
-                    value={expiry}
-                    onChange={(event) => setExpiry(event.target.value)}
-                  />
-                </label>
-                <label className="font-body text-[12px] text-on-surface-variant">
-                  BMS claimed status
+                <MonthCalendarField
+                  size="comfortable"
+                  allowPast
+                  label="Expiry"
+                  placeholder="Select date"
+                  selectedIso={expiry}
+                  minDate={minCalendarDate}
+                  onSelect={setExpiry}
+                />
+                <label className="block space-y-1">
+                  <FieldLabel>BMS claimed status</FieldLabel>
                   <select
-                    className={`${INPUT_CLASS} mt-1`}
+                    className={SELECT_CLASS}
+                    style={{ backgroundImage: SCHEDULE_SELECT_CHEVRON }}
                     value={claimedStatus}
                     onChange={(event) => setClaimedStatus(event.target.value)}
                   >
@@ -1190,10 +1283,10 @@ export function CareplusOperationsBoard() {
               </>
             ) : null}
             {eventType === "evidence.attached" ? (
-              <label className="md:col-span-2 font-body text-[12px] text-on-surface-variant">
-                Evidence file
-                <input
-                  className={`${INPUT_CLASS} mt-1`}
+              <label className="md:col-span-2 block space-y-1">
+                  <FieldLabel>Evidence file</FieldLabel>
+                  <input
+                  className={INPUT_CLASS}
                   type="file"
                   accept="application/pdf,image/jpeg,image/png,image/webp"
                   onChange={(event) => {
@@ -1215,7 +1308,7 @@ export function CareplusOperationsBoard() {
             type="button"
             disabled={saving || uploading}
             onClick={() => void submit()}
-            className="mt-4 rounded-lg bg-primary px-4 py-2.5 font-body text-[13px] font-semibold text-on-primary disabled:opacity-50"
+            className="mt-4 rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {saving ? "Sending…" : "Send to CarePlus"}
           </button>

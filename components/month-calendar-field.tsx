@@ -24,6 +24,7 @@ export function MonthCalendarField({
   label,
   placeholder = "Select date",
   disabled = false,
+  allowPast = false,
   size = "compact",
 }: {
   selectedIso: string;
@@ -32,6 +33,8 @@ export function MonthCalendarField({
   label?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Admin / record-capture flows: allow selecting dates before minDate. */
+  allowPast?: boolean;
   /** "comfortable" matches the standard platform field metrics. */
   size?: "compact" | "comfortable";
 }) {
@@ -102,6 +105,7 @@ export function MonthCalendarField({
             <BookingMonthCalendar
               selectedIso={selectedIso}
               minDate={minDate}
+              allowPast={allowPast}
               onSelect={(iso) => {
                 onSelect(iso);
                 setOpen(false);
