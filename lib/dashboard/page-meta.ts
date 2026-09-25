@@ -127,15 +127,15 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
     icon: "domain",
   },
   "/dashboard/careplus": {
-    title: "CarePlus",
+    title: "CarePlus records",
     subtitle:
-      "Map a tenant, link staff and customers, and review CarePlus delivery receipts.",
-    icon: "hub",
+      "Review records businesses sent to CarePlus. Retry a delivery if it failed.",
+    icon: "health_and_safety",
   },
   "/dashboard/careplus-records": {
     title: "CarePlus records",
     subtitle:
-      "Send incidents, complaints and follow-up actions to CarePlus, then review delivery corrections.",
+      "Capture incidents, complaints and risks in Trade. CarePlus takes the follow-up action.",
     icon: "health_and_safety",
   },
   "/dashboard/packages": {

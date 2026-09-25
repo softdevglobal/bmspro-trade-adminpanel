@@ -3,7 +3,7 @@ import { SuperAdminGuard } from "@/components/super-admin-guard";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "CarePlus - BMS Pro Trade",
+  title: "CarePlus records - BMS Pro Trade",
 };
 
 export default function CareplusPage() {

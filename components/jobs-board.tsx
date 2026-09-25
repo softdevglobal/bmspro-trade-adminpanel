@@ -1,5 +1,6 @@
 "use client";
 
+import { CareplusCaptureShortcut } from "@/components/careplus-capture-shortcut";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -1786,6 +1787,9 @@ export function JobsBoard({
 
   return (
     <>
+      <div className="mb-3">
+        <CareplusCaptureShortcut context="Use when a visit raises a safety or quality issue" />
+      </div>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-body text-[12px] text-on-surface-variant sm:flex-1">
           {groupedBookings.active.length} active ·{" "}

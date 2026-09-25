@@ -1,5 +1,6 @@
 "use client";
 
+import { CareplusCaptureShortcut } from "@/components/careplus-capture-shortcut";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
@@ -503,6 +504,7 @@ export function CustomersBoard() {
   return (
     <>
       <div className="w-full min-w-0 space-y-4">
+        <CareplusCaptureShortcut context="Link a participant when known, or leave blank for anonymous feedback" />
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4 sm:rounded-2xl">
           <label className="sr-only" htmlFor="customer-search">
             Search customers

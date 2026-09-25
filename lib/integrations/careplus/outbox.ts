@@ -14,6 +14,7 @@ import {
   CAREPLUS_OUTBOX_BATCH_SIZE,
   CAREPLUS_OUTBOX_COLLECTION,
   CAREPLUS_OUTBOX_MAX_ATTEMPTS,
+  CAREPLUS_REQUEST_TIMEOUT_MS,
 } from "@/lib/integrations/careplus/constants";
 import {
   getCareplusIntegration,
@@ -29,7 +30,6 @@ import {
   FieldValue,
   Timestamp,
   type DocumentData,
-  type Query,
 } from "firebase-admin/firestore";
 
 function toMillis(value: unknown): number | null {
@@ -82,6 +82,7 @@ export function mapOutboxDoc(
     careplusRecordId: asString(data.careplusRecordId),
     careplusResource: asString(data.careplusResource),
     corrections,
+    origin: data.origin === "tenant" ? "tenant" : "system",
     createdAt: toMillis(data.createdAt),
     sentAt: toMillis(data.sentAt),
   };
@@ -120,24 +121,185 @@ function receiptStillOpen(receipt: CareplusReceipt | null): boolean {
   return OPEN_RECEIPT_STATUSES.has(receipt.status);
 }
 
+function attentionRank(row: CareplusOutboxRecord): number {
+  if (
+    row.status === "failed" ||
+    row.processingStatus === "rejected" ||
+    row.processingStatus === "correction_required"
+  ) {
+    return 0;
+  }
+  if (row.status === "retry" || row.status === "pending") return 1;
+  if (row.status === "awaiting_receipt") return 2;
+  return 3;
+}
+
+function sortOutbox(rows: CareplusOutboxRecord[]): CareplusOutboxRecord[] {
+  return rows.sort((a, b) => {
+    const rank = attentionRank(a) - attentionRank(b);
+    if (rank !== 0) return rank;
+    return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+  });
+}
+
 export async function listCareplusOutbox(
   businessId?: string,
-  limit = 40,
+  limit = 80,
 ): Promise<CareplusOutboxRecord[]> {
-  let query: Query = adminDb.collection(
-    CAREPLUS_OUTBOX_COLLECTION,
-  );
+  const col = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION);
+  const max = Math.min(100, Math.max(1, limit));
   if (businessId?.trim()) {
-    query = query.where("businessId", "==", businessId.trim());
+    const snap = await col
+      .where("businessId", "==", businessId.trim())
+      .limit(max)
+      .get();
+    return sortOutbox(snap.docs.map((doc) => mapOutboxDoc(doc.id, doc.data() ?? {})));
   }
-  const snap = await query.limit(Math.min(100, Math.max(1, limit))).get();
-  return snap.docs
-    .map((doc) => mapOutboxDoc(doc.id, doc.data() ?? {}))
-    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+
+  const [attention, sent] = await Promise.all([
+    col
+      .where("status", "in", ["pending", "retry", "awaiting_receipt", "failed"])
+      .limit(max)
+      .get(),
+    col.where("status", "==", "sent").limit(Math.min(20, max)).get(),
+  ]);
+  const seen = new Set<string>();
+  const rows: CareplusOutboxRecord[] = [];
+  for (const doc of [...attention.docs, ...sent.docs]) {
+    if (seen.has(doc.id)) continue;
+    seen.add(doc.id);
+    rows.push(mapOutboxDoc(doc.id, doc.data() ?? {}));
+  }
+  return sortOutbox(rows);
+}
+
+export async function deliverCareplusOutboxEvent(
+  eventId: string,
+  options?: {
+    ignoreBackoff?: boolean;
+    mapping?: Awaited<ReturnType<typeof getCareplusIntegration>>;
+  },
+): Promise<"sent" | "awaiting" | "retried" | "failed" | "skipped"> {
+  const snap = await adminDb
+    .collection(CAREPLUS_OUTBOX_COLLECTION)
+    .doc(eventId)
+    .get();
+  if (!snap.exists) return "skipped";
+
+  const businessId = asString(snap.data()?.businessId) ?? "";
+  const mapping =
+    options?.mapping ??
+    (businessId ? await getCareplusIntegration(businessId) : null);
+  if (!mapping || mapping.status !== "active") return "skipped";
+
+  const claimed = await claimOutboxEvent(eventId, options?.ignoreBackoff);
+  if (!claimed) return "skipped";
+
+  const started = Date.now();
+  try {
+    if (claimed.status === "awaiting_receipt") {
+      const receipt = await fetchCareplusReceipt({
+        businessId: claimed.businessId,
+        eventId: claimed.eventId,
+      });
+      if (receiptStillOpen(receipt) && !TERMINAL_RECEIPT_STATUSES.has(receipt.status)) {
+        await markOutboxAwaitingReceipt(claimed.eventId, claimed.lastStatus ?? 202, receipt);
+        return "awaiting";
+      }
+      await markOutboxSent(claimed.eventId, claimed.lastStatus ?? 200, receipt);
+      return "sent";
+    }
+
+    const result =
+      claimed.eventType === "job.completed"
+        ? await sendCareplusJobCompleted({
+            businessId: claimed.businessId,
+            rawBody: claimed.rawBody,
+          })
+        : await sendCareplusRecord({
+            businessId: claimed.businessId,
+            rawBody: claimed.rawBody,
+          });
+    if (receiptStillOpen(result.receipt)) {
+      await markOutboxAwaitingReceipt(claimed.eventId, result.status, result.receipt);
+      return "awaiting";
+    }
+    await markOutboxSent(claimed.eventId, result.status, result.receipt);
+    await touchCareplusIntegration(claimed.businessId, {
+      lastEventStatus: result.receipt?.status || String(result.status),
+      lastEventAt: FieldValue.serverTimestamp(),
+      lastErrorCode: result.receipt?.corrections[0]?.message ?? null,
+    });
+    await logAuditEvent({
+      businessId: claimed.businessId,
+      category: "integration",
+      action: "careplus.event_sent",
+      actor: { uid: null, role: "system", name: "BMS Trade", email: null },
+      source: "system",
+      summary: `CarePlus ${claimed.eventType} sent for ${claimed.jobId}`,
+      targetId: claimed.eventId,
+      targetLabel: claimed.jobId,
+      metadata: {
+        eventId: claimed.eventId,
+        jobId: claimed.jobId,
+        eventType: claimed.eventType,
+        httpStatus: result.status,
+        processingStatus: result.receipt?.status ?? null,
+        durationMs: Date.now() - started,
+      },
+    });
+    return "sent";
+  } catch (error) {
+    const recovered = await recoverDeliveredReceipt(claimed);
+    if (recovered) return recovered;
+
+    const status = error instanceof CareplusClientError ? error.status : 0;
+    const code =
+      error instanceof CareplusClientError ? error.code : "network_error";
+    const retryAfter = retryAfterSecondsFromError(error);
+    const willRetry =
+      shouldRetryStatus(status || 503) &&
+      claimed.attempts < CAREPLUS_OUTBOX_MAX_ATTEMPTS;
+
+    await markOutboxAttempt({
+      eventId: claimed.eventId,
+      attempts: claimed.attempts,
+      status,
+      code,
+      retry: willRetry,
+      retryAfterSeconds: retryAfter,
+    });
+    await touchCareplusIntegration(claimed.businessId, {
+      lastEventStatus: status ? String(status) : "error",
+      lastEventAt: FieldValue.serverTimestamp(),
+      lastErrorCode: code,
+    });
+    await logAuditEvent({
+      businessId: claimed.businessId,
+      category: "integration",
+      action: willRetry ? "careplus.event_retry" : "careplus.event_failed",
+      actor: { uid: null, role: "system", name: "BMS Trade", email: null },
+      source: "system",
+      summary: willRetry
+        ? `CarePlus ${claimed.eventType} will retry for ${claimed.jobId}`
+        : `CarePlus ${claimed.eventType} failed for ${claimed.jobId}`,
+      targetId: claimed.eventId,
+      targetLabel: claimed.jobId,
+      metadata: {
+        eventId: claimed.eventId,
+        jobId: claimed.jobId,
+        httpStatus: status || null,
+        errorCode: code,
+        durationMs: Date.now() - started,
+      },
+    });
+    return willRetry ? "retried" : "failed";
+  }
 }
 
 export async function processCareplusOutbox(options?: {
   businessId?: string;
+  eventId?: string;
   limit?: number;
   ignoreBackoff?: boolean;
 }): Promise<{ scanned: number; sent: number; failed: number; retried: number }> {
@@ -150,6 +312,9 @@ export async function processCareplusOutbox(options?: {
   const now = Date.now();
   const due = snap.docs.filter((doc) => {
     const data = doc.data() ?? {};
+    if (options?.eventId && doc.id !== options.eventId.trim()) {
+      return false;
+    }
     if (
       options?.businessId &&
       data.businessId !== options.businessId.trim()
@@ -172,114 +337,13 @@ export async function processCareplusOutbox(options?: {
       mappingCache.set(businessId, await getCareplusIntegration(businessId));
     }
     const mapping = businessId ? mappingCache.get(businessId) : null;
-    if (!mapping || mapping.status !== "active") continue;
-
-    const claimed = await claimOutboxEvent(doc.id, options?.ignoreBackoff);
-    if (!claimed) continue;
-
-    const started = Date.now();
-    try {
-      if (claimed.status === "awaiting_receipt") {
-        const receipt = await fetchCareplusReceipt({
-          businessId: claimed.businessId,
-          eventId: claimed.eventId,
-        });
-        if (receiptStillOpen(receipt) && !TERMINAL_RECEIPT_STATUSES.has(receipt.status)) {
-          await markOutboxAwaitingReceipt(claimed.eventId, claimed.lastStatus ?? 202, receipt);
-          retried += 1;
-          continue;
-        }
-        await markOutboxSent(claimed.eventId, claimed.lastStatus ?? 200, receipt);
-        sent += 1;
-        continue;
-      }
-
-      const result =
-        claimed.eventType === "job.completed"
-          ? await sendCareplusJobCompleted({
-              businessId: claimed.businessId,
-              rawBody: claimed.rawBody,
-            })
-          : await sendCareplusRecord({
-              businessId: claimed.businessId,
-              rawBody: claimed.rawBody,
-            });
-      if (receiptStillOpen(result.receipt)) {
-        await markOutboxAwaitingReceipt(claimed.eventId, result.status, result.receipt);
-        retried += 1;
-        continue;
-      }
-      await markOutboxSent(claimed.eventId, result.status, result.receipt);
-      await touchCareplusIntegration(claimed.businessId, {
-        lastEventStatus: result.receipt?.status || String(result.status),
-        lastEventAt: FieldValue.serverTimestamp(),
-        lastErrorCode: result.receipt?.corrections[0]?.message ?? null,
-      });
-      await logAuditEvent({
-        businessId: claimed.businessId,
-        category: "integration",
-        action: "careplus.event_sent",
-        actor: { uid: null, role: "system", name: "CarePlus outbox", email: null },
-        source: "system",
-        summary: `CarePlus ${claimed.eventType} sent for ${claimed.jobId}`,
-        targetId: claimed.eventId,
-        targetLabel: claimed.jobId,
-        metadata: {
-          eventId: claimed.eventId,
-          jobId: claimed.jobId,
-          eventType: claimed.eventType,
-          httpStatus: result.status,
-          processingStatus: result.receipt?.status ?? null,
-          durationMs: Date.now() - started,
-        },
-      });
-      sent += 1;
-    } catch (error) {
-      const status = error instanceof CareplusClientError ? error.status : 0;
-      const code =
-        error instanceof CareplusClientError
-          ? error.code
-          : "network_error";
-      const retryAfter = retryAfterSecondsFromError(error);
-      const willRetry =
-        shouldRetryStatus(status || 503) &&
-        claimed.attempts < CAREPLUS_OUTBOX_MAX_ATTEMPTS;
-
-      await markOutboxAttempt({
-        eventId: claimed.eventId,
-        attempts: claimed.attempts,
-        status,
-        code,
-        retry: willRetry,
-        retryAfterSeconds: retryAfter,
-      });
-      await touchCareplusIntegration(claimed.businessId, {
-        lastEventStatus: status ? String(status) : "error",
-        lastEventAt: FieldValue.serverTimestamp(),
-        lastErrorCode: code,
-      });
-      await logAuditEvent({
-        businessId: claimed.businessId,
-        category: "integration",
-        action: willRetry ? "careplus.event_retry" : "careplus.event_failed",
-        actor: { uid: null, role: "system", name: "CarePlus outbox", email: null },
-        source: "system",
-        summary: willRetry
-          ? `CarePlus ${claimed.eventType} will retry for ${claimed.jobId}`
-          : `CarePlus ${claimed.eventType} failed for ${claimed.jobId}`,
-        targetId: claimed.eventId,
-        targetLabel: claimed.jobId,
-        metadata: {
-          eventId: claimed.eventId,
-          jobId: claimed.jobId,
-          httpStatus: status || null,
-          errorCode: code,
-          durationMs: Date.now() - started,
-        },
-      });
-      if (willRetry) retried += 1;
-      else failed += 1;
-    }
+    const result = await deliverCareplusOutboxEvent(doc.id, {
+      ignoreBackoff: options?.ignoreBackoff,
+      mapping,
+    });
+    if (result === "sent") sent += 1;
+    else if (result === "failed") failed += 1;
+    else if (result === "retried" || result === "awaiting") retried += 1;
   }
 
   return { scanned: due.length, sent, failed, retried };
@@ -311,9 +375,53 @@ async function claimOutboxEvent(
     tx.update(ref, {
       attempts: current.attempts + 1,
       lastErrorCode: null,
+      nextAttemptAt: Timestamp.fromMillis(Date.now() + CAREPLUS_REQUEST_TIMEOUT_MS + 15_000),
     });
     return { ...current, attempts: current.attempts + 1 };
   });
+}
+
+async function recoverDeliveredReceipt(
+  claimed: CareplusOutboxRecord,
+): Promise<"sent" | "awaiting" | null> {
+  try {
+    const receipt = await fetchCareplusReceipt({
+      businessId: claimed.businessId,
+      eventId: claimed.eventId,
+    });
+    if (!receipt.eventId) return null;
+    if (
+      receiptStillOpen(receipt) &&
+      !TERMINAL_RECEIPT_STATUSES.has(receipt.status) &&
+      !receipt.careplusRecordId
+    ) {
+      await markOutboxAwaitingReceipt(claimed.eventId, claimed.lastStatus ?? 202, receipt);
+      return "awaiting";
+    }
+    await markOutboxSent(claimed.eventId, claimed.lastStatus ?? 200, receipt);
+    await touchCareplusIntegration(claimed.businessId, {
+      lastEventStatus: receipt.status || "processed",
+      lastEventAt: FieldValue.serverTimestamp(),
+      lastErrorCode: receipt.corrections[0]?.message ?? null,
+    });
+    return "sent";
+  } catch {
+    return null;
+  }
+}
+
+export async function reconcileCareplusOutboxReceipts(
+  rows: CareplusOutboxRecord[],
+): Promise<void> {
+  const open = rows
+    .filter(
+      (row) =>
+        row.status === "retry" ||
+        row.status === "pending" ||
+        row.status === "awaiting_receipt",
+    )
+    .slice(0, 5);
+  await Promise.all(open.map((row) => recoverDeliveredReceipt(row)));
 }
 
 async function markOutboxSent(
@@ -373,6 +481,37 @@ async function markOutboxAttempt(input: {
   });
 }
 
+export async function parkCareplusOutboxFailure(
+  eventId: string,
+  code: string,
+): Promise<void> {
+  await adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId).update({
+    status: "failed",
+    lastErrorCode: code,
+    nextAttemptAt: null,
+  });
+}
+
+/** @deprecated Use parkCareplusOutboxFailure — tenants retry their own failed sends. */
+export const parkCareplusOutboxForSuperAdmin = parkCareplusOutboxFailure;
+
+export async function retryCareplusOutboxEventForBusiness(
+  eventId: string,
+  businessId: string,
+): Promise<CareplusOutboxRecord> {
+  const id = eventId.trim();
+  const tenant = businessId.trim();
+  if (!id || !tenant) throw new Error("Record id is required.");
+  const ref = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("Record not found.");
+  const current = mapOutboxDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== tenant) {
+    throw new Error("That record belongs to another business.");
+  }
+  return retryCareplusOutboxEvent(id);
+}
+
 export async function retryCareplusOutboxEvent(eventId: string): Promise<CareplusOutboxRecord> {
   const ref = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(eventId.trim());
   const snap = await ref.get();
@@ -396,4 +535,21 @@ export async function retryCareplusOutboxEvent(eventId: string): Promise<Careplu
   });
   const saved = await ref.get();
   return mapOutboxDoc(saved.id, saved.data() ?? {});
+}
+
+export async function deleteCareplusOutboxEvent(
+  eventId: string,
+  businessId: string,
+): Promise<void> {
+  const id = eventId.trim();
+  const tenant = businessId.trim();
+  if (!id || !tenant) throw new Error("Record id is required.");
+  const ref = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("Record not found.");
+  const current = mapOutboxDoc(snap.id, snap.data() ?? {});
+  if (current.businessId !== tenant) {
+    throw new Error("That record belongs to another business.");
+  }
+  await ref.delete();
 }

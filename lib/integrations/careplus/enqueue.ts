@@ -3,15 +3,28 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { adminDb } from "@/lib/firebase/admin";
+import {
+  buildCaptureEnvelope,
+  type CareplusCaptureEventType,
+  type CareplusCaptureKind,
+  captureKindFromEventType,
+  isAmendCaptureEvent,
+  nextCaptureRevision,
+} from "@/lib/integrations/careplus/capture-records";
 import { isCareplusSecretConfigured } from "@/lib/integrations/careplus/config";
-import { CAREPLUS_OUTBOX_COLLECTION } from "@/lib/integrations/careplus/constants";
+import {
+  CAREPLUS_CAPTURES_COLLECTION,
+  CAREPLUS_OUTBOX_COLLECTION,
+} from "@/lib/integrations/careplus/constants";
 import {
   activeCustomerCareplusId,
   activeStaffCareplusId,
   getCareplusIntegration,
 } from "@/lib/integrations/careplus/mapping";
+import { deliverCareplusOutboxEvent, parkCareplusOutboxFailure } from "@/lib/integrations/careplus/outbox";
 import type {
   CareplusEnqueueInput,
+  CareplusEnqueueResult,
   CareplusEventType,
   CareplusJobCompletedPayload,
   CareplusRecordPayload,
@@ -223,16 +236,20 @@ export async function buildCareplusActivityCompletedPayload(
   return buildCareplusActivityPayload(input, "activity.completed");
 }
 
-export async function enqueueCareplusRecord(
+function wroteNewEvent(result: CareplusEnqueueResult): boolean {
+  return (
+    result === "queued" ||
+    result === "sent" ||
+    result === "failed" ||
+    result === "retry"
+  );
+}
+
+async function writeCareplusOutboxDoc(
   payload: CareplusRecordPayload | CareplusJobCompletedPayload,
-  jobId = "",
-): Promise<"queued" | "skipped" | "exists"> {
-  if (!payload.eventId || !payload.businessId) return "skipped";
-
-  const mapping = await getCareplusIntegration(payload.businessId);
-  if (!mapping || mapping.status !== "active") return "skipped";
-  if (!isCareplusSecretConfigured(payload.businessId)) return "skipped";
-
+  jobId: string,
+  origin: "tenant" | "system",
+): Promise<"queued" | "exists"> {
   const rawBody = JSON.stringify(payload);
   const payloadHash = createHash("sha256").update(rawBody).digest("hex");
   const ref = adminDb.collection(CAREPLUS_OUTBOX_COLLECTION).doc(payload.eventId);
@@ -244,7 +261,7 @@ export async function enqueueCareplusRecord(
   return adminDb.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (snap.exists) {
-      return "exists";
+      return "exists" as const;
     }
     tx.set(ref, {
       eventId: payload.eventId,
@@ -262,20 +279,57 @@ export async function enqueueCareplusRecord(
       careplusRecordId: null,
       careplusResource: null,
       corrections: [],
+      origin,
       createdAt: FieldValue.serverTimestamp(),
       sentAt: null,
     });
-    return "queued";
+    return "queued" as const;
   });
+}
+
+async function settleCareplusDelivery(
+  eventId: string,
+  mapping: NonNullable<Awaited<ReturnType<typeof getCareplusIntegration>>>,
+): Promise<CareplusEnqueueResult> {
+  try {
+    const delivery = await deliverCareplusOutboxEvent(eventId, {
+      ignoreBackoff: true,
+      mapping,
+    });
+    if (delivery === "sent") return "sent";
+    if (delivery === "awaiting") return "queued";
+    if (delivery === "failed") return "failed";
+    if (delivery === "retried") return "retry";
+    if (delivery === "skipped") return "skipped";
+    return "queued";
+  } catch (error) {
+    console.error("[careplus] immediate delivery failed", error);
+    return "queued";
+  }
+}
+
+export async function enqueueCareplusRecord(
+  payload: CareplusRecordPayload | CareplusJobCompletedPayload,
+  jobId = "",
+): Promise<CareplusEnqueueResult> {
+  if (!payload.eventId || !payload.businessId) return "skipped";
+
+  const mapping = await getCareplusIntegration(payload.businessId);
+  if (!mapping || mapping.status !== "active") return "skipped";
+  if (!isCareplusSecretConfigured(payload.businessId)) return "skipped";
+
+  const written = await writeCareplusOutboxDoc(payload, jobId, "system");
+  if (written !== "queued") return written;
+  return settleCareplusDelivery(payload.eventId, mapping);
 }
 
 export async function enqueueCareplusJobCompleted(
   input: CareplusEnqueueInput,
-): Promise<"queued" | "skipped" | "exists"> {
+): Promise<CareplusEnqueueResult> {
   if (!input.id || !input.businessId) return "skipped";
   const payload = await buildCareplusActivityCompletedPayload(input);
   const queued = await enqueueCareplusRecord(payload, input.id);
-  if (queued === "queued") {
+  if (wroteNewEvent(queued)) {
     await persistJobCareplusRevision(input.id, payload.source.revision, true);
   }
   return queued;
@@ -287,7 +341,7 @@ export async function enqueueCareplusJobCompletedSafe(
   try {
     await enqueueCareplusJobCompleted(input);
   } catch (error) {
-    console.error("[careplus] failed to enqueue job.completed", error);
+    console.error("[careplus] failed to send job.completed", error);
   }
 }
 
@@ -313,7 +367,7 @@ export async function enqueueCareplusActivitySafe(
     const resolved = resolveCareplusVisitEvent(input, eventType);
     const payload = await buildCareplusActivityPayload(input, resolved);
     const queued = await enqueueCareplusRecord(payload, input.id);
-    if (queued === "queued") {
+    if (wroteNewEvent(queued)) {
       await persistJobCareplusRevision(
         input.id,
         payload.source.revision,
@@ -321,7 +375,7 @@ export async function enqueueCareplusActivitySafe(
       );
     }
   } catch (error) {
-    console.error(`[careplus] failed to enqueue ${eventType}`, error);
+    console.error(`[careplus] failed to send ${eventType}`, error);
   }
 }
 
@@ -341,8 +395,53 @@ export async function enqueueCareplusDirectorySafe(input: {
       record: input.record,
     });
   } catch (error) {
-    console.error("[careplus] failed to enqueue directory event", error);
+    console.error("[careplus] failed to send directory event", error);
   }
+}
+
+async function readCaptureRevision(
+  businessId: string,
+  recordId: string,
+): Promise<number | null> {
+  const snap = await adminDb
+    .collection(CAREPLUS_CAPTURES_COLLECTION)
+    .doc(recordId)
+    .get();
+  if (!snap.exists) return null;
+  const data = snap.data() ?? {};
+  if (data.businessId !== businessId) return null;
+  return typeof data.revision === "number" && data.revision > 0
+    ? data.revision
+    : null;
+}
+
+async function persistCaptureRevision(input: {
+  businessId: string;
+  recordId: string;
+  kind: CareplusCaptureKind;
+  eventType: CareplusCaptureEventType;
+  eventId: string;
+  revision: number;
+  title: string;
+  customerId?: string;
+}): Promise<void> {
+  await adminDb.collection(CAREPLUS_CAPTURES_COLLECTION).doc(input.recordId).set(
+    {
+      recordId: input.recordId,
+      businessId: input.businessId,
+      kind: input.kind,
+      eventType: input.eventType,
+      lastEventId: input.eventId,
+      revision: input.revision,
+      title: input.title,
+      customerId: input.customerId || null,
+      updatedAt: FieldValue.serverTimestamp(),
+      ...(input.revision === 1
+        ? { createdAt: FieldValue.serverTimestamp() }
+        : {}),
+    },
+    { merge: true },
+  );
 }
 
 export async function enqueueCareplusCaptureSafe(input: {
@@ -350,8 +449,11 @@ export async function enqueueCareplusCaptureSafe(input: {
   eventType: Extract<
     CareplusEventType,
     | "incident.captured"
+    | "incident.amended"
     | "complaint.captured"
+    | "complaint.amended"
     | "risk.captured"
+    | "risk.amended"
     | "action.captured"
     | "evidence.attached"
     | "staff.credential.submitted"
@@ -361,8 +463,99 @@ export async function enqueueCareplusCaptureSafe(input: {
   staffId?: string;
   jobId?: string;
   record: Record<string, unknown>;
-}): Promise<"queued" | "skipped" | "exists"> {
-  return enqueueCareplusRecord({
+}): Promise<CareplusEnqueueResult> {
+  const isOperationalCapture =
+    input.eventType.startsWith("incident.") ||
+    input.eventType.startsWith("complaint.") ||
+    input.eventType.startsWith("risk.");
+
+  if (isOperationalCapture) {
+    const eventType = input.eventType as CareplusCaptureEventType;
+    const kind = captureKindFromEventType(eventType);
+    const previous = await readCaptureRevision(input.businessId, input.recordId);
+    if (isAmendCaptureEvent(eventType) && previous === null) {
+      throw new Error("Amend requires an existing CarePlus capture record.");
+    }
+    const revision = isAmendCaptureEvent(eventType)
+      ? nextCaptureRevision(previous)
+      : 1;
+
+    // Prefer mapped CarePlus ids when present; otherwise keep the BMS id so
+    // CarePlus can park as pending_mapping. Never invent CarePlus ids.
+    const mappedCustomer =
+      (await activeCustomerCareplusId(input.businessId, input.customerId)) ||
+      input.customerId?.trim() ||
+      "";
+    const mappedStaff =
+      (await activeStaffCareplusId(input.businessId, input.staffId)) ||
+      input.staffId?.trim() ||
+      "";
+
+    const record = { ...input.record };
+    if (record.anonymous === true) {
+      delete record.customerId;
+    } else if (mappedCustomer) {
+      record.customerId = mappedCustomer;
+    }
+    if (kind === "complaint" && mappedStaff) {
+      record.ownerId = mappedStaff;
+    }
+
+    const envelope = buildCaptureEnvelope({
+      businessId: input.businessId,
+      recordId: input.recordId,
+      eventType,
+      revision,
+      customerId: record.anonymous === true ? "" : mappedCustomer,
+      staffId: mappedStaff,
+      jobId: input.jobId,
+      record,
+    });
+
+    const payload: CareplusRecordPayload = envelope;
+    const written = await writeCareplusOutboxDoc(
+      payload,
+      input.jobId ?? input.recordId,
+      "tenant",
+    );
+    if (written !== "queued") return written;
+
+    await persistCaptureRevision({
+      businessId: input.businessId,
+      recordId: input.recordId,
+      kind,
+      eventType,
+      eventId: payload.eventId,
+      revision,
+      title:
+        typeof input.record.title === "string" ? input.record.title : input.recordId,
+      customerId: mappedCustomer,
+    });
+
+    const mapping = await getCareplusIntegration(payload.businessId);
+    if (!mapping || mapping.status !== "active") {
+      await parkCareplusOutboxFailure(payload.eventId, "mapping_inactive");
+      return "failed";
+    }
+    if (!isCareplusSecretConfigured(payload.businessId)) {
+      await parkCareplusOutboxFailure(payload.eventId, "secret_missing");
+      return "failed";
+    }
+
+    const result = await settleCareplusDelivery(payload.eventId, mapping);
+    if (
+      result === "sent" ||
+      result === "queued" ||
+      result === "retry" ||
+      result === "failed"
+    ) {
+      return result;
+    }
+    await parkCareplusOutboxFailure(payload.eventId, "delivery_skipped");
+    return "failed";
+  }
+
+  const payload: CareplusRecordPayload = {
     eventId: `bms-${input.recordId}-${input.eventType}-v1`,
     eventType: input.eventType,
     businessId: input.businessId,
@@ -375,5 +568,26 @@ export async function enqueueCareplusCaptureSafe(input: {
       revision: 1,
     },
     record: input.record,
-  });
+  };
+  if (!payload.eventId || !payload.businessId) return "skipped";
+
+  const written = await writeCareplusOutboxDoc(payload, input.jobId ?? input.recordId, "tenant");
+  if (written !== "queued") return written;
+
+  const mapping = await getCareplusIntegration(payload.businessId);
+  if (!mapping || mapping.status !== "active") {
+    await parkCareplusOutboxFailure(payload.eventId, "mapping_inactive");
+    return "failed";
+  }
+  if (!isCareplusSecretConfigured(payload.businessId)) {
+    await parkCareplusOutboxFailure(payload.eventId, "secret_missing");
+    return "failed";
+  }
+
+  const result = await settleCareplusDelivery(payload.eventId, mapping);
+  if (result === "sent" || result === "queued" || result === "retry" || result === "failed") {
+    return result;
+  }
+  await parkCareplusOutboxFailure(payload.eventId, "delivery_skipped");
+  return "failed";
 }

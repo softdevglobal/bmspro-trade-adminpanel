@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     if (action === "retry" && eventId) {
       const outbox = await retryCareplusOutboxEvent(eventId);
       const result = await processCareplusOutbox({
-        businessId: outbox.businessId,
+        eventId: outbox.eventId,
         ignoreBackoff: true,
       });
       return NextResponse.json({ ok: true, outbox, ...result });
