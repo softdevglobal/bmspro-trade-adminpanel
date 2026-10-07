@@ -204,7 +204,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/dashboard/careplus-records",
-    label: "CarePlus records",
+    label: "CarePlus",
     icon: "health_and_safety",
     roles: ["business_owner", "staff"],
   },

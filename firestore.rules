@@ -446,7 +446,7 @@ service cloud.firestore {
     }
 
     function isAdminSdkOnlyCollection() {
-      return isCareplusCollection() || request.path[3] == 'document_counters';
+      return isCareplusCollection() || request.path[3] in ['document_counters', 'participant_onboarding'];
     }
 
     // Super admins can access remaining collections in the admin portal.

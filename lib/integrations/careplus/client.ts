@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHmac } from "node:crypto";
+import { parseCareplusProviderProfile, type CareplusProviderProfile } from "@/lib/integrations/careplus/provider-profile";
 
 import {
   getCareplusEndpoints,
@@ -207,10 +208,10 @@ function parseDirectoryPeople(body: unknown): CareplusDirectoryPerson[] {
   });
 }
 
-export async function fetchCareplusDirectory(input: {
+async function fetchCareplusDirectoryResponse(input: {
   businessId: string;
-  view: "staff" | "participants";
-}): Promise<CareplusDirectoryPerson[]> {
+  view: "staff" | "participants" | "provider";
+}): Promise<unknown> {
   const secret = getCareplusSecretForBusiness(input.businessId);
   if (!secret) {
     throw new CareplusClientError(
@@ -235,6 +236,7 @@ export async function fetchCareplusDirectory(input: {
 
   const response = await fetch(url, {
     method: "GET",
+    cache: "no-store",
     redirect: "error",
     headers: {
       accept: "application/json",
@@ -247,7 +249,26 @@ export async function fetchCareplusDirectory(input: {
 
   const body = await readCappedJson(response);
   throwIfUnsuccessful(response.status);
-  return parseDirectoryPeople(body);
+  return body;
+}
+
+export async function fetchCareplusDirectory(input: {
+  businessId: string;
+  view: "staff" | "participants";
+}): Promise<CareplusDirectoryPerson[]> {
+  return parseDirectoryPeople(await fetchCareplusDirectoryResponse(input));
+}
+
+export async function fetchCareplusProviderProfile(
+  businessId: string,
+  expectedProviderId: string,
+): Promise<CareplusProviderProfile> {
+  const body = await fetchCareplusDirectoryResponse({ businessId, view: "provider" });
+  try {
+    return parseCareplusProviderProfile(body, expectedProviderId);
+  } catch {
+    throw new CareplusClientError(409, "provider_mismatch", "CarePlus returned a different provider profile. Check the connection before trying again.");
+  }
 }
 
 export async function fetchCareplusDirectorySafe(
