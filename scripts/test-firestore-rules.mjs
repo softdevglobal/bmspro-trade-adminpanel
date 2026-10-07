@@ -336,6 +336,23 @@ await expect(
   assertSucceeds(getDoc(doc(anonymous, "subscription_plans", "plan-1"))),
 );
 
+
+console.log("\nparticipant onboarding stays behind the business-scoped API");
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  await setDoc(doc(context.firestore(), "participant_onboarding", BUSINESS_A, "records", "participant-a"), {
+    participantName: "Participant A", status: "draft", updatedAt: "2026-10-07T00:00:00.000Z",
+  });
+});
+for (const [name, db] of [
+  ["owner", asOwnerA], ["other tenant owner", asOwnerB], ["staff", asStaffA],
+  ["super admin", asSuperAdmin], ["customer", asCustomerA], ["anonymous", anonymous],
+]) {
+  await expect(name + " cannot directly read participant onboarding",
+    assertFails(getDoc(doc(db, "participant_onboarding", BUSINESS_A, "records", "participant-a"))));
+  await expect(name + " cannot directly write participant onboarding",
+    assertFails(setDoc(doc(db, "participant_onboarding", BUSINESS_A, "records", "participant-a"), { participantName: "Changed" })));
+}
+
 await testEnv.cleanup();
 
 console.log(`\n${passed} passed, ${failed} failed`);

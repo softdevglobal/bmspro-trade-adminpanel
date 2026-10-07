@@ -133,9 +133,9 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
     icon: "health_and_safety",
   },
   "/dashboard/careplus-records": {
-    title: "CarePlus records",
+    title: "CarePlus",
     subtitle:
-      "Capture incidents, complaints and risks in Trade. CarePlus takes the follow-up action.",
+      "Manage participant onboarding and capture incidents, complaints and risks.",
     icon: "health_and_safety",
   },
   "/dashboard/packages": {
