@@ -75,8 +75,10 @@ const cspDirectives = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  // Dev runs over plain http://localhost, so only upgrade in deployed builds.
-  isDev ? "" : "upgrade-insecure-requests",
+  // Browsers ignore this directive in report-only CSP (it would change
+  // requests). Only emit it when the policy is enforced. HSTS already
+  // upgrades HTTP on production.
+  !isDev && cspEnforced ? "upgrade-insecure-requests" : "",
   "report-uri /api/security/csp-report",
 ]
   .filter(Boolean)
