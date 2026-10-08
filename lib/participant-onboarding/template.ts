@@ -12,10 +12,19 @@ const evidence = ["Complete", "Pending", "N/A"];
 const contactMethods = ["Phone call", "Text message (SMS)", "Email", "Video call", "In person", "Communication app or device", "Written letter", "Other"];
 const languages = ["English", "Arabic", "Cantonese", "Dari", "Greek", "Hindi", "Italian", "Japanese", "Khmer", "Korean", "Mandarin", "Nepali", "Persian (Farsi)", "Punjabi", "Samoan", "Sinhala", "Spanish", "Tagalog", "Tamil", "Thai", "Turkish", "Urdu", "Vietnamese", "Other / not listed", "Not known yet"];
 const copyMethods = ["Printed copy", "Email", "Accessible or alternate format", "Secure electronic copy", "Other"];
+const providerAdoptionGuidance = [
+  "Staff reference page - keep with the master onboarding pack. Official sources checked on 7 October 2026; recheck requirements before adoption and whenever services or rules change.",
+  "NDIS Commission - Provision of supports: https://www.ndiscommission.gov.au/rules-and-standards/ndis-practice-standards/core-module-provision-supports",
+  "NDIS Commission - Rights and responsibilities: https://www.ndiscommission.gov.au/rules-and-standards/ndis-practice-standards/core-module-rights-and-responsibilities",
+  "NDIA - How to make a service agreement: https://www.ndis.gov.au/participants/working-providers/arranging-supports/how-make-service-agreement",
+  "NDIA - Pricing arrangements: https://www.ndis.gov.au/providers/pricing-and-payments/pricing/pricing-arrangements",
+  "Confirm legal entity details, complaints and privacy contacts, record access controls and retention policy. Review agreement terms, attach the completed support schedule, set review responsibilities, and keep participant consent restrictions visible to staff who need them.",
+  "Check current pricing schedules and claiming guidance for each relevant support. For SIL, review applicable requirements, registration status and housing arrangements, and add participant-specific support and shared-living documentation before commencement.",
+].join("\n\n");
 
 export function createSupportSchedule(): OnboardingSection {
   return section("support-schedule", "ONB 03 B · Support and price schedule",
-    "Repeat for each distinct support or rate. Amounts are in Australian dollars. No charge is authorised unless specified, agreed and permitted by applicable rules.", [
+    "Repeat for each distinct support or rate. Amounts are in Australian dollars. Confirm current rules for the support and funding type; a maximum price is not automatically the agreed price. No charge is authorised unless specified, agreed and permitted by applicable rules. Only charge cancellation fees where the agreed term and applicable rules allow it. If the provider cancels and does not deliver the support, no fee is charged; discuss a replacement or suitable arrangement.", [
     "Support description, item number and agreed outcome", "Delivery location, days, times, frequency and staffing",
     ["Unit", "text"], ["Rate per unit (AUD)", "number"], ["Agreed quantity", "number"], ["Estimated total (AUD)", "number"],
     ["GST treatment / inclusion", "text"], "Funding management and invoice recipient", "Invoice frequency, payment terms and disputed invoice contact",
@@ -26,7 +35,7 @@ export function createSupportSchedule(): OnboardingSection {
 }
 
 export function createRiskSection(): OnboardingSection {
-  return section("risk", "Risk and agreed safeguards", "Discuss choices with the participant. Add an entry for each risk.", [
+  return section("risk", "Risk and agreed safeguards", "Consider falls, manual handling, health events, abuse or exploitation, environmental hazards and loss of essential supports. Discuss choices with the participant and add an entry for each risk, including the impact, agreed action, escalation, owner and due date.", [
     "Risk / likely impact", "Agreed action and escalation", ["Responsible person", "text"], ["Due date", "date"],
   ]);
 }
@@ -66,6 +75,7 @@ export function upgradeOnboardingDraft(input: OnboardingInput): { form: Onboardi
       : item),
   };
   if (input.status !== "draft") return { form: input, addedOverview: false, addedChoices: false };
+
   let sections = [...input.sections];
   let addedOverview = false;
   let addedChoices = false;
@@ -82,6 +92,36 @@ export function upgradeOnboardingDraft(input: OnboardingInput): { form: Onboardi
     templateVersion = 2;
   } else if (sections.some((item) => item.id === "pack-overview")) {
     templateVersion = 2;
+  }
+
+  // Move provider adoption fields back to the opening page; older drafts stored
+  // duplicate copies in both sections. Preserve conflicting values in a review note.
+  const overviewIndex = sections.findIndex((item) => item.id === "pack-overview");
+  const maintenanceIndex = sections.findIndex((item) => item.id === "maintenance");
+  if (overviewIndex >= 0 && maintenanceIndex >= 0) {
+    const overview = { ...sections[overviewIndex], fields: sections[overviewIndex].fields.map((field) => ({ ...field })) };
+    const maintenance = { ...sections[maintenanceIndex], fields: sections[maintenanceIndex].fields.map((field) => ({ ...field })) };
+    const moves = new Map([["Template owner", "Template owner"], ["Approved by", "Approved by"], ["Adoption date", "Adoption date"], ["Next template review", "Next template review"]]);
+    const reviewNotes: string[] = [];
+    const kept: OnboardingField[] = [];
+    for (const field of maintenance.fields) {
+      const targetLabel = moves.get(field.label);
+      if (!targetLabel) { kept.push(field); continue; }
+      const target = overview.fields.find((candidate) => candidate.label === targetLabel);
+      if (!target) { kept.push(field); continue; }
+      if (!target.value.trim()) target.value = field.value;
+      else if (field.value.trim() && target.value !== field.value) reviewNotes.push(`${field.label}: ${field.value}`);
+    }
+    if (reviewNotes.length) {
+      const previousNote = kept.find((field) => field.label === "Previous provider adoption details - review values");
+      if (previousNote) previousNote.value = [previousNote.value, ...reviewNotes].filter(Boolean).join("\n");
+      else kept.push({ id: crypto.randomUUID(), label: "Previous provider adoption details - review values", type: "textarea", value: reviewNotes.join("\n") });
+    }
+    if (!maintenance.description.includes("ndiscommission.gov.au/rules-and-standards")) {
+      maintenance.description = [maintenance.description, providerAdoptionGuidance].filter(Boolean).join("\n\n");
+    }
+    sections[overviewIndex] = overview;
+    sections[maintenanceIndex] = { ...maintenance, fields: kept };
   }
 
   sections = sections.map((item) => {
@@ -150,7 +190,7 @@ export function createOnboardingTemplate(): OnboardingSection[] {
       ["Participant / supporter involvement recorded by", "text"], ["Involvement date", "date"],
     ]),
     section("consent", "ONB 02 · Participant consent record",
-      "Explain each choice and record limits. A blank response is not consent. Declining optional sharing must not automatically prevent support. This record grants no permission for photos, publicity, medical treatment, restrictive practices or financial control. Consent may be changed or withdrawn through the privacy contact; record any effect on support and records that must be retained.", [
+      "Explain each choice and record limits. A blank response is not consent. Declining optional sharing or media use must not automatically prevent support. Explain that relevant identity, contact, funding and support information is used to organise and deliver agreed services, manage safety and keep service records, and that access is restricted to authorised people. Information may be disclosed without consent where required or permitted by law. This record grants no permission for photos, publicity, medical treatment, restrictive practices or financial control. Consent may be changed or withdrawn through the privacy contact; explain any effect on support and records that must be retained. Withdrawal does not undo lawful actions already taken.", [
       "Explained purposes for collection, use and lawful disclosure of relevant identity, contact, funding and support information",
       "Privacy contact and how to request access or correction", ["Privacy notice version", "text"], ["Privacy notice given on", "date"], ["Format explained", "select", ["Verbal explanation", "Easy Read", "Written information", "Interpreter used", "Accessible format", "Other"]],
       ["Collect and use relevant personal and sensitive information for explained support purposes", "select", yesNo],
@@ -186,7 +226,7 @@ export function createOnboardingTemplate(): OnboardingSection[] {
       "If unsigned or copy declined: circumstances, agreed terms and next action",
     ]),
     section("assessment-a", "ONB 04 A · Initial needs and safety assessment",
-      "Record the participant's own account and observations. This is an initial support assessment, not a clinical diagnosis; refer specialist matters to a qualified professional.", [
+      "Record the participant's own account and relevant observations. This is an initial support assessment, not a clinical diagnosis; refer specialist matters to a suitably qualified professional. For each support area, select Independent, Support needed, Not relevant or Unknown, then describe the required help and refer to existing professional plans where applicable.", [
       ["Assessment date", "date"], ["Assessor and role", "text"], "Participant and others involved with permission",
       "What matters to me, my strengths and desired outcomes", "My routines, preferences, boundaries and things I do independently",
       ...["Personal care and daily routines", "Mobility, transfers and equipment", "Meals, swallowing and nutrition", "Medication and health monitoring",
@@ -204,10 +244,7 @@ export function createOnboardingTemplate(): OnboardingSection[] {
       "Manager approval / recorded agreement", ["Manager approval date", "date"], ["Support plan review due", "date"], "Earlier review triggers",
       "Start arrangements confirmed with participant and assigned workers briefed",
     ]),
-    section("maintenance", "Provider adoption and review", "Record the provider's adoption and review of this onboarding pack and any additional service-specific documentation.", [
-      ["Template owner", "text"], ["Approved by", "text"], ["Adoption date", "date"], ["Next template review", "date"],
-      "Provider checks: legal entity, complaints / privacy contacts, record access and retention policy",
-      "Applicable pricing / claiming guidance reviewed for relevant supports", "Additional SIL / housing documentation if relevant",
+    section("maintenance", "Provider adoption and review", providerAdoptionGuidance, [
       "Reviewed by and role", "Changes made and version issued", ["Approval date", "date"], ["Next review date", "date"],
     ]),
   ];
