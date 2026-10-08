@@ -1,9 +1,11 @@
 "use client";
 import { useRef, useState, type PointerEvent } from "react";
+import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { parseSignature, type SignaturePoint, type SignatureStrokes } from "@/lib/participant-onboarding/signature";
 
 export function OnboardingSignaturePad({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (value: string) => void }) {
   const [drawing, setDrawing] = useState<SignatureStrokes | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const pending = useRef<SignatureStrokes | null>(null);
   const pointer = useRef<number | null>(null);
   const strokes = drawing ?? parseSignature(value);
@@ -37,6 +39,16 @@ export function OnboardingSignaturePad({ value, disabled, onChange }: { value: s
       }} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}>
       {strokes.map((stroke, index) => <polyline key={index} points={(stroke.length === 1 ? [stroke[0], [stroke[0][0] + 0.1, stroke[0][1] + 0.1]] : stroke).map((p) => p.join(",")).join(" ")} fill="none" stroke="currentColor" strokeWidth="2.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />)}
     </svg>
-    <div className="flex items-center gap-3"><button type="button" disabled={disabled || !value || drawing !== null} className="min-h-11 rounded-xl border border-outline-variant/60 px-4 py-2 font-body text-[13px] font-semibold hover:bg-primary/5 disabled:opacity-50" onClick={() => { if (window.confirm("Clear the participant signature?")) onChange(""); }}>Clear signature</button><span aria-live="polite" className="text-sm text-on-surface-variant">{value ? "Signature captured" : "No signature yet"}</span></div>
+    <div className="flex items-center gap-3"><button type="button" disabled={disabled || !value || drawing !== null} className="min-h-11 rounded-xl border border-outline-variant/60 px-4 py-2 font-body text-[13px] font-semibold hover:bg-primary/5 disabled:opacity-50" onClick={() => setConfirmClear(true)}>Clear signature</button><span aria-live="polite" className="text-sm text-on-surface-variant">{value ? "Signature captured" : "No signature yet"}</span></div>
+    <CancelConfirmModal
+      open={confirmClear}
+      title="Clear participant signature?"
+      description="This removes the signature from this form. You can draw it again before saving."
+      confirmLabel="Clear signature"
+      cancelLabel="Keep signature"
+      onCancel={() => setConfirmClear(false)}
+      onConfirm={() => { onChange(""); setConfirmClear(false); }}
+      stacked
+    />
   </div>;
 }
