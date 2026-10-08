@@ -1,3 +1,5 @@
+import { ensureCustomerAccount } from "@/lib/customer/server";
+import { onboardingCustomerContact } from "@/lib/participant-onboarding/customer-contact";
 import { createHash } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { buildOnboardingCareplusPayload } from "@/lib/participant-onboarding/careplus-payload";
@@ -65,6 +67,7 @@ export async function POST(request: Request) {
     if (Buffer.byteLength(text, "utf8") > 500000) return errorResponse("This form is too large.", 413);
     body = JSON.parse(text);
     input = validateOnboarding(body);
+    if (input.status === "completed") onboardingCustomerContact(input);
     if (body.id !== undefined && !validId(body.id)) return errorResponse("Invalid record reference.", 400);
     if (body.id && (!Number.isInteger(body.revision) || Number(body.revision) < 1)) return errorResponse("Invalid record version.", 400);
   } catch (error) {
@@ -118,7 +121,29 @@ export async function POST(request: Request) {
         // The event was stored atomically with the form; the existing worker retries it.
       }
     }
-    return NextResponse.json({ ok: true, record, careplusSync }, { status: body.id ? 200 : 201 });
+    let customerAccount: "draft" | "missing_email" | "ready" | "email_pending" | "failed" = "draft";
+    if (input.status === "completed") {
+      const contact = onboardingCustomerContact(input);
+      customerAccount = contact ? "failed" : "missing_email";
+      if (contact) {
+        try {
+          const business = (await adminDb.collection("businesses").doc(auth.businessId).get()).data() || {};
+          const account = await ensureCustomerAccount({
+            ...contact, businessId: auth.businessId,
+            businessName: typeof business.businessName === "string" ? business.businessName : null,
+            bookingSlug: typeof business.bookingSlug === "string" ? business.bookingSlug : null,
+            logoUrl: typeof business.logoUrl === "string" ? business.logoUrl : null,
+            context: "onboarding",
+          });
+          customerAccount = (account.welcomeEmailSent || account.welcomePreviouslySent) ? "ready" : "email_pending";
+          await ref.update({ customerId: account.uid, customerEmail: account.email, customerAccountStatus: customerAccount });
+        } catch {
+          // The onboarding was saved; keep account failure separate so retries update this record.
+          customerAccount = "failed";
+        }
+      }
+    }
+    return NextResponse.json({ ok: true, record, careplusSync, customerAccount }, { status: body.id ? 200 : 201 });
   } catch (error) {
     if (error instanceof Error && error.message === "NOT_FOUND") return errorResponse("Onboarding record not found.", 404);
     if (error instanceof Error && error.message === "CONFLICT") return errorResponse("Another user updated this record. Reopen the saved version before saving again.", 409);

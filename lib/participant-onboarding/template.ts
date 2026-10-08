@@ -34,7 +34,7 @@ export function createRiskSection(): OnboardingSection {
 
 export function createPackOverview(): OnboardingSection {
   return section("pack-overview", "NDIS participant onboarding pack", [
-    "Editable templates for intake, consent, service agreements and initial assessment",
+    "Forms for intake, consent, service agreements and initial assessment",
     "Use this pack with each participant to record their choices, agree on supports and identify what must be ready before services start. Replace provider placeholders and complete the forms together, using the participant’s preferred communication method.",
     "How to use this pack",
     "1. Complete the intake form and confirm who may make or support decisions.",
@@ -42,8 +42,8 @@ export function createPackOverview(): OnboardingSection {
     "3. Complete the initial assessment and resolve service commencement risks.",
     "4. Complete and agree the service agreement and support schedule.",
     "5. Give the participant copies and retain the completed records securely.",
-    "Before adopting the templates",
-    "This is a working template, not a completed record or a guarantee of audit compliance. Adapt it to the provider’s actual services, registration conditions, policies and participant needs. Have the service agreement reviewed for the services and jurisdiction before use. A separate SIL-specific review and schedule are needed before using it for SIL; it is not a complete 0138 or tenancy agreement.",
+    "Before using this onboarding pack",
+    "Complete and review this onboarding form before treating it as a participant record. Using this form does not guarantee audit compliance. Adapt it to the provider’s actual services, registration conditions, policies and participant needs. Have the service agreement reviewed for the services and jurisdiction before use. A separate SIL-specific review and schedule are needed before using it for SIL; it is not a complete 0138 or tenancy agreement.",
     "Record actual dates and decisions. Do not backdate signatures or invent evidence. For existing participants, identify missing records and document a current review. Collect only information needed for the support.",
   ].join("\n\n"), [
     ["Provider name", "text"],
@@ -59,6 +59,12 @@ export function createPackOverview(): OnboardingSection {
 
 /** Prepare older drafts for review; saving remains an explicit user action. */
 export function upgradeOnboardingDraft(input: OnboardingInput): { form: OnboardingInput; addedOverview: boolean; addedChoices: boolean } {
+  if (input.sections.some((item) => item.id === "maintenance" && item.title === "Template adoption and review")) input = {
+    ...input,
+    sections: input.sections.map((item) => item.id === "maintenance" && item.title === "Template adoption and review"
+      ? { ...item, title: "Provider adoption and review", description: item.description.replace("of this template", "of this onboarding pack") }
+      : item),
+  };
   if (input.status !== "draft") return { form: input, addedOverview: false, addedChoices: false };
   let sections = [...input.sections];
   let addedOverview = false;
@@ -78,6 +84,14 @@ export function upgradeOnboardingDraft(input: OnboardingInput): { form: Onboardi
     templateVersion = 2;
   }
 
+  sections = sections.map((item) => {
+    if (item.id !== "agreement-c" || item.fields.some((field) => field.type === "signature")) return item;
+    const index = item.fields.findIndex((field) => field.label === "Participant signature / recorded agreement");
+    if (index < 0) return item;
+    const fields = item.fields.map((field, position) => position === index ? { ...field, label: "Participant recorded agreement (if not signing)" } : field);
+    fields.splice(index, 0, { id: crypto.randomUUID(), label: "Participant signature", type: "signature", value: "" });
+    return { ...item, fields };
+  });
   const intakeIndex = sections.findIndex((item) => item.id === "intake-a");
   if (intakeIndex >= 0) {
     const intake = { ...sections[intakeIndex], fields: sections[intakeIndex].fields.map((field) => ({ ...field })) };
@@ -165,7 +179,7 @@ export function createOnboardingTemplate(): OnboardingSection[] {
       "Individual emergency plan reference and date", "Notice arrangements for ending / changing services and method of notification",
       "Transition arrangements, essential supports and information handover with consent",
       "Acknowledgement: supports, fees, choices, complaints and schedules discussed; opportunity for questions and advice",
-      ["Participant name", "text"], "Participant signature / recorded agreement", ["Participant agreement date", "date"],
+      ["Participant name", "text"], ["Participant signature", "signature"], "Participant recorded agreement (if not signing)", ["Participant agreement date", "date"],
       "Representative name, signature and authority evidence reference", ["Representative agreement date", "date"],
       "Provider representative, role and signature / recorded agreement", ["Provider agreement date", "date"],
       "Interpreter / support person and how agreement was explained", ["Copy supplied on", "date"], ["Copy method / accessible format", "select", copyMethods],
@@ -190,11 +204,19 @@ export function createOnboardingTemplate(): OnboardingSection[] {
       "Manager approval / recorded agreement", ["Manager approval date", "date"], ["Support plan review due", "date"], "Earlier review triggers",
       "Start arrangements confirmed with participant and assigned workers briefed",
     ]),
-    section("maintenance", "Template adoption and review", "Record the provider's adoption and review of this template and any additional service-specific documentation.", [
+    section("maintenance", "Provider adoption and review", "Record the provider's adoption and review of this onboarding pack and any additional service-specific documentation.", [
       ["Template owner", "text"], ["Approved by", "text"], ["Adoption date", "date"], ["Next template review", "date"],
       "Provider checks: legal entity, complaints / privacy contacts, record access and retention policy",
       "Applicable pricing / claiming guidance reviewed for relevant supports", "Additional SIL / housing documentation if relevant",
       "Reviewed by and role", "Changes made and version issued", ["Approval date", "date"], ["Next review date", "date"],
     ]),
   ];
+}
+
+/** Keep the opening guidance current for previously saved onboarding records. */
+export function onboardingGuidance(description: string): string {
+  return description
+    .replace("Editable templates for intake, consent, service agreements and initial assessment", "Forms for intake, consent, service agreements and initial assessment")
+    .replace("Before adopting the templates", "Before using this onboarding pack")
+    .replace("This is a working template, not a completed record or a guarantee of audit compliance.", "Complete and review this onboarding form before treating it as a participant record. Using this form does not guarantee audit compliance.");
 }

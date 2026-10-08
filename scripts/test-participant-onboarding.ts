@@ -9,12 +9,12 @@ describe("Participant onboarding", () => {
     const record = validateOnboarding(draft());
     assert.equal(record.sections.length, 11);
     const consent = record.sections.find((section) => section.id === "consent")!;
-    assert.equal(consent.fields.filter((field) => field.type === "select").length, 5);
+    assert.equal(consent.fields.filter((field) => field.type === "select" && field.options?.includes("N/A")).length, 3);
     assert.ok(consent.fields.every((field) => field.value === ""));
   });
   it("preserves declined consent without granting other permissions", () => {
     const input = draft();
-    const choice = input.sections.find((section) => section.id === "consent")!.fields.find((field) => field.type === "select")!;
+    const choice = input.sections.find((section) => section.id === "consent")!.fields.find((field) => field.type === "select" && field.options?.includes("N/A"))!;
     choice.value = "No";
     assert.equal(validateOnboarding(input).sections.find((section) => section.id === "consent")!.fields.find((field) => field.id === choice.id)!.value, "No");
   });
@@ -79,7 +79,7 @@ describe("Participant onboarding", () => {
     assert.equal(validateOnboarding(upgraded.form).templateVersion, 2);
     const reopened = upgradeOnboardingDraft(upgraded.form);
     assert.equal(reopened.addedOverview, false);
-    assert.strictEqual(reopened.form, upgraded.form);
+    assert.deepEqual(reopened.form, upgraded.form);
   });
   it("preserves historical completed forms and intentional layout changes", () => {
     const completed = draft();
@@ -87,7 +87,7 @@ describe("Participant onboarding", () => {
     completed.sections = completed.sections.filter((section) => section.id !== "pack-overview");
     assert.strictEqual(upgradeOnboardingDraft(completed).form, completed);
     const customised = { ...completed, status: "draft" as const, templateVersion: 2 as const };
-    assert.strictEqual(upgradeOnboardingDraft(customised).form, customised);
+    assert.deepEqual(upgradeOnboardingDraft(customised).form, customised);
     assert.equal(upgradeOnboardingDraft(customised).addedOverview, false);
   });
   it("does not duplicate an existing opening page or accept an invalid template version", () => {

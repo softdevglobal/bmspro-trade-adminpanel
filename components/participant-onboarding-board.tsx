@@ -1,22 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { OnboardingSignaturePad } from "@/components/onboarding-signature-pad";
 import { MonthCalendarField } from "@/components/month-calendar-field";
 import { JOB_ESTIMATE_SELECT_CHEVRON } from "@/lib/bookings/job-estimate";
 import { platformTodayIso } from "@/lib/platform/timezone";
 import { useAuth } from "@/lib/auth/auth-context";
 import type { CareplusProviderProfile } from "@/lib/integrations/careplus/provider-profile";
 import { fillProviderDetails } from "@/lib/participant-onboarding/provider-details";
-import { createOnboardingTemplate, createPackOverview, createRiskSection, createSupportSchedule, upgradeOnboardingDraft } from "@/lib/participant-onboarding/template";
+import { createOnboardingTemplate, createPackOverview, createRiskSection, createSupportSchedule, upgradeOnboardingDraft, onboardingGuidance } from "@/lib/participant-onboarding/template";
 import { FIELD_TYPES, validateOnboarding, type FieldType, type OnboardingInput, type OnboardingRecord, type OnboardingSection } from "@/lib/participant-onboarding/types";
 
 type Summary = Pick<OnboardingRecord, "id" | "participantName" | "participantReference" | "status" | "updatedAt" | "revision">;
-type ApiResult = { careplusSync?: "sent" | "pending" | "failed" | "not_connected"; records?: Summary[]; nextCursor?: string | null; record?: OnboardingRecord; connected?: boolean; profile?: CareplusProviderProfile | null };
+type ApiResult = { customerAccount?: "draft" | "missing_email" | "ready" | "email_pending" | "failed"; careplusSync?: "sent" | "pending" | "failed" | "not_connected"; records?: Summary[]; nextCursor?: string | null; record?: OnboardingRecord; connected?: boolean; profile?: CareplusProviderProfile | null };
 const inputClass = "min-h-11 w-full rounded-xl border border-outline-variant/60 bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-on-surface-variant/55 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60";
 const selectClass = inputClass + " appearance-none bg-[length:0.875rem] bg-[right_1.1rem_center] bg-no-repeat pr-9";
 const buttonClass = "inline-flex min-h-11 items-center justify-center rounded-xl border border-outline-variant/60 bg-surface-container-lowest px-4 py-2 font-body text-[13px] font-semibold text-on-surface transition-colors hover:border-primary/30 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50";
 const primaryClass = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50";
 
+function fieldDisplayLabel(sectionId: string, label: string): string {
+  if (sectionId !== "pack-overview" && sectionId !== "maintenance") return label;
+  return label === "Template owner" ? "Provider owner" : label === "Next template review" ? "Next review date" : label;
+}
 function freshSection(section: OnboardingSection): OnboardingSection {
   return { ...section, id: crypto.randomUUID(), fields: section.fields.map((field) => ({ ...field, id: crypto.randomUUID(), value: "" })) };
 }
@@ -73,7 +78,6 @@ export function ParticipantOnboardingBoard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [editStructure, setEditStructure] = useState(false);
   const [showSectionBuilder, setShowSectionBuilder] = useState(false);
@@ -147,7 +151,7 @@ export function ParticipantOnboardingBoard() {
   function canSwitch() { return !dirty || window.confirm("Discard unsaved changes and continue?"); }
   function change(patch: Partial<OnboardingInput>) {
     setForm((previous) => previous ? { ...previous, ...patch } : previous);
-    setDirty(true); setNotice(""); setError("");
+    setDirty(true); setError("");
   }
   function updateSection(id: string, update: (section: OnboardingSection) => OnboardingSection) {
     if (form) change({ sections: form.sections.map((section) => section.id === id ? update(section) : section) });
@@ -155,7 +159,7 @@ export function ParticipantOnboardingBoard() {
 
   async function startNew() {
     if (!canSwitch()) return;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setError("");
     try {
       const defaults = await readProviderDetails();
       const sections = createOnboardingTemplate();
@@ -164,15 +168,14 @@ export function ParticipantOnboardingBoard() {
       setView("form");
       setFormSessionId(crypto.randomUUID());
       setForm(prepared.form); setProviderProfile(defaults.profile); setProviderNote(defaults.note);
-      setActiveId(sections[0].id); setRecordId(null); setRevision(0); setDirty(prepared.filledFields > 0);
+      setActiveId(sections[0].id); setRecordId(null); setRevision(0); setDirty(false);
       setEditStructure(false); setNewLabel("");
-      if (prepared.filledFields) setNotice("Provider details have been filled from CarePlus. Review them and save the form.");
     } finally { setBusy(false); }
   }
 
   async function openRecord(id: string) {
     if (!canSwitch()) return;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setError("");
     try {
       const [result, defaults] = await Promise.all([api("?id=" + encodeURIComponent(id)), readProviderDetails()]);
       if (!result.record) throw new Error("Record data is unavailable.");
@@ -187,20 +190,15 @@ export function ParticipantOnboardingBoard() {
       setFormSessionId(crypto.randomUUID());
       setForm(autofilled.form); setProviderProfile(defaults.profile); setProviderNote(defaults.note);
       setRecordId(record.id); setRevision(record.revision); setActiveId(autofilled.form.sections[0]?.id || "");
-      setDirty(prepared.addedOverview || prepared.addedChoices || autofilled.filledFields > 0); setEditStructure(false); setNewLabel("");
-      const notices = [
-        prepared.addedOverview ? "The opening page has been added to this draft." : "",
-        prepared.addedChoices ? "Dropdowns for contact method and language have been added. Your previous answers were kept for review." : "",
-        autofilled.filledFields ? "Blank provider fields have been filled from CarePlus." : "",
-      ].filter(Boolean);
-      if (notices.length) setNotice(notices.join(" ") + " Save changes to keep them.");
+      setDirty(false); setEditStructure(false); setNewLabel("");
+
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not open record."); }
     finally { setBusy(false); }
   }
 
   async function save() {
     if (!form) return;
-    setError(""); setNotice("");
+    setError("");
     try {
       const intakeName = form.sections
         .find((section) => section.id === "intake-a")
@@ -214,13 +212,7 @@ export function ParticipantOnboardingBoard() {
       const saved = result.record;
       setRecordId(saved.id); setRevision(saved.revision); setForm(input); setDirty(false);
       setRecords((previous) => [saved, ...previous.filter((record) => record.id !== saved.id)]);
-      setNotice(result.careplusSync === "sent"
-        ? "Onboarding saved in Trade. The participant is now available in CarePlus Participants."
-        : result.careplusSync === "not_connected"
-          ? "Onboarding saved in Trade. Connect CarePlus and save again to send the participant."
-          : result.careplusSync === "failed"
-            ? "Onboarding saved in Trade, but CarePlus rejected the participant transfer. Check the CarePlus connection and integration errors, then save again."
-            : "Onboarding saved in Trade. The participant transfer is queued and will appear in CarePlus after synchronization.");
+      setView("saved");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save onboarding."); }
     finally { setBusy(false); }
   }
@@ -286,46 +278,21 @@ export function ParticipantOnboardingBoard() {
   return (
     <div className="space-y-5 font-body text-on-surface">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-2xl text-sm text-on-surface-variant">Use the NDIS onboarding template, add sections and fields, and save a separate record for each participant.</p>
+        <p className="max-w-2xl text-sm text-on-surface-variant">View saved participant onboarding records or create a new one.</p>
         <button className={primaryClass} disabled={busy || loading} onClick={() => void startNew()}>{busy ? "Please wait…" : "New participant onboarding"}</button>
       </div>
       {error && <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
-      {notice && <div role="status" className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-800">{notice}</div>}
-      <div role="tablist" aria-label="Participant onboarding views" className="flex gap-2 border-b border-outline-variant/50 pb-3">
-        {(["form", "saved"] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            id={"onboarding-tab-" + tab}
-            aria-selected={view === tab}
-            aria-controls={"onboarding-panel-" + tab}
-            tabIndex={view === tab ? 0 : -1}
-            className={view === tab ? primaryClass : buttonClass}
-            onClick={() => setView(tab)}
-            onKeyDown={(event) => {
-              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-              event.preventDefault();
-              const next = event.key === "Home" ? "form" : event.key === "End" ? "saved" : tab === "saved" ? "form" : "saved";
-              setView(next);
-              document.getElementById("onboarding-tab-" + next)?.focus();
-            }}
-          >
-            {tab === "saved" ? "Saved onboarding" : "Onboarding form"}
-          </button>
-        ))}
-      </div>
       <div className="space-y-5">
-        <section role="tabpanel" id="onboarding-panel-saved" aria-labelledby="onboarding-tab-saved" hidden={view !== "saved"} className="rounded-xl border border-outline-variant/50 bg-surface-container-lowest p-4">
-          <h2 className="mb-3 font-semibold text-on-surface">Saved onboarding</h2>
+        <section aria-label="Saved participant onboarding" hidden={view !== "saved"}>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-lg font-semibold text-on-surface">Saved participants</h2><span className="text-sm text-on-surface-variant">{filtered.length} shown</span></div>
           <label className="mb-3 block"><span className="sr-only">Search saved participants</span><input className={inputClass} placeholder="Search name or reference" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           {loading ? <p role="status" className="font-body text-[13px] text-on-surface-variant">Loading records…</p> : (
-            <div className="max-h-[550px] space-y-2 overflow-y-auto">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {filtered.map((record) => (
-                <button key={record.id} disabled={busy} onClick={() => void openRecord(record.id)} className={"w-full rounded-lg border p-3 text-left disabled:opacity-40 " + (recordId === record.id ? "border-primary bg-primary/5" : "border-outline-variant/40 hover:bg-surface-container")}>
-                  <span className="block font-medium text-on-surface">{record.participantName}</span>
-                  <span className="block text-xs text-on-surface-variant">{record.participantReference || "No reference"} · {record.status}</span>
-                  <span className="block text-xs text-on-surface-variant">Updated {new Date(record.updatedAt).toLocaleDateString()}</span>
+                <button key={record.id} disabled={busy} onClick={() => void openRecord(record.id)} className="group rounded-2xl border border-outline-variant/50 bg-surface-container-lowest p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md disabled:opacity-40">
+                  <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 font-display text-lg font-bold text-primary" aria-hidden="true">{record.participantName.trim().split(/\\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</span><span className="block font-display text-base font-semibold text-on-surface group-hover:text-primary">{record.participantName}</span>
+                  <span className="mt-2 block text-sm text-on-surface-variant">{record.participantReference || "No reference"}</span><span className={"mt-4 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold " + (record.status === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>{record.status === "completed" ? "Completed" : "Draft"}</span>
+                  <span className="mt-4 block text-xs text-on-surface-variant">Updated {new Date(record.updatedAt).toLocaleDateString()}</span>
                 </button>
               ))}
               {!filtered.length && <p className="font-body text-[13px] text-on-surface-variant">{search ? "No matching participants in the loaded records." : "No saved onboarding records yet."}</p>}
@@ -333,9 +300,9 @@ export function ParticipantOnboardingBoard() {
           )}
           {nextCursor && <button disabled={busy} onClick={() => void loadMore()} className={buttonClass + " mt-3 w-full"}>Load more records</button>}
         </section>
-        <div role="tabpanel" id="onboarding-panel-form" aria-labelledby="onboarding-tab-form" hidden={view !== "form"}>
+        <div role="dialog" aria-modal="true" aria-label={recordId ? "Edit participant onboarding" : "New participant onboarding"} hidden={view !== "form"} className="fixed inset-0 z-[100] overflow-y-auto bg-black/50 p-3 backdrop-blur-sm sm:p-6"><div className="mx-auto my-3 max-w-6xl rounded-2xl bg-surface p-4 shadow-2xl sm:my-6 sm:p-6">
         {!form ? <div className="rounded-xl border border-dashed border-outline-variant p-10 text-center"><h2 className="text-lg font-semibold text-on-surface">Start a participant onboarding</h2><p className="mt-2 text-sm text-on-surface-variant">Create a new form or open a saved record. Drafts can be saved before every section is filled.</p></div> : (
-          <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="min-w-0 space-y-4">
+          <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="min-w-0 space-y-4"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary">CarePlus</p><h2 className="font-display text-xl font-semibold text-on-surface">{recordId ? "Participant onboarding" : "New participant onboarding"}</h2></div><button type="button" className={buttonClass} disabled={busy} onClick={() => { if (canSwitch()) setView("saved"); }}>Close</button></div>
             <fieldset disabled={busy} className="min-w-0 space-y-4">
               <div className="rounded-xl border border-outline-variant/50 bg-surface-container-lowest p-5">
                 <div className="grid gap-4 md:grid-cols-3">
@@ -348,7 +315,7 @@ export function ParticipantOnboardingBoard() {
                   </div>
                 </div>
                 {providerNote && <p role="status" className="mt-3 text-sm text-on-surface-variant">{providerNote}</p>}
-                <p className="mt-2 font-body text-[12px] text-on-surface-variant">Completed is a record status. It does not grant consent or replace a participant’s agreement. Signature fields record names or agreement details; use your agreed signing process.</p>
+                <p className="mt-2 font-body text-[12px] text-on-surface-variant">Completed is a record status. It does not grant consent or replace a participant’s agreement. Draw the participant signature in step 7 or record their agreement using your agreed signing process.</p>
               </div>
               {showSectionBuilder && <div id="onboarding-section-builder" className="space-y-4 rounded-xl border border-primary/40 bg-surface-container-lowest p-5">
                 <div><h2 className="text-lg font-semibold">Add a section</h2><p className="mt-1 text-sm text-on-surface-variant">Choose a ready-made section, or create your own with a first question.</p></div>
@@ -399,37 +366,37 @@ export function ParticipantOnboardingBoard() {
                       <button type="button" disabled={form.sections.length >= 50} className={buttonClass} onClick={() => addSection(active)}>Duplicate blank section</button>
                       <button type="button" disabled={form.sections.length === 1} className={buttonClass + " text-red-700"} onClick={() => removeSection(active)}>Remove section</button>
                     </div>
-                  </div> : active.description && <p className="mb-5 whitespace-pre-wrap text-sm leading-relaxed text-on-surface-variant">{active.description}</p>}
+                  </div> : active.description && <p className="mb-5 whitespace-pre-wrap text-sm leading-relaxed text-on-surface-variant">{active.id === "pack-overview" ? onboardingGuidance(active.description) : active.description}</p>}
                   <div className="grid gap-5 sm:grid-cols-2">
-                    {active.fields.map((field) => <div key={field.id} className={field.type === "textarea" ? "sm:col-span-2" : ""}>
-                      {editStructure && <div className="mb-2 flex gap-2"><input aria-label={"Edit field label: " + field.label} maxLength={300} className={inputClass} value={field.label} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, label: event.target.value } : item) }))} /><button type="button" className={buttonClass + " text-red-700"} aria-label={"Remove field: " + field.label} onClick={() => { if (field.value && !window.confirm("Remove this field and its response?")) return; updateSection(active.id, (section) => ({ ...section, fields: section.fields.filter((item) => item.id !== field.id) })); }}>Remove</button></div>}
-                      <label className="block space-y-1.5 font-body text-[13px]"><span className="font-semibold text-on-surface">{field.label}</span>
-                        {field.type === "textarea" ? <textarea maxLength={6000} rows={3} className={inputClass} value={field.value} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item) }))} /> :
+                    {active.fields.map((field) => { const FieldContainer = field.type === "signature" || field.type === "date" ? "div" : "label"; return <div key={field.id} className={(field.type === "textarea" || field.type === "signature") ? "sm:col-span-2" : ""}>
+                      {editStructure && <div className="mb-2 flex gap-2"><input aria-label={"Edit field label: " + field.label} maxLength={300} className={inputClass} value={fieldDisplayLabel(active.id, field.label)} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, label: event.target.value } : item) }))} /><button type="button" className={buttonClass + " text-red-700"} aria-label={"Remove field: " + field.label} onClick={() => { if (field.value && !window.confirm("Remove this field and its response?")) return; updateSection(active.id, (section) => ({ ...section, fields: section.fields.filter((item) => item.id !== field.id) })); }}>Remove</button></div>}
+                      <FieldContainer className="block space-y-1.5 font-body text-[13px]"><span className="font-semibold text-on-surface">{fieldDisplayLabel(active.id, field.label)}</span>
+                        {field.type === "signature" ? <OnboardingSignaturePad key={formSessionId + ":" + field.id} value={field.value} disabled={busy} onChange={(value) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value } : item) }))} /> : field.type === "textarea" ? <textarea maxLength={6000} rows={3} className={inputClass} value={field.value} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item) }))} /> :
                           field.type === "select" ? <select className={selectClass} style={{ backgroundImage: JOB_ESTIMATE_SELECT_CHEVRON }} value={field.value} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item) }))}><option value="">Not answered</option>{field.options?.map((option) => <option key={option} value={option}>{option}</option>)}</select> :
                           field.type === "date" ? field.label.trim().toLowerCase() === "date of birth"
                             ? <BirthDateFields key={formSessionId + ":" + field.id} value={field.value} disabled={busy} onChange={(value) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value } : item) }))} />
                             : <MonthCalendarField selectedIso={field.value} minDate={platformTodayIso()} allowPast disabled={busy} size="comfortable" placeholder="Choose a date" onSelect={(value) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value } : item) }))} /> :
                             <input type={field.type} step={field.type === "number" ? "any" : undefined} maxLength={6000} className={inputClass} value={field.value} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item) }))} />}
-                      </label>
-                    </div>)}
+                      </FieldContainer>
+                    </div>; })}
                   </div>
                   {!active.fields.length && <p className="font-body text-[13px] text-on-surface-variant">Add your first question below. An answer box will appear here.</p>}
                   <div className="mt-6 space-y-3 border-t border-outline-variant/50 pt-4">
                     <h3 className="text-sm font-semibold">Add another question</h3><p className="font-body text-[13px] text-on-surface-variant">Write the question, choose how it should be answered, then click Add question.</p>
                     <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto]">
                       <label><span className="mb-1 block text-sm font-medium">Question</span><input maxLength={300} className={inputClass} placeholder="For example: Who should we contact?" value={newLabel} onChange={(event) => setNewLabel(event.target.value)} /></label>
-                      <label><span className="mb-1 block text-sm font-medium">Answer format</span><select className={selectClass} style={{ backgroundImage: JOB_ESTIMATE_SELECT_CHEVRON }} value={newType} onChange={(event) => setNewType(event.target.value as FieldType)}>{FIELD_TYPES.map((type) => <option key={type} value={type}>{({ text: "Short answer", textarea: "Long answer", date: "Date", email: "Email", tel: "Phone", number: "Number", select: "Dropdown" })[type]}</option>)}</select></label>
+                      <label><span className="mb-1 block text-sm font-medium">Answer format</span><select className={selectClass} style={{ backgroundImage: JOB_ESTIMATE_SELECT_CHEVRON }} value={newType} onChange={(event) => setNewType(event.target.value as FieldType)}>{FIELD_TYPES.map((type) => <option key={type} value={type}>{({ text: "Short answer", textarea: "Long answer", date: "Date", email: "Email", tel: "Phone", number: "Number", select: "Dropdown", signature: "Draw signature" })[type]}</option>)}</select></label>
                       <button type="button" className={buttonClass} disabled={!newLabel.trim() || active.fields.length >= 80 || totalFields >= 600} onClick={addField}>Add question</button>
                     </div>
                     {newType === "select" && <label className="block space-y-1 font-body text-[13px] font-semibold">Choices separated by commas<input className={inputClass} placeholder="Yes, No, N/A" value={newOptions} onChange={(event) => setNewOptions(event.target.value)} /></label>}
                   </div>
-                  <div className="mt-6 flex justify-between gap-2"><button type="button" className={buttonClass} disabled={index === 0} onClick={() => setActiveId(form.sections[index - 1].id)}>Previous section</button><button type="button" className={buttonClass} disabled={index === form.sections.length - 1} onClick={() => setActiveId(form.sections[index + 1].id)}>Next section</button></div>
+                  <div className="mt-6 flex justify-between gap-2"><button type="button" className={buttonClass} disabled={index === 0} onClick={() => setActiveId(form.sections[index - 1].id)}>Previous section</button>{index === form.sections.length - 1 ? <button type="submit" className={primaryClass} disabled={busy}>{busy ? "Saving…" : recordId ? "Save changes" : "Save participant onboarding"}</button> : <button type="button" className={buttonClass} onClick={() => setActiveId(form.sections[index + 1].id)}>Next section</button>}</div>
                 </section>}
               </div>
             </fieldset>
           </form>
         )}
-        </div>
+        </div></div>
       </div>
     </div>
   );

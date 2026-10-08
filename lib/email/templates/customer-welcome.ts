@@ -28,7 +28,7 @@ export type CustomerWelcomeEmailInput = {
   businessId?: string | null;
   /** Temporary password, only for accounts created by the business. */
   temporaryPassword?: string | null;
-  context?: "quotation" | "inspection" | null;
+  context?: "quotation" | "inspection" | "onboarding" | null;
 };
 
 /**
@@ -58,7 +58,9 @@ export async function sendCustomerWelcomeEmail(
   }
 
   const portalLine =
-    input.context === "quotation"
+    input.context === "onboarding"
+      ? "access your customer account following participant onboarding"
+      : input.context === "quotation"
       ? "view quotations, request visits, and track your jobs"
       : input.context === "inspection"
         ? "track your requests and proposed times"
@@ -107,8 +109,8 @@ export async function sendCustomerWelcomeEmail(
       senderName: business,
       source: "customer_welcome",
       message: input.temporaryPassword
-        ? `Welcome to ${business} on BMS Pro Trade. A customer account was created for ${input.email}. Check your email for your login details.`
-        : `Welcome to ${business} on BMS Pro Trade. Your customer account for ${input.email} is ready. Check your email for details.`,
+        ? `Welcome to ${business} on BMS Pro Trade. A customer account was created for ${input.email}. Check your email for your login details.${input.context === "onboarding" && accountUrl ? ` Sign in: ${accountUrl}. Change your password after signing in.` : ""}`
+        : `Welcome to ${business} on BMS Pro Trade. Your customer account for ${input.email} is ready. Check your email for details.${input.context === "onboarding" && accountUrl ? ` Sign in: ${accountUrl}` : ""}`,
     });
   }
 
