@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { OnboardingSignaturePad } from "@/components/onboarding-signature-pad";
+import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { MonthCalendarField } from "@/components/month-calendar-field";
 import { JOB_ESTIMATE_SELECT_CHEVRON } from "@/lib/bookings/job-estimate";
 import { platformTodayIso } from "@/lib/platform/timezone";
@@ -66,6 +68,7 @@ function BirthDateFields({ value, disabled, onChange }: {
 
 export function ParticipantOnboardingBoard() {
   const { user, businessId } = useAuth();
+  const router = useRouter();
   const [view, setView] = useState<"saved" | "form">("saved");
   const [records, setRecords] = useState<Summary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -89,6 +92,27 @@ export function ParticipantOnboardingBoard() {
   const [newOptions, setNewOptions] = useState("");
   const [providerProfile, setProviderProfile] = useState<CareplusProviderProfile | null>(null);
   const [providerNote, setProviderNote] = useState("");
+  const [confirmation, setConfirmation] = useState<{ title: string; description: string; confirmLabel: string; cancelLabel: string; discard: boolean; action: () => void } | null>(null);
+
+  function requestDiscard(action: () => void) {
+    if (!dirty) { action(); return; }
+    setConfirmation({
+      title: "Discard unsaved changes?",
+      description: "Your changes have not been saved. You can keep editing or discard them and continue.",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      discard: true,
+      action,
+    });
+  }
+
+  function finishConfirmation(confirmed: boolean) {
+    const request = confirmation;
+    setConfirmation(null);
+    if (!confirmed || !request) return;
+    if (request.discard) setDirty(false);
+    request.action();
+  }
 
   const api = useCallback(async (query = "", body?: object): Promise<ApiResult> => {
     if (!user) throw new Error("Please sign in again.");
@@ -126,15 +150,25 @@ export function ParticipantOnboardingBoard() {
     window.addEventListener("beforeunload", warn);
     // Dashboard links use client navigation, which does not fire beforeunload.
     const warnLink = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
-      if (target && !window.confirm("You have unsaved onboarding changes. Leave this page?")) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+      if (!link || confirmation || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target === "_blank" || link.hasAttribute("download")) return;
+      const destination = new URL(link.href, window.location.href);
+      if (destination.origin !== window.location.origin) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const href = destination.pathname + destination.search + destination.hash;
+      setConfirmation({
+        title: "Leave onboarding?",
+        description: "Your changes have not been saved. Keep editing or discard them and leave this page.",
+        confirmLabel: "Discard changes",
+        cancelLabel: "Keep editing",
+        discard: true,
+        action: () => router.push(href),
+      });
     };
     document.addEventListener("click", warnLink, true);
     return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", warnLink, true); };
-  }, [dirty]);
+  }, [dirty, confirmation, router]);
 
 
   async function readProviderDetails(): Promise<{ profile: CareplusProviderProfile | null; note: string }> {
@@ -148,7 +182,6 @@ export function ParticipantOnboardingBoard() {
     }
   }
 
-  function canSwitch() { return !dirty || window.confirm("Discard unsaved changes and continue?"); }
   function change(patch: Partial<OnboardingInput>) {
     setForm((previous) => previous ? { ...previous, ...patch } : previous);
     setDirty(true); setError("");
@@ -157,8 +190,7 @@ export function ParticipantOnboardingBoard() {
     if (form) change({ sections: form.sections.map((section) => section.id === id ? update(section) : section) });
   }
 
-  async function startNew() {
-    if (!canSwitch()) return;
+  async function prepareNew() {
     setBusy(true); setError("");
     try {
       const defaults = await readProviderDetails();
@@ -173,8 +205,11 @@ export function ParticipantOnboardingBoard() {
     } finally { setBusy(false); }
   }
 
-  async function openRecord(id: string) {
-    if (!canSwitch()) return;
+  function startNew() {
+    requestDiscard(() => { void prepareNew(); });
+  }
+
+  async function loadRecord(id: string) {
     setBusy(true); setError("");
     try {
       const [result, defaults] = await Promise.all([api("?id=" + encodeURIComponent(id)), readProviderDetails()]);
@@ -194,6 +229,10 @@ export function ParticipantOnboardingBoard() {
 
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not open record."); }
     finally { setBusy(false); }
+  }
+
+  function openRecord(id: string) {
+    requestDiscard(() => { void loadRecord(id); });
   }
 
   async function save() {
@@ -248,9 +287,18 @@ export function ParticipantOnboardingBoard() {
     });
   }
   function removeSection(section: OnboardingSection) {
-    if (!form || form.sections.length === 1 || !window.confirm('Remove "' + section.title + '" and its responses?')) return;
-    const sections = form.sections.filter((item) => item.id !== section.id);
-    change({ sections }); setActiveId(sections[0].id);
+    if (!form || form.sections.length === 1) return;
+    setConfirmation({
+      title: "Remove this section?",
+      description: `“${section.title}” and its answers will be removed from this form. This cannot be undone after saving.`,
+      confirmLabel: "Remove section",
+      cancelLabel: "Keep section",
+      discard: false,
+      action: () => {
+        const sections = form.sections.filter((item) => item.id !== section.id);
+        change({ sections }); setActiveId(sections[0].id);
+      },
+    });
   }
   function moveSection(id: string, direction: number) {
     if (!form) return;
@@ -302,7 +350,7 @@ export function ParticipantOnboardingBoard() {
         </section>
         <div role="dialog" aria-modal="true" aria-label={recordId ? "Edit participant onboarding" : "New participant onboarding"} hidden={view !== "form"} className="fixed inset-0 z-[100] overflow-y-auto bg-black/50 p-3 backdrop-blur-sm sm:p-6"><div className="mx-auto my-3 max-w-6xl rounded-2xl bg-surface p-4 shadow-2xl sm:my-6 sm:p-6">
         {!form ? <div className="rounded-xl border border-dashed border-outline-variant p-10 text-center"><h2 className="text-lg font-semibold text-on-surface">Start a participant onboarding</h2><p className="mt-2 text-sm text-on-surface-variant">Create a new form or open a saved record. Drafts can be saved before every section is filled.</p></div> : (
-          <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="min-w-0 space-y-4"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary">CarePlus</p><h2 className="font-display text-xl font-semibold text-on-surface">{recordId ? "Participant onboarding" : "New participant onboarding"}</h2></div><button type="button" className={buttonClass} disabled={busy} onClick={() => { if (canSwitch()) setView("saved"); }}>Close</button></div>
+          <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="min-w-0 space-y-4"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-primary">CarePlus</p><h2 className="font-display text-xl font-semibold text-on-surface">{recordId ? "Participant onboarding" : "New participant onboarding"}</h2></div><button type="button" className={buttonClass} disabled={busy} onClick={() => requestDiscard(() => setView("saved"))}>Close</button></div>
             <fieldset disabled={busy} className="min-w-0 space-y-4">
               <div className="rounded-xl border border-outline-variant/50 bg-surface-container-lowest p-5">
                 <div className="grid gap-4 md:grid-cols-3">
@@ -369,7 +417,11 @@ export function ParticipantOnboardingBoard() {
                   </div> : active.description && <p className="mb-5 whitespace-pre-wrap text-sm leading-relaxed text-on-surface-variant">{active.id === "pack-overview" ? onboardingGuidance(active.description) : active.description}</p>}
                   <div className="grid gap-5 sm:grid-cols-2">
                     {active.fields.map((field) => { const FieldContainer = field.type === "signature" || field.type === "date" ? "div" : "label"; return <div key={field.id} className={(field.type === "textarea" || field.type === "signature") ? "sm:col-span-2" : ""}>
-                      {editStructure && <div className="mb-2 flex gap-2"><input aria-label={"Edit field label: " + field.label} maxLength={300} className={inputClass} value={fieldDisplayLabel(active.id, field.label)} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, label: event.target.value } : item) }))} /><button type="button" className={buttonClass + " text-red-700"} aria-label={"Remove field: " + field.label} onClick={() => { if (field.value && !window.confirm("Remove this field and its response?")) return; updateSection(active.id, (section) => ({ ...section, fields: section.fields.filter((item) => item.id !== field.id) })); }}>Remove</button></div>}
+                      {editStructure && <div className="mb-2 flex gap-2"><input aria-label={"Edit field label: " + field.label} maxLength={300} className={inputClass} value={fieldDisplayLabel(active.id, field.label)} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, label: event.target.value } : item) }))} /><button type="button" className={buttonClass + " text-red-700"} aria-label={"Remove field: " + field.label} onClick={() => {
+                        const removeField = () => updateSection(active.id, (section) => ({ ...section, fields: section.fields.filter((item) => item.id !== field.id) }));
+                        if (!field.value) { removeField(); return; }
+                        setConfirmation({ title: "Remove this question?", description: "This question and its answer will be removed from the form. This cannot be undone after saving.", confirmLabel: "Remove question", cancelLabel: "Keep question", discard: false, action: removeField });
+                      }}>Remove</button></div>}
                       <FieldContainer className="block space-y-1.5 font-body text-[13px]"><span className="font-semibold text-on-surface">{fieldDisplayLabel(active.id, field.label)}</span>
                         {field.type === "signature" ? <OnboardingSignaturePad key={formSessionId + ":" + field.id} value={field.value} disabled={busy} onChange={(value) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value } : item) }))} /> : field.type === "textarea" ? <textarea maxLength={6000} rows={3} className={inputClass} value={field.value} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item) }))} /> :
                           field.type === "select" ? <select className={selectClass} style={{ backgroundImage: JOB_ESTIMATE_SELECT_CHEVRON }} value={field.value} onChange={(event) => updateSection(active.id, (section) => ({ ...section, fields: section.fields.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item) }))}><option value="">Not answered</option>{field.options?.map((option) => <option key={option} value={option}>{option}</option>)}</select> :
@@ -398,6 +450,16 @@ export function ParticipantOnboardingBoard() {
         )}
         </div></div>
       </div>
+      <CancelConfirmModal
+        open={confirmation !== null}
+        title={confirmation?.title || "Confirm action"}
+        description={confirmation?.description || ""}
+        confirmLabel={confirmation?.confirmLabel || "Continue"}
+        cancelLabel={confirmation?.cancelLabel || "Cancel"}
+        onCancel={() => finishConfirmation(false)}
+        onConfirm={() => finishConfirmation(true)}
+        stacked
+      />
     </div>
   );
 }

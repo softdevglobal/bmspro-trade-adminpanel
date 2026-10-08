@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 type Props = {
   open: boolean;
@@ -29,6 +30,12 @@ export function CancelConfirmModal({
   isLoading = false,
   stacked = false,
 }: Props) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
 
@@ -44,9 +51,9 @@ export function CancelConfirmModal({
     };
   }, [open, onCancel, isLoading]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       className={`fixed inset-0 flex items-center justify-center p-4 ${
         stacked ? "z-[120]" : "z-[110]"
@@ -115,6 +122,7 @@ export function CancelConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
