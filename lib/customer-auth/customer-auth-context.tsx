@@ -1,5 +1,6 @@
 "use client";
 
+import { CustomerPasswordChangeDialog } from "@/components/customer-password-change-dialog";
 import { CustomerAuthModal } from "@/components/customer-auth-modal";
 import { postSessionAudit } from "@/lib/audit/log-session-client";
 import { buildCustomerAuthEmail } from "@/lib/customer/scoped-auth";
@@ -226,6 +227,7 @@ export function CustomerAuthProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const [passwordChangeUid, setPasswordChangeUid] = useState<string | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -280,6 +282,7 @@ export function CustomerAuthProvider({
       const slug = activeBookingSlugRef.current;
       const cachedProfile = readProfileCache(next.uid, slug);
       setFirebaseUser(next);
+      setPasswordChangeUid(localStorage.getItem(`customer-password-change:${next.uid}`) === "required" ? next.uid : null);
       if (cachedProfile) {
         setProfile(cachedProfile);
         setProfileLoading(false);
@@ -373,6 +376,13 @@ export function CustomerAuthProvider({
       }
     }
 
+    if (password === "00001111") {
+      localStorage.setItem(`customer-password-change:${credential.user.uid}`, "required");
+      setPasswordChangeUid(credential.user.uid);
+    } else {
+      localStorage.removeItem(`customer-password-change:${credential.user.uid}`);
+      setPasswordChangeUid(null);
+    }
     const token = await credential.user.getIdToken();
     void postSessionAudit(token, "login", { bookingSlug: slug });
   }, []);
@@ -423,7 +433,14 @@ export function CustomerAuthProvider({
           : new Error("Could not save your profile. Please try again.");
       }
 
-      const token = await credential.user.getIdToken();
+      if (params.password === "00001111") {
+      localStorage.setItem(`customer-password-change:${credential.user.uid}`, "required");
+      setPasswordChangeUid(credential.user.uid);
+    } else {
+      localStorage.removeItem(`customer-password-change:${credential.user.uid}`);
+      setPasswordChangeUid(null);
+    }
+    const token = await credential.user.getIdToken();
       void postSessionAudit(token, "login", { bookingSlug: slug });
     },
     [],
@@ -530,6 +547,7 @@ export function CustomerAuthProvider({
   return (
     <CustomerAuthContext.Provider value={value}>
       {children}
+      {status === "authenticated" && passwordChangeUid === firebaseUser?.uid && <CustomerPasswordChangeDialog key={passwordChangeUid} onChanged={() => setPasswordChangeUid(null)} onSignOut={() => { void logout(); }} />}
       <CustomerAuthModal
         open={modalOpen}
         onClose={closeAuth}

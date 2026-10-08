@@ -1,10 +1,11 @@
-export type FieldType = "text" | "textarea" | "date" | "email" | "tel" | "number" | "select";
+import { parseSignature } from "./signature";
+export type FieldType = "text" | "textarea" | "date" | "email" | "tel" | "number" | "select" | "signature";
 export type OnboardingField = { id: string; label: string; type: FieldType; value: string; options?: string[] };
 export type OnboardingSection = { id: string; title: string; description: string; fields: OnboardingField[] };
 export type OnboardingInput = { templateVersion?: 1 | 2; participantName: string; participantReference: string; status: "draft" | "completed"; sections: OnboardingSection[] };
 export type OnboardingRecord = OnboardingInput & { id: string; revision: number; updatedAt: string; createdAt: string };
 
-export const FIELD_TYPES: FieldType[] = ["text", "textarea", "date", "email", "tel", "number", "select"];
+export const FIELD_TYPES: FieldType[] = ["text", "textarea", "date", "email", "tel", "number", "select", "signature"];
 
 /** Validate editable schemas as well as responses before storing sensitive records. */
 export function validateOnboarding(raw: unknown): OnboardingInput {
@@ -36,7 +37,8 @@ export function validateOnboarding(raw: unknown): OnboardingInput {
       fieldIds.add(fieldId);
       if (!FIELD_TYPES.includes(field.type as FieldType)) fail("Invalid field type.");
       const type = field.type as FieldType;
-      const value = string(field.value, 6000);
+      const value = string(field.value, type === "signature" ? 60000 : 6000);
+      if (type === "signature") parseSignature(value);
       let options: string[] | undefined;
       if (type === "select") {
         if (!Array.isArray(field.options) || field.options.length < 1 || field.options.length > 30) fail("Choice fields need between 1 and 30 options.");

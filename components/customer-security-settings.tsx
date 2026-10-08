@@ -99,7 +99,7 @@ function PasswordField({
   );
 }
 
-export function CustomerSecuritySettings() {
+export function CustomerSecuritySettings({ onPasswordChanged }: { onPasswordChanged?: () => void } = {}) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -134,6 +134,10 @@ export function CustomerSecuritySettings() {
       return;
     }
 
+    if (newPassword === "00001111") {
+      setError("Choose a personal password instead of the default password.");
+      return;
+    }
     if (currentPassword === newPassword) {
       setError("New password must be different from your current password.");
       return;
@@ -165,6 +169,9 @@ export function CustomerSecuritySettings() {
       setNewPassword("");
       setConfirmPassword("");
       setNotice("Password changed successfully.");
+      localStorage.removeItem(`customer-password-change:${current.uid}`);
+      window.dispatchEvent(new CustomEvent("customer-password-changed", { detail: current.uid }));
+      onPasswordChanged?.();
     } catch (err) {
       setError(firebasePasswordError(err));
     } finally {
@@ -173,14 +180,14 @@ export function CustomerSecuritySettings() {
   }
 
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+    <div id="change-password" className="scroll-mt-24 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
       <div className="flex items-start gap-3 border-b border-stone-100 pb-4">
         <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-on-surface">
           <span className="material-symbols-outlined text-[20px]">shield</span>
         </span>
         <div>
           <h2 className="font-display text-[18px] font-semibold text-on-surface">
-            Security
+            Change password
           </h2>
           <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">
             Update your account password for better security.

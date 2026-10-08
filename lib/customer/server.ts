@@ -257,6 +257,7 @@ export type EnsuredCustomerAccount = {
   created: boolean;
   /** True when a welcome email was sent during this call. */
   welcomeEmailSent: boolean;
+  welcomePreviouslySent: boolean;
 };
 
 /**
@@ -274,7 +275,7 @@ export async function ensureCustomerAccount(input: {
   bookingSlug?: string | null;
   logoUrl?: string | null;
   /** Adjust welcome copy (e.g. quotation vs inspection). */
-  context?: "quotation" | "inspection" | null;
+  context?: "quotation" | "inspection" | "onboarding" | null;
   /** When false, skip the welcome email even for new accounts. Defaults to true. */
   sendWelcomeEmail?: boolean;
 }): Promise<EnsuredCustomerAccount> {
@@ -383,7 +384,7 @@ export async function ensureCustomerAccount(input: {
     }
   }
 
-  return { uid, email, created, welcomeEmailSent };
+  return { uid, email, created, welcomeEmailSent, welcomePreviouslySent: welcomeAlreadySent };
 }
 
 export async function updateCustomerProfile(

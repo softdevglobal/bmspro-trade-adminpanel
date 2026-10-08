@@ -526,6 +526,7 @@ function AuthedAccount({
         </div>
       ) : null}
 
+      {tab !== "profile" && <div className="mt-4"><a href={`${accountPath(slug, "profile")}#change-password`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-primary/25 bg-white px-4 py-2 font-body text-sm font-semibold text-primary hover:bg-primary/5"><span className="material-symbols-outlined text-[20px]" aria-hidden="true">lock</span>Change password</a></div>}
       <div className={tab === "profile" ? "" : "mt-5"}>
         {tab === "profile" ? <ProfileSection slug={slug} /> : null}
         {tab === "requests" ? (
@@ -676,6 +677,7 @@ function ProfileSection({ slug }: { slug: string }) {
 
   return (
     <div className="space-y-5">
+    <CustomerSecuritySettings />
     <form className="space-y-5" onSubmit={handleSubmit}>
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl border border-stone-200/90 bg-gradient-to-br from-primary/[0.09] via-white to-[#faf8f5] p-4 shadow-sm sm:rounded-3xl sm:p-6">
@@ -875,7 +877,7 @@ function ProfileSection({ slug }: { slug: string }) {
       </div>
     </form>
 
-    <CustomerSecuritySettings />
+
     </div>
   );
 }
