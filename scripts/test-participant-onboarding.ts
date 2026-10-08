@@ -67,19 +67,43 @@ describe("Participant onboarding", () => {
     const input = draft();
     input.sections = input.sections.filter((section) => section.id !== "pack-overview");
     const maintenance = input.sections.find((section) => section.id === "maintenance")!;
-    maintenance.fields.find((field) => field.label === "Template owner")!.value = "Existing owner";
+    maintenance.fields.push({ id: "legacy-owner", label: "Template owner", type: "text", value: "Existing owner" });
     input.sections.find((section) => section.id === "intake-a")!.fields[2].value = "Existing participant name";
     const original = JSON.stringify(input);
     const upgraded = upgradeOnboardingDraft(input);
     assert.equal(upgraded.addedOverview, true);
     assert.equal(upgraded.form.sections[0].id, "pack-overview");
     assert.equal(upgraded.form.sections[0].fields.find((field) => field.label === "Template owner")!.value, "Existing owner");
+    assert.ok(!upgraded.form.sections.find((section) => section.id === "maintenance")!.fields.some((field) => field.label === "Template owner"));
+    assert.match(upgraded.form.sections.find((section) => section.id === "maintenance")!.description, /ndiscommission\.gov\.au/);
     assert.equal(upgraded.form.sections.find((section) => section.id === "intake-a")!.fields[2].value, "Existing participant name");
     assert.equal(JSON.stringify(input), original);
     assert.equal(validateOnboarding(upgraded.form).templateVersion, 2);
     const reopened = upgradeOnboardingDraft(upgraded.form);
     assert.equal(reopened.addedOverview, false);
     assert.deepEqual(reopened.form, upgraded.form);
+  });
+  it("keeps provider adoption details on the opening page and references in the final section", () => {
+    const current = draft();
+    const overview = current.sections.find((section) => section.id === "pack-overview")!;
+    const maintenance = current.sections.find((section) => section.id === "maintenance")!;
+    for (const label of ["Template owner", "Approved by", "Adoption date", "Next template review"]) {
+      assert.ok(overview.fields.some((field) => field.label === label));
+      assert.ok(!maintenance.fields.some((field) => field.label === label));
+    }
+    assert.match(maintenance.description, /ndiscommission\.gov\.au/);
+    assert.match(maintenance.description, /pricing-and-payments\/pricing\/pricing-arrangements/);
+    assert.deepEqual(maintenance.fields.map((field) => field.label), ["Reviewed by and role", "Changes made and version issued", "Approval date", "Next review date"]);
+  });
+  it("retains the source document's consent, pricing, cancellation and risk guidance", () => {
+    const sections = createOnboardingTemplate();
+    const consentSection = sections.find((section) => section.id === "consent")!;
+    const schedule = sections.find((section) => section.id === "support-schedule")!;
+    const risk = sections.find((section) => section.id === "risk")!;
+    assert.match(consentSection.description, /disclosed without consent where required or permitted by law/);
+    assert.match(schedule.description, /maximum price is not automatically the agreed price/);
+    assert.match(schedule.description, /If the provider cancels and does not deliver the support, no fee is charged/);
+    assert.match(risk.description, /falls, manual handling, health events, abuse or exploitation/);
   });
   it("preserves historical completed forms and intentional layout changes", () => {
     const completed = draft();
