@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHmac } from "node:crypto";
+import { CAREPLUS_TRADE_SYNC_PAUSED, isCareplusOutboundBodyAllowed } from "@/lib/integrations/careplus/outbound-policy";
 import { parseCareplusProviderProfile, type CareplusProviderProfile } from "@/lib/integrations/careplus/provider-profile";
 
 import {
@@ -18,7 +19,6 @@ import {
 } from "@/lib/integrations/careplus/constants";
 import type {
   CareplusDirectoryPerson,
-  CareplusJobCompletedPayload,
   CareplusLearningResult,
   CareplusLearningView,
   CareplusReceipt,
@@ -460,19 +460,20 @@ async function signedCareplusPost(input: {
   };
 }
 
-export async function sendCareplusJobCompleted(input: {
+export async function sendCareplusJobCompleted(_input: {
   businessId: string;
   rawBody: string;
 }): Promise<CareplusSendResult> {
-  JSON.parse(input.rawBody) as CareplusJobCompletedPayload;
-  const { eventsEndpoint } = getCareplusEndpoints();
-  return signedCareplusPost({ ...input, endpoint: eventsEndpoint });
+  throw new CareplusClientError(409, CAREPLUS_TRADE_SYNC_PAUSED, "Trade action sync is paused. Only CarePlus records and participant onboardings can be sent.");
 }
 
 export async function sendCareplusRecord(input: {
   businessId: string;
   rawBody: string;
 }): Promise<CareplusSendResult> {
+  if (!isCareplusOutboundBodyAllowed(input.rawBody)) {
+    throw new CareplusClientError(409, CAREPLUS_TRADE_SYNC_PAUSED, "Trade action sync is paused. Only CarePlus records and participant onboardings can be sent.");
+  }
   const { recordsEndpoint } = getCareplusEndpoints();
   return signedCareplusPost({ ...input, endpoint: recordsEndpoint });
 }

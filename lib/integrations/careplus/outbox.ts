@@ -2,6 +2,7 @@ import "server-only";
 
 import { logAuditEvent } from "@/lib/audit/server";
 import { adminDb } from "@/lib/firebase/admin";
+import { CAREPLUS_TRADE_SYNC_PAUSED, isCareplusOutboundBodyAllowed } from "@/lib/integrations/careplus/outbound-policy";
 import {
   CareplusClientError,
   fetchCareplusReceipt,
@@ -185,6 +186,23 @@ export async function deliverCareplusOutboxEvent(
     .doc(eventId)
     .get();
   if (!snap.exists) return "skipped";
+
+  const stored = snap.data() ?? {};
+  if (!isCareplusOutboundBodyAllowed(
+    typeof stored.rawBody === "string" ? stored.rawBody : "",
+    typeof stored.eventType === "string" ? stored.eventType : undefined,
+  )) {
+    // Park historical Trade events so the retry batch can reach allowed records.
+    // Keep the payload for a future explicit resumption of Trade sync.
+    if (["pending", "retry", "awaiting_receipt"].includes(stored.status)) {
+      await snap.ref.update({
+        status: "failed",
+        lastErrorCode: CAREPLUS_TRADE_SYNC_PAUSED,
+        nextAttemptAt: null,
+      });
+    }
+    return "skipped";
+  }
 
   const businessId = asString(snap.data()?.businessId) ?? "";
   const mapping =
