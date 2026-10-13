@@ -16,6 +16,7 @@ import {
   getBusinessProfile,
   requireBusinessMember,
   updateBusinessProfile,
+  type BankTransferDetails,
 } from "@/lib/onboarding/server";
 import {
   isAuTimezone,
@@ -142,6 +143,7 @@ export async function PATCH(request: Request) {
       requests: boolean;
     };
     feePayerMode?: "business" | "customer";
+    bankTransferDetails?: BankTransferDetails | null;
   } = {};
 
   if ("feePayerMode" in raw) {
@@ -152,6 +154,45 @@ export async function PATCH(request: Request) {
       );
     }
     updates.feePayerMode = raw.feePayerMode;
+  }
+
+  if ("bankTransferDetails" in raw) {
+    const value = raw.bankTransferDetails;
+    if (value == null) {
+      updates.bankTransferDetails = null;
+    } else if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return NextResponse.json(
+        { ok: false, error: "Enter valid bank transfer details." },
+        { status: 400 },
+      );
+    } else {
+      const details = value as Record<string, unknown>;
+      const bankName = typeof details.bankName === "string" ? details.bankName.trim() : "";
+      const businessName = typeof details.businessName === "string" ? details.businessName.trim() : "";
+      const bsb = typeof details.bsb === "string" ? details.bsb.trim() : "";
+      const accountNumber = typeof details.accountNumber === "string" ? details.accountNumber.trim() : "";
+      if (!bankName && !businessName && !bsb && !accountNumber) {
+        updates.bankTransferDetails = null;
+      } else if (!bankName || !businessName || !bsb || !accountNumber) {
+        return NextResponse.json(
+          { ok: false, error: "Complete all four bank transfer fields, or clear them all." },
+          { status: 400 },
+        );
+      } else if (
+        bankName.length > 100 ||
+        businessName.length > 120 ||
+        bsb.length > 12 ||
+        accountNumber.length > 30 ||
+        !/^\d{3}[- ]?\d{3}$/.test(bsb)
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "Enter a valid bank name, business name, BSB, and account number." },
+          { status: 400 },
+        );
+      } else {
+        updates.bankTransferDetails = { bankName, businessName, bsb, accountNumber };
+      }
+    }
   }
 
   if ("businessName" in raw) {

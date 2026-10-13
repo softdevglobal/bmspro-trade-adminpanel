@@ -398,6 +398,16 @@ export function QuotationDocumentPreview({
           ) : null}
         </div>
 
+        {document.paymentInstructions?.trim() ? (
+          <div className="relative mt-6 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 p-4 shadow-sm backdrop-blur-[1px]">
+            <div className="absolute inset-y-0 left-0 w-1 bg-[#0b33a0]" />
+            <p className="text-[13px] font-bold text-[#0b33a0]">Bank transfer details</p>
+            <p className="mt-2 whitespace-pre-line text-[11px] leading-relaxed text-[#1e2430]">
+              {document.paymentInstructions.trim()}
+            </p>
+          </div>
+        ) : null}
+
         {/* Terms and conditions */}
         {document.termsAndConditions?.trim() ? (
           <div className="relative mt-6 overflow-hidden rounded-lg border border-[#c5d0e0] bg-white/90 p-4 shadow-sm backdrop-blur-[1px]">

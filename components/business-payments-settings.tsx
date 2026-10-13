@@ -5,11 +5,25 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useEffect, useState } from "react";
 
 type FeePayerMode = "business" | "customer";
+type BankTransferDetails = {
+  bankName: string;
+  businessName: string;
+  bsb: string;
+  accountNumber: string;
+};
 
 type PaymentsProfile = {
   feePayerMode: FeePayerMode;
   stripeConnectAccountId: string | null;
   stripeConnectOnboarded: boolean;
+  bankTransferDetails: BankTransferDetails | null;
+};
+
+const EMPTY_BANK_DETAILS: BankTransferDetails = {
+  bankName: "",
+  businessName: "",
+  bsb: "",
+  accountNumber: "",
 };
 
 function maskAccountId(accountId: string): string {
@@ -24,6 +38,9 @@ export function BusinessPaymentsSettings() {
   const [feeMode, setFeeMode] = useState<FeePayerMode>("business");
   const [connecting, setConnecting] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
+  const [bankDetails, setBankDetails] = useState<BankTransferDetails>(EMPTY_BANK_DETAILS);
+  const [savingBankDetails, setSavingBankDetails] = useState(false);
+  const [bankNotice, setBankNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -74,6 +91,11 @@ export function BusinessPaymentsSettings() {
           stripeConnectAccountId: payload.profile.stripeConnectAccountId ?? null,
           stripeConnectOnboarded:
             payload.profile.stripeConnectOnboarded === true,
+          bankTransferDetails: payload.profile.bankTransferDetails ?? null,
+        });
+        setBankDetails({
+          ...EMPTY_BANK_DETAILS,
+          ...(payload.profile.bankTransferDetails ?? {}),
         });
         setFeeMode(resolvedMode);
       } catch {
@@ -205,14 +227,50 @@ export function BusinessPaymentsSettings() {
     }
   }
 
+  async function handleSaveBankDetails() {
+    if (!user) return;
+    setSavingBankDetails(true);
+    setBankNotice(null);
+    setError(null);
+    setNotice(null);
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/business/profile", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bankTransferDetails: bankDetails }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        profile?: { bankTransferDetails?: BankTransferDetails | null };
+        error?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error ?? "Could not save bank transfer details.");
+      }
+      const saved = payload.profile?.bankTransferDetails ?? null;
+      setProfile((current) => current ? { ...current, bankTransferDetails: saved } : current);
+      setBankDetails({ ...EMPTY_BANK_DETAILS, ...(saved ?? {}) });
+      setBankNotice(saved ? "Bank details saved." : "Bank details cleared.");
+    } catch (err) {
+      setBankNotice(null);
+      setError(err instanceof Error ? err.message : "Could not save bank transfer details.");
+    } finally {
+      setSavingBankDetails(false);
+    }
+  }
+
   const connected = Boolean(profile?.stripeConnectAccountId);
   const onboarded = Boolean(profile?.stripeConnectOnboarded);
 
   return (
     <SettingsSection
       icon="payments"
-      title="Online payments (Stripe)"
-      description="Accept card payments for quotation deposits and invoices. Funds go directly to your connected Stripe account."
+      title="Payments"
+      description="Manage Stripe card payments and the bank transfer details shown on quotations and invoices."
     >
       {loading ? (
         <p className="font-body text-[13px] text-on-surface-variant">
@@ -287,6 +345,40 @@ export function BusinessPaymentsSettings() {
             )}
           </div>
 
+          {/* Bank transfer instructions */}
+          <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/40 p-4 sm:p-5">
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined mt-0.5 text-[21px] text-primary">account_balance</span>
+              <div>
+                <p className="font-body text-[14px] font-semibold text-on-surface">Bank transfer</p>
+                <p className="mt-1 max-w-2xl font-body text-[12px] leading-relaxed text-on-surface-variant">
+                  Add a bank transfer option for customers. These details appear on quotations and invoices when all four fields are saved.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <BankField label="Bank name" value={bankDetails.bankName} onChange={(value) => setBankDetails((current) => ({ ...current, bankName: value }))} placeholder="e.g. Commonwealth Bank" />
+              <BankField label="Business name" value={bankDetails.businessName} onChange={(value) => setBankDetails((current) => ({ ...current, businessName: value }))} placeholder="Account name" />
+              <BankField label="BSB" value={bankDetails.bsb} onChange={(value) => setBankDetails((current) => ({ ...current, bsb: value }))} placeholder="000-000" />
+              <BankField label="Account number" value={bankDetails.accountNumber} onChange={(value) => setBankDetails((current) => ({ ...current, accountNumber: value }))} placeholder="Account number" />
+            </div>
+            <div className="mt-4 flex justify-end border-t border-outline-variant/50 pt-4">
+              <button
+                type="button"
+                disabled={savingBankDetails}
+                onClick={() => void handleSaveBankDetails()}
+                className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-primary px-4 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              >
+                {savingBankDetails ? "Saving…" : "Save bank details"}
+              </button>
+            </div>
+            {bankNotice ? (
+              <p role="status" className="mt-3 font-body text-[12px] font-semibold text-primary">
+                {bankNotice}
+              </p>
+            ) : null}
+          </div>
+
           {/* Fee payer */}
           <div>
             <p className="font-body text-[13px] font-semibold text-on-surface">
@@ -338,6 +430,32 @@ export function BusinessPaymentsSettings() {
         </div>
       )}
     </SettingsSection>
+  );
+}
+
+function BankField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="block font-body text-[12px] font-semibold text-on-surface">
+      {label}
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        maxLength={label === "Account number" ? 30 : label === "Business name" ? 120 : label === "BSB" ? 12 : 100}
+        autoComplete="off"
+        placeholder={placeholder}
+        className="mt-1.5 h-11 w-full rounded-xl border border-outline-variant bg-surface px-3 font-body text-[13px] font-normal text-on-surface outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+      />
+    </label>
   );
 }
 

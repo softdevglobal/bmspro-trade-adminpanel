@@ -297,6 +297,12 @@ export function buildQuotationDocumentFromDetail(
     gstPercentage?: number | null;
     timezone?: string | null;
     payUrl?: string | null;
+    bankTransferDetails?: {
+      bankName: string;
+      businessName: string;
+      bsb: string;
+      accountNumber: string;
+    } | null;
   },
 ): QuotationDocumentData {
   const gstPercentage = branding.registeredForGst
@@ -341,7 +347,9 @@ export function buildQuotationDocumentFromDetail(
     totalAud,
     deposit: buildQuotationDocumentDeposit(totalAud, quotation.depositRequest),
     termsAndConditions: resolveQuotationTerms(quotation),
-    paymentInstructions: null,
+    paymentInstructions: branding.bankTransferDetails
+      ? `Bank: ${branding.bankTransferDetails.bankName}\nAccount name: ${branding.bankTransferDetails.businessName}\nBSB: ${branding.bankTransferDetails.bsb}\nAccount number: ${branding.bankTransferDetails.accountNumber}`
+      : null,
     notes: quotation.notes?.trim() ? quotation.notes.trim() : null,
     payUrl: branding.payUrl ?? null,
     business: {
@@ -1020,6 +1028,48 @@ export async function generateDocumentPdf(
   drawTotalsPanel(y);
   y -= panelH + 20;
 
+  const paymentInstructions = data.paymentInstructions?.trim();
+  if (paymentInstructions) {
+    const paymentLines = paymentInstructions
+      .split(/\r?\n/)
+      .flatMap((line) => wrapText(line.trim(), font, 9, CONTENT_WIDTH - 28));
+    const lineH = 13;
+    const boxH = 36 + paymentLines.length * lineH;
+    ensureSpace(boxH);
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - boxH,
+      width: CONTENT_WIDTH,
+      height: boxH,
+      color: WHITE,
+      opacity: 0.9,
+      borderColor: rgb(0.78, 0.84, 0.92),
+      borderWidth: 0.75,
+    });
+    page.drawRectangle({
+      x: MARGIN,
+      y: y - boxH,
+      width: 4,
+      height: boxH,
+      color: BRAND,
+    });
+    drawText("Bank transfer details", MARGIN + 14, y - 18, {
+      size: 11,
+      bold: true,
+      color: BRAND,
+    });
+    let paymentY = y - 35;
+    paymentLines.forEach((line) => {
+      drawText(line, MARGIN + 14, paymentY, {
+        size: 9,
+        color: TEXT,
+        maxWidth: CONTENT_WIDTH - 28,
+      });
+      paymentY -= lineH;
+    });
+    y -= boxH + 20;
+  }
+
   const termsText = data.termsAndConditions?.trim();
   if (termsText) {
     const termsW = CONTENT_WIDTH;
@@ -1283,6 +1333,12 @@ export async function generateQuotationPdf(
     inspectionRequestCode?: string | null;
     timezone?: string | null;
     payUrl?: string | null;
+    bankTransferDetails?: {
+      bankName: string;
+      businessName: string;
+      bsb: string;
+      accountNumber: string;
+    } | null;
   } = {},
 ): Promise<Buffer> {
   const data = buildQuotationDocumentFromDetail(quotation, options);

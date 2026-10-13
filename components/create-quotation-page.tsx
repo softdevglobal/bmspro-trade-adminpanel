@@ -347,6 +347,9 @@ export function CreateQuotationPage() {
   const [businessEmail, setBusinessEmail] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
+  const [bankTransferDetails, setBankTransferDetails] = useState<{
+    bankName: string; businessName: string; bsb: string; accountNumber: string;
+  } | null>(null);
 
   // When opened from an request (e.g. a visit run by staff who can't
   // create quotations), bind the quotation to that existing visit and prefill
@@ -790,6 +793,7 @@ export function CreateQuotationPage() {
             businessPhone?: string | null;
             abn?: string | null;
             termsAndConditions?: string | null;
+            bankTransferDetails?: { bankName: string; businessName: string; bsb: string; accountNumber: string } | null;
           };
         };
         if (profileRes.ok && profileData.ok && profileData.profile) {
@@ -802,6 +806,7 @@ export function CreateQuotationPage() {
           setBusinessEmail(profile.businessEmail ?? null);
           setBusinessPhone(profile.businessPhone ?? null);
           setBusinessAbn(profile.abn ?? null);
+          setBankTransferDetails(profile.bankTransferDetails ?? null);
           if (!termsLoaded) {
             setTermsAndConditions(profile.termsAndConditions ?? "");
             setTermsLoaded(true);
@@ -1256,7 +1261,9 @@ export function CreateQuotationPage() {
       totalAud: total,
       deposit: buildQuotationDocumentDeposit(total, depositRequest),
       termsAndConditions: termsAndConditions.trim() || null,
-      paymentInstructions: null,
+      paymentInstructions: bankTransferDetails
+        ? `Bank: ${bankTransferDetails.bankName}\nAccount name: ${bankTransferDetails.businessName}\nBSB: ${bankTransferDetails.bsb}\nAccount number: ${bankTransferDetails.accountNumber}`
+        : null,
       notes: comment.trim() || null,
       business: {
         businessName,
@@ -1292,6 +1299,7 @@ export function CreateQuotationPage() {
     businessEmail,
     businessPhone,
     businessAbn,
+    bankTransferDetails,
     gstEnabled,
     gstPricing,
     gstPercentage,
