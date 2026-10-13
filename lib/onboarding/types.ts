@@ -112,8 +112,6 @@ export type TenantStatus = "pending_review" | "active" | "suspended";
 
 export type TenantSource = "self_signup" | "super_admin_create";
 
-/** Default login password when a super admin onboard a business owner. */
-export const ADMIN_CREATED_DEFAULT_PASSWORD = "00001111";
 
 export function iconForBusinessType(type: string): string {
   const found = BUSINESS_TYPES.find((b) => b.id === type);

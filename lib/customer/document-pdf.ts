@@ -1,3 +1,4 @@
+import { readTrustedStorage } from "@/lib/security/storage-read";
 import "server-only";
 
 import {
@@ -44,12 +45,11 @@ export async function getCustomerDocumentPdf(
     return { ok: false, status: 403, error: "Quotation PDF is not available." };
   }
 
-  const response = await fetch(resolvedUrl);
-  if (!response.ok) {
-    return { ok: false, status: 502, error: "Could not load the PDF file." };
-  }
-
-  const buffer = await response.arrayBuffer();
+  let buffer: Buffer;
+  try {
+    if (!request.businessId) throw new Error("Missing tenant.");
+    buffer = await readTrustedStorage(resolvedUrl, [`${kind === "invoice" ? "invoices" : "quotations"}/${request.businessId}/`], "pdf");
+  } catch { return { ok: false, status: 502, error: "Could not load the PDF file." }; }
   const code =
     kind === "invoice"
       ? request.invoice?.invoiceCode?.trim() || "invoice"

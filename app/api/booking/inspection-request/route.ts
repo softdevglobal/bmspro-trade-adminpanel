@@ -1,5 +1,6 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   isTenantAccessAllowed,
 } from "@/lib/onboarding/business-status";
@@ -18,7 +19,7 @@ async function readCustomer(
   const match = header.match(/^Bearer (.+)$/);
   if (!match) return { uid: null, email: null, name: null };
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     return {
       uid: decoded.uid ?? null,
       email: decoded.email ?? null,

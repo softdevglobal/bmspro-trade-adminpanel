@@ -1,3 +1,5 @@
+import { inaccessibleInitialPassword, issueActivationLink } from "@/lib/auth/activation";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { sendStaffWelcomeEmail } from "@/lib/email/templates";
@@ -27,7 +29,6 @@ const WEEK_DAY_IDS = [
   "sunday",
 ] as const;
 const WEEK_DAYS = new Set<string>(WEEK_DAY_IDS);
-const DEFAULT_STAFF_PASSWORD = "00001111";
 
 type DayAvailability = {
   day: string;
@@ -72,7 +73,7 @@ async function requireBusinessUser(request: Request): Promise<
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
@@ -417,7 +418,7 @@ export async function POST(request: Request) {
   try {
     const authUser = await adminAuth.createUser({
       email: parsed.value.email,
-      password: DEFAULT_STAFF_PASSWORD,
+      password: inaccessibleInitialPassword(),
       displayName: parsed.value.fullName,
       emailVerified: false,
     });
@@ -443,6 +444,7 @@ export async function POST(request: Request) {
       status: "active",
       isActive: true,
       mustChangePassword: true,
+      activationRequired: true,
       createdByUid: auth.uid,
       createdByEmail: auth.email ?? null,
       createdAt: now,
@@ -466,7 +468,7 @@ export async function POST(request: Request) {
         fullName: parsed.value.fullName,
         businessName: business?.businessName?.trim() || "your business",
         staffType: parsed.value.staffType,
-        temporaryPassword: DEFAULT_STAFF_PASSWORD,
+        activationUrl: await issueActivationLink(authUid, "staff"),
         logoUrl: business?.logoUrl ?? null,
         businessId: auth.businessId,
       });

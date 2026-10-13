@@ -1,7 +1,8 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import "server-only";
 
 import { requireCallCenterAgent } from "@/lib/callcenter/auth";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 
 const WORKSHOP_CHAT_ROLES = new Set(["owner", "admin", "staff"]);
 
@@ -23,7 +24,7 @@ export async function requireWorkshopChatUser(req: Request): Promise<
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = typeof decoded.role === "string" ? decoded.role : "";

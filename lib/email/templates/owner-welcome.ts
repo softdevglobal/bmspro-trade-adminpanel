@@ -23,8 +23,8 @@ export type OwnerWelcomeEmailInput = {
   businessName: string;
   bookingSlug?: string | null;
   planName?: string | null;
-  /** Temporary password, only for admin-created accounts. */
-  temporaryPassword?: string | null;
+  /** Single-use activation link, only for admin-created accounts. */
+  activationUrl?: string | null;
   /** Optional business logo URL shown in the email body. */
   logoUrl?: string | null;
   businessId?: string | null;
@@ -50,8 +50,8 @@ export async function sendOwnerWelcomeEmail(
         : `/booknow/${input.bookingSlug}`,
     });
   }
-  if (input.temporaryPassword) {
-    details.push({ label: "Temporary password", value: input.temporaryPassword });
+  if (input.activationUrl) {
+    details.push({ label: "Activation", value: "Use the secure link below to set your password." });
   }
 
   const html = renderEmail({
@@ -63,12 +63,12 @@ export async function sendOwnerWelcomeEmail(
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
     title: `Your ${input.businessName} workspace is ready`,
     greetingName: firstName(input.ownerName),
-    body: input.temporaryPassword
-      ? `Your BMS Pro Trade account has been created. Sign in with your email and the temporary password below, then change it from your profile.\n\nFrom your dashboard you can manage jobs, requests, your team, and your public booking page.`
+    body: input.activationUrl
+      ? `Your BMS Pro Trade account has been created. Use the secure link below to verify your email and choose your password.\n\nFrom your dashboard you can manage jobs, requests, your team, and your public booking page.`
       : `Thanks for setting up ${input.businessName} on BMS Pro Trade. Your account is ready.\n\nFrom your dashboard you can manage jobs, requests, your team, and your public booking page.`,
     details,
-    ctaUrl: loginUrl(),
-    ctaLabel: "Go to my dashboard",
+    ctaUrl: input.activationUrl || loginUrl(),
+    ctaLabel: input.activationUrl ? "Activate my account" : "Go to my dashboard",
     footnote:
       "If you didn't create this account, please ignore this email or contact support.",
     businessName: input.businessName,
@@ -89,8 +89,8 @@ export async function sendOwnerWelcomeEmail(
       businessId: input.businessId,
       senderName: input.businessName,
       source: "owner_welcome",
-      message: input.temporaryPassword
-        ? `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in with ${input.email} — check your email for your temporary password.`
+      message: input.activationUrl
+        ? `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in with ${input.email} — check your email to activate your account.`
         : `Welcome to BMS Pro Trade! Your ${input.businessName} workspace is ready. Sign in anytime with ${input.email}.`,
     });
   }

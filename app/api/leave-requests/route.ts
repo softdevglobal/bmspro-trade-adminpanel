@@ -1,4 +1,4 @@
-import { adminAuth } from "@/lib/firebase/admin";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import {
   createStaffLeaveRequest,
   listBusinessLeaveRequests,
@@ -18,7 +18,7 @@ async function requireBusinessOwner(request: Request) {
     };
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
@@ -54,7 +54,7 @@ async function requireStaff(request: Request) {
     };
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

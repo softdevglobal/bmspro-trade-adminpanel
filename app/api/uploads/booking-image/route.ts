@@ -1,4 +1,7 @@
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { boundedUploadForm } from "@/lib/security/upload-request";
+import { clientAddress, consumeRateLimits } from "@/lib/security/rate-limit";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
+import { adminDb } from "@/lib/firebase/admin";
 import { isTenantAccessAllowed } from "@/lib/onboarding/business-status";
 import { uploadBookingRequestImage } from "@/lib/onboarding/services/upload";
 import { NextResponse } from "next/server";
@@ -29,7 +32,7 @@ async function readCustomerUid(
   const match = header.match(/^Bearer (.+)$/);
   if (!match) return null;
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     return decoded.uid ?? null;
   } catch {
     return null;
@@ -38,9 +41,15 @@ async function readCustomerUid(
 
 export async function POST(request: Request) {
   try {
+    if (!(await consumeRateLimits([
+      { key: "uploads:booking:ip:" + clientAddress(request), limit: 20, windowMs: 3600_000 },
+      { key: "uploads:booking:global", limit: 1000, windowMs: 86400_000 },
+    ]))) return NextResponse.json({ error: "Upload limit reached. Please try later." }, { status: 429 });
+  } catch { return NextResponse.json({ error: "Upload service temporarily unavailable." }, { status: 503 }); }
+  try {
     let formData: FormData;
     try {
-      formData = await request.formData();
+      formData = await boundedUploadForm(request);
     } catch {
       return NextResponse.json(
         { ok: false, error: "Invalid upload request." },
@@ -78,6 +87,9 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!(await consumeRateLimits([{ key: "uploads:business:" + business.id, limit: 200, windowMs: 86400_000 }]))) {
+      return NextResponse.json({ error: "Business upload limit reached." }, { status: 429 });
+    }
     const customerUid = (await readCustomerUid(request)) ?? "guest";
     const buffer = Buffer.from(await file.arrayBuffer());
     const result = await uploadBookingRequestImage(buffer, file.type || "", {

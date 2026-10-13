@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 /**
  * Records an in-app password change after the client updates Firebase Auth.
  *
@@ -10,7 +11,6 @@ import {
   resolveAuditIdentityForUid,
 } from "@/lib/audit/action-logs";
 import type { AuditSource } from "@/lib/audit/types";
-import { adminAuth } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const identity = await resolveAuditIdentityForUid(decoded.uid);
     const claimRole = actorRoleFromClaim(decoded.role ?? identity.role);
     const role = identity.role === "customer" ? "customer" : claimRole;

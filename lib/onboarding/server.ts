@@ -1,4 +1,10 @@
+import { adoptOnboardingLogo } from "@/lib/security/logo-storage";
+import { resolveAppBaseUrl } from "@/lib/config/base-url";
+import { getStorageBucketName } from "@/lib/firebase/admin";
+import { trustedStorageObject } from "@/lib/security/file-types";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import "server-only";
+import { inaccessibleInitialPassword, issueActivationLink } from "@/lib/auth/activation";
 import { parseSlotCapacityFromBusiness } from "@/lib/calendar/slot-capacity";
 import {
   DEFAULT_WORKING_HOURS,
@@ -13,7 +19,6 @@ import {
 } from "@/lib/onboarding/booking-slug";
 import {
   validateOnboardingPayload,
-  ADMIN_CREATED_DEFAULT_PASSWORD,
   type OnboardingPayload,
   type TenantSource,
   type TenantStatus,
@@ -93,7 +98,7 @@ export async function requireSuperAdmin(req: Request): Promise<
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const isSuperAdmin =
       decoded.superAdmin === true || decoded.role === "super_admin";
 
@@ -144,7 +149,7 @@ export async function createTenantFromPayload(
   }
 
   return createTenantWithOwnerAccount(validated.value, planResult.plan, {
-    password: ADMIN_CREATED_DEFAULT_PASSWORD,
+    password: inaccessibleInitialPassword(),
     status: options.status,
     source: options.source,
     createdByUid: options.createdByUid ?? null,
@@ -187,6 +192,10 @@ async function createTenantWithOwnerAccount(
 
   let uid: string | null = null;
 
+  if (!resolveAppBaseUrl()) {
+    return { ok: false, error: "Configure APP_URL before provisioning accounts." };
+  }
+
   try {
     const authUser = await adminAuth.createUser({
       email: value.accountEmail,
@@ -198,12 +207,13 @@ async function createTenantWithOwnerAccount(
 
     const businessRef = adminDb.collection("businesses").doc();
     const tenantId = businessRef.id;
+    value = { ...value, logoUrl: await adoptOnboardingLogo(value.logoUrl, tenantId) };
     const now = FieldValue.serverTimestamp();
     const bookingSlug = await reserveBookingSlug(value.businessName);
     const tenantNumber = await allocateTenantNumber();
 
     await adminAuth.setCustomUserClaims(uid, {
-      role: "owner",
+      role: "pending_owner",
       businessId: tenantId,
     });
 
@@ -234,12 +244,16 @@ async function createTenantWithOwnerAccount(
       fullName: value.ownerFullName || null,
       businessId: tenantId,
       role: "owner",
+      activationRequired: true,
+      mustChangePassword: true,
+      emailVerificationRequired: true,
       ...subscriptionFields.ownerUser,
       createdAt: now,
       updatedAt: now,
     });
     await batch.commit();
 
+    const activationUrl = await issueActivationLink(uid, "owner");
     await sendOwnerWelcomeEmail({
       email: value.accountEmail,
       phone: value.businessPhone || null,
@@ -249,10 +263,7 @@ async function createTenantWithOwnerAccount(
       planName: selectedPlan.name,
       logoUrl: value.logoUrl ?? null,
       businessId: tenantId,
-      temporaryPassword:
-        options.source === "super_admin_create"
-          ? options.password
-          : null,
+      activationUrl,
     });
 
     return { ok: true, tenantId, uid };
@@ -323,6 +334,7 @@ function businessDocument(
       email: value.accountEmail,
     },
     ...options.subscriptionFields,
+    emailVerificationPending: options.source === "self_signup",
     status: options.status,
     source: options.source,
     isActive: options.status === "active",
@@ -528,6 +540,7 @@ export async function updateBusinessProfile(
   }
 
   if ("logoUrl" in updates) {
+    if (updates.logoUrl) trustedStorageObject(updates.logoUrl, getStorageBucketName(), [`business-logos/${businessId}/`]);
     payload.logoUrl = updates.logoUrl;
   }
 
@@ -631,7 +644,7 @@ export async function requireBusinessMember(req: Request): Promise<
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     let role = typeof decoded.role === "string" ? decoded.role : null;
@@ -725,7 +738,7 @@ export async function resolveAuditLogAccess(
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const claimRole = decoded.role;
     const isSuperAdminClaim =
       decoded.superAdmin === true || claimRole === "super_admin";
@@ -818,7 +831,7 @@ export async function registerSelfSignupTenant(
 
   return createTenantWithOwnerAccount(value, planResult.plan, {
     password,
-    status: "active",
+    status: "pending_review",
     source: "self_signup",
   });
 }

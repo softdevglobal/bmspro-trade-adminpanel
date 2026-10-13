@@ -18,8 +18,9 @@
  * emulator accepts tokens signed with it, so no real service account is needed.
  */
 import { spawn } from "node:child_process";
-import { createHmac, generateKeyPairSync } from "node:crypto";
+import { createHash, createHmac, generateKeyPairSync } from "node:crypto";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -138,7 +139,7 @@ async function tokenFor(uid, claims) {
 
 // --------------------------------------------------------------- server start
 function startServer() {
-  const child = spawn("npx", ["next", "start", "-p", String(PORT)], {
+  const child = spawn(process.execPath, [fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url)), "start", "-p", String(PORT)], {
     env: {
       ...process.env,
       NODE_ENV: "production",
@@ -152,6 +153,9 @@ function startServer() {
       // Two destinations sign with different secrets; the route must accept both.
       STRIPE_SECRET_KEY: "sk_test_harness",
       STRIPE_WEBHOOK_SECRET: "whsec_platform_secret, whsec_connected_secret",
+      ZEPTOMAIL_TOKEN: "",
+      ZEPTOMAIL_SYSTEM_TOKEN: "",
+      ZEPTOMAIL_REQUEST_TOKEN: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -395,15 +399,18 @@ try {
   }
 
   const codeSnap = await adminDb.collection("passwordResetCodes").doc(KNOWN).get();
-  const issuedCode = codeSnap.data()?.code;
-  if (typeof issuedCode === "string" && /^\d{6}$/.test(issuedCode)) {
+  const digest = codeSnap.data()?.codeDigest;
+  const issuedCode = "654321";
+  if (typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) && codeSnap.data()?.code === undefined) {
     passed += 1;
-    console.log("  PASS  a six-digit code is issued for a real account");
+    console.log("  PASS  reset code is stored hashed without plaintext");
   } else {
     failed += 1;
-    failures.push("a six-digit code is issued for a real account");
-    console.log(`  FAIL  a six-digit code is issued for a real account\n        got ${issuedCode}`);
+    failures.push("reset code is stored hashed without plaintext");
+    console.log("  FAIL  reset code is stored hashed without plaintext");
   }
+  // Seed a known code through the isolated emulator Admin SDK: delivery is disabled.
+  await codeSnap.ref.update({ codeDigest: createHash("sha256").update(issuedCode).digest("hex") });
 
   const noCodeForUnknown = await adminDb
     .collection("passwordResetCodes")

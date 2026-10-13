@@ -43,3 +43,11 @@ next-env.d.ts
 # firebase emulator
 firestore-debug.log
 firebase-debug.log
+
+# Generated from the pinned PDF.js package during dev/build
+/public/pdf.worker.min.mjs
+
+# Local security validation artifacts
+/tmp/security-*.txt
+/tmp/security-tests-run.log
+/output/trade-security-audit.json

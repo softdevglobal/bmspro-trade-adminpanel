@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 /**
  * Business contact lookup for signed-in business members (owner, admin, staff).
  *
@@ -7,7 +8,7 @@
  * Response: { ok: true, ownerName, ownerPhone, businessName, businessPhone }
  */
 
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -19,7 +20,7 @@ async function requireBusinessMember(request: Request) {
     return { ok: false as const, status: 401, error: "Missing authorization header." };
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

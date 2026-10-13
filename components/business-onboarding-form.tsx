@@ -6,7 +6,6 @@ import {
   BUSINESS_STRUCTURES,
   BUSINESS_TYPES,
   DEFAULT_AU_TIMEZONE,
-  ADMIN_CREATED_DEFAULT_PASSWORD,
   iconForBusinessType,
   formatAbn,
   normaliseServiceAreas,
@@ -31,7 +30,6 @@ import {
 } from "@/lib/subscription-plans/theme";
 import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
 import { formatMessageQuotaLabel } from "@/lib/sms-packages/helpers";
-import { isStripeCheckoutEnabled } from "@/lib/stripe/public";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -42,8 +40,6 @@ import {
   useMemo,
   useState,
 } from "react";
-import { useAuth } from "@/lib/auth/auth-context";
-import { auth } from "@/lib/firebase/client";
 
 type Mode = "self_signup" | "super_admin_create";
 export type OnboardingWizardStep = 1 | 2 | 3;
@@ -223,7 +219,6 @@ export const BusinessOnboardingForm = forwardRef<
   ref,
 ) {
   const router = useRouter();
-  const { login } = useAuth();
   const [step, setStep] = useState<Step>(1);
   const [form, setForm] = useState<FormState>(INITIAL_STATE);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -510,61 +505,10 @@ export const BusinessOnboardingForm = forwardRef<
       }
 
       if (mode === "self_signup") {
-        const email = form.accountEmail.trim();
-        const password = form.password;
-        const planId = form.selectedPlanId;
-        try {
-          const useStripeCheckout =
-            isStripeCheckoutEnabled() && Boolean(planId);
-
-          await login(email, password, { skipRedirect: useStripeCheckout });
-
-          if (useStripeCheckout && planId) {
-            const sessionUser = auth.currentUser;
-            if (!sessionUser) {
-              setErrorMessage(
-                "Signed in but could not start checkout. Open the dashboard to subscribe.",
-              );
-              return;
-            }
-            const token = await sessionUser.getIdToken();
-            const checkoutRes = await fetch(
-              "/api/stripe/checkout/subscription",
-              {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ planId }),
-              },
-            );
-            const checkoutData = (await checkoutRes.json()) as {
-              ok?: boolean;
-              url?: string;
-              error?: string;
-            };
-            if (checkoutRes.ok && checkoutData.ok && checkoutData.url) {
-              window.location.href = checkoutData.url;
-              return;
-            }
-            setErrorMessage(
-              checkoutData.error ??
-                "Account created but checkout could not start. Sign in and subscribe from the dashboard.",
-            );
-            router.push("/dashboard");
-            return;
-          }
-
-          return;
-        } catch {
-          setSuccessMessage(
-            "Your account was created. Sign in with your email and password."
-          );
-          setForm(INITIAL_STATE);
-          setStep(1);
-          return;
-        }
+        setSuccessMessage("Check your email to verify and activate your account. After activation, sign in to choose your subscription.");
+        setForm(INITIAL_STATE);
+        setStep(1);
+        return;
       }
 
       setSuccessMessage("Tenant created successfully.");
@@ -1064,12 +1008,7 @@ export const BusinessOnboardingForm = forwardRef<
                   lock
                 </span>
                 <p>
-                  A login account will be created automatically. Default
-                  password:{" "}
-                  <span className="font-semibold text-on-surface">
-                    {ADMIN_CREATED_DEFAULT_PASSWORD}
-                  </span>
-                  . Share this with the business owner to sign in.
+                  A secure activation link will be emailed to the business owner so they can choose their password.
                 </p>
               </div>
             )}
@@ -1624,7 +1563,7 @@ function ContextualProTip({
         message:
           mode === "self_signup"
             ? "Continue to choose the plan that fits your team."
-            : "The owner will sign in with the default password 00001111.",
+            : "The owner will receive an email to activate their account.",
       };
     }
 

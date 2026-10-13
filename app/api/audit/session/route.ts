@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 /**
  * Records sign-in / sign-out for business owners, staff, and customers.
  *
@@ -11,7 +12,7 @@ import {
   type AuditActorRole,
   type AuditSource,
 } from "@/lib/audit/types";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -128,7 +129,7 @@ export async function POST(request: Request) {
     typeof payload.bookingSlug === "string" ? payload.bookingSlug.trim() : "";
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessIdClaim =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const claimRole = decoded.role;

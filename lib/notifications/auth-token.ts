@@ -1,6 +1,7 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import "server-only";
 
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 
 export type BusinessOwnerAuth =
   | { ok: true; businessId: string }
@@ -58,7 +59,7 @@ export async function requireBusinessOwnerFromToken(
     };
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
+    const decoded = await verifyAccountIdToken(token);
     const claimBusinessId =
       typeof decoded.businessId === "string"
         ? decoded.businessId.trim()

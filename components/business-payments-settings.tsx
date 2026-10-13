@@ -1,4 +1,5 @@
 "use client";
+import { PaymentReconciliationNotice } from "@/components/payment-reconciliation-notice";
 
 import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -214,6 +215,7 @@ export function BusinessPaymentsSettings() {
       title="Online payments (Stripe)"
       description="Accept card payments for quotation deposits and invoices. Funds go directly to your connected Stripe account."
     >
+      <PaymentReconciliationNotice />
       {loading ? (
         <p className="font-body text-[13px] text-on-surface-variant">
           Loading payment settings…

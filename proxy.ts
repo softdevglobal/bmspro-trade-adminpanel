@@ -1,3 +1,4 @@
+import { contentSecurityPolicy, cspHeaderName } from "@/lib/security/csp";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -23,7 +24,14 @@ export function proxy(request: NextRequest) {
     });
   }
 
-  const response = NextResponse.next();
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const policy = contentSecurityPolicy(nonce);
+  const headers = new Headers(request.headers);
+  headers.set("x-nonce", nonce);
+  headers.set("Content-Security-Policy", policy);
+  const response = NextResponse.next({ request: { headers } });
+  response.headers.set(cspHeaderName, policy);
+  if (request.nextUrl.pathname.startsWith("/activate/")) response.headers.set("Referrer-Policy", "no-referrer");
   // Always vary on Origin so a permitted response is never cached and replayed
   // for a different origin.
   response.headers.set("Vary", "Origin");
@@ -38,5 +46,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: "/api/chat/:path*",
+  matcher: ["/api/chat/:path*", "/((?!api|_next|favicon.ico|sw.js|manifest|robots|.*\\.(?:png|jpg|jpeg|svg|webp|gif|ico)$).*)"],
 };
