@@ -357,6 +357,7 @@ async function generateInvoicePdfBytes(
       registeredForGst: profile?.registeredForGst ?? false,
       gstPercentage: profile?.gstPercentage ?? null,
       payUrl,
+      bankTransferDetails: profile?.bankTransferDetails ?? null,
     });
   } catch (error) {
     console.error("[invoice] PDF generation failed:", error);

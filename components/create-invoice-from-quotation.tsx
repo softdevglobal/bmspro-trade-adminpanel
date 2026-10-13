@@ -270,6 +270,9 @@ export function CreateInvoiceFromQuotation({
   const [businessEmail, setBusinessEmail] = useState<string | null>(null);
   const [businessPhone, setBusinessPhone] = useState<string | null>(null);
   const [businessAbn, setBusinessAbn] = useState<string | null>(null);
+  const [bankTransferDetails, setBankTransferDetails] = useState<{
+    bankName: string; businessName: string; bsb: string; accountNumber: string;
+  } | null>(null);
   const isEditingInvoice = draftInvoiceId.trim().length > 0;
 
   const loadQuotation = useCallback(async () => {
@@ -516,6 +519,7 @@ export function CreateInvoiceFromQuotation({
             businessPhone?: string | null;
             abn?: string | null;
             termsAndConditions?: string | null;
+            bankTransferDetails?: { bankName: string; businessName: string; bsb: string; accountNumber: string } | null;
           };
         };
         const profile = profileBody.profile;
@@ -530,6 +534,7 @@ export function CreateInvoiceFromQuotation({
           setBusinessEmail(profile.businessEmail ?? null);
           setBusinessPhone(profile.businessPhone ?? null);
           setBusinessAbn(profile.abn ?? null);
+          setBankTransferDetails(profile.bankTransferDetails ?? null);
           if (direct && profile.termsAndConditions?.trim()) {
             setTermsAndConditions(profile.termsAndConditions.trim());
           }
@@ -820,7 +825,9 @@ export function CreateInvoiceFromQuotation({
         if (base?.includes(depositNote)) return base;
         return base ? `${base}\n\n${depositNote}` : depositNote;
       })(),
-      paymentInstructions: null,
+      paymentInstructions: bankTransferDetails
+        ? `Bank: ${bankTransferDetails.bankName}\nAccount name: ${bankTransferDetails.businessName}\nBSB: ${bankTransferDetails.bsb}\nAccount number: ${bankTransferDetails.accountNumber}`
+        : null,
       notes: notes.trim() || null,
       business: {
         businessName: business?.businessName ?? "Your business",
@@ -859,6 +866,7 @@ export function CreateInvoiceFromQuotation({
     businessEmail,
     businessPhone,
     businessAbn,
+    bankTransferDetails,
     gstEnabled,
     gstPercentage,
   ]);
