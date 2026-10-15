@@ -9,6 +9,7 @@
     "lint": "eslint",
     "seed:super-admin": "tsx --env-file=.env.local scripts/seed-super-admin.ts",
     "cron:reminders": "tsx --env-file=.env scripts/run-schedule-reminders.ts",
+    "migrate:renumber-codes": "tsx --env-file=.env scripts/renumber-reference-codes.ts",
     "firebase:deploy-rules": "firebase deploy --only firestore:rules",
     "test:rules": "firebase emulators:exec --only firestore --project bms-rules-test \"node scripts/test-firestore-rules.mjs\"",
     "test:api": "firebase emulators:exec --only auth,firestore --project bms-api-test \"node scripts/test-api-access.mjs\"",

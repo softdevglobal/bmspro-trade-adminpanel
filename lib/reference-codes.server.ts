@@ -13,10 +13,15 @@ import {
 import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 
 const MAX_ALLOCATION_ATTEMPTS = 24;
-const MAX_TENANT_NUMBER = 999;
+const MAX_SEQUENCE_SKIPS = 1000;
 const SUFFIX_DIGITS = 4;
 const BUSINESSES_COLLECTION = "businesses";
 const COUNTERS_COLLECTION = "document_counters";
+const TENANT_SEQUENCE_DOC = "tenant-sequence";
+const DOCUMENT_CODE_TARGETS = {
+  inv: { collection: "invoices", field: "invoiceCode" },
+  qt: { collection: "quotations", field: "quotationCode" },
+} as const;
 
 async function codeExists(
   collection: string,
@@ -53,27 +58,32 @@ function parseTenantNumber(raw: unknown): number | null {
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return null;
   const value = Math.floor(n);
-  return value >= 1 && value <= MAX_TENANT_NUMBER ? value : null;
-}
-
-function randomDigits(length: number): string {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  let out = "";
-  for (let i = 0; i < length; i += 1) {
-    out += String(bytes[i]! % 10);
-  }
-  return out;
-}
-
-function randomTenantNumber(): number {
-  const bytes = new Uint8Array(2);
-  crypto.getRandomValues(bytes);
-  return (((bytes[0]! << 8) | bytes[1]!) % MAX_TENANT_NUMBER) + 1;
+  return value >= 1 ? value : null;
 }
 
 function counterDoc(id: string) {
   return adminDb.collection(COUNTERS_COLLECTION).doc(id);
+}
+
+/** Claim docs keep the legacy 3-digit key so older claims still block reuse. */
+function tenantClaimDoc(n: number) {
+  return counterDoc(`tenant-${String(n).padStart(3, "0")}`);
+}
+
+async function nextSequenceValue(ref: DocumentReference): Promise<number> {
+  return adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const raw = snap.data()?.last;
+    const last =
+      typeof raw === "number" && Number.isFinite(raw) ? Math.floor(raw) : 0;
+    const next = Math.max(0, last) + 1;
+    tx.set(
+      ref,
+      { last: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+    return next;
+  });
 }
 
 async function claimDoc(ref: DocumentReference): Promise<boolean> {
@@ -86,7 +96,7 @@ async function claimDoc(ref: DocumentReference): Promise<boolean> {
 }
 
 async function tenantNumberInUse(n: number): Promise<boolean> {
-  const claimSnap = await counterDoc(`tenant-${formatTenantNumber(n)}`).get();
+  const claimSnap = await tenantClaimDoc(n).get();
   if (claimSnap.exists) return true;
   const businesses = await adminDb
     .collection(BUSINESSES_COLLECTION)
@@ -96,17 +106,18 @@ async function tenantNumberInUse(n: number): Promise<boolean> {
   return !businesses.empty;
 }
 
-/** Random unused 3-digit tenant code (`001`–`999`). */
+/** Next tenant code in signup order (`01`, `02`, … `99`, `100`, …), skipping any already taken. */
 export async function allocateTenantNumber(): Promise<number> {
-  for (let attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt += 1) {
-    const n = randomTenantNumber();
+  const sequenceRef = counterDoc(TENANT_SEQUENCE_DOC);
+  for (let attempt = 0; attempt < MAX_SEQUENCE_SKIPS; attempt += 1) {
+    const n = await nextSequenceValue(sequenceRef);
     if (await tenantNumberInUse(n)) continue;
-    if (await claimDoc(counterDoc(`tenant-${formatTenantNumber(n)}`))) return n;
+    if (await claimDoc(tenantClaimDoc(n))) return n;
   }
   throw new Error("Could not allocate a unique tenant number.");
 }
 
-/** Stored tenant code, allocating a random unique one if missing. */
+/** Stored tenant code, allocating the next sequential one if missing. */
 export async function resolveTenantNumber(businessId: string): Promise<number> {
   const id = businessId.trim();
   if (!id) throw new Error("Missing business id for tenant number.");
@@ -136,26 +147,27 @@ export async function resolveTenantNumber(businessId: string): Promise<number> {
   });
 }
 
-async function allocateUniqueSuffix(kind: "inv" | "qt"): Promise<string> {
-  for (let attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt += 1) {
-    const suffix = randomDigits(SUFFIX_DIGITS);
-    if (await claimDoc(counterDoc(`${kind}-${suffix}`))) return suffix;
-  }
-  throw new Error(
-    kind === "inv"
-      ? "Could not allocate a unique invoice number."
-      : "Could not allocate a unique quotation number.",
-  );
-}
-
+/** Per-tenant running number (`0001`, `0002`, …); skips codes already stored on older documents. */
 async function allocateDocumentCode(
   businessId: string,
   kind: "inv" | "qt",
   prefix: string,
 ): Promise<string> {
   const tenantNumber = await resolveTenantNumber(businessId);
-  const suffix = await allocateUniqueSuffix(kind);
-  return `${prefix} ${formatTenantNumber(tenantNumber)} ${suffix}`;
+  const sequenceRef = counterDoc(`${kind}-tenant-${businessId.trim()}`);
+  const target = DOCUMENT_CODE_TARGETS[kind];
+  for (let attempt = 0; attempt < MAX_SEQUENCE_SKIPS; attempt += 1) {
+    const n = await nextSequenceValue(sequenceRef);
+    const suffix = String(n).padStart(SUFFIX_DIGITS, "0");
+    const code = `${prefix} ${formatTenantNumber(tenantNumber)} ${suffix}`;
+    if (await codeExists(target.collection, target.field, code)) continue;
+    return code;
+  }
+  throw new Error(
+    kind === "inv"
+      ? "Could not allocate a unique invoice number."
+      : "Could not allocate a unique quotation number.",
+  );
 }
 
 export async function allocateQuotationCode(businessId: string): Promise<string> {
