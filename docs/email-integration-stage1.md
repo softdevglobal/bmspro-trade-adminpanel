@@ -68,7 +68,7 @@ Permission is checked again by the worker at send time.
 | `EMAIL_SEND_ENABLED` | `true` turns the feature on. Off by default. |
 | `EMAIL_SEND_PILOT_BUSINESS_IDS` | Optional comma list. When set, only these businesses get the feature. |
 | `EMAIL_RECIPIENT_ALLOWLIST` | Optional comma list of addresses or `@domains`. Set it on non-production deployments. |
-| `EMAIL_CREDENTIALS_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). Use a different key per environment. Never commit it. |
+| `EMAIL_CREDENTIALS_KEY` | 32 random bytes, base64 (`openssl rand -base64 32`). Never commit it. Environments that share a Firestore database must share the key (today local dev and production both use `bmspro-trade`); give each its own key once they have separate databases. |
 | `GOOGLE_EMAIL_CLIENT_ID` | Google OAuth web client id. |
 | `GOOGLE_EMAIL_CLIENT_SECRET` | Google OAuth web client secret. |
 | `GOOGLE_EMAIL_REDIRECT_URI` | Must exactly match the redirect registered in Google. |
