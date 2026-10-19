@@ -3,6 +3,7 @@
 import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { DocumentEmailPanel } from "@/components/document-email-panel";
 import { PaymentLinkButton } from "@/components/payment-link-button";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -26,6 +27,7 @@ import { formatQuoteDate } from "@/lib/quotations/document";
 import { displayBookingCode } from "@/lib/reference-codes";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
+import { useOpenFromViewParam } from "@/lib/ui/use-view-param";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -803,6 +805,9 @@ function InvoicePreviewDrawer({
                 </span>
                 Copy data
               </button>
+              {invoice.status === "sent" || invoice.status === "paid" ? (
+                <DocumentEmailPanel documentType="invoice" documentId={invoice.id} />
+              ) : null}
               {invoice.status === "sent" ? (
                 <button
                   type="button"
@@ -996,6 +1001,7 @@ export function InvoicesBoard() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<InvoiceFilter>("due");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useOpenFromViewParam(setSelectedId);
   const [deleteTarget, setDeleteTarget] = useState<InvoiceDetail | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<InvoiceDetail | null>(null);
