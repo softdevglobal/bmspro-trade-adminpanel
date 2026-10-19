@@ -13,7 +13,8 @@
     "firebase:deploy-rules": "firebase deploy --only firestore:rules",
     "test:rules": "firebase emulators:exec --only firestore --project bms-rules-test \"node scripts/test-firestore-rules.mjs\"",
     "test:api": "firebase emulators:exec --only auth,firestore --project bms-api-test \"node scripts/test-api-access.mjs\"",
-    "test:careplus-records": "tsx --test scripts/test-careplus-capture-records.ts"
+    "test:careplus-records": "tsx --test scripts/test-careplus-capture-records.ts",
+    "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts"
   },
   "dependencies": {
     "firebase": "^12.13.0",

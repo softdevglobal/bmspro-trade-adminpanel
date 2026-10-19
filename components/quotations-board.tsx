@@ -7,6 +7,7 @@ import {
 } from "@/components/convert-to-booking-panel";
 import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { DocumentEmailPanel } from "@/components/document-email-panel";
 import { FollowUpActionButtons } from "@/components/follow-up-action-buttons";
 import { QuotationOwnerDecisionButtons } from "@/components/quotation-owner-decision-buttons";
 import { PaymentLinkButton } from "@/components/payment-link-button";
@@ -56,6 +57,7 @@ import { pdfBytesToObjectUrl, printPdfBytes } from "@/lib/pdf/print-pdf";
 import type { QuotationDetail } from "@/lib/quotations/types";
 import { displayBookingCode, displayQuotationCode } from "@/lib/reference-codes";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
+import { useOpenFromViewParam } from "@/lib/ui/use-view-param";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1174,6 +1176,9 @@ function QuotationPreviewContent({
               </span>
               Copy data
             </button>
+            {quotation.status === "sent" ? (
+              <DocumentEmailPanel documentType="quote" documentId={quotation.id} />
+            ) : null}
             {awaitingCustomer && quotation.status === "sent" ? (
               <div
                 className={`flex items-start gap-2 rounded-xl border p-3 ${
@@ -1693,6 +1698,7 @@ export function QuotationsBoard() {
     setSelectedId(id);
     setPreviewMode("review");
   }
+  useOpenFromViewParam(handleOpenQuotation);
 
   function handleStartConvertBooking(id: string) {
     if (!jobsModuleEnabled) return;
