@@ -1,5 +1,6 @@
 "use client";
 
+import { EmailProviderLogo } from "@/components/email-provider-logo";
 import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
@@ -183,13 +184,8 @@ export function EmailConnectionSettings({
                       className="flex flex-col gap-3 rounded-xl border border-outline-variant/70 bg-white p-3.5"
                     >
                       <div className="flex items-start gap-2.5">
-                        <span
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-body text-[14px] font-bold text-white ${
-                            option.id === "google" ? "bg-rose-500" : "bg-sky-600"
-                          }`}
-                          aria-hidden
-                        >
-                          {option.id === "google" ? "G" : "O"}
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant/60 bg-white p-1.5">
+                          <EmailProviderLogo provider={option.id} className="h-full w-full" />
                         </span>
                         <div className="min-w-0">
                           <p className="font-body text-[13px] font-semibold text-on-surface">{option.title}</p>
