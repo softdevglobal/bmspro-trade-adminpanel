@@ -1,4 +1,4 @@
-export type EmailProvider = "google" | "microsoft";
+export type EmailProvider = "google" | "microsoft" | "yahoo";
 
 export type EmailConnectionStatus = "active" | "needs_reconnect" | "disconnected";
 

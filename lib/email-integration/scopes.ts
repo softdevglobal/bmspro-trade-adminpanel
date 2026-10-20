@@ -13,7 +13,8 @@ function graphScope(scope: string): string {
  */
 export function capabilitiesFromScopes(scopes: string[]): string[] {
   const graph = new Set(scopes.map(graphScope));
-  if (scopes.includes(GMAIL_MODIFY) || graph.has("mail.readwrite")) {
+  // An IMAP login (app password) has full access to the mailbox.
+  if (scopes.includes(GMAIL_MODIFY) || graph.has("mail.readwrite") || scopes.includes("imap")) {
     return ["send", "read", "modify"];
   }
   if (scopes.includes(GMAIL_READONLY) || graph.has("mail.read")) return ["send", "read"];

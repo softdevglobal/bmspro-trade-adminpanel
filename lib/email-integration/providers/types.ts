@@ -8,6 +8,11 @@ export type ProviderCredentials = {
   refreshToken: string;
   /** Space-separated scopes granted (needed to refresh some providers' tokens). */
   scope?: string;
+  /**
+   * Mailboxes reached over IMAP/SMTP with an app password (Yahoo) carry the
+   * login here instead of tokens; the token fields are then unused.
+   */
+  password?: { user: string; pass: string };
 };
 
 /** A sign-in that couldn't complete; `code` is shown via the settings page. */
@@ -79,8 +84,15 @@ export interface EmailSendAdapter {
   provider: EmailProvider;
   /** Name shown to owners, e.g. "Gmail". */
   label: string;
+  /**
+   * "oauth": the owner signs in at the provider. "app_password": the owner
+   * enters an app password made at the provider, sent to connectWithPassword.
+   */
+  authMethod: "oauth" | "app_password";
   /** OAuth app credentials are set on the server. */
   isConfigured(): boolean;
+  /** App-password providers: checks the login and returns the account. */
+  connectWithPassword?(input: { address: string; password: string }): Promise<ConnectedAccount>;
   /** The registered OAuth redirect URI (used to return to the right origin). */
   redirectUri(): string | null;
   buildAuthorizationUrl(input: {

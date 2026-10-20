@@ -92,11 +92,15 @@ export interface MailboxAdapter {
   getMetadata(credentials: ProviderCredentials, id: string): Promise<MailboxMetadata | null>;
   getBody(credentials: ProviderCredentials, id: string, maxChars: number): Promise<MessageBody | null>;
   getAttachment(credentials: ProviderCredentials, messageId: string, attachmentId: string): Promise<Buffer>;
-  /** Applies an action to a whole conversation (`targets` are its stored messages). */
+  /**
+   * Applies an action to a whole conversation (`targets` are its stored
+   * messages). Providers whose ids change when mail moves folder (IMAP)
+   * return the old and new id of each moved message.
+   */
   threadAction(
     credentials: ProviderCredentials,
     threadId: string,
     action: MailboxAction,
     targets: ActionTarget[],
-  ): Promise<void>;
+  ): Promise<void | { moved: { from: string; to: string }[] }>;
 }

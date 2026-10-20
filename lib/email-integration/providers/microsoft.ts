@@ -314,6 +314,7 @@ async function sendViaDraft(credentials: ProviderCredentials, payload: SendPaylo
 
 export const microsoftEmailAdapter: EmailSendAdapter = {
   provider: "microsoft",
+  authMethod: "oauth",
   label: "Outlook",
 
   isConfigured: () => getMicrosoftOAuthConfig() !== null,

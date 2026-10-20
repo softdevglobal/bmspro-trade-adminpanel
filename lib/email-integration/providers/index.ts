@@ -6,20 +6,23 @@ import type { MailboxAdapter } from "@/lib/email-integration/mailbox/provider";
 import { googleEmailAdapter } from "@/lib/email-integration/providers/google";
 import { microsoftEmailAdapter } from "@/lib/email-integration/providers/microsoft";
 import type { EmailSendAdapter } from "@/lib/email-integration/providers/types";
+import { yahooEmailAdapter, yahooMailbox } from "@/lib/email-integration/providers/yahoo";
 import type { EmailProvider } from "@/lib/email-integration/types";
 
 const SEND_ADAPTERS: Record<EmailProvider, EmailSendAdapter> = {
   google: googleEmailAdapter,
   microsoft: microsoftEmailAdapter,
+  yahoo: yahooEmailAdapter,
 };
 
 const MAILBOX_ADAPTERS: Record<EmailProvider, MailboxAdapter> = {
   google: gmailMailbox,
   microsoft: microsoftMailbox,
+  yahoo: yahooMailbox,
 };
 
 export function parseEmailProvider(value: string): EmailProvider | null {
-  return value === "google" || value === "microsoft" ? value : null;
+  return Object.hasOwn(SEND_ADAPTERS, value) ? (value as EmailProvider) : null;
 }
 
 /** Sign-in and sending for a provider. */

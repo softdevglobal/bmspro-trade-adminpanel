@@ -6,10 +6,12 @@ import { useAuth } from "@/lib/auth/auth-context";
 import {
   EMAIL_PROVIDERS,
   emailApi,
+  providerInfo,
   providerLabel,
   useEmailSending,
+  type ProviderInfo,
 } from "@/lib/email-integration/client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 const CONNECT_ERRORS: Record<string, string> = {
   access_denied: "Access was not granted, so nothing was connected.",
@@ -31,7 +33,7 @@ const BUTTON_PRIMARY =
 const BUTTON_OUTLINE =
   "inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-outline-variant px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60";
 
-/** Owner settings card: connect, reconnect or disconnect the business mailbox (Gmail or Outlook). */
+/** Owner settings card: connect, reconnect or disconnect the business mailbox (Gmail, Outlook or Yahoo). */
 export function EmailConnectionSettings({
   returnTo = "settings",
 }: {
@@ -42,6 +44,10 @@ export function EmailConnectionSettings({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** App-password provider whose connect form is open. */
+  const [passwordForm, setPasswordForm] = useState<ProviderInfo | null>(null);
+  const [formAddress, setFormAddress] = useState("");
+  const [formPassword, setFormPassword] = useState("");
 
   useEffect(() => {
     // Surface the OAuth callback result once, then tidy the URL.
@@ -74,8 +80,43 @@ export function EmailConnectionSettings({
 
   if (loading || !enabled) return null;
 
+  function openPasswordForm(option: ProviderInfo, address = "") {
+    setPasswordForm(option);
+    setFormAddress(address);
+    setFormPassword("");
+    setError(null);
+    setNotice(null);
+  }
+
+  async function handlePasswordConnect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || !passwordForm) return;
+    setBusy(passwordForm.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await emailApi(user, `/api/email/connect/${passwordForm.id}`, {
+        method: "POST",
+        body: JSON.stringify({ address: formAddress, password: formPassword }),
+      });
+      setPasswordForm(null);
+      setFormPassword("");
+      await reload();
+      setNotice("Mailbox connected. Your mail is being imported.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect the mailbox.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleConnect(provider: string) {
     if (!user) return;
+    const option = providerInfo(provider);
+    if (option?.authMethod === "app_password") {
+      openPasswordForm(option, connection?.provider === provider ? connection.address : "");
+      return;
+    }
     setBusy(provider);
     setError(null);
     setNotice(null);
@@ -118,12 +159,90 @@ export function EmailConnectionSettings({
 
   const needsReconnect = connection?.status === "needs_reconnect";
   const label = providerLabel(connection?.provider);
+  const usesAppPassword = providerInfo(connection?.provider)?.authMethod === "app_password";
+
+  const passwordFormPanel = passwordForm ? (
+    <form
+      onSubmit={(event) => void handlePasswordConnect(event)}
+      className="space-y-3 rounded-xl border border-outline-variant/70 bg-white p-4"
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant/60 bg-white p-1.5">
+          <EmailProviderLogo provider={passwordForm.id} className="h-full w-full" />
+        </span>
+        <div className="min-w-0">
+          <p className="font-body text-[13px] font-semibold text-on-surface">
+            Connect {passwordForm.label}
+          </p>
+          <p className="mt-0.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
+            {`${passwordForm.company} doesn't let other apps use your normal password.`} Create an
+            app password in your {passwordForm.company} account (Account security → Generate app
+            password), then paste it here.{" "}
+            {passwordForm.appPasswordHelpUrl ? (
+              <a
+                href={passwordForm.appPasswordHelpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                How to create one
+              </a>
+            ) : null}
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="font-body text-[12px] font-semibold text-on-surface">Email address</span>
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            value={formAddress}
+            readOnly={Boolean(connection && connection.provider === passwordForm.id)}
+            onChange={(event) => setFormAddress(event.target.value)}
+            placeholder="you@yahoo.com"
+            className="mt-1 h-10 w-full rounded-xl border border-outline-variant bg-white px-3 font-body text-[13px] text-on-surface outline-none focus:border-primary read-only:bg-surface-container-low"
+          />
+        </label>
+        <label className="block">
+          <span className="font-body text-[12px] font-semibold text-on-surface">App password</span>
+          <input
+            type="password"
+            required
+            autoComplete="new-password"
+            value={formPassword}
+            onChange={(event) => setFormPassword(event.target.value)}
+            placeholder="16-letter app password"
+            className="mt-1 h-10 w-full rounded-xl border border-outline-variant bg-white px-3 font-body text-[13px] text-on-surface outline-none focus:border-primary"
+          />
+        </label>
+      </div>
+      <p className="font-body text-[11px] leading-relaxed text-on-surface-variant">
+        The app password is encrypted and only used to send and read this mailbox. You can
+        remove it in your {passwordForm.company} account at any time.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" disabled={Boolean(busy)} className={BUTTON_PRIMARY}>
+          {busy === passwordForm.id ? "Checking…" : "Connect"}
+        </button>
+        <button
+          type="button"
+          disabled={Boolean(busy)}
+          onClick={() => setPasswordForm(null)}
+          className={BUTTON_OUTLINE}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  ) : null;
 
   return (
     <SettingsSection
       icon="forward_to_inbox"
       title="Email sending"
-      description="Connect your business Gmail or Outlook to send quotes and invoices from your own address and use your mailbox here."
+      description="Connect your business Gmail, Outlook or Yahoo Mail to send quotes and invoices from your own address and use your mailbox here."
     >
       <div className="space-y-4">
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/70 px-4 py-3.5">
@@ -143,7 +262,9 @@ export function EmailConnectionSettings({
                   </p>
                   <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
                     {needsReconnect
-                      ? `${label} sign-in expired. Reconnect, then resume any emails on hold.`
+                      ? usesAppPassword
+                        ? `${label} stopped accepting the app password. Reconnect with a new one, then resume any emails on hold.`
+                        : `${label} sign-in expired. Reconnect, then resume any emails on hold.`
                       : `${label} connected · can send email`}
                   </p>
                 </div>
@@ -172,10 +293,10 @@ export function EmailConnectionSettings({
           ) : (
             <div className="space-y-3">
               <p className="font-body text-[13px] text-on-surface">
-                Choose your email provider. We only ask for permission to send; reading
-                your mailbox here is a separate step you can turn on later.
+                Choose your email provider. Gmail and Outlook first ask only for permission
+                to send; reading your mailbox here is a separate step you can turn on later.
               </p>
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {EMAIL_PROVIDERS.map((option) => {
                   const ready = providers.includes(option.id);
                   return (
@@ -200,7 +321,11 @@ export function EmailConnectionSettings({
                         onClick={() => void handleConnect(option.id)}
                         className={BUTTON_PRIMARY}
                       >
-                        {busy === option.id ? "Opening sign-in…" : `Connect ${option.label}`}
+                        {busy === option.id
+                          ? option.authMethod === "app_password"
+                            ? "Checking…"
+                            : "Opening sign-in…"
+                          : `Connect ${option.label}`}
                       </button>
                     </li>
                   );
@@ -209,6 +334,8 @@ export function EmailConnectionSettings({
             </div>
           )}
         </div>
+
+        {passwordFormPanel}
 
         {error ? (
           <p
