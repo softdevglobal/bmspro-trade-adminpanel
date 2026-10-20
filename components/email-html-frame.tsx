@@ -5,17 +5,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /**
  * Shows an email's HTML the way it was designed, safely:
  * - `sandbox` without `allow-scripts`, so nothing in the email can run;
- * - a CSP inside the frame blocking every network request, so remote images
- *   and tracking pixels stay off until the user chooses "Show images";
+ * - a CSP inside the frame that allows images (always shown, like a normal
+ *   mail app) but blocks every other network request;
  * - links open in a new tab, never inside the app.
  * The HTML is also cleaned on the server before it gets here.
  */
-export function EmailHtmlFrame({ html, showImages }: { html: string; showImages: boolean }) {
+export function EmailHtmlFrame({ html }: { html: string }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(120);
 
   const srcDoc = `<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data: ${showImages ? "https:" : ""};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data: https: http:;">
 <base target="_blank">
 <style>
   html,body{margin:0;padding:0;background:#fff;}

@@ -30,7 +30,7 @@ export function htmlToText(html: string): string {
 /**
  * Server-side clean-up of email HTML before it reaches the preview frame.
  * Defence in depth: the frame itself is sandboxed (no scripts) and has a CSP
- * that blocks every network request unless the user chooses to show images.
+ * that blocks every network request except images.
  */
 export function sanitizeEmailHtml(html: string): string {
   return html
