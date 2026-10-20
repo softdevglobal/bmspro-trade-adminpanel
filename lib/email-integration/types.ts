@@ -1,4 +1,5 @@
-export type EmailProvider = "google" | "microsoft" | "yahoo";
+/** "imap": the owner's own mail server (Zoho, cPanel hosting, …) over IMAP/SMTP. */
+export type EmailProvider = "google" | "microsoft" | "yahoo" | "imap";
 
 export type EmailConnectionStatus = "active" | "needs_reconnect" | "disconnected";
 

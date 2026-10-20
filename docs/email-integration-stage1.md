@@ -310,3 +310,38 @@ Notes:
   are picked up only if the server supports CONDSTORE.
 - To check live: confirm a sent email appears once (not twice) in Yahoo's Sent
   folder. If it's missing, set `savesSentCopy: false` for Yahoo.
+
+## Other email provider (Zoho, cPanel hosting, any IMAP/SMTP host)
+
+Provider id `imap`. For a mailbox the business already has with Zoho, its web
+host (cPanel) or any provider with IMAP and SMTP. The owner picks a preset
+(Zoho, Zoho Australia, cPanel / web hosting) or enters the servers, plus the
+email address, password and (optionally) a username. The server signs in to
+both IMAP and SMTP before saving. Nothing is configured on the server.
+
+It uses the same IMAP mailbox and SMTP sending as Yahoo
+(`mailbox/imap.ts`, `providers/app-password.ts`); `providers/other.ts` creates
+them without fixed servers, and each mailbox's servers are stored with its
+encrypted password (`credentials.password.server`).
+
+Rules for owner-entered servers (`imap/servers.ts`, `imap/host.ts`):
+- Hostnames only (no IP addresses or `localhost`). IMAP ports 993 (TLS) or 143
+  (STARTTLS); SMTP 465 (TLS), 587 or 2525 (STARTTLS). STARTTLS is required, so
+  a connection never falls back to plain text. Certificates are verified for the
+  name entered.
+- Every connection resolves the name and refuses private, loopback,
+  link-local, carrier-grade NAT and other non-public addresses, then connects to
+  the checked address. Owners can't point our servers into a private network.
+  For local testing only, `EMAIL_ALLOW_PRIVATE_MAIL_HOSTS=true` lifts this outside
+  production builds.
+- Sent copies: after sending, the adapter looks for the Message-ID in Sent and
+  appends the message only if the server didn't file it (`savesSentCopy: "detect"`).
+
+Notes:
+- Zoho needs IMAP access turned on in Zoho Mail settings; accounts with
+  two-factor sign-in use an app-specific password. Australian Zoho accounts use
+  `imap.zoho.com.au` / `smtp.zoho.com.au`.
+- cPanel hosts usually use `mail.<domain>` on 993 / 465. If the certificate is
+  only valid for the hosting server's own name, the owner enters that name
+  (cPanel shows it under Email Accounts → Connect Devices).
+- Port 25 is not offered: most hosts block it for sending from apps.

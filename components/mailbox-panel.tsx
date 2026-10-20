@@ -101,7 +101,7 @@ export function MailboxPanel() {
   if (!connection) {
     return (
       <p className="rounded-2xl border border-dashed border-outline-variant/60 px-5 py-8 text-center font-body text-[13px] text-on-surface-variant">
-        Connect Gmail, Outlook or Yahoo Mail above to use your mailbox here.
+        Connect your business email above to use your mailbox here.
       </p>
     );
   }

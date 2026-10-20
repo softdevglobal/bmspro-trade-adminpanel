@@ -42,19 +42,28 @@ export async function POST(
     return_to?: unknown;
     address?: unknown;
     password?: unknown;
+    username?: unknown;
+    server?: unknown;
   } | null;
 
-  // App-password providers (Yahoo): check the login here and save it.
+  // Password providers (Yahoo, other email): check the login here and save it.
   if (adapter.authMethod === "app_password") {
     const address = typeof body?.address === "string" ? body.address.slice(0, 320) : "";
     const password = typeof body?.password === "string" ? body.password.slice(0, 200) : "";
+    const username = typeof body?.username === "string" ? body.username.slice(0, 320) : "";
     try {
-      const account = await adapter.connectWithPassword!({ address, password });
+      const account = await adapter.connectWithPassword!({
+        address,
+        password,
+        username,
+        server: body?.server,
+      });
       await saveConnectedAccount({ businessId: auth.businessId, uid: auth.uid, provider, account });
       return NextResponse.json({ ok: true, connected: true });
     } catch (error) {
       if (error instanceof ProviderOAuthError || error instanceof EmailConnectionError) {
-        const status = error.code === "account_mismatch" ? 409 : error.code === "server_unreachable" ? 502 : 400;
+        const status =
+          error.code === "account_mismatch" ? 409 : error.code === "server_unreachable" ? 502 : 400;
         return emailError(status, error.message, error.code);
       }
       console.error("[email/connect] app password connect failed");

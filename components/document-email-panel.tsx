@@ -256,7 +256,7 @@ function SendDocumentEmailDialog({
                 Connect your email first
               </p>
               <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                Connect Gmail, Outlook or Yahoo Mail on the Emails page to send documents from your own address.
+                Connect your business email on the Emails page to send documents from your own address.
               </p>
               <Link
                 href="/dashboard/emails"

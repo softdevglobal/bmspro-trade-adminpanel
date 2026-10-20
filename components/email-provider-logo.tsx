@@ -31,6 +31,16 @@ export function EmailProviderLogo({
     );
   }
 
+  if (provider === "imap") {
+    return (
+      <svg viewBox="0 0 48 48" className={className} role="img" aria-label="Email">
+        <rect width="48" height="48" rx="10" fill="#0F766E" />
+        <rect x="9" y="14" width="30" height="21" rx="3" fill="none" stroke="#fff" strokeWidth="3" />
+        <path d="M10.5 16.5 24 26.5l13.5-10" fill="none" stroke="#fff" strokeWidth="3" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+
   if (provider === "yahoo") {
     return (
       <svg viewBox="0 0 48 48" className={className} role="img" aria-label="Yahoo">
