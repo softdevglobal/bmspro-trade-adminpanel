@@ -2,20 +2,26 @@
 
 import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
-import { emailApi, useEmailSending } from "@/lib/email-integration/client";
+import {
+  EMAIL_PROVIDERS,
+  emailApi,
+  providerLabel,
+  useEmailSending,
+} from "@/lib/email-integration/client";
 import { useEffect, useState } from "react";
 
 const CONNECT_ERRORS: Record<string, string> = {
-  access_denied: "Gmail access was not granted, so nothing was connected.",
+  access_denied: "Access was not granted, so nothing was connected.",
   invalid_state: "That connection link expired. Please try again.",
   missing_scope:
-    "Permission to send email was not granted. Tick the Gmail send permission when connecting.",
-  missing_refresh_token: "Google did not grant offline access. Please try again.",
+    "Permission to send email was not granted. Accept the send permission when connecting.",
+  missing_refresh_token: "Offline access wasn't granted, so we couldn't stay connected. Please try again.",
   account_mismatch:
     "Another mailbox is already connected. Disconnect it before connecting a different one.",
-  unverified_email: "That Google account's email address is not verified.",
+  unverified_email: "That account's email address is not verified.",
+  invalid_identity: "We couldn't confirm which account you signed in with. Please try again.",
   missing_read_scope:
-    "Inbox access wasn't granted, so your Inbox can't be shown. Sending still works. Tick the Gmail read permission to try again.",
+    "Inbox access wasn't granted, so your Inbox can't be shown. Sending still works. Accept the mailbox permission to try again.",
   not_enabled: "Email sending is not enabled for this business.",
 };
 
@@ -24,7 +30,7 @@ const BUTTON_PRIMARY =
 const BUTTON_OUTLINE =
   "inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-outline-variant px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60";
 
-/** Owner settings card: connect, reconnect or disconnect the business Gmail. */
+/** Owner settings card: connect, reconnect or disconnect the business mailbox (Gmail or Outlook). */
 export function EmailConnectionSettings({
   returnTo = "settings",
 }: {
@@ -32,7 +38,7 @@ export function EmailConnectionSettings({
 }) {
   const { user } = useAuth();
   const { loading, enabled, providers, connection, reload } = useEmailSending();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -43,7 +49,7 @@ export function EmailConnectionSettings({
     if (!result) return;
     const reason = params.get("reason") ?? "";
     queueMicrotask(() => {
-      if (result === "connected") setNotice("Gmail connected.");
+      if (result === "connected") setNotice("Mailbox connected.");
       else if (result === "inbox_enabled") setNotice("Mailbox enabled. Your mail is being imported.");
       else setError(CONNECT_ERRORS[reason] ?? "The mailbox could not be connected. Please try again.");
     });
@@ -57,9 +63,9 @@ export function EmailConnectionSettings({
   }, []);
 
   useEffect(() => {
-    // Back from Google via bfcache: the button is still frozen mid-redirect.
+    // Back from the sign-in page via bfcache: the button is still frozen mid-redirect.
     function handlePageShow(event: PageTransitionEvent) {
-      if (event.persisted) setBusy(false);
+      if (event.persisted) setBusy(null);
     }
     window.addEventListener("pageshow", handlePageShow);
     return () => window.removeEventListener("pageshow", handlePageShow);
@@ -67,20 +73,20 @@ export function EmailConnectionSettings({
 
   if (loading || !enabled) return null;
 
-  async function handleConnect() {
+  async function handleConnect(provider: string) {
     if (!user) return;
-    setBusy(true);
+    setBusy(provider);
     setError(null);
     setNotice(null);
     try {
-      const { url } = await emailApi<{ url: string }>(user, "/api/email/connect/google", {
+      const { url } = await emailApi<{ url: string }>(user, `/api/email/connect/${provider}`, {
         method: "POST",
         body: JSON.stringify({ return_to: returnTo }),
       });
-      window.location.href = url;
+      window.location.assign(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the connection.");
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -93,7 +99,7 @@ export function EmailConnectionSettings({
     ) {
       return;
     }
-    setBusy(true);
+    setBusy("disconnect");
     setError(null);
     setNotice(null);
     try {
@@ -105,18 +111,18 @@ export function EmailConnectionSettings({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not disconnect the mailbox.");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   const needsReconnect = connection?.status === "needs_reconnect";
-  const googleReady = providers.includes("google");
+  const label = providerLabel(connection?.provider);
 
   return (
     <SettingsSection
       icon="forward_to_inbox"
       title="Email sending"
-      description="Connect your business Gmail to send quotes and invoices from your own address and use your mailbox here."
+      description="Connect your business Gmail or Outlook to send quotes and invoices from your own address and use your mailbox here."
     >
       <div className="space-y-4">
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/70 px-4 py-3.5">
@@ -136,8 +142,8 @@ export function EmailConnectionSettings({
                   </p>
                   <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
                     {needsReconnect
-                      ? "Gmail sign-in expired. Reconnect, then resume any emails on hold."
-                      : "Gmail connected · can send email"}
+                      ? `${label} sign-in expired. Reconnect, then resume any emails on hold.`
+                      : `${label} connected · can send email`}
                   </p>
                 </div>
               </div>
@@ -145,8 +151,8 @@ export function EmailConnectionSettings({
                 {needsReconnect ? (
                   <button
                     type="button"
-                    disabled={busy || !googleReady}
-                    onClick={() => void handleConnect()}
+                    disabled={Boolean(busy) || !providers.includes(connection.provider)}
+                    onClick={() => void handleConnect(connection.provider)}
                     className={BUTTON_PRIMARY}
                   >
                     Reconnect
@@ -154,7 +160,7 @@ export function EmailConnectionSettings({
                 ) : null}
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={Boolean(busy)}
                   onClick={() => void handleDisconnect()}
                   className={BUTTON_OUTLINE}
                 >
@@ -163,30 +169,47 @@ export function EmailConnectionSettings({
               </div>
             </div>
           ) : (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-2.5">
-                <span className="material-symbols-outlined mt-0.5 text-[20px] text-on-surface-variant">
-                  alternate_email
-                </span>
-                <div>
-                  <p className="font-body text-[13px] font-semibold text-on-surface">
-                    Connect your Gmail account
-                  </p>
-                  <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
-                    {googleReady
-                      ? "We only ask for permission to send. We can't read your inbox."
-                      : "Gmail sending isn't configured on the server yet."}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busy || !googleReady}
-                onClick={() => void handleConnect()}
-                className={BUTTON_PRIMARY}
-              >
-                {busy ? "Opening Google…" : "Connect Gmail"}
-              </button>
+            <div className="space-y-3">
+              <p className="font-body text-[13px] text-on-surface">
+                Choose your email provider. We only ask for permission to send; reading
+                your mailbox here is a separate step you can turn on later.
+              </p>
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {EMAIL_PROVIDERS.map((option) => {
+                  const ready = providers.includes(option.id);
+                  return (
+                    <li
+                      key={option.id}
+                      className="flex flex-col gap-3 rounded-xl border border-outline-variant/70 bg-white p-3.5"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <span
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-body text-[14px] font-bold text-white ${
+                            option.id === "google" ? "bg-rose-500" : "bg-sky-600"
+                          }`}
+                          aria-hidden
+                        >
+                          {option.id === "google" ? "G" : "O"}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-body text-[13px] font-semibold text-on-surface">{option.title}</p>
+                          <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
+                            {ready ? option.description : "Not set up on the server yet."}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={Boolean(busy) || !ready}
+                        onClick={() => void handleConnect(option.id)}
+                        className={BUTTON_PRIMARY}
+                      >
+                        {busy === option.id ? "Opening sign-in…" : `Connect ${option.label}`}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
         </div>

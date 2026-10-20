@@ -4,8 +4,11 @@ import {
   EMAIL_MESSAGES_COLLECTION,
   EMAIL_SYNC_STATE_COLLECTION,
 } from "@/lib/email-integration/config";
-import type { GmailMetadata } from "@/lib/email-integration/mailbox/gmail";
-import { folderFromLabels, parseSender } from "@/lib/email-integration/mailbox/parse";
+import { messageDocId } from "@/lib/email-integration/mailbox/ids";
+import { parseSender } from "@/lib/email-integration/mailbox/parse";
+
+export { messageDocId };
+import type { MailboxMetadata } from "@/lib/email-integration/mailbox/provider";
 import type {
   MailboxView,
   MailboxMatch,
@@ -20,10 +23,6 @@ import {
   type DocumentData,
 } from "firebase-admin/firestore";
 
-export function messageDocId(connectionId: string, providerMessageId: string): string {
-  return `${connectionId}_${providerMessageId}`;
-}
-
 function clip(value: string, max: number): string {
   return value.length > max ? value.slice(0, max) : value;
 }
@@ -35,14 +34,14 @@ function clip(value: string, max: number): string {
 export async function upsertMessage(input: {
   businessId: string;
   connectionId: string;
-  message: GmailMetadata;
+  message: MailboxMetadata;
   match: MailboxMatch;
 }): Promise<"stored" | "removed" | "skipped"> {
   const { businessId, connectionId, message, match } = input;
   const ref = adminDb
     .collection(EMAIL_MESSAGES_COLLECTION)
     .doc(messageDocId(connectionId, message.id));
-  const folder = folderFromLabels(message.labelIds);
+  const folder = message.folder;
 
   if (!folder) {
     // Spam and drafts are never stored; a message moved there drops out of views.
@@ -52,7 +51,7 @@ export async function upsertMessage(input: {
     return "removed";
   }
 
-  const sender = parseSender(message.headers.from ?? "");
+  const sender = parseSender(message.from);
   await ref.set(
     {
       businessId,
@@ -62,17 +61,17 @@ export async function upsertMessage(input: {
       folder,
       fromName: sender.name ? clip(sender.name, 200) : null,
       fromAddress: clip(sender.address, 320),
-      to: clip(message.headers.to ?? "", 1000),
-      cc: clip(message.headers.cc ?? "", 1000),
-      subject: clip(message.headers.subject ?? "", 500),
+      to: clip(message.to, 1000),
+      cc: clip(message.cc, 1000),
+      subject: clip(message.subject, 500),
       snippet: clip(message.snippet, 300),
-      sentAt: message.internalDate ? Timestamp.fromMillis(message.internalDate) : null,
+      sentAt: message.date ? Timestamp.fromMillis(message.date) : null,
       hasAttachments: message.hasAttachments,
-      unread: message.labelIds.includes("UNREAD"),
-      starred: message.labelIds.includes("STARRED"),
+      unread: message.unread,
+      starred: message.starred,
       // Kept for threading replies (In-Reply-To / References).
-      messageIdHeader: clip(message.headers["message-id"] ?? "", 500),
-      references: clip(message.headers.references ?? "", 4000),
+      messageIdHeader: clip(message.messageIdHeader, 500),
+      references: clip(message.references, 4000),
       matchMethod: match.method,
       customerEmails: match.customerEmails,
       customerName: match.customerName,
@@ -110,7 +109,7 @@ export async function updateMessageMatch(
 /** Updates only folder/unread/starred after an action (keeps why it matched). */
 export async function updateMessageLabels(
   connectionId: string,
-  message: GmailMetadata,
+  message: MailboxMetadata,
 ): Promise<void> {
   const ref = adminDb
     .collection(EMAIL_MESSAGES_COLLECTION)
@@ -118,9 +117,9 @@ export async function updateMessageLabels(
   const snap = await ref.get();
   if (!snap.exists) return;
   await ref.update({
-    folder: folderFromLabels(message.labelIds),
-    unread: message.labelIds.includes("UNREAD"),
-    starred: message.labelIds.includes("STARRED"),
+    folder: message.folder,
+    unread: message.unread,
+    starred: message.starred,
     updatedAt: FieldValue.serverTimestamp(),
   });
 }

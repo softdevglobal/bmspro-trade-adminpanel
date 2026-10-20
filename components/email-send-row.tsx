@@ -58,7 +58,7 @@ export function EmailSendRow({
     if (
       confirmUnknown &&
       !window.confirm(
-        "This email may already have been sent. Check your Gmail Sent folder first. Send it again anyway?",
+        "This email may already have been sent. Check your mailbox's Sent folder first. Send it again anyway?",
       )
     ) {
       return;

@@ -6,7 +6,19 @@ export type ProviderCredentials = {
   /** Epoch ms when the access token expires. */
   accessTokenExpiresAt: number;
   refreshToken: string;
+  /** Space-separated scopes granted (needed to refresh some providers' tokens). */
+  scope?: string;
 };
+
+/** A sign-in that couldn't complete; `code` is shown via the settings page. */
+export class ProviderOAuthError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 export type ConnectedAccount = {
   providerAccountId: string;
@@ -28,7 +40,15 @@ export type SendPayload = {
   outboxId: string;
   attachments: { filename: string; contentType: string; content: Buffer }[];
   /** Replies: keep the conversation threaded at the provider and in clients. */
-  thread: { providerThreadId: string; inReplyTo: string; references: string } | null;
+  thread: SendThread | null;
+};
+
+export type SendThread = {
+  providerThreadId: string;
+  inReplyTo: string;
+  references: string;
+  /** The message being replied to (Outlook replies through its own reply API). */
+  replyToProviderMessageId?: string | null;
 };
 
 export type SendResult =
@@ -57,6 +77,12 @@ export type RefreshResult =
 /** Transport only — queueing, permissions and state live in the outbox. */
 export interface EmailSendAdapter {
   provider: EmailProvider;
+  /** Name shown to owners, e.g. "Gmail". */
+  label: string;
+  /** OAuth app credentials are set on the server. */
+  isConfigured(): boolean;
+  /** The registered OAuth redirect URI (used to return to the right origin). */
+  redirectUri(): string | null;
   buildAuthorizationUrl(input: {
     state: string;
     codeChallenge: string;

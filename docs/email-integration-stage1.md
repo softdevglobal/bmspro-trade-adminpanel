@@ -224,3 +224,50 @@ verification and security assessment for this scope.
 - `firebase deploy --only firestore:rules` (`email_messages`, `email_sync_state` server-only).
 - `firebase deploy --only firestore:indexes` (five `email_messages` indexes: folders, Starred, the "Customers only" filter on both, and threads).
 - The `/api/cron/email-sync` cron is in `vercel.json`.
+
+---
+
+## Microsoft (Outlook, Hotmail, Microsoft 365)
+
+Same features as Gmail, behind the same provider interfaces:
+`providers/microsoft.ts` (sign-in and sending) and `mailbox/microsoft.ts`
+(reading and organising). Owners pick Gmail or Outlook on the Email card.
+
+| | Gmail | Microsoft |
+| --- | --- | --- |
+| Send-only scopes | `openid email gmail.send` | `openid email profile offline_access User.Read Mail.Send` |
+| Mailbox scope (opt-in) | `gmail.modify` | `Mail.ReadWrite` |
+| Folders | labels → Inbox / Sent / Archive / Trash | folders → same views; drafts and junk hidden; custom folders show in Archive |
+| Starred | `STARRED` label | Flagged |
+| Conversations | `threadId` | `conversationId` |
+| Changes | Gmail history | polling on `lastModifiedDateTime` (2-minute overlap) |
+| Replies | `threadId` + In-Reply-To/References | `createReply` on the original, then send |
+| Attachments | MIME | ≤ 3 MB inline, larger via upload sessions |
+
+Microsoft notes:
+- Every Graph call sends `Prefer: IdType="ImmutableId"`, so message ids
+  survive archive, delete and restore. Outlook ids contain `/ + =`, so stored
+  message documents use a hashed key (`mailbox/ids.ts`); Gmail keys are unchanged.
+- Send-only connections use `sendMail` (no message id comes back; attachments
+  up to 3 MB in total). With the mailbox enabled, sends go through a draft so
+  the message and conversation ids are known and replies thread in Outlook.
+- Mail deleted permanently (emptied from Deleted Items) isn't reported by
+  polling; it shows "no longer in the mailbox" if opened.
+- Microsoft rotates refresh tokens; each refresh stores the newest one.
+- There is no API to revoke one app's delegated access. Disconnect deletes our
+  credentials; owners can also remove the app in their Microsoft account.
+
+### Microsoft Entra setup
+
+1. Entra admin center → App registrations → New registration.
+   Supported account types: **Accounts in any organizational directory and
+   personal Microsoft accounts**. Redirect URI (Web):
+   `https://<app domain>/api/email/oauth/microsoft/callback` (and the localhost one for dev).
+2. Certificates & secrets → New client secret; note its expiry and rotate it before then.
+3. API permissions → Microsoft Graph → Delegated: `openid`, `email`, `profile`,
+   `offline_access`, `User.Read`, `Mail.Send`, `Mail.ReadWrite`.
+4. Optional but recommended: publisher verification (removes the "unverified"
+   warning). Some organisations require their admin to approve the app.
+
+Environment variables: `MICROSOFT_EMAIL_CLIENT_ID`, `MICROSOFT_EMAIL_CLIENT_SECRET`,
+`MICROSOFT_EMAIL_REDIRECT_URI`, optional `MICROSOFT_EMAIL_TENANT` (default `common`).

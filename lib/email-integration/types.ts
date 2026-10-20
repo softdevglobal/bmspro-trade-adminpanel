@@ -1,4 +1,4 @@
-export type EmailProvider = "google";
+export type EmailProvider = "google" | "microsoft";
 
 export type EmailConnectionStatus = "active" | "needs_reconnect" | "disconnected";
 
@@ -40,8 +40,13 @@ export type EmailPayloadSnapshot = {
   attachmentBytes: number | null;
   /** Mailbox sends: every attached file (names only; bytes live in Storage). */
   attachmentNames?: string[];
-  /** Mailbox replies: Gmail thread and threading headers. */
-  thread?: { providerThreadId: string; inReplyTo: string; references: string } | null;
+  /** Mailbox replies: provider thread, threading headers and the message replied to. */
+  thread?: {
+    providerThreadId: string;
+    inReplyTo: string;
+    references: string;
+    replyToProviderMessageId?: string | null;
+  } | null;
 };
 
 /** One send attempt as shown in a document's email history. */

@@ -1,19 +1,20 @@
 import "server-only";
 
 import { EMAIL_PROVIDER_TIMEOUT_MS } from "@/lib/email-integration/config";
+import { htmlToText, sanitizeEmailHtml } from "@/lib/email-integration/mailbox/html";
+import { folderFromLabels } from "@/lib/email-integration/mailbox/parse";
+import {
+  MailboxReadError,
+  type MailboxAdapter,
+  type MailboxMetadata,
+  type MailboxSearch,
+  type MessageBody,
+} from "@/lib/email-integration/mailbox/provider";
 import type { ProviderCredentials } from "@/lib/email-integration/providers/types";
 
-const API = "https://gmail.googleapis.com/gmail/v1/users/me";
+export { htmlToText, sanitizeEmailHtml };
 
-export class GmailReadError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    public readonly retryAfterMs: number | null = null,
-  ) {
-    super(code);
-  }
-}
+const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 async function gmailGet<T>(
   credentials: ProviderCredentials,
@@ -46,7 +47,7 @@ async function gmailRequest<T>(
       return await gmailRequestOnce<T>(credentials, method, path, params, body);
     } catch (error) {
       if (
-        !(error instanceof GmailReadError && error.code === "rate_limited") ||
+        !(error instanceof MailboxReadError && error.code === "rate_limited") ||
         attempt >= RATE_LIMIT_RETRIES
       ) {
         throw error;
@@ -82,7 +83,7 @@ async function gmailRequestOnce<T>(
     const rateLimited =
       response.status === 429 || /RateLimitExceeded/i.test(reason);
     const retryAfter = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
-    throw new GmailReadError(
+    throw new MailboxReadError(
       response.status,
       rateLimited
         ? "rate_limited"
@@ -103,31 +104,8 @@ export async function getProfileHistoryId(
   credentials: ProviderCredentials,
 ): Promise<string> {
   const profile = await gmailGet<{ historyId?: string }>(credentials, "/profile");
-  if (!profile.historyId) throw new GmailReadError(502, "no_history_id");
+  if (!profile.historyId) throw new MailboxReadError(502, "no_history_id");
   return profile.historyId;
-}
-
-export async function listMessageIds(
-  credentials: ProviderCredentials,
-  input: { labelId: "INBOX" | "SENT"; days: number; max: number },
-): Promise<{ id: string; threadId: string }[]> {
-  const found: { id: string; threadId: string }[] = [];
-  let pageToken: string | undefined;
-  do {
-    const params: Array<[string, string]> = [
-      ["labelIds", input.labelId],
-      ["q", `newer_than:${input.days}d`],
-      ["maxResults", String(Math.min(100, input.max - found.length))],
-    ];
-    if (pageToken) params.push(["pageToken", pageToken]);
-    const page = await gmailGet<{
-      messages?: { id: string; threadId: string }[];
-      nextPageToken?: string;
-    }>(credentials, "/messages", params);
-    found.push(...(page.messages ?? []));
-    pageToken = page.nextPageToken;
-  } while (pageToken && found.length < input.max);
-  return found;
 }
 
 /** One page of a Gmail search (all time, including Trash). */
@@ -166,7 +144,7 @@ export async function getThreadMessageIds(
     );
     return (thread.messages ?? []).map((message) => message.id);
   } catch (error) {
-    if (error instanceof GmailReadError && error.code === "not_found") return [];
+    if (error instanceof MailboxReadError && error.code === "not_found") return [];
     throw error;
   }
 }
@@ -178,7 +156,7 @@ export type HistoryChanges = {
   historyId: string | null;
 };
 
-/** Reads history since `startHistoryId`; throws `not_found` when it has expired. */
+/** Reads history since `startHistoryId`; throws `cursor_expired` when it has expired. */
 export async function listHistory(
   credentials: ProviderCredentials,
   startHistoryId: string,
@@ -207,7 +185,12 @@ export async function listHistory(
       }[];
       nextPageToken?: string;
       historyId?: string;
-    }>(credentials, "/history", params);
+    }>(credentials, "/history", params).catch((error: unknown) => {
+      if (error instanceof MailboxReadError && error.code === "not_found") {
+        throw new MailboxReadError(404, "cursor_expired");
+      }
+      throw error;
+    });
     for (const record of page.history ?? []) {
       for (const item of record.messagesAdded ?? []) changed.add(item.message.id);
       for (const item of record.labelsAdded ?? []) changed.add(item.message.id);
@@ -227,16 +210,6 @@ export async function listHistory(
 
 type RawHeader = { name?: string; value?: string };
 
-export type GmailMetadata = {
-  id: string;
-  threadId: string;
-  labelIds: string[];
-  snippet: string;
-  internalDate: number | null;
-  headers: Record<string, string>;
-  hasAttachments: boolean;
-};
-
 function headersMap(headers: RawHeader[] | undefined): Record<string, string> {
   const map: Record<string, string> = {};
   for (const header of headers ?? []) {
@@ -249,7 +222,7 @@ function headersMap(headers: RawHeader[] | undefined): Record<string, string> {
 export async function getMessageMetadata(
   credentials: ProviderCredentials,
   id: string,
-): Promise<GmailMetadata | null> {
+): Promise<MailboxMetadata | null> {
   try {
     const message = await gmailGet<{
       id: string;
@@ -269,18 +242,27 @@ export async function getMessageMetadata(
       ["metadataHeaders", "References"],
     ]);
     const internal = Number(message.internalDate);
+    const labels = message.labelIds ?? [];
+    const headers = headersMap(message.payload?.headers);
     return {
       id: message.id,
       threadId: message.threadId,
-      labelIds: message.labelIds ?? [],
+      folder: folderFromLabels(labels),
+      unread: labels.includes("UNREAD"),
+      starred: labels.includes("STARRED"),
+      from: headers.from ?? "",
+      to: headers.to ?? "",
+      cc: headers.cc ?? "",
+      subject: headers.subject ?? "",
+      messageIdHeader: headers["message-id"] ?? "",
+      references: headers.references ?? "",
       snippet: message.snippet ?? "",
-      internalDate: Number.isFinite(internal) ? internal : null,
-      headers: headersMap(message.payload?.headers),
+      date: Number.isFinite(internal) ? internal : null,
       // Metadata format omits parts; the attachment hint comes from the mime type.
       hasAttachments: /multipart\/(mixed|related)/i.test(message.payload?.mimeType ?? ""),
     };
   } catch (error) {
-    if (error instanceof GmailReadError && error.code === "not_found") return null;
+    if (error instanceof MailboxReadError && error.code === "not_found") return null;
     throw error;
   }
 }
@@ -296,72 +278,10 @@ type Part = {
   parts?: Part[];
 };
 
-export type GmailBody = {
-  text: string;
-  html: string | null;
-  attachments: {
-    name: string;
-    size: number;
-    mimeType: string;
-    attachmentId: string | null;
-    /** Content-ID, for images the HTML shows inline via cid: links. */
-    contentId: string | null;
-    inline: boolean;
-  }[];
-};
+export type GmailBody = MessageBody;
 
 function decodePart(data: string | undefined): string {
   return data ? Buffer.from(data, "base64url").toString("utf8") : "";
-}
-
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
-};
-
-/** Reduces HTML to readable plain text (search, quoting, plain-text view). */
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
-      if (entity.startsWith("#")) {
-        const code = entity[1]?.toLowerCase() === "x"
-          ? Number.parseInt(entity.slice(2), 16)
-          : Number.parseInt(entity.slice(1), 10);
-        return Number.isFinite(code) && code > 0 && code < 0x110000
-          ? String.fromCodePoint(code)
-          : match;
-      }
-      return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
-    })
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-/**
- * Server-side clean-up of email HTML before it reaches the preview frame.
- * Defence in depth: the frame itself is sandboxed (no scripts) and has a CSP
- * that blocks every network request unless the user chooses to show images.
- */
-export function sanitizeEmailHtml(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(
-      /<(script|iframe|object|embed|applet|form|noscript|template|frameset|svg|math)\b[\s\S]*?<\/\1\s*>/gi,
-      "",
-    )
-    .replace(
-      /<\/?(script|iframe|object|embed|applet|form|input|button|textarea|select|option|link|meta|base|frame|frameset|svg|math)\b[^>]*>/gi,
-      "",
-    )
-    .replace(/\s(on[a-z]+|srcdoc|formaction)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(
-      /\s(href|src|background|action|poster|xlink:href)\s*=\s*("|')?\s*(javascript|vbscript|data:(?!image\/(png|gif|jpe?g|webp)))[^"'\s>]*("|')?/gi,
-      ' $1="#"',
-    );
 }
 
 export function extractBody(payload: Part | undefined, maxChars: number): GmailBody {
@@ -417,7 +337,7 @@ export async function getMessageBody(
     );
     return extractBody(message.payload, maxChars);
   } catch (error) {
-    if (error instanceof GmailReadError && error.code === "not_found") return null;
+    if (error instanceof MailboxReadError && error.code === "not_found") return null;
     throw error;
   }
 }
@@ -456,16 +376,70 @@ export async function untrashThread(credentials: ProviderCredentials, threadId: 
   await gmailRequest(credentials, "POST", `/threads/${encodeURIComponent(threadId)}/untrash`);
 }
 
-/** Gmail's own search, used to find matches among the messages already shown. */
-export async function searchMessageIds(
-  credentials: ProviderCredentials,
-  query: string,
-  max: number,
-): Promise<string[]> {
-  const page = await gmailGet<{ messages?: { id: string }[] }>(credentials, "/messages", [
-    ["q", query],
-    ["maxResults", String(max)],
-    ["includeSpamTrash", "true"],
+// ---- Adapter -----------------------------------------------------------------
+
+/** Everything except spam and drafts (Trash included), newest first. */
+export const WHOLE_MAILBOX_QUERY = "-in:spam -in:drafts";
+
+/** Gmail search for every message to, from or copied to these addresses, all time. */
+export function customerSearchQuery(addresses: string[]): string {
+  const terms = addresses.flatMap((address) => [
+    `from:${address}`,
+    `to:${address}`,
+    `cc:${address}`,
+    `bcc:${address}`,
   ]);
-  return (page.messages ?? []).map((message) => message.id);
+  return `{${terms.join(" ")}}`;
 }
+
+function gmailQuery(search: MailboxSearch): string {
+  if (search.kind === "customers") return customerSearchQuery(search.addresses);
+  if (search.kind === "all") return WHOLE_MAILBOX_QUERY;
+  return search.text;
+}
+
+export const gmailMailbox: MailboxAdapter = {
+  startCursor: getProfileHistoryId,
+
+  async changes(credentials, cursor, max) {
+    const result = await listHistory(credentials, cursor, max);
+    return {
+      changedIds: result.changedIds,
+      deletedIds: result.deletedIds,
+      cursor: result.historyId ?? cursor,
+    };
+  },
+
+  searchPage(credentials, search, pageToken) {
+    return searchMessagePage(credentials, gmailQuery(search), pageToken);
+  },
+
+  threadMessageIds: getThreadMessageIds,
+  getMetadata: getMessageMetadata,
+  getBody: getMessageBody,
+  getAttachment,
+
+  async threadAction(credentials, threadId, action, targets) {
+    switch (action) {
+      case "mark_read":
+        return modifyThreadLabels(credentials, threadId, { remove: ["UNREAD"] });
+      case "mark_unread":
+        return modifyThreadLabels(credentials, threadId, { add: ["UNREAD"] });
+      case "star":
+        return modifyThreadLabels(credentials, threadId, { add: ["STARRED"] });
+      case "unstar":
+        return modifyThreadLabels(credentials, threadId, { remove: ["STARRED"] });
+      case "archive":
+        return modifyThreadLabels(credentials, threadId, { remove: ["INBOX"] });
+      case "move_to_inbox":
+        if (targets.some((target) => target.folder === "trash")) {
+          await untrashThread(credentials, threadId);
+        }
+        return modifyThreadLabels(credentials, threadId, { add: ["INBOX"] });
+      case "trash":
+        return trashThread(credentials, threadId);
+      case "untrash":
+        return untrashThread(credentials, threadId);
+    }
+  },
+};

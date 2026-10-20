@@ -7,6 +7,8 @@ import {
   type EmailConnectionRecord,
 } from "@/lib/email-integration/connections";
 import { freshCredentials } from "@/lib/email-integration/credentials";
+import type { MailboxAdapter } from "@/lib/email-integration/mailbox/provider";
+import { getMailboxAdapter } from "@/lib/email-integration/providers";
 import type { ProviderCredentials } from "@/lib/email-integration/providers/types";
 import type { NextResponse } from "next/server";
 
@@ -23,6 +25,7 @@ export async function requireMailbox(
       uid: string;
       businessId: string;
       connection: EmailConnectionRecord;
+      adapter: MailboxAdapter;
       credentials: ProviderCredentials | null;
     }
   | { ok: false; response: NextResponse }
@@ -33,6 +36,10 @@ export async function requireMailbox(
   const connection = await getBusinessEmailConnection(auth.businessId);
   if (!connection) {
     return { ok: false, response: emailError(404, "No mailbox is connected.", "not_connected") };
+  }
+  const adapter = getMailboxAdapter(connection.provider);
+  if (!adapter) {
+    return { ok: false, response: emailError(409, "This mailbox provider isn't supported.") };
   }
   if (connection.status !== "active") {
     return {
@@ -65,5 +72,21 @@ export async function requireMailbox(
     }
     credentials = fresh.credentials;
   }
-  return { ok: true, uid: auth.uid, businessId: auth.businessId, connection, credentials };
+  return { ok: true, uid: auth.uid, businessId: auth.businessId, connection, adapter, credentials };
+}
+
+/**
+ * Provider ids from a URL segment. Outlook ids contain "/", "+" and "=", so
+ * the browser percent-encodes them; decode once if they arrive encoded.
+ */
+export function providerIdParam(raw: string, maxLength = 512): string | null {
+  let value = raw;
+  if (/%[0-9a-f]{2}/i.test(value)) {
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      return null;
+    }
+  }
+  return /^[A-Za-z0-9_\-+/=.]+$/.test(value) && value.length <= maxLength ? value : null;
 }

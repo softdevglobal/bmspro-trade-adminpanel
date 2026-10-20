@@ -153,3 +153,32 @@ export function emailStatusTone(status: EmailOutboxStatus): string {
       return "border-primary/20 bg-primary/5 text-primary";
   }
 }
+
+export type ProviderInfo = {
+  id: "google" | "microsoft";
+  /** Short name used in sentences, e.g. "Sign-in to Gmail expired". */
+  label: string;
+  /** Longer name for the connect options. */
+  title: string;
+  description: string;
+};
+
+export const EMAIL_PROVIDERS: ProviderInfo[] = [
+  {
+    id: "google",
+    label: "Gmail",
+    title: "Gmail or Google Workspace",
+    description: "Accounts ending in @gmail.com, or your own domain on Google.",
+  },
+  {
+    id: "microsoft",
+    label: "Outlook",
+    title: "Outlook or Microsoft 365",
+    description: "Outlook.com, Hotmail and Live, or your own domain on Microsoft 365.",
+  },
+];
+
+/** Display name of a connected provider ("Gmail", "Outlook"). */
+export function providerLabel(provider: string | null | undefined): string {
+  return EMAIL_PROVIDERS.find((item) => item.id === provider)?.label ?? "your email";
+}

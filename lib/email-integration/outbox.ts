@@ -28,6 +28,7 @@ import {
 } from "@/lib/email-integration/documents";
 import { recordEmailEvent, type EmailEventType } from "@/lib/email-integration/events";
 import { generateMessageId } from "@/lib/email-integration/mime";
+import type { SendThread } from "@/lib/email-integration/providers/types";
 import { getEmailAdapter } from "@/lib/email-integration/providers";
 import type {
   EmailDocumentType,
@@ -441,7 +442,7 @@ export async function enqueueMailboxMessage(input: {
   subject: unknown;
   bodyText: unknown;
   attachments: MailboxAttachmentInput[];
-  thread: { providerThreadId: string; inReplyTo: string; references: string } | null;
+  thread: SendThread | null;
   /** What the message replies to or forwards, for the history label. */
   intent: "new" | "reply" | "forward";
 }): Promise<

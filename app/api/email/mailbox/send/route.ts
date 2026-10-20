@@ -13,9 +13,9 @@ import {
   MAILBOX_ATTACHMENTS_MAX_BYTES,
   MAILBOX_UPLOAD_MAX_BYTES,
 } from "@/lib/email-integration/config";
-import { getAttachment, getMessageBody } from "@/lib/email-integration/mailbox/gmail";
 import { requireMailbox } from "@/lib/email-integration/mailbox/access";
 import { replyReferences } from "@/lib/email-integration/mailbox/parse";
+import type { SendThread } from "@/lib/email-integration/providers/types";
 import { getStoredMessage } from "@/lib/email-integration/mailbox/store";
 import { syncMailbox } from "@/lib/email-integration/mailbox/sync";
 import {
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     });
   }
 
-  let thread: { providerThreadId: string; inReplyTo: string; references: string } | null = null;
+  let thread: SendThread | null = null;
   const sourceId =
     intent === "reply"
       ? payload.reply_to_message_id
@@ -98,9 +98,11 @@ export async function POST(request: Request) {
         providerThreadId: source.threadId,
         inReplyTo: source.messageIdHeader,
         references: replyReferences(source.references, source.messageIdHeader),
+        // Outlook threads replies through its own reply API on the original.
+        replyToProviderMessageId: source.providerMessageId,
       };
     } else if (payload.include_original_attachments === true) {
-      const body = await getMessageBody(readGate.credentials!, source.providerMessageId, 1);
+      const body = await readGate.adapter.getBody(readGate.credentials!, source.providerMessageId, 1);
       let total = attachments.reduce((sum, file) => sum + file.content.length, 0);
       for (const item of body?.attachments ?? []) {
         if (!item.attachmentId) continue;
@@ -111,7 +113,11 @@ export async function POST(request: Request) {
         attachments.push({
           name: item.name,
           contentType: item.mimeType,
-          content: await getAttachment(readGate.credentials!, source.providerMessageId, item.attachmentId),
+          content: await readGate.adapter.getAttachment(
+            readGate.credentials!,
+            source.providerMessageId,
+            item.attachmentId,
+          ),
         });
       }
     }

@@ -4,14 +4,14 @@
  * stores encrypted credentials, then redirects back to Settings.
  */
 
-import { getGoogleOAuthConfig, isEmailSendEnabled } from "@/lib/email-integration/config";
+import { isEmailSendEnabled } from "@/lib/email-integration/config";
 import {
   consumeOAuthState,
   EmailConnectionError,
   saveConnectedAccount,
 } from "@/lib/email-integration/connections";
 import { getEmailAdapter, parseEmailProvider } from "@/lib/email-integration/providers";
-import { GoogleOAuthError } from "@/lib/email-integration/providers/google";
+import { ProviderOAuthError } from "@/lib/email-integration/providers/types";
 import { resolveAppBaseUrl } from "@/lib/config/base-url";
 import { NextResponse } from "next/server";
 
@@ -25,12 +25,14 @@ const RETURN_PATHS = {
 
 function settingsRedirect(
   request: Request,
+  provider: string,
   params: Record<string, string>,
   returnTo: keyof typeof RETURN_PATHS = "emails",
 ) {
-  // Return to the origin Google just sent the user to (the registered redirect
-  // URI), so local dev on any port and each deployment land back on themselves.
-  const redirectUri = getGoogleOAuthConfig()?.redirectUri;
+  // Return to the origin the provider just sent the user to (its registered
+  // redirect URI), so local dev on any port and each deployment land back on
+  // themselves.
+  const redirectUri = getEmailAdapter(provider)?.redirectUri();
   const base = redirectUri
     ? new URL(redirectUri).origin
     : (resolveAppBaseUrl() ?? new URL(request.url).origin);
@@ -52,18 +54,19 @@ export async function GET(
   const providerError = searchParams.get("error");
 
   if (!provider || !adapter) {
-    return settingsRedirect(request, { email: "error", reason: "unsupported_provider" });
+    return settingsRedirect(request, rawProvider, { email: "error", reason: "unsupported_provider" });
   }
 
   // Consume the state even on denial so it can never be replayed.
   const stored = await consumeOAuthState(state, provider);
   if (!stored) {
-    return settingsRedirect(request, { email: "error", reason: "invalid_state" });
+    return settingsRedirect(request, rawProvider, { email: "error", reason: "invalid_state" });
   }
   const { returnTo } = stored;
   if (providerError || !code) {
     return settingsRedirect(
       request,
+      rawProvider,
       {
         email: "error",
         reason: providerError === "access_denied" ? "access_denied" : "authorisation_failed",
@@ -72,7 +75,7 @@ export async function GET(
     );
   }
   if (!isEmailSendEnabled(stored.businessId)) {
-    return settingsRedirect(request, { email: "error", reason: "not_enabled" }, returnTo);
+    return settingsRedirect(request, rawProvider, { email: "error", reason: "not_enabled" }, returnTo);
   }
 
   try {
@@ -90,19 +93,20 @@ export async function GET(
       // The send connection is kept either way; only report whether read came through.
       return settingsRedirect(
         request,
+        rawProvider,
         saved.capabilities.includes("read")
           ? { email: "inbox_enabled" }
           : { email: "error", reason: "missing_read_scope" },
         returnTo,
       );
     }
-    return settingsRedirect(request, { email: "connected" }, returnTo);
+    return settingsRedirect(request, rawProvider, { email: "connected" }, returnTo);
   } catch (error) {
     const reason =
-      error instanceof GoogleOAuthError || error instanceof EmailConnectionError
+      error instanceof ProviderOAuthError || error instanceof EmailConnectionError
         ? error.code
         : "connection_failed";
     console.error("[email/oauth] callback failed", reason);
-    return settingsRedirect(request, { email: "error", reason }, returnTo);
+    return settingsRedirect(request, rawProvider, { email: "error", reason }, returnTo);
   }
 }

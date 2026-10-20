@@ -12,12 +12,16 @@ import { isEmailSendEnabled, isRecipientAllowed } from "../lib/email-integration
 import { decryptJson, encryptJson } from "../lib/email-integration/crypto";
 import { extractBody, htmlToText, sanitizeEmailHtml } from "../lib/email-integration/mailbox/gmail";
 import { classifyMessage } from "../lib/email-integration/mailbox/match";
+import { EMPTY_BACKFILL, queueNewWork, readBackfill } from "../lib/email-integration/mailbox/backfill";
+import { customerSearchQuery, WHOLE_MAILBOX_QUERY } from "../lib/email-integration/mailbox/gmail";
+import { messageDocId } from "../lib/email-integration/mailbox/ids";
 import {
-  customerSearchQuery,
-  EMPTY_BACKFILL,
-  queueNewWork,
-  WHOLE_MAILBOX_QUERY,
-} from "../lib/email-integration/mailbox/backfill";
+  folderFor,
+  formatGraphAddress,
+  outlookCustomerSearch,
+  toMetadata,
+} from "../lib/email-integration/mailbox/microsoft";
+import { normaliseGraphScopes } from "../lib/email-integration/providers/microsoft";
 import type { PlatformDocumentRef } from "../lib/email-integration/types";
 import {
   extractAddresses,
@@ -448,7 +452,7 @@ describe("full-history import queue", () => {
     assert.equal(first.queue.filter((task) => task.type === "search").length, 3);
     assert.deepEqual(first.queue[first.queue.length - 1], {
       type: "search",
-      query: WHOLE_MAILBOX_QUERY,
+      search: { kind: "all" },
       pageToken: null,
     });
     assert.equal(first.done, false);
@@ -456,10 +460,14 @@ describe("full-history import queue", () => {
     // A later sync with one new customer queues just that search, ahead of
     // the sweep still in progress, and never a second sweep.
     customers.set("new@x.com", new Set());
-    const sweep = { type: "search" as const, query: WHOLE_MAILBOX_QUERY, pageToken: "p9" };
+    const sweep = { type: "search" as const, search: { kind: "all" as const }, pageToken: "p9" };
     const second = queueNewWork({ ...first, queue: [sweep] }, { customers, platformThreads }, "owner@biz.com");
     assert.equal(second.queue.length, 2);
-    assert.match((second.queue[0] as { query: string }).query, /new@x\.com/);
+    assert.deepEqual(second.queue[0], {
+      type: "search",
+      search: { kind: "customers", addresses: ["new@x.com"] },
+      pageToken: null,
+    });
     assert.deepEqual(second.queue[1], sweep);
   });
 
@@ -468,5 +476,118 @@ describe("full-history import queue", () => {
     assert.equal(first.queue.length, 1);
     const later = queueNewWork({ ...first, queue: [] }, { customers: new Map(), platformThreads: new Map() }, "o@b.com");
     assert.equal(later.done, true);
+  });
+});
+
+describe("provider-neutral import queue", () => {
+  it("builds Gmail queries from neutral searches", () => {
+    assert.equal(WHOLE_MAILBOX_QUERY, "-in:spam -in:drafts");
+  });
+
+  it("converts queues saved as raw Gmail queries, keeping the page token", () => {
+    const state = readBackfill({
+      queue: [
+        { type: "search", query: "-in:spam -in:drafts", pageToken: "p42" },
+        { type: "search", query: customerSearchQuery(["a@x.com", "b@y.com"]), pageToken: null },
+        { type: "thread", threadId: "t9" },
+        { type: "search", query: "nonsense" },
+      ],
+      searched: ["a@x.com"],
+      imported: 4405,
+      wholeMailboxQueued: true,
+    });
+    assert.deepEqual(state?.queue, [
+      { type: "search", search: { kind: "all" }, pageToken: "p42" },
+      { type: "search", search: { kind: "customers", addresses: ["a@x.com", "b@y.com"] }, pageToken: null },
+      { type: "thread", threadId: "t9" },
+    ]);
+    assert.equal(state?.imported, 4405);
+  });
+});
+
+describe("Outlook mapping", () => {
+  const folders = {
+    inbox: "F-IN",
+    sentitems: "F-SENT",
+    archive: "F-ARCH",
+    deleteditems: "F-DEL",
+    drafts: "F-DRAFT",
+    junkemail: "F-JUNK",
+  };
+
+  it("maps folders to mailbox views and hides drafts and junk", () => {
+    assert.equal(folderFor("F-IN", false, folders), "inbox");
+    assert.equal(folderFor("F-SENT", false, folders), "sent");
+    assert.equal(folderFor("F-DEL", false, folders), "trash");
+    assert.equal(folderFor("F-ARCH", false, folders), "archive");
+    assert.equal(folderFor("F-CUSTOM", false, folders), "archive");
+    assert.equal(folderFor("F-DRAFT", false, folders), null);
+    assert.equal(folderFor("F-JUNK", false, folders), null);
+    assert.equal(folderFor("F-IN", true, folders), null);
+  });
+
+  it("formats addresses the way the matcher reads them", () => {
+    assert.equal(formatGraphAddress({ emailAddress: { name: "Sam Smith", address: "sam@x.com" } }), "Sam Smith <sam@x.com>");
+    assert.equal(formatGraphAddress({ emailAddress: { name: "sam@x.com", address: "sam@x.com" } }), "sam@x.com");
+    assert.equal(formatGraphAddress({ emailAddress: { name: 'Bad <"name">', address: "b@x.com" } }), "Bad name <b@x.com>");
+    assert.equal(formatGraphAddress(undefined), "");
+  });
+
+  it("turns a Graph message into provider-neutral details", () => {
+    const meta = toMetadata(
+      {
+        id: "AAMk/abc+=",
+        conversationId: "AAQk=",
+        parentFolderId: "F-IN",
+        subject: "Quote",
+        bodyPreview: "Hi there",
+        from: { emailAddress: { name: "Sam", address: "sam@x.com" } },
+        toRecipients: [{ emailAddress: { address: "owner@biz.com" } }],
+        ccRecipients: [{ emailAddress: { name: "Ann", address: "ann@x.com" } }],
+        receivedDateTime: "2026-10-20T01:02:03Z",
+        isRead: false,
+        flag: { flagStatus: "flagged" },
+        hasAttachments: true,
+        internetMessageId: "<m1@x.com>",
+      },
+      folders,
+    );
+    assert.deepEqual(meta, {
+      id: "AAMk/abc+=",
+      threadId: "AAQk=",
+      folder: "inbox",
+      unread: true,
+      starred: true,
+      from: "Sam <sam@x.com>",
+      to: "owner@biz.com",
+      cc: "Ann <ann@x.com>",
+      subject: "Quote",
+      messageIdHeader: "<m1@x.com>",
+      references: "",
+      snippet: "Hi there",
+      date: Date.parse("2026-10-20T01:02:03Z"),
+      hasAttachments: true,
+    });
+  });
+
+  it("searches customers as participants and strips quotes", () => {
+    assert.equal(outlookCustomerSearch(["a@x.com", 'b"@y.com']), "participants:a@x.com OR participants:b@y.com");
+  });
+
+  it("reads Microsoft scopes with or without the Graph prefix", () => {
+    const scopes = normaliseGraphScopes("https://graph.microsoft.com/Mail.Send Mail.ReadWrite openid");
+    assert.deepEqual(scopes, ["mail.send", "mail.readwrite", "openid"]);
+    assert.deepEqual(capabilitiesFromScopes(scopes), ["send", "read", "modify"]);
+    assert.deepEqual(capabilitiesFromScopes(normaliseGraphScopes("Mail.Send User.Read")), ["send"]);
+  });
+});
+
+describe("stored message ids", () => {
+  it("keeps Gmail ids readable and hashes ids Firestore can't use as keys", () => {
+    assert.equal(messageDocId("conn", "18c2fa9e01"), "conn_18c2fa9e01");
+    const outlook = messageDocId("conn", "AAMkAGI2/abc+def==");
+    assert.match(outlook, /^conn_h[0-9a-f]{40}$/);
+    assert.doesNotMatch(outlook, /\//);
+    assert.equal(outlook, messageDocId("conn", "AAMkAGI2/abc+def=="));
   });
 });

@@ -17,21 +17,17 @@ import {
   type BusinessMailContext,
 } from "@/lib/email-integration/mailbox/directory";
 import {
-  getMessageMetadata,
-  getProfileHistoryId,
-  type GmailMetadata,
-  getThreadMessageIds,
-  GmailReadError,
-  listHistory,
-  searchMessagePage,
-} from "@/lib/email-integration/mailbox/gmail";
-import {
   EMPTY_BACKFILL,
   queueNewWork,
   readBackfill,
-  WHOLE_MAILBOX_QUERY,
   type BackfillState,
 } from "@/lib/email-integration/mailbox/backfill";
+import {
+  MailboxReadError,
+  type MailboxAdapter,
+  type MailboxMetadata,
+} from "@/lib/email-integration/mailbox/provider";
+import { getMailboxAdapter } from "@/lib/email-integration/providers";
 import { classifyMessage } from "@/lib/email-integration/mailbox/match";
 import {
   deleteStoredMessages,
@@ -52,9 +48,9 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
  *   labelled with its customer / platform link.
  */
 const SYNC_SCHEMA_VERSION = 4;
-/** Parallel Gmail reads; kept well under Gmail's per-user rate limit. */
+/** Parallel reads; kept well under providers' per-user rate limits. */
 const FETCH_CONCURRENCY = 5;
-/** How long to wait after Gmail says "slow down" before importing again. */
+/** How long to wait after the provider says "slow down" before importing again. */
 const RATE_LIMIT_PAUSE_MS = 60 * 1000;
 
 export type SyncOutcome =
@@ -66,6 +62,7 @@ function toMillis(value: unknown): number | null {
 }
 
 type IngestContext = {
+  adapter: MailboxAdapter;
   credentials: ProviderCredentials;
   connection: EmailConnectionRecord;
   mail: BusinessMailContext;
@@ -75,12 +72,12 @@ type IngestContext = {
   expanded: Set<string>;
 };
 
-function classify(context: IngestContext, message: GmailMetadata) {
+function classify(context: IngestContext, message: MailboxMetadata) {
   return classifyMessage({
     threadId: message.threadId,
-    from: message.headers.from ?? "",
-    to: message.headers.to ?? "",
-    cc: message.headers.cc ?? "",
+    from: message.from,
+    to: message.to,
+    cc: message.cc,
     ownAddress: context.connection.address,
     customers: context.mail.customers,
     platformThreads: context.mail.platformThreads,
@@ -97,16 +94,20 @@ function classify(context: IngestContext, message: GmailMetadata) {
 async function ingest(
   context: IngestContext,
   ids: string[],
-  options: { refresh?: boolean; relink?: boolean } = {},
+  options: { refresh?: boolean; relink?: boolean; prefetched?: MailboxMetadata[] } = {},
 ): Promise<{ stored: number; newlyLinked: string[] }> {
   let stored = 0;
   const newlyLinked: string[] = [];
+  // Providers that list full details with the ids (Outlook) skip a fetch per message.
+  const prefetched = new Map((options.prefetched ?? []).map((message) => [message.id, message]));
   const todo = ids.filter(
     (id) => options.refresh || options.relink || !context.knownMessages.has(id),
   );
   for (let i = 0; i < todo.length; i += FETCH_CONCURRENCY) {
     const batch = await Promise.all(
-      todo.slice(i, i + FETCH_CONCURRENCY).map((id) => getMessageMetadata(context.credentials, id)),
+      todo
+        .slice(i, i + FETCH_CONCURRENCY)
+        .map((id) => prefetched.get(id) ?? context.adapter.getMetadata(context.credentials, id)),
     );
     // Classify in order (it updates the linked-thread set), then write the
     // whole batch in parallel.
@@ -150,7 +151,7 @@ async function expandThreads(context: IngestContext, threadIds: string[]): Promi
   for (const threadId of threadIds) {
     if (context.expanded.has(threadId)) continue;
     context.expanded.add(threadId);
-    const ids = await getThreadMessageIds(context.credentials, threadId);
+    const ids = await context.adapter.threadMessageIds(context.credentials, threadId);
     stored += (await ingest(context, ids, { relink: true })).stored;
   }
   return stored;
@@ -172,16 +173,19 @@ async function runBackfill(
   while (queue.length > 0 && Date.now() < deadline) {
     const task = queue[0];
     if (task.type === "search") {
-      const page = await searchMessagePage(context.credentials, task.query, task.pageToken);
+      const page = await context.adapter.searchPage(context.credentials, task.search, task.pageToken);
       // Customer searches also re-label mail the whole-mailbox sweep stored earlier.
-      const result = await ingest(context, page.ids, { relink: task.query !== WHOLE_MAILBOX_QUERY });
+      const result = await ingest(context, page.ids, {
+        relink: task.search.kind !== "all",
+        prefetched: page.prefetched,
+      });
       const expandedCount = await expandThreads(context, result.newlyLinked);
       stored += result.stored + expandedCount;
       imported += result.stored + expandedCount;
       if (page.nextPageToken) queue[0] = { ...task, pageToken: page.nextPageToken };
       else queue.shift();
     } else {
-      const ids = await getThreadMessageIds(context.credentials, task.threadId);
+      const ids = await context.adapter.threadMessageIds(context.credentials, task.threadId);
       const result = await ingest(context, ids, { relink: true });
       stored += result.stored;
       imported += result.stored;
@@ -193,7 +197,7 @@ async function runBackfill(
 }
 
 /**
- * Syncs one mailbox. Incremental Gmail history keeps it current; a resumable
+ * Syncs one mailbox. Incremental provider changes keep it current; a resumable
  * queue imports all past mail with customers and platform conversations.
  * One lease per mailbox prevents overlapping runs.
  */
@@ -201,7 +205,8 @@ export async function syncMailbox(
   connection: EmailConnectionRecord,
   options: { manual?: boolean; budgetMs?: number } = {},
 ): Promise<SyncOutcome> {
-  if (connection.status !== "active" || !connection.capabilities.includes("read")) {
+  const adapter = getMailboxAdapter(connection.provider);
+  if (!adapter || connection.status !== "active" || !connection.capabilities.includes("read")) {
     return { ok: false, code: "not_enabled" };
   }
   const deadline = Date.now() + Math.min(options.budgetMs ?? MAILBOX_SYNC_BUDGET_MS, MAILBOX_SYNC_BUDGET_MS);
@@ -262,6 +267,7 @@ export async function syncMailbox(
       loadKnownMessages(connection.id),
     ]);
     const context: IngestContext = {
+      adapter,
       credentials: credentials.credentials,
       connection,
       mail,
@@ -277,15 +283,18 @@ export async function syncMailbox(
 
     if (historyId) {
       try {
-        const changes = await listHistory(credentials.credentials, historyId, MAILBOX_SYNC_MAX_MESSAGES);
-        const result = await ingest(context, changes.changedIds, { refresh: true });
+        const changes = await adapter.changes(credentials.credentials, historyId, MAILBOX_SYNC_MAX_MESSAGES);
+        const result = await ingest(context, changes.changedIds, {
+          refresh: true,
+          prefetched: changes.prefetched,
+        });
         stored += result.stored + (await expandThreads(context, result.newlyLinked));
         await markMessagesDeleted(connection.id, changes.deletedIds);
-        historyId = changes.historyId ?? historyId;
+        historyId = changes.cursor;
       } catch (error) {
         // An expired cursor means changes were missed: import everything again
         // (already-stored mail is kept and skipped).
-        if (!(error instanceof GmailReadError && error.code === "not_found")) throw error;
+        if (!(error instanceof MailboxReadError && error.code === "cursor_expired")) throw error;
         mode = "resync";
         historyId = null;
         backfill = { ...EMPTY_BACKFILL, imported: backfill.imported };
@@ -293,7 +302,7 @@ export async function syncMailbox(
     }
     if (!historyId) {
       // Checkpoint before importing, so mail arriving meanwhile is replayed later.
-      historyId = await getProfileHistoryId(credentials.credentials);
+      historyId = await adapter.startCursor(credentials.credentials);
     }
 
     backfill = queueNewWork(backfill, mail, connection.address);
@@ -317,7 +326,7 @@ export async function syncMailbox(
     });
     return { ok: true, stored, mode, historyComplete: result.state.done };
   } catch (error) {
-    const code = error instanceof GmailReadError ? error.code : "sync_failed";
+    const code = error instanceof MailboxReadError ? error.code : "sync_failed";
     if (code === "rate_limited") {
       // Progress is already saved page by page; just pause and resume later.
       await finish({ pausedUntil: Timestamp.fromMillis(Date.now() + RATE_LIMIT_PAUSE_MS) });
@@ -336,8 +345,10 @@ export async function refreshMessageLabels(
   credentials: ProviderCredentials,
   providerMessageIds: string[],
 ): Promise<void> {
+  const adapter = getMailboxAdapter(connection.provider);
+  if (!adapter) return;
   for (const id of providerMessageIds) {
-    const message = await getMessageMetadata(credentials, id);
+    const message = await adapter.getMetadata(credentials, id);
     if (message) await updateMessageLabels(connection.id, message);
   }
 }
@@ -350,7 +361,10 @@ export async function importMessages(
   connection: EmailConnectionRecord,
   credentials: ProviderCredentials,
   providerMessageIds: string[],
+  prefetched?: MailboxMetadata[],
 ): Promise<void> {
+  const adapter = getMailboxAdapter(connection.provider);
+  if (!adapter) return;
   const [mail, known] = await Promise.all([
     loadBusinessMailContext(connection.businessId),
     loadKnownMessages(connection.id),
@@ -359,6 +373,7 @@ export async function importMessages(
   if (missing.length === 0) return;
   await ingest(
     {
+      adapter,
       credentials,
       connection,
       mail,
@@ -367,5 +382,6 @@ export async function importMessages(
       expanded: new Set(),
     },
     missing,
+    { prefetched },
   );
 }

@@ -1,18 +1,14 @@
 /**
- * POST { action } — Gmail-side changes to a whole conversation: read/unread,
- * star, archive, back to Inbox, trash or restore. Needs gmail.modify. The
- * stored copies are refreshed straight away so every view updates.
+ * POST { action } — provider-side changes to a whole conversation: read/unread,
+ * star, archive, back to Inbox, trash or restore. Needs organise access
+ * (gmail.modify / Mail.ReadWrite). The stored copies are refreshed straight
+ * away so every view updates.
  */
 
 import { emailError } from "@/lib/email-integration/auth";
 import { recordEmailEvent } from "@/lib/email-integration/events";
-import {
-  GmailReadError,
-  modifyThreadLabels,
-  trashThread,
-  untrashThread,
-} from "@/lib/email-integration/mailbox/gmail";
-import { requireMailbox } from "@/lib/email-integration/mailbox/access";
+import { providerIdParam, requireMailbox } from "@/lib/email-integration/mailbox/access";
+import { MailboxReadError } from "@/lib/email-integration/mailbox/provider";
 import { listThreadMessages } from "@/lib/email-integration/mailbox/store";
 import { refreshMessageLabels } from "@/lib/email-integration/mailbox/sync";
 import type { MailboxAction } from "@/lib/email-integration/types";
@@ -36,8 +32,8 @@ export async function POST(
   request: Request,
   ctx: RouteContext<"/api/email/mailbox/threads/[threadId]/actions">,
 ) {
-  const { threadId } = await ctx.params;
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(threadId)) return emailError(404, "Conversation not found.");
+  const threadId = providerIdParam((await ctx.params).threadId);
+  if (!threadId) return emailError(404, "Conversation not found.");
 
   const body = (await request.json().catch(() => null)) as { action?: unknown } | null;
   const action = ACTIONS.find((item) => item === body?.action);
@@ -55,41 +51,23 @@ export async function POST(
   if (stored.length === 0) return emailError(404, "Conversation not found.");
 
   const credentials = gate.credentials!;
+  const own = gate.connection.address.toLowerCase();
   try {
-    switch (action) {
-      case "mark_read":
-        await modifyThreadLabels(credentials, threadId, { remove: ["UNREAD"] });
-        break;
-      case "mark_unread":
-        await modifyThreadLabels(credentials, threadId, { add: ["UNREAD"] });
-        break;
-      case "star":
-        await modifyThreadLabels(credentials, threadId, { add: ["STARRED"] });
-        break;
-      case "unstar":
-        await modifyThreadLabels(credentials, threadId, { remove: ["STARRED"] });
-        break;
-      case "archive":
-        await modifyThreadLabels(credentials, threadId, { remove: ["INBOX"] });
-        break;
-      case "move_to_inbox":
-        if (stored.some((message) => message.folder === "trash")) {
-          await untrashThread(credentials, threadId);
-        }
-        await modifyThreadLabels(credentials, threadId, { add: ["INBOX"] });
-        break;
-      case "trash":
-        await trashThread(credentials, threadId);
-        break;
-      case "untrash":
-        await untrashThread(credentials, threadId);
-        break;
-    }
+    await gate.adapter.threadAction(
+      credentials,
+      threadId,
+      action,
+      stored.map((message) => ({
+        id: message.providerMessageId,
+        folder: message.folder,
+        fromSelf: message.fromAddress.toLowerCase() === own,
+      })),
+    );
   } catch (error) {
-    if (error instanceof GmailReadError && error.code === "read_not_authorised") {
+    if (error instanceof MailboxReadError && error.code === "read_not_authorised") {
       return emailError(409, "Allow mailbox management to use this action.", "needs_modify");
     }
-    return emailError(502, "Gmail didn't accept that change. Try again.");
+    return emailError(502, "Your email provider didn't accept that change. Try again.");
   }
 
   await refreshMessageLabels(

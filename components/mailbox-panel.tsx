@@ -70,7 +70,7 @@ function accentFor(message: MailboxMessageSummary): string {
   return "border-l-transparent";
 }
 
-/** The connected Gmail mailbox, labelled with each conversation's link to the platform. */
+/** The connected mailbox (Gmail or Outlook), labelled with each conversation's link to the platform. */
 export function MailboxPanel() {
   const { user } = useAuth();
   const { loading, connection, reload } = useEmailSending();
@@ -101,7 +101,7 @@ export function MailboxPanel() {
   if (!connection) {
     return (
       <p className="rounded-2xl border border-dashed border-outline-variant/60 px-5 py-8 text-center font-body text-[13px] text-on-surface-variant">
-        Connect Gmail above to use your mailbox here.
+        Connect Gmail or Outlook above to use your mailbox here.
       </p>
     );
   }
@@ -128,16 +128,16 @@ export function MailboxPanel() {
           <div>
             <p className="font-body text-[14px] font-semibold text-on-surface">Use your whole mailbox here</p>
             <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
-              This asks Google for permission to read and organise {connection.address}.
+              This asks {connection.provider === "microsoft" ? "Microsoft" : "Google"} for permission to read and organise {connection.address}.
               All your mail is imported (spam and drafts excepted), and email with
               your customers is linked to their quotes, invoices and jobs. Only
-              business owners can see it, message contents are read from Gmail when
+              business owners can see it, message contents are read from your mailbox when
               opened and not stored, and disconnecting removes everything imported.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => void startUpgrade()} disabled={enabling} className={BUTTON_PRIMARY}>
-              {enabling ? "Opening Google…" : "Enable mailbox"}
+              {enabling ? "Opening sign-in…" : "Enable mailbox"}
             </button>
             <button type="button" onClick={() => setDraft({ intent: "new" })} className={BUTTON_OUTLINE}>
               <span className="material-symbols-outlined text-[18px]">edit</span>
@@ -163,7 +163,7 @@ export function MailboxPanel() {
             To mark read, star, archive or delete from here, allow BMS Pro Trade to organise your mail.
           </p>
           <button type="button" onClick={() => void startUpgrade()} disabled={enabling} className={BUTTON_OUTLINE}>
-            {enabling ? "Opening Google…" : "Allow"}
+            {enabling ? "Opening sign-in…" : "Allow"}
           </button>
         </div>
       ) : null}
@@ -269,7 +269,7 @@ function Mailbox({
         setStatus(result.status);
         await load();
       } catch (err) {
-        // Busy, too soon and "Gmail asked us to slow down" are normal while
+        // Busy, too soon and "slow down" from the provider are normal while
         // importing; the status bar explains them, so no red error.
         const quiet =
           err instanceof EmailApiError &&
@@ -292,7 +292,7 @@ function Mailbox({
   }, [load]);
 
   // Keep importing while past mail is incomplete and the page is open; wait
-  // out a Gmail "slow down" pause first. Otherwise refresh once a minute.
+  // out a provider "slow down" pause first. Otherwise refresh once a minute.
   const importing = status ? !status.historyComplete : false;
   useEffect(() => {
     if (!status || syncing) return;
@@ -506,7 +506,7 @@ function Mailbox({
               <span className="font-semibold">Importing your mailbox</span> ·{" "}
               {(status?.imported ?? 0).toLocaleString("en-AU")} emails so far.{" "}
               {status?.pausedUntil
-                ? `Gmail asked us to slow down, so importing continues at ${new Date(status.pausedUntil).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}. Everything already imported is ready to use.`
+                ? `Your email provider asked us to slow down, so importing continues at ${new Date(status.pausedUntil).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}. Everything already imported is ready to use.`
                 : "Customer and BMS Pro conversations come first; the rest of your history follows."}
             </p>
           </div>
@@ -625,7 +625,7 @@ function ThreadView({
         const last = payload.messages[payload.messages.length - 1];
         if (last) open.add(last.id);
         setExpanded(open);
-        // Opening a conversation marks it read in Gmail, like Gmail does.
+        // Opening a conversation marks it read in the mailbox too, like Gmail and Outlook do.
         if (canModify && !markedRead.current && payload.messages.some((message) => message.unread)) {
           markedRead.current = true;
           void onAction("mark_read");

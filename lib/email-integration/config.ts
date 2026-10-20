@@ -85,6 +85,20 @@ export type GoogleOAuthConfig = {
   redirectUri: string;
 };
 
+export type MicrosoftOAuthConfig = GoogleOAuthConfig & {
+  /** "common" (work, school and personal accounts) unless set. */
+  tenant: string;
+};
+
+export function getMicrosoftOAuthConfig(): MicrosoftOAuthConfig | null {
+  const clientId = process.env.MICROSOFT_EMAIL_CLIENT_ID?.trim();
+  const clientSecret = process.env.MICROSOFT_EMAIL_CLIENT_SECRET?.trim();
+  const redirectUri = process.env.MICROSOFT_EMAIL_REDIRECT_URI?.trim();
+  if (!clientId || !clientSecret || !redirectUri) return null;
+  const tenant = process.env.MICROSOFT_EMAIL_TENANT?.trim() || "common";
+  return { clientId, clientSecret, redirectUri, tenant };
+}
+
 export function getGoogleOAuthConfig(): GoogleOAuthConfig | null {
   const clientId = process.env.GOOGLE_EMAIL_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_EMAIL_CLIENT_SECRET?.trim();

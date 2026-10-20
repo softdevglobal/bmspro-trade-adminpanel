@@ -193,7 +193,7 @@ function RecipientField({
   );
 }
 
-/** New email, reply, reply all or forward, sent from the connected Gmail. */
+/** New email, reply, reply all or forward, sent from the connected mailbox. */
 export function MailComposer({
   draft,
   fromAddress,

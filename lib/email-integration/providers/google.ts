@@ -6,12 +6,13 @@ import {
   type GoogleOAuthConfig,
 } from "@/lib/email-integration/config";
 import { buildMimeMessage } from "@/lib/email-integration/mime";
-import type {
-  ConnectedAccount,
-  EmailSendAdapter,
-  ProviderCredentials,
-  RefreshResult,
-  SendResult,
+import {
+  ProviderOAuthError,
+  type ConnectedAccount,
+  type EmailSendAdapter,
+  type ProviderCredentials,
+  type RefreshResult,
+  type SendResult,
 } from "@/lib/email-integration/providers/types";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -29,14 +30,7 @@ export const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 const SEND_SCOPES = ["openid", "email", GMAIL_SEND_SCOPE];
 const ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 
-export class GoogleOAuthError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export class GoogleOAuthError extends ProviderOAuthError {}
 
 function requireConfig(): GoogleOAuthConfig {
   const config = getGoogleOAuthConfig();
@@ -143,6 +137,11 @@ function isPreConnectFailure(error: unknown): boolean {
 
 export const googleEmailAdapter: EmailSendAdapter = {
   provider: "google",
+  label: "Gmail",
+
+  isConfigured: () => getGoogleOAuthConfig() !== null,
+
+  redirectUri: () => getGoogleOAuthConfig()?.redirectUri ?? null,
 
   buildAuthorizationUrl({ state, codeChallenge, loginHint, includeRead }) {
     const config = requireConfig();

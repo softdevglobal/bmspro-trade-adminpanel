@@ -10,7 +10,6 @@ import {
   getEmailConnectionById,
   parseReturnTo,
 } from "@/lib/email-integration/connections";
-import { getGoogleOAuthConfig } from "@/lib/email-integration/config";
 import { getEmailAdapter } from "@/lib/email-integration/providers";
 import { NextResponse } from "next/server";
 
@@ -29,8 +28,8 @@ export async function POST(
     return emailError(404, "Email connection not found.");
   }
   const adapter = getEmailAdapter(connection.provider);
-  if (!adapter || !getGoogleOAuthConfig()) {
-    return emailError(503, "Google email is not configured on the server.");
+  if (!adapter || !adapter.isConfigured()) {
+    return emailError(503, "This email provider isn't configured on the server.");
   }
 
   const body = (await request.json().catch(() => null)) as { return_to?: unknown } | null;

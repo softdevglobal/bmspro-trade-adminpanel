@@ -10,7 +10,6 @@ import {
   parseReturnTo,
 } from "@/lib/email-integration/connections";
 import { getEmailAdapter, parseEmailProvider } from "@/lib/email-integration/providers";
-import { getGoogleOAuthConfig } from "@/lib/email-integration/config";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -28,8 +27,8 @@ export async function POST(
   if (!provider || !adapter) {
     return emailError(404, "This email provider is not supported.");
   }
-  if (provider === "google" && !getGoogleOAuthConfig()) {
-    return emailError(503, "Google email sending is not configured on the server.");
+  if (!adapter.isConfigured()) {
+    return emailError(503, `${adapter.label} isn't configured on the server yet.`);
   }
 
   // Reconnecting the current mailbox pre-selects that account at Google.

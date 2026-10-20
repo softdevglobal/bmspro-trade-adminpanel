@@ -256,7 +256,7 @@ function SendDocumentEmailDialog({
                 Connect your email first
               </p>
               <p className="mt-1 font-body text-[12px] text-on-surface-variant">
-                Connect Gmail on the Emails page to send documents from your own address.
+                Connect Gmail or Outlook on the Emails page to send documents from your own address.
               </p>
               <Link
                 href="/dashboard/emails"
@@ -269,7 +269,7 @@ function SendDocumentEmailDialog({
 
           {preview && connection?.status === "needs_reconnect" ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-body text-[12px] text-amber-800">
-              Your Gmail sign-in expired.{" "}
+              Your email sign-in expired.{" "}
               <Link href="/dashboard/emails" className="font-semibold underline">
                 Reconnect on the Emails page
               </Link>{" "}

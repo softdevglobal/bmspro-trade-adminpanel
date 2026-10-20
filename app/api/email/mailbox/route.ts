@@ -1,11 +1,10 @@
 /**
  * GET ?view=inbox|sent|starred|archive|trash&cursor=&q= — the business's
- * mailbox, newest first, plus sync/import status. With `q`, Gmail's own search
- * runs across the whole mailbox.
+ * mailbox, newest first, plus sync/import status. With `q`, the provider's own
+ * search runs across the whole mailbox.
  */
 
 import { emailError } from "@/lib/email-integration/auth";
-import { searchMessageIds } from "@/lib/email-integration/mailbox/gmail";
 import { importMessages } from "@/lib/email-integration/mailbox/sync";
 import { requireMailbox } from "@/lib/email-integration/mailbox/access";
 import {
@@ -31,9 +30,10 @@ export async function GET(request: Request) {
 
   if (q) {
     try {
-      const ids = await searchMessageIds(gate.credentials!, q, 50);
+      const page = await gate.adapter.searchPage(gate.credentials!, { kind: "text", text: q }, null);
+      const ids = page.ids.slice(0, 50);
       // Hits the background import hasn't reached yet are imported now.
-      await importMessages(gate.connection, gate.credentials!, ids);
+      await importMessages(gate.connection, gate.credentials!, ids, page.prefetched);
       const items = await getStoredMessagesByProviderIds(gate.connection.id, ids);
       return NextResponse.json({ ok: true, items, nextCursor: null, status });
     } catch {
