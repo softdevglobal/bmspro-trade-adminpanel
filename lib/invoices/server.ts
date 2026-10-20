@@ -26,6 +26,7 @@ import { resolveInvoicePayUrl } from "@/lib/payments/document-pay-link";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { allocateInvoiceCode } from "@/lib/reference-codes.server";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
+import { resolveInvoiceCustomer } from "@/lib/invoices/customer";
 import { FieldValue } from "firebase-admin/firestore";
 import type {
   CreateDirectInvoiceInput,
@@ -839,6 +840,8 @@ export async function createInvoiceFromQuotation(
 
   const values = buildInvoiceValues(input);
   if (!values.ok) return values;
+  const { customer: invoiceCustomer, address: invoiceAddress } =
+    resolveInvoiceCustomer(input, quotation);
 
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(quotation.id);
   const existing = await docRef.get();
@@ -854,19 +857,9 @@ export async function createInvoiceFromQuotation(
       const canUpdateDirectDetails =
         quotation.createdSource === "invoice_direct" ||
         existingInvoice.status === "sent";
-      const customer =
-        canUpdateDirectDetails && input.customer
-          ? input.customer
-          : quotation.customer;
-      const address =
-        canUpdateDirectDetails && input.address
-          ? {
-              street: input.address.street ?? "",
-              suburb: input.address.suburb ?? "",
-              state: input.address.state ?? "",
-              postcode: input.address.postcode ?? "",
-            }
-          : quotation.address;
+      // Customer details can be corrected on a draft as well as a sent invoice.
+      const customer = invoiceCustomer;
+      const address = invoiceAddress;
       const serviceTitle =
         canUpdateDirectDetails && input.serviceTitle?.trim()
           ? input.serviceTitle.trim()
@@ -1039,8 +1032,8 @@ export async function createInvoiceFromQuotation(
       id: quotation.id,
       quotationCode: quotation.quotationCode,
       serviceTitle: quotation.serviceTitle,
-      customer: quotation.customer,
-      address: quotation.address,
+      customer: invoiceCustomer,
+      address: invoiceAddress,
       finalPriceAud: values.finalPriceAud,
       subtotalAud: values.subtotalAud,
       balanceDueAud: values.balanceDueAud,
@@ -1060,8 +1053,8 @@ export async function createInvoiceFromQuotation(
     quotationCode: quotation.quotationCode,
     inspectionRequestId: quotation.inspectionRequestId,
     serviceTitle: quotation.serviceTitle,
-    customer: quotation.customer,
-    address: quotation.address,
+    customer: invoiceCustomer,
+    address: invoiceAddress,
     lineItems: serializeLineItemsForFirestore(values.lineItems),
     subtotalAud: values.subtotalAud,
     discountAud: values.discountAud,
