@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic";
 const RETURN_PATHS = {
   emails: "/dashboard/emails",
   settings: "/dashboard/settings",
+  app: "/email/connected",
 } as const;
 
 function settingsRedirect(

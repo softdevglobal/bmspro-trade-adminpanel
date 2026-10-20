@@ -133,11 +133,15 @@ function connectionDocId(
 
 // ---- OAuth state -----------------------------------------------------------
 
-/** Pages that can start the connect flow; the callback returns to the same one. */
-export type OAuthReturnTo = "emails" | "settings";
+/**
+ * Where the connect flow started; the callback returns there. "app" is the
+ * mobile app, which signs in through the phone's browser and then shows a
+ * page telling the owner to go back to the app.
+ */
+export type OAuthReturnTo = "emails" | "settings" | "app";
 
 export function parseReturnTo(value: unknown): OAuthReturnTo {
-  return value === "settings" ? "settings" : "emails";
+  return value === "settings" || value === "app" ? value : "emails";
 }
 
 export type OAuthStateRecord = {
