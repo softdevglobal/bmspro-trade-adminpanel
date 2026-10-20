@@ -175,7 +175,7 @@ export function EmailConnectionSettings({
             Connect {passwordForm.label}
           </p>
           <p className="mt-0.5 font-body text-[12px] leading-relaxed text-on-surface-variant">
-            {passwordForm.company} doesn&apos;t let other apps use your normal password. Create an
+            {`${passwordForm.company} doesn't let other apps use your normal password.`} Create an
             app password in your {passwordForm.company} account (Account security → Generate app
             password), then paste it here.{" "}
             {passwordForm.appPasswordHelpUrl ? (
