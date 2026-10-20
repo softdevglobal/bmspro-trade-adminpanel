@@ -271,3 +271,42 @@ Microsoft notes:
 
 Environment variables: `MICROSOFT_EMAIL_CLIENT_ID`, `MICROSOFT_EMAIL_CLIENT_SECRET`,
 `MICROSOFT_EMAIL_REDIRECT_URI`, optional `MICROSOFT_EMAIL_TENANT` (default `common`).
+
+## Yahoo Mail (IMAP / SMTP with an app password)
+
+Yahoo only grants mail OAuth to apps it has approved, so Yahoo mailboxes
+connect with an **app password** the owner creates in their Yahoo account
+(Account security → Generate app password). The owner enters their address and
+the app password on the Email card; the server logs in to IMAP and SMTP to
+check them before saving. Nothing needs to be set up on the server: no keys or
+env variables.
+
+Code: `providers/app-password.ts` (connect, SMTP sending) and
+`mailbox/imap.ts` (reading and organising), with the pure helpers in
+`imap/ids.ts`, connection reuse in `imap/session.ts` and server settings in
+`imap/servers.ts`. Another IMAP provider (AOL, iCloud, …) is a new entry in
+`servers.ts` plus a provider id.
+
+| | Yahoo |
+| --- | --- |
+| Servers | `imap.mail.yahoo.com:993`, `smtp.mail.yahoo.com:465` (TLS) |
+| Access | Full mailbox from the start (send, read, organise); no separate "enable mailbox" step |
+| Folders | Inbox, Sent, Archive and Trash by their IMAP special-use flags; drafts and Bulk (spam) hidden |
+| Starred | `\Flagged` |
+| Message ids | `folder_uidvalidity_uid`. Moving mail changes its UID, so actions return the new ids and the stored copy is replaced |
+| Conversations | The root Message-ID of the References chain (IMAP has no threads) |
+| Changes | New mail from UIDNEXT; read/starred changes and removals in the newest 150 messages per folder (all mail with CONDSTORE) |
+| Sending | SMTP; Bcc only in the envelope. Yahoo files sent mail in Sent itself (`savesSentCopy`); other servers get an IMAP APPEND |
+
+Notes:
+- The app password is stored encrypted like OAuth tokens. It doesn't expire;
+  if the owner removes it in Yahoo, sends and syncs fail with an auth error and
+  the connection asks to be reconnected with a new one.
+- Disconnect deletes the stored password. Only the owner can revoke it in Yahoo.
+- SMTP outcomes: a server reply is definite (4xx retried, 5xx not); a dropped
+  connection before DATA is retried; during or after DATA it is "unknown" and
+  never retried automatically.
+- Read/starred changes made in Yahoo to mail older than the newest 150 per folder
+  are picked up only if the server supports CONDSTORE.
+- To check live: confirm a sent email appears once (not twice) in Yahoo's Sent
+  folder. If it's missing, set `savesSentCopy: false` for Yahoo.

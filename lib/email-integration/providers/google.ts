@@ -137,6 +137,7 @@ function isPreConnectFailure(error: unknown): boolean {
 
 export const googleEmailAdapter: EmailSendAdapter = {
   provider: "google",
+  authMethod: "oauth",
   label: "Gmail",
 
   isConfigured: () => getGoogleOAuthConfig() !== null,

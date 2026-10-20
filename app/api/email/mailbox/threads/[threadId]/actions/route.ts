@@ -9,8 +9,8 @@ import { emailError } from "@/lib/email-integration/auth";
 import { recordEmailEvent } from "@/lib/email-integration/events";
 import { providerIdParam, requireMailbox } from "@/lib/email-integration/mailbox/access";
 import { MailboxReadError } from "@/lib/email-integration/mailbox/provider";
-import { listThreadMessages } from "@/lib/email-integration/mailbox/store";
-import { refreshMessageLabels } from "@/lib/email-integration/mailbox/sync";
+import { listThreadMessages, markMessagesDeleted } from "@/lib/email-integration/mailbox/store";
+import { importMessages, refreshMessageLabels } from "@/lib/email-integration/mailbox/sync";
 import type { MailboxAction } from "@/lib/email-integration/types";
 import { NextResponse } from "next/server";
 
@@ -52,8 +52,9 @@ export async function POST(
 
   const credentials = gate.credentials!;
   const own = gate.connection.address.toLowerCase();
+  let moved: { from: string; to: string }[] = [];
   try {
-    await gate.adapter.threadAction(
+    const result = await gate.adapter.threadAction(
       credentials,
       threadId,
       action,
@@ -63,6 +64,7 @@ export async function POST(
         fromSelf: message.fromAddress.toLowerCase() === own,
       })),
     );
+    if (result) moved = result.moved;
   } catch (error) {
     if (error instanceof MailboxReadError && error.code === "read_not_authorised") {
       return emailError(409, "Allow mailbox management to use this action.", "needs_modify");
@@ -70,10 +72,23 @@ export async function POST(
     return emailError(502, "Your email provider didn't accept that change. Try again.");
   }
 
+  // IMAP mail gets a new id when it changes folder: drop the old copy and
+  // store the new one, so the conversation shows in its new folder at once.
+  const movedFrom = new Set(moved.map((item) => item.from));
+  if (moved.length > 0) {
+    await markMessagesDeleted(gate.connection.id, [...movedFrom]);
+    await importMessages(
+      gate.connection,
+      credentials,
+      moved.map((item) => item.to).filter(Boolean),
+    );
+  }
   await refreshMessageLabels(
     gate.connection,
     credentials,
-    stored.map((message) => message.providerMessageId),
+    stored
+      .map((message) => message.providerMessageId)
+      .filter((id) => !movedFrom.has(id)),
   );
   if (action === "trash" || action === "untrash" || action === "archive" || action === "move_to_inbox") {
     await recordEmailEvent({

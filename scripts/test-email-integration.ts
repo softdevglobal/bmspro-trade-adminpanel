@@ -34,6 +34,28 @@ import {
 } from "../lib/email-integration/mailbox/parse";
 import { capabilitiesFromScopes } from "../lib/email-integration/scopes";
 import {
+  changedFlagUids,
+  decodeMessageId,
+  decodePageToken,
+  diffRecentWindow,
+  encodeMessageId,
+  encodePageToken,
+  flagState,
+  pageOfUids,
+  parseCursor,
+  parseThreadId,
+  serializeCursor,
+  threadIdFor,
+  threadRoot,
+} from "../lib/email-integration/imap/ids";
+import { structureHasAttachments, toImapMetadata } from "../lib/email-integration/mailbox/imap";
+import {
+  APP_PASSWORD_SCOPES,
+  classifySmtpError,
+  normaliseAppPassword,
+} from "../lib/email-integration/providers/app-password";
+import { parseEmailProvider } from "../lib/email-integration/providers";
+import {
   buildMimeMessage,
   generateMessageId,
   MimeHeaderError,
@@ -589,5 +611,156 @@ describe("stored message ids", () => {
     assert.match(outlook, /^conn_h[0-9a-f]{40}$/);
     assert.doesNotMatch(outlook, /\//);
     assert.equal(outlook, messageDocId("conn", "AAMkAGI2/abc+def=="));
+  });
+});
+
+describe("Yahoo / IMAP mailboxes", () => {
+  it("round-trips message ids and rejects anything else", () => {
+    const id = encodeMessageId({ folder: "archive", uidValidity: "1700000000", uid: 42 });
+    assert.equal(id, "archive_1700000000_42");
+    assert.deepEqual(decodeMessageId(id), { folder: "archive", uidValidity: "1700000000", uid: 42 });
+    assert.equal(decodeMessageId("spam_1_2"), null);
+    assert.equal(decodeMessageId("inbox_1_2/../x"), null);
+    // Firestore keys stay readable (no hashing needed).
+    assert.equal(messageDocId("conn", id), `conn_${id}`);
+  });
+
+  it("threads a conversation on its root Message-ID", () => {
+    const original = threadRoot({ messageId: "<a@x.com>", inReplyTo: "", references: "" });
+    const reply = threadRoot({ messageId: "<b@y.com>", inReplyTo: "<a@x.com>", references: "<a@x.com>" });
+    const replyOnlyInReplyTo = threadRoot({ messageId: "<c@y.com>", inReplyTo: "<a@x.com>", references: "" });
+    const deep = threadRoot({ messageId: "<d@y.com>", inReplyTo: "<c@y.com>", references: "<a@x.com> <b@y.com> <c@y.com>" });
+    assert.equal(original, "<a@x.com>");
+    assert.equal(reply, original);
+    assert.equal(replyOnlyInReplyTo, original);
+    assert.equal(deep, original);
+
+    const threadId = threadIdFor(original, "inbox_1_1");
+    assert.match(threadId, /^r[A-Za-z0-9_-]+$/);
+    assert.deepEqual(parseThreadId(threadId), { kind: "root", root: "<a@x.com>" });
+    assert.equal(threadIdFor(null, "inbox_1_9"), "xinbox_1_9");
+    assert.deepEqual(parseThreadId("xinbox_1_9"), { kind: "single", messageId: "inbox_1_9" });
+    assert.match(threadIdFor(`<${"a".repeat(200)}@x.com>`, "inbox_1_1"), /^h[0-9a-f]{40}$/);
+    assert.equal(parseThreadId(`r${Buffer.from("not an id").toString("base64url")}`), null);
+  });
+
+  it("reads back only cursors it wrote, keeping flag state aligned", () => {
+    const raw = serializeCursor({
+      folders: { inbox: { v: "9", n: 120, m: null, r: [100, 110, 119], s: "130" } },
+    });
+    assert.deepEqual(parseCursor(raw), {
+      folders: { inbox: { v: "9", n: 120, m: null, r: [100, 110, 119], s: "130" } },
+    });
+    assert.equal(parseCursor("12345"), null); // a Gmail history id
+    assert.equal(parseCursor("not json"), null);
+    const misaligned = parseCursor(serializeCursor({ folders: { sent: { v: "1", n: 5, m: "7", r: [1, 2], s: "1" } } }));
+    assert.equal(misaligned?.folders.sent?.s, "");
+  });
+
+  it("finds removed mail and read / star changes in the recent window", () => {
+    const { deleted, window } = diffRecentWindow([10, 11, 12, 13], [10, 12, 13, 14, 15]);
+    assert.deepEqual(deleted, [11]);
+    assert.deepEqual(window, [10, 12, 13, 14, 15]);
+    assert.equal(flagState(new Set(["\\Seen", "\\Flagged"])), "3");
+    assert.equal(flagState(undefined), "0");
+    const now = new Map([[10, "1"], [12, "0"], [13, "2"]]);
+    assert.deepEqual(changedFlagUids({ r: [10, 11, 12, 13], s: "1010" }, now), [12, 13]);
+  });
+
+  it("pages newest first across a folder", () => {
+    const uids = [1, 2, 3, 4, 5, 6, 7];
+    assert.deepEqual(pageOfUids(uids, null, 3), { page: [7, 6, 5], next: 5 });
+    assert.deepEqual(pageOfUids(uids, 5, 3), { page: [4, 3, 2], next: 2 });
+    assert.deepEqual(pageOfUids(uids, 2, 3), { page: [1], next: null });
+    const token = encodePageToken({ f: 2, v: "77", b: 40 });
+    assert.deepEqual(decodePageToken(token), { f: 2, v: "77", b: 40 });
+    assert.deepEqual(decodePageToken("garbage"), { f: 0, v: null, b: null });
+    assert.deepEqual(decodePageToken(encodePageToken({ f: 9, v: null, b: null })), { f: 0, v: null, b: null });
+  });
+
+  it("maps a fetched message onto the mailbox shape", () => {
+    const metadata = toImapMetadata(
+      "inbox",
+      "5",
+      {
+        uid: 31,
+        flags: new Set(["\\Flagged"]),
+        internalDate: new Date("2026-10-20T00:00:00Z"),
+        envelope: {
+          date: new Date("2026-10-19T23:00:00Z"),
+          subject: "Re: Quote Q-12",
+          messageId: "<b@y.com>",
+          from: [{ name: "Sam Customer", address: "sam@y.com" }],
+          to: [{ address: "owner@yahoo.com" }],
+          cc: [],
+        },
+        bodyStructure: {
+          type: "multipart/mixed",
+          childNodes: [
+            { type: "text/plain", part: "1" },
+            { type: "application/pdf", part: "2", disposition: "attachment", dispositionParameters: { filename: "q.pdf" } },
+          ],
+        },
+      },
+      { messageId: "<b@y.com>", inReplyTo: "<a@x.com>", references: ["<a@x.com>"], text: "  Looks   good\n thanks ", html: false },
+    );
+    assert.deepEqual(metadata, {
+      id: "inbox_5_31",
+      threadId: threadIdFor("<a@x.com>", "inbox_5_31"),
+      folder: "inbox",
+      unread: true,
+      starred: true,
+      from: "Sam Customer <sam@y.com>",
+      to: "owner@yahoo.com",
+      cc: "",
+      subject: "Re: Quote Q-12",
+      messageIdHeader: "<b@y.com>",
+      references: "<a@x.com>",
+      snippet: "Looks good thanks",
+      date: Date.parse("2026-10-19T23:00:00Z"),
+      hasAttachments: true,
+    });
+    assert.equal(
+      toImapMetadata("inbox", "5", { uid: 1, flags: new Set(["\\Deleted"]) }, null),
+      null,
+    );
+  });
+
+  it("treats inline images as part of the message, not attachments", () => {
+    assert.equal(
+      structureHasAttachments({
+        type: "multipart/related",
+        childNodes: [
+          { type: "text/html" },
+          { type: "image/png", disposition: "inline", parameters: { name: "logo.png" } },
+        ],
+      }),
+      false,
+    );
+  });
+
+  it("only retries an SMTP failure when the email can't have gone", () => {
+    assert.equal(classifySmtpError({ code: "EAUTH", responseCode: 535 }, "Yahoo").kind, "auth_failure");
+    const busy = classifySmtpError({ code: "EMESSAGE", responseCode: 421, command: "DATA" }, "Yahoo");
+    assert.equal(busy.kind, "safe_failure");
+    assert.equal(busy.kind === "safe_failure" && busy.retryable, true);
+    const refused = classifySmtpError({ code: "EMESSAGE", responseCode: 554, command: "DATA" }, "Yahoo");
+    assert.equal(refused.kind === "safe_failure" && refused.retryable, false);
+    const beforeSend = classifySmtpError({ code: "ETIMEDOUT", command: "CONN" }, "Yahoo");
+    assert.equal(beforeSend.kind === "safe_failure" && beforeSend.retryable, true);
+    // Dropped while (or after) sending the message: never resend automatically.
+    assert.equal(classifySmtpError({ code: "ETIMEDOUT", command: "DATA" }, "Yahoo").kind, "unknown");
+    assert.equal(classifySmtpError({ code: "ESOCKET" }, "Yahoo").kind, "unknown");
+  });
+
+  it("strips the spaces Yahoo shows in app passwords", () => {
+    assert.equal(normaliseAppPassword("abcd efgh ijkl mnop"), "abcdefghijklmnop");
+  });
+
+  it("gives an IMAP login full mailbox access and recognises the provider", () => {
+    assert.deepEqual(capabilitiesFromScopes(APP_PASSWORD_SCOPES), ["send", "read", "modify"]);
+    assert.equal(parseEmailProvider("yahoo"), "yahoo");
+    assert.equal(parseEmailProvider("toString"), null);
+    assert.equal(parseEmailProvider("aol"), null);
   });
 });

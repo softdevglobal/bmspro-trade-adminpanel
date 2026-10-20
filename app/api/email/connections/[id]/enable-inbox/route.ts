@@ -31,6 +31,10 @@ export async function POST(
   if (!adapter || !adapter.isConfigured()) {
     return emailError(503, "This email provider isn't configured on the server.");
   }
+  if (adapter.authMethod !== "oauth") {
+    // App-password mailboxes can already read; reconnecting renews the password.
+    return emailError(400, "This mailbox already has inbox access.");
+  }
 
   const body = (await request.json().catch(() => null)) as { return_to?: unknown } | null;
   const { state, codeChallenge } = await createOAuthState({

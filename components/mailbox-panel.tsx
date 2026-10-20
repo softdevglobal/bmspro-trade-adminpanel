@@ -5,7 +5,7 @@ import { AttachmentGallery, useInlineImages } from "@/components/mail-attachment
 import { MailComposer, type ComposerDraft } from "@/components/mail-composer";
 import { MailCustomerPanel, MatchChip } from "@/components/mail-customer-panel";
 import { useAuth } from "@/lib/auth/auth-context";
-import { emailApi, EmailApiError, useEmailSending } from "@/lib/email-integration/client";
+import { emailApi, EmailApiError, providerInfo, useEmailSending } from "@/lib/email-integration/client";
 import type {
   MailboxAction,
   MailboxMessageSummary,
@@ -70,7 +70,7 @@ function accentFor(message: MailboxMessageSummary): string {
   return "border-l-transparent";
 }
 
-/** The connected mailbox (Gmail or Outlook), labelled with each conversation's link to the platform. */
+/** The connected mailbox (Gmail, Outlook or Yahoo), labelled with each conversation's link to the platform. */
 export function MailboxPanel() {
   const { user } = useAuth();
   const { loading, connection, reload } = useEmailSending();
@@ -101,7 +101,7 @@ export function MailboxPanel() {
   if (!connection) {
     return (
       <p className="rounded-2xl border border-dashed border-outline-variant/60 px-5 py-8 text-center font-body text-[13px] text-on-surface-variant">
-        Connect Gmail or Outlook above to use your mailbox here.
+        Connect Gmail, Outlook or Yahoo Mail above to use your mailbox here.
       </p>
     );
   }
@@ -128,7 +128,7 @@ export function MailboxPanel() {
           <div>
             <p className="font-body text-[14px] font-semibold text-on-surface">Use your whole mailbox here</p>
             <p className="mt-1 font-body text-[12px] leading-relaxed text-on-surface-variant">
-              This asks {connection.provider === "microsoft" ? "Microsoft" : "Google"} for permission to read and organise {connection.address}.
+              This asks {providerInfo(connection.provider)?.company ?? "your email provider"} for permission to read and organise {connection.address}.
               All your mail is imported (spam and drafts excepted), and email with
               your customers is linked to their quotes, invoices and jobs. Only
               business owners can see it, message contents are read from your mailbox when

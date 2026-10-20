@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import type {
   EmailConnectionSummary,
   EmailOutboxStatus,
+  EmailProvider,
 } from "@/lib/email-integration/types";
 import { useCallback, useEffect, useState } from "react";
 
@@ -155,12 +156,18 @@ export function emailStatusTone(status: EmailOutboxStatus): string {
 }
 
 export type ProviderInfo = {
-  id: "google" | "microsoft";
+  id: EmailProvider;
   /** Short name used in sentences, e.g. "Sign-in to Gmail expired". */
   label: string;
   /** Longer name for the connect options. */
   title: string;
   description: string;
+  /** Who is asked for access (e.g. "This asks Google for permission…"). */
+  company: string;
+  /** "app_password": connect with a form instead of a sign-in redirect. */
+  authMethod: "oauth" | "app_password";
+  /** Where to create an app password. */
+  appPasswordHelpUrl?: string;
 };
 
 export const EMAIL_PROVIDERS: ProviderInfo[] = [
@@ -169,14 +176,31 @@ export const EMAIL_PROVIDERS: ProviderInfo[] = [
     label: "Gmail",
     title: "Gmail or Google Workspace",
     description: "Accounts ending in @gmail.com, or your own domain on Google.",
+    company: "Google",
+    authMethod: "oauth",
   },
   {
     id: "microsoft",
     label: "Outlook",
     title: "Outlook or Microsoft 365",
     description: "Outlook.com, Hotmail and Live, or your own domain on Microsoft 365.",
+    company: "Microsoft",
+    authMethod: "oauth",
+  },
+  {
+    id: "yahoo",
+    label: "Yahoo Mail",
+    title: "Yahoo Mail",
+    description: "Yahoo, Ymail and Rocketmail addresses, using a Yahoo app password.",
+    company: "Yahoo",
+    authMethod: "app_password",
+    appPasswordHelpUrl: "https://help.yahoo.com/kb/SLN15241.html",
   },
 ];
+
+export function providerInfo(provider: string | null | undefined): ProviderInfo | null {
+  return EMAIL_PROVIDERS.find((item) => item.id === provider) ?? null;
+}
 
 /** Display name of a connected provider ("Gmail", "Outlook"). */
 export function providerLabel(provider: string | null | undefined): string {

@@ -54,7 +54,7 @@ export function mapConnectionDoc(id: string, data: DocumentData): EmailConnectio
   return {
     id,
     businessId: asString(data.businessId) ?? "",
-    provider: data.provider === "microsoft" ? "microsoft" : "google",
+    provider: data.provider === "microsoft" || data.provider === "yahoo" ? data.provider : "google",
     providerAccountId: asString(data.providerAccountId) ?? "",
     address: asString(data.address) ?? "",
     displayName: asString(data.displayName),
