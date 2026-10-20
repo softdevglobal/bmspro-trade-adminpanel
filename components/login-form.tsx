@@ -215,6 +215,28 @@ export function LoginForm() {
         )}
       </button>
 
+      {/* On large screens these links sit in the blue panel; the panel is hidden on small ones. */}
+      <p className="text-center font-body text-[12px] leading-relaxed text-on-surface-variant lg:hidden">
+        By signing in you agree to our{" "}
+        <a
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+        >
+          Terms of Service
+        </a>{" "}
+        and{" "}
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+        >
+          Privacy Policy
+        </a>
+        .
+      </p>
     </form>
 
     <ForgotPasswordModal
