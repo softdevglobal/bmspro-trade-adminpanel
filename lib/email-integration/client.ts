@@ -196,6 +196,64 @@ export const EMAIL_PROVIDERS: ProviderInfo[] = [
     authMethod: "app_password",
     appPasswordHelpUrl: "https://help.yahoo.com/kb/SLN15241.html",
   },
+  {
+    id: "imap",
+    label: "Email (IMAP)",
+    title: "Other email provider",
+    description: "Zoho, cPanel and other hosting, using IMAP for your inbox and SMTP for sending.",
+    company: "your email provider",
+    authMethod: "app_password",
+  },
+];
+
+/** Server presets for "Other email provider". `{domain}` is the address's domain. */
+export type MailServerPreset = {
+  id: string;
+  label: string;
+  imapHost: string;
+  imapPort: number;
+  smtpHost: string;
+  smtpPort: number;
+  hint: string;
+};
+
+export const MAIL_SERVER_PRESETS: MailServerPreset[] = [
+  {
+    id: "zoho",
+    label: "Zoho Mail",
+    imapHost: "imap.zoho.com",
+    imapPort: 993,
+    smtpHost: "smtp.zoho.com",
+    smtpPort: 465,
+    hint: "Turn on IMAP access in Zoho Mail settings. With two-factor sign-in, use an app-specific password.",
+  },
+  {
+    id: "zoho_au",
+    label: "Zoho Mail (Australia)",
+    imapHost: "imap.zoho.com.au",
+    imapPort: 993,
+    smtpHost: "smtp.zoho.com.au",
+    smtpPort: 465,
+    hint: "For Zoho accounts made in Australia (mail.zoho.com.au). Turn on IMAP access in Zoho Mail settings.",
+  },
+  {
+    id: "cpanel",
+    label: "cPanel / web hosting",
+    imapHost: "mail.{domain}",
+    imapPort: 993,
+    smtpHost: "mail.{domain}",
+    smtpPort: 465,
+    hint: "Use the details under Email Accounts → Connect Devices in cPanel. Some hosts use the server's own name instead of mail.yourdomain.",
+  },
+  {
+    id: "custom",
+    label: "Other (enter details)",
+    imapHost: "",
+    imapPort: 993,
+    smtpHost: "",
+    smtpPort: 465,
+    hint: "Find the IMAP and SMTP details in your email provider's help pages.",
+  },
 ];
 
 export function providerInfo(provider: string | null | undefined): ProviderInfo | null {

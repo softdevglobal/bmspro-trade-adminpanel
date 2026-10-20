@@ -245,8 +245,11 @@ const FLAG_ACTIONS = {
   unstar: { flag: "\\Flagged", add: false },
 } as const;
 
-/** Mailbox adapter for an IMAP account (Yahoo and similar). */
-export function createImapMailbox(server: ImapServerConfig): MailboxAdapter {
+/**
+ * Mailbox adapter for an IMAP account. `server` is the provider's fixed
+ * servers (Yahoo), or null when each mailbox stores its own ("Other email").
+ */
+export function createImapMailbox(server: ImapServerConfig | null): MailboxAdapter {
   return {
     async startCursor(credentials) {
       return withImap(server, credentials, async (context) => {

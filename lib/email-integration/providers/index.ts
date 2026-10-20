@@ -6,6 +6,7 @@ import type { MailboxAdapter } from "@/lib/email-integration/mailbox/provider";
 import { googleEmailAdapter } from "@/lib/email-integration/providers/google";
 import { microsoftEmailAdapter } from "@/lib/email-integration/providers/microsoft";
 import type { EmailSendAdapter } from "@/lib/email-integration/providers/types";
+import { otherEmailAdapter, otherMailbox } from "@/lib/email-integration/providers/other";
 import { yahooEmailAdapter, yahooMailbox } from "@/lib/email-integration/providers/yahoo";
 import type { EmailProvider } from "@/lib/email-integration/types";
 
@@ -13,12 +14,14 @@ const SEND_ADAPTERS: Record<EmailProvider, EmailSendAdapter> = {
   google: googleEmailAdapter,
   microsoft: microsoftEmailAdapter,
   yahoo: yahooEmailAdapter,
+  imap: otherEmailAdapter,
 };
 
 const MAILBOX_ADAPTERS: Record<EmailProvider, MailboxAdapter> = {
   google: gmailMailbox,
   microsoft: microsoftMailbox,
   yahoo: yahooMailbox,
+  imap: otherMailbox,
 };
 
 export function parseEmailProvider(value: string): EmailProvider | null {

@@ -1,12 +1,14 @@
 import "server-only";
 
 import { EMAIL_PROVIDER_TIMEOUT_MS } from "@/lib/email-integration/config";
-import type { ImapServerConfig } from "@/lib/email-integration/imap/servers";
+import { resolvePublicMailHost, UnsafeMailHostError } from "@/lib/email-integration/imap/host";
+import { customServerConfig, type ImapServerConfig } from "@/lib/email-integration/imap/servers";
 import { MailboxReadError } from "@/lib/email-integration/mailbox/provider";
 import type { ProviderCredentials } from "@/lib/email-integration/providers/types";
 import type { MailboxFolder } from "@/lib/email-integration/types";
 import { ImapFlow, type MailboxObject } from "imapflow";
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 
 /**
  * Shared IMAP connections. A sync or a page view makes many small reads;
@@ -44,17 +46,38 @@ export type ImapContext = {
 
 function sessionKey(server: ImapServerConfig, login: { user: string; pass: string }): string {
   const secret = createHash("sha256").update(login.pass).digest("hex").slice(0, 16);
-  return `${server.imap.host}|${login.user.toLowerCase()}|${secret}`;
+  return `${server.imap.host}:${server.imap.port}|${login.user.toLowerCase()}|${secret}`;
 }
 
-export function createImapClient(
+/**
+ * The servers a mailbox uses: its own stored settings ("Other email
+ * provider"), else the provider's fixed ones (Yahoo).
+ */
+export function serverFor(
+  fixed: ImapServerConfig | null,
+  credentials: ProviderCredentials,
+): ImapServerConfig | null {
+  const own = credentials.password?.server;
+  return own ? customServerConfig(own) : fixed;
+}
+
+/**
+ * A client for `server`, connecting to its checked public address. Throws
+ * UnsafeMailHostError for names that resolve to a private network.
+ */
+export async function createImapClient(
   server: ImapServerConfig,
   login: { user: string; pass: string },
-): ImapFlow {
+): Promise<ImapFlow> {
+  const address = await resolvePublicMailHost(server.imap.host);
   return new ImapFlow({
-    host: server.imap.host,
+    host: address,
+    // TLS checks the certificate against the name the owner entered.
+    servername: isIP(server.imap.host) ? undefined : server.imap.host,
     port: server.imap.port,
-    secure: true,
+    secure: server.imap.secure,
+    // Without implicit TLS, STARTTLS is required; never plain text.
+    doSTARTTLS: server.imap.secure ? undefined : true,
     auth: { user: login.user, pass: login.pass },
     logger: false,
     disableAutoIdle: true,
@@ -68,6 +91,7 @@ export function createImapClient(
 /** Maps an IMAP or socket failure onto the codes the sync understands. */
 export function toMailboxError(error: unknown): MailboxReadError {
   if (error instanceof MailboxReadError) return error;
+  if (error instanceof UnsafeMailHostError) return new MailboxReadError(503, "provider_unavailable");
   const err = (error ?? {}) as {
     authenticationFailed?: boolean;
     code?: string;
@@ -105,12 +129,13 @@ async function listFolders(client: ImapFlow): Promise<Map<MailboxFolder, string>
   return found;
 }
 
-function connect(server: ImapServerConfig, login: { user: string; pass: string }, key: string): Promise<ImapFlow> {
-  const client = createImapClient(server, login);
+async function connect(server: ImapServerConfig, login: { user: string; pass: string }, key: string): Promise<ImapFlow> {
+  const client = await createImapClient(server, login);
   // An unhandled "error" event would crash the process.
   client.on("error", () => sessions.delete(key));
   client.on("close", () => sessions.delete(key));
-  return client.connect().then(() => client);
+  await client.connect();
+  return client;
 }
 
 /**
@@ -118,12 +143,13 @@ function connect(server: ImapServerConfig, login: { user: string; pass: string }
  * MailboxReadError (unauthorised, rate_limited, provider_unavailable, …).
  */
 export async function withImap<T>(
-  server: ImapServerConfig,
+  fixedServer: ImapServerConfig | null,
   credentials: ProviderCredentials,
   fn: (context: ImapContext) => Promise<T>,
 ): Promise<T> {
   const login = credentials.password;
-  if (!login) throw new MailboxReadError(401, "unauthorised");
+  const server = serverFor(fixedServer, credentials);
+  if (!login || !server) throw new MailboxReadError(401, "unauthorised");
   const key = sessionKey(server, login);
 
   let session = sessions.get(key);

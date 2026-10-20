@@ -55,6 +55,13 @@ import {
   normaliseAppPassword,
 } from "../lib/email-integration/providers/app-password";
 import { parseEmailProvider } from "../lib/email-integration/providers";
+import { isPublicAddress } from "../lib/email-integration/imap/host";
+import {
+  MailServerSettingsError,
+  parseMailServerSettings,
+  YAHOO_SERVERS,
+} from "../lib/email-integration/imap/servers";
+import { serverFor } from "../lib/email-integration/imap/session";
 import {
   buildMimeMessage,
   generateMessageId,
@@ -762,5 +769,59 @@ describe("Yahoo / IMAP mailboxes", () => {
     assert.equal(parseEmailProvider("yahoo"), "yahoo");
     assert.equal(parseEmailProvider("toString"), null);
     assert.equal(parseEmailProvider("aol"), null);
+  });
+});
+
+describe("Other email provider (own IMAP / SMTP servers)", () => {
+  it("accepts usual server settings and works out TLS from the port", () => {
+    assert.deepEqual(
+      parseMailServerSettings({ imap_host: "IMAP.Zoho.com.au.", imap_port: 993, smtp_host: "smtp.zoho.com.au", smtp_port: "587" }),
+      {
+        imap: { host: "imap.zoho.com.au", port: 993, secure: true },
+        smtp: { host: "smtp.zoho.com.au", port: 587, secure: false },
+      },
+    );
+  });
+
+  it("refuses IP addresses, local names and unusual ports", () => {
+    const base = { imap_host: "mail.example.com", imap_port: 993, smtp_host: "mail.example.com", smtp_port: 465 };
+    for (const bad of [
+      { imap_host: "127.0.0.1" },
+      { imap_host: "localhost" },
+      { smtp_host: "169.254.169.254" },
+      { smtp_host: "mail..example.com" },
+      { imap_port: 22 },
+      { smtp_port: 25 },
+      { imap_host: "" },
+    ]) {
+      assert.throws(() => parseMailServerSettings({ ...base, ...bad }), MailServerSettingsError, JSON.stringify(bad));
+    }
+    assert.throws(() => parseMailServerSettings(null), MailServerSettingsError);
+  });
+
+  it("only treats public internet addresses as reachable", () => {
+    for (const address of ["8.8.8.8", "203.0.114.5", "2404:6800:4006:80a::200e"]) {
+      assert.equal(isPublicAddress(address), true, address);
+    }
+    for (const address of [
+      "127.0.0.1", "10.1.2.3", "172.20.0.1", "192.168.1.1", "169.254.169.254",
+      "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1", "not-an-ip",
+    ]) {
+      assert.equal(isPublicAddress(address), false, address);
+    }
+  });
+
+  it("uses a mailbox's own servers when it has them", () => {
+    const own = {
+      imap: { host: "mail.example.com", port: 993, secure: true },
+      smtp: { host: "mail.example.com", port: 587, secure: false },
+    };
+    const base = { accessToken: "", accessTokenExpiresAt: 0, refreshToken: "" };
+    const custom = serverFor(null, { ...base, password: { user: "a@example.com", pass: "x", server: own } });
+    assert.equal(custom?.imap.host, "mail.example.com");
+    assert.equal(custom?.savesSentCopy, "detect");
+    assert.equal(serverFor(null, { ...base, password: { user: "a@example.com", pass: "x" } }), null);
+    assert.equal(serverFor(YAHOO_SERVERS, { ...base, password: { user: "a@yahoo.com", pass: "x" } }), YAHOO_SERVERS);
+    assert.equal(parseEmailProvider("imap"), "imap");
   });
 });

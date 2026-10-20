@@ -1,6 +1,7 @@
 "use client";
 
 import { EmailProviderLogo } from "@/components/email-provider-logo";
+import { OtherMailServerForm } from "@/components/other-mail-server-form";
 import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
@@ -33,7 +34,7 @@ const BUTTON_PRIMARY =
 const BUTTON_OUTLINE =
   "inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-outline-variant px-4 font-body text-[13px] font-semibold text-on-surface transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-60";
 
-/** Owner settings card: connect, reconnect or disconnect the business mailbox (Gmail, Outlook or Yahoo). */
+/** Owner settings card: connect, reconnect or disconnect the business mailbox (Gmail, Outlook, Yahoo or another provider). */
 export function EmailConnectionSettings({
   returnTo = "settings",
 }: {
@@ -90,6 +91,10 @@ export function EmailConnectionSettings({
 
   async function handlePasswordConnect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    await connectWithPassword({ address: formAddress, password: formPassword });
+  }
+
+  async function connectWithPassword(body: object) {
     if (!user || !passwordForm) return;
     setBusy(passwordForm.id);
     setError(null);
@@ -97,7 +102,7 @@ export function EmailConnectionSettings({
     try {
       await emailApi(user, `/api/email/connect/${passwordForm.id}`, {
         method: "POST",
-        body: JSON.stringify({ address: formAddress, password: formPassword }),
+        body: JSON.stringify(body),
       });
       setPasswordForm(null);
       setFormPassword("");
@@ -161,7 +166,17 @@ export function EmailConnectionSettings({
   const label = providerLabel(connection?.provider);
   const usesAppPassword = providerInfo(connection?.provider)?.authMethod === "app_password";
 
-  const passwordFormPanel = passwordForm ? (
+  const passwordFormPanel = passwordForm?.id === "imap" ? (
+    <OtherMailServerForm
+      initialAddress={formAddress}
+      addressLocked={Boolean(connection && connection.provider === "imap")}
+      busy={Boolean(busy)}
+      primaryClass={BUTTON_PRIMARY}
+      outlineClass={BUTTON_OUTLINE}
+      onSubmit={(input) => void connectWithPassword(input)}
+      onCancel={() => setPasswordForm(null)}
+    />
+  ) : passwordForm ? (
     <form
       onSubmit={(event) => void handlePasswordConnect(event)}
       className="space-y-3 rounded-xl border border-outline-variant/70 bg-white p-4"
@@ -242,7 +257,7 @@ export function EmailConnectionSettings({
     <SettingsSection
       icon="forward_to_inbox"
       title="Email sending"
-      description="Connect your business Gmail, Outlook or Yahoo Mail to send quotes and invoices from your own address and use your mailbox here."
+      description="Connect your business email (Gmail, Outlook, Yahoo, Zoho or your web host) to send quotes and invoices from your own address and use your mailbox here."
     >
       <div className="space-y-4">
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-low/70 px-4 py-3.5">
@@ -263,7 +278,7 @@ export function EmailConnectionSettings({
                   <p className="mt-0.5 font-body text-[12px] text-on-surface-variant">
                     {needsReconnect
                       ? usesAppPassword
-                        ? `${label} stopped accepting the app password. Reconnect with a new one, then resume any emails on hold.`
+                        ? `${label} stopped accepting the saved password. Reconnect with a new one, then resume any emails on hold.`
                         : `${label} sign-in expired. Reconnect, then resume any emails on hold.`
                       : `${label} connected · can send email`}
                   </p>
@@ -296,7 +311,7 @@ export function EmailConnectionSettings({
                 Choose your email provider. Gmail and Outlook first ask only for permission
                 to send; reading your mailbox here is a separate step you can turn on later.
               </p>
-              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {EMAIL_PROVIDERS.map((option) => {
                   const ready = providers.includes(option.id);
                   return (
