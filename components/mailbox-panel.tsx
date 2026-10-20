@@ -452,13 +452,13 @@ function Mailbox({
   );
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
-      <aside className="space-y-3">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
+      <aside className="min-w-0 space-y-3">
         <button type="button" onClick={() => onCompose({ intent: "new" })} className={`${BUTTON_PRIMARY} w-full`}>
           <span className="material-symbols-outlined text-[18px]">edit</span>
           New email
         </button>
-        <nav aria-label="Mail folders" className="flex gap-1 overflow-x-auto lg:flex-col">
+        <nav aria-label="Mail folders" className="grid grid-cols-5 gap-1 lg:flex lg:flex-col">
           {VIEWS.map((option) => {
             const active = !activeSearch && view === option.value;
             return (
@@ -471,7 +471,7 @@ function Mailbox({
                   setSearch("");
                   setSelected(null);
                 }}
-                className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-2 font-body text-[13px] font-semibold transition-colors lg:rounded-l-none lg:rounded-r-full ${
+                className={`inline-flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1 py-2 font-body text-[11px] font-semibold transition-colors lg:flex-row lg:gap-2 lg:rounded-l-none lg:rounded-r-full lg:px-3 lg:text-[13px] ${
                   active ? "bg-primary/10 text-primary" : "text-on-surface-variant hover:bg-surface-container"
                 }`}
               >
@@ -675,7 +675,7 @@ function ThreadView({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <article className="min-w-0 overflow-hidden rounded-2xl border border-outline-variant/60 bg-white">
         <header className="flex flex-wrap items-center gap-1 border-b border-outline-variant/50 px-2 py-2">
           <button type="button" onClick={onBack} className={ICON_BUTTON} aria-label="Back to list" title="Back">
