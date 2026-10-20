@@ -805,13 +805,8 @@ function MessageCard({
   onCompose: (intent: "reply" | "reply_all" | "forward") => void;
 }) {
   const [plain, setPlain] = useState(!message.bodyHtml);
-  const [showImages, setShowImages] = useState(false);
   // Images embedded in the email (cid:) are shown in place.
   const html = useInlineImages(message.id, expanded ? message.bodyHtml : null, message.attachments);
-  const hasRemoteImages = useMemo(
-    () => Boolean(message.bodyHtml && /(<img[^>]+src\s*=\s*["']?https?:|url\(\s*["']?https?:)/i.test(message.bodyHtml)),
-    [message.bodyHtml],
-  );
 
   return (
     <section className="py-3">
@@ -869,15 +864,6 @@ function MessageCard({
                 <>
                   {message.bodyHtml ? (
                     <div className="flex flex-wrap items-center gap-2">
-                      {!plain && hasRemoteImages && !showImages ? (
-                        <p className="flex flex-1 flex-wrap items-center gap-2 rounded-lg bg-surface-container-low px-3 py-1.5 font-body text-[11px] text-on-surface-variant">
-                          <span className="material-symbols-outlined text-[15px]">hide_image</span>
-                          Images from the web are hidden to protect your privacy.
-                          <button type="button" onClick={() => setShowImages(true)} className="font-semibold text-primary hover:underline">
-                            Show images
-                          </button>
-                        </p>
-                      ) : null}
                       <button
                         type="button"
                         onClick={() => setPlain((value) => !value)}
@@ -892,7 +878,7 @@ function MessageCard({
                       {message.bodyText || "(empty message)"}
                     </pre>
                   ) : (
-                    <EmailHtmlFrame html={html} showImages={showImages} />
+                    <EmailHtmlFrame html={html} />
                   )}
                 </>
               )}
