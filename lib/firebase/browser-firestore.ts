@@ -5,6 +5,7 @@ import {
   memoryLocalCache,
   persistentLocalCache,
   persistentMultipleTabManager,
+  setLogLevel,
   type Firestore,
 } from "firebase/firestore";
 
@@ -30,6 +31,11 @@ export function initBrowserFirestore(app: FirebaseApp): Firestore {
   } catch {
     db = getFirestore(app);
   }
+
+  // Firestore logs routine reconnects ("Listen stream transport errored")
+  // as warnings when the browser drops its live connection (sleep, network
+  // change, background tab); it reconnects by itself. Keep real errors only.
+  setLogLevel("error");
 
   cacheByApp.set(app.name, db);
   return db;
