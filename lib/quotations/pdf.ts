@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   computeDocumentTotals,
+  customerAddressDisplayLines,
   formatQuoteDate,
   formatQuoteMoney,
   formatLineDiscountLabel,
@@ -555,13 +556,17 @@ export async function generateDocumentPdf(
   y = Math.min(y - 28, headerBottom);
 
   // ── Customer card ──
-  ensureSpace(72);
   const displayCustomerPhone = formatAuPhoneDisplay(data.customer.phone);
+  const addressLines = customerAddressDisplayLines(data.customerAddress).flatMap(
+    (line) => wrapText(line, font, 10, CONTENT_WIDTH - 28),
+  );
   const customerLines =
     (data.customer.fullName ? 1 : 0) +
+    addressLines.length +
     (data.customer.email ? 1 : 0) +
     (displayCustomerPhone ? 1 : 0);
   const cardH = Math.max(58, 28 + customerLines * 14);
+  ensureSpace(cardH + 16);
   page.drawRectangle({
     x: MARGIN,
     y: y - cardH,
@@ -588,6 +593,13 @@ export async function generateDocumentPdf(
       bold: true,
     });
     cardY -= 14;
+  }
+  for (const line of addressLines) {
+    drawText(line, MARGIN + 14, cardY, {
+      size: 10,
+      color: MUTED,
+    });
+    cardY -= 13;
   }
   if (data.customer.email) {
     drawText(data.customer.email, MARGIN + 14, cardY, {
