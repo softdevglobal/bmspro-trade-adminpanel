@@ -334,7 +334,7 @@ export function EmailConnectionSettings({
                         type="button"
                         disabled={Boolean(busy) || !ready}
                         onClick={() => void handleConnect(option.id)}
-                        className={BUTTON_PRIMARY}
+                        className={`${BUTTON_PRIMARY} mt-auto`}
                       >
                         {busy === option.id
                           ? option.authMethod === "app_password"
