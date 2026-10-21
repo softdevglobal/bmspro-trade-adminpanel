@@ -1,5 +1,7 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import "server-only";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { resolveCallCenterAgentProfile } from "@/lib/callcenter/agent-access";
+import { adminDb } from "@/lib/firebase/admin";
 import type { DecodedIdToken } from "firebase-admin/auth";
 
 /**
@@ -37,9 +39,11 @@ export async function requireCallCenterAgent(req: Request): Promise<
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
 
     if (decoded.role === "call_center") {
+      const profile = await resolveCallCenterAgentProfile(decoded.uid, decoded.email ?? "");
+      if (!profile?.isActive) return { ok: false, status: 403, error: "Call-center account is inactive." };
       return {
         ok: true,
         uid: decoded.uid,

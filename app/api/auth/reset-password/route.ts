@@ -1,9 +1,10 @@
+import { consumeResetCode } from "@/lib/auth/reset-codes";
+import { completeAccountActivation } from "@/lib/auth/activation";
 import {
   logPasswordChanged,
   resolveAuditIdentityForUid,
 } from "@/lib/audit/action-logs";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { Timestamp } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -21,50 +22,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
     }
 
-    if (newPassword.length < 8) {
+    if (newPassword.length < 12 || newPassword.length > 128) {
       return NextResponse.json(
-        { error: "Password must be at least 8 characters." },
+        { error: "Password must be 12–128 characters." },
         { status: 400 },
       );
     }
 
     const docRef = adminDb.collection("passwordResetCodes").doc(trimmedEmail);
-    const snap = await docRef.get();
-
-    if (!snap.exists) {
-      return NextResponse.json({ error: "Invalid or expired code." }, { status: 400 });
-    }
-
-    const data = snap.data()!;
-
-    // Check used
-    if (data.used === true) {
-      return NextResponse.json({ error: "This code has already been used." }, { status: 400 });
-    }
-
-    // Check expiry
-    const expiresAt = (data.expiresAt as Timestamp).toMillis();
-    if (Date.now() > expiresAt) {
-      await docRef.delete();
-      return NextResponse.json({ error: "Code has expired. Please request a new one." }, { status: 400 });
-    }
-
-    // Track attempts (max 5)
-    const attempts = (data.attempts as number) + 1;
-    if (attempts > 5) {
-      await docRef.delete();
-      return NextResponse.json(
-        { error: "Too many incorrect attempts. Please request a new code." },
-        { status: 400 },
-      );
-    }
-
-    if (data.code !== trimmedCode) {
-      await docRef.update({ attempts });
-      return NextResponse.json(
-        { error: `Incorrect code. ${5 - attempts + 1} attempt(s) remaining.` },
-        { status: 400 },
-      );
+    if (!(await consumeResetCode(docRef, trimmedCode))) {
+      return NextResponse.json({ error: "Invalid, expired, or already used code." }, { status: 400 });
     }
 
     // Code is valid — look up the user and update their password
@@ -79,7 +46,7 @@ export async function POST(req: NextRequest) {
     await adminAuth.updateUser(uid, { password: newPassword });
 
     // Mark code as used
-    await docRef.update({ used: true });
+    await completeAccountActivation(uid);
 
     const identity = await resolveAuditIdentityForUid(uid);
     await logPasswordChanged({

@@ -1,10 +1,10 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { NextResponse } from "next/server";
 import {
   createPersonalCalendarEvent,
   listPersonalCalendarEvents,
 } from "@/lib/calendar/personal-events/server";
 import { parseCreatePersonalEventInput } from "@/lib/calendar/personal-events/types";
-import { adminAuth } from "@/lib/firebase/admin";
 
 export const runtime = "nodejs";
 
@@ -23,7 +23,7 @@ async function requireBusinessMember(
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

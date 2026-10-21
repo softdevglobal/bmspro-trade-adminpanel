@@ -1,4 +1,6 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import "server-only";
+import { inaccessibleInitialPassword, issueActivationLink } from "@/lib/auth/activation";
 
 import { logAuditEvent } from "@/lib/audit/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
@@ -47,7 +49,7 @@ export async function authenticateCustomerRequest(
     return { ok: false, status: 401, error: "Sign in to continue." };
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const uid = decoded.uid;
     const profile = await loadCustomerProfileDoc(uid);
     const tokenEmail =
@@ -247,8 +249,6 @@ export async function getOrCreateCustomerProfile(
   return mapCustomerDoc(created.id, createdData);
 }
 
-/** Default password for customer accounts created by a business owner. */
-export const DEFAULT_CUSTOMER_PASSWORD = "00001111";
 
 export type EnsuredCustomerAccount = {
   uid: string;
@@ -262,9 +262,9 @@ export type EnsuredCustomerAccount = {
 
 /**
  * Ensures a customer account exists for the given email - creating a Firebase
- * Auth user with the default password and a `customers/{uid}` profile when one
+ * Auth user with an inaccessible random password and a `customers/{uid}` profile when one
  * doesn't already exist. Used when a business owner adds an inspection on a
- * customer's behalf. Best-effort welcome email with credentials on creation.
+ * customer's behalf. Welcome email with a single-use activation link on creation.
  */
 export async function ensureCustomerAccount(input: {
   email: string;
@@ -313,7 +313,7 @@ export async function ensureCustomerAccount(input: {
 
     const authUser = await adminAuth.createUser({
       email: authEmail,
-      password: DEFAULT_CUSTOMER_PASSWORD,
+      password: inaccessibleInitialPassword(),
       displayName: fullName || undefined,
       emailVerified: false,
     });
@@ -334,8 +334,9 @@ export async function ensureCustomerAccount(input: {
       email,
       fullName,
       phone,
+      ...(created ? { activationRequired: true, mustChangePassword: true } : {}),
       registeredBusinessId: input.businessId,
-      registeredBookingSlug: input.bookingSlug ?? null,
+      registeredBookingSlug: bookingSlug || null,
       registeredBusinessName: input.businessName ?? null,
       createdAt: now,
       updatedAt: now,
@@ -347,7 +348,7 @@ export async function ensureCustomerAccount(input: {
     if (phone && !data.phone) update.phone = phone;
     if (!data.registeredBusinessId) {
       update.registeredBusinessId = input.businessId;
-      update.registeredBookingSlug = input.bookingSlug ?? null;
+      update.registeredBookingSlug = bookingSlug || null;
       update.registeredBusinessName = input.businessName ?? null;
     }
     await ref.set(update, { merge: true });
@@ -370,7 +371,7 @@ export async function ensureCustomerAccount(input: {
         bookingSlug: input.bookingSlug ?? null,
         logoUrl: input.logoUrl ?? null,
         businessId: input.businessId,
-        temporaryPassword: created ? DEFAULT_CUSTOMER_PASSWORD : null,
+        activationUrl: created || profileData.activationRequired === true ? await issueActivationLink(uid, "customer") : null,
         context: input.context ?? null,
       });
       if (welcomeEmailSent) {
@@ -470,4 +471,3 @@ export async function listBusinessCustomers(
     .map((doc) => mapCustomerDoc(doc.id, doc.data() ?? {}))
     .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
 }
-

@@ -26,8 +26,8 @@ export type CustomerWelcomeEmailInput = {
   /** Optional business logo URL shown in the email body. */
   logoUrl?: string | null;
   businessId?: string | null;
-  /** Temporary password, only for accounts created by the business. */
-  temporaryPassword?: string | null;
+  /** Single-use activation link, only for accounts created by the business. */
+  activationUrl?: string | null;
   context?: "quotation" | "inspection" | "onboarding" | null;
 };
 
@@ -75,19 +75,12 @@ export async function sendCustomerWelcomeEmail(
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
     title: `Your ${businessTitle} is ready`,
     greetingName: firstName(input.fullName),
-    body: input.temporaryPassword
-      ? `${business} created a BMS Pro Trade account for you so you can ${portalLine}. Sign in with the credentials below, then change your password from your account.`
+    body: input.activationUrl
+      ? `${business} created a BMS Pro Trade account for you so you can ${portalLine}. Use the secure link below to choose your password and activate your account.`
       : `Thanks for joining BMS Pro Trade. You can now ${portalLine} with ${business}.\n\nSign in anytime with the email you used to register.`,
     details,
-    loginCredentials: input.temporaryPassword
-      ? {
-          email: input.email,
-          password: input.temporaryPassword,
-          label: "Your login credentials",
-        }
-      : undefined,
-    ctaUrl: accountUrl,
-    ctaLabel: slug ? "View my account" : "Open booking",
+    ctaUrl: input.activationUrl || accountUrl,
+    ctaLabel: input.activationUrl ? "Activate my account" : slug ? "View my account" : "Open booking",
     footnote:
       "If you didn't create this account, you can ignore this email.",
     businessName: input.businessName ?? null,
@@ -108,8 +101,8 @@ export async function sendCustomerWelcomeEmail(
       businessId: input.businessId,
       senderName: business,
       source: "customer_welcome",
-      message: input.temporaryPassword
-        ? `Welcome to ${business} on BMS Pro Trade. A customer account was created for ${input.email}. Check your email for your login details.${input.context === "onboarding" && accountUrl ? ` Sign in: ${accountUrl}. Change your password after signing in.` : ""}`
+      message: input.activationUrl
+        ? `Welcome to ${business} on BMS Pro Trade. A customer account was created for ${input.email}. Check your email to activate your account.${input.context === "onboarding" && accountUrl ? ` Sign in: ${accountUrl}. Change your password after signing in.` : ""}`
         : `Welcome to ${business} on BMS Pro Trade. Your customer account for ${input.email} is ready. Check your email for details.${input.context === "onboarding" && accountUrl ? ` Sign in: ${accountUrl}` : ""}`,
     });
   }

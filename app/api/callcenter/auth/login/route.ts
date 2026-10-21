@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 /**
  * Call-center agent login endpoint.
  *
@@ -136,7 +137,7 @@ export async function POST(request: Request) {
   let activeSignIn = signIn.data;
   let activeDecoded: Awaited<ReturnType<typeof adminAuth.verifyIdToken>>;
   try {
-    activeDecoded = await adminAuth.verifyIdToken(activeSignIn.idToken);
+    activeDecoded = await verifyAccountIdToken(activeSignIn.idToken);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Login failed. Please try again." },
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
     }
 
     activeSignIn = refreshed.data;
-    activeDecoded = await adminAuth.verifyIdToken(activeSignIn.idToken);
+    activeDecoded = await verifyAccountIdToken(activeSignIn.idToken);
     isSuperAdmin = await isSuperAdminAccount(activeDecoded);
     agentProfile = await resolveCallCenterAgentProfile(
       activeDecoded.uid,
@@ -175,9 +176,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const isCallCenterAgent =
-    activeDecoded.role === "call_center" ||
-    (agentProfile?.isActive ?? false);
+  if (!isSuperAdmin && agentProfile && !agentProfile.isActive) {
+    await ensureCallCenterAgentClaims(activeDecoded.uid, agentProfile);
+    return NextResponse.json({ ok: false, error: "This call-center account is inactive." }, { status: 403 });
+  }
+  const isCallCenterAgent = agentProfile?.isActive === true;
 
   if (!isCallCenterAgent && !isSuperAdmin) {
     if (agentProfile && !agentProfile.isActive) {

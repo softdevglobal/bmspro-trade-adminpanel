@@ -10,12 +10,15 @@
     "seed:super-admin": "tsx --env-file=.env.local scripts/seed-super-admin.ts",
     "cron:reminders": "tsx --env-file=.env scripts/run-schedule-reminders.ts",
     "migrate:renumber-codes": "tsx --env-file=.env scripts/renumber-reference-codes.ts",
-    "firebase:deploy-rules": "firebase deploy --only firestore:rules",
-    "test:rules": "firebase emulators:exec --only firestore --project bms-rules-test \"node scripts/test-firestore-rules.mjs\"",
+    "firebase:deploy-rules": "firebase deploy --only firestore:rules,storage",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-bms-security-test \"node scripts/test-firestore-rules.mjs\"",
     "test:api": "firebase emulators:exec --only auth,firestore --project bms-api-test \"node scripts/test-api-access.mjs\"",
     "test:careplus-records": "tsx --test scripts/test-careplus-capture-records.ts",
     "test:invoice-customer": "tsx --test scripts/test-invoice-customer.ts",
-    "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts"
+    "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
+    "predev": "node scripts/copy-pdf-worker.mjs",
+    "test:security": "firebase emulators:exec --only auth,firestore,storage --project demo-bms-security-test \"node scripts/test-security.mjs\""
   },
   "dependencies": {
     "firebase": "^12.13.0",
@@ -25,10 +28,10 @@
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",
     "mailparser": "3.9.36",
-    "next": "16.2.6",
+    "next": "16.3.8",
     "nodemailer": "10.0.15",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.0.227",
+    "pdfjs-dist": "6.2.108",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "stripe": "^22.2.3",
@@ -43,10 +46,13 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.8",
     "firebase-tools": "^14.9.0",
     "tailwindcss": "^4",
     "tsx": "^4.22.3",
     "typescript": "^5"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.5"
   }
 }

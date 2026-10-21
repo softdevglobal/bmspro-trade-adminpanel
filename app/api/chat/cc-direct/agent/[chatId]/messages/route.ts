@@ -49,6 +49,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const messages = await getCcMessages(
     chatId,
+    { uid: auth.uid },
     Number.isFinite(limit) ? limit : 40,
     before,
   );

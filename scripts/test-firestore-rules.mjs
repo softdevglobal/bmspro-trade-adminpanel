@@ -21,7 +21,7 @@ import {
 import { readFileSync } from "node:fs";
 import { doc, getDoc, setDoc, deleteDoc, updateDoc } from "firebase/firestore";
 
-const PROJECT_ID = "bms-rules-test";
+const PROJECT_ID = "demo-bms-security-test";
 
 const BUSINESS_A = "biz-a";
 const BUSINESS_B = "biz-b";
@@ -351,6 +351,30 @@ for (const [name, db] of [
     assertFails(getDoc(doc(db, "participant_onboarding", BUSINESS_A, "records", "participant-a"))));
   await expect(name + " cannot directly write participant onboarding",
     assertFails(setDoc(doc(db, "participant_onboarding", BUSINESS_A, "records", "participant-a"), { participantName: "Changed" })));
+}
+
+console.log("\nactivation and attendance integrity");
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, "users", "pending-owner"), { role: "owner", businessId: BUSINESS_A, activationRequired: true });
+  await setDoc(doc(db, "customers", "pending-customer"), { activationRequired: true });
+  await setDoc(doc(db, "jobs", "pending-customer-job"), { businessId: BUSINESS_A, customerId: "pending-customer" });
+  await setDoc(doc(db, "staff_check_ins", "check-in-a"), { staffId: "staff-a", businessId: BUSINESS_A, ownerUid: "owner-a", checkInTime: new Date() });
+  await setDoc(doc(db, "users", "inactive-agent"), { role: "call_center", isActive: false, status: "inactive" });
+  await setDoc(doc(db, "conversations", "active-room"), { userId: "owner-a" });
+});
+const pendingOwnerDb = testEnv.authenticatedContext("pending-owner", ownerA).firestore();
+await expect("pending owner cannot read tenant data even with owner claims", assertFails(getDoc(doc(pendingOwnerDb, "businesses", BUSINESS_A))));
+await expect("pending owner cannot clear activation state", assertFails(updateDoc(doc(pendingOwnerDb, "users", "pending-owner"), { activationRequired: false })));
+const pendingCustomerDb = testEnv.authenticatedContext("pending-customer", {}).firestore();
+await expect("pending customer cannot read own booking", assertFails(getDoc(doc(pendingCustomerDb, "jobs", "pending-customer-job"))));
+await expect("staff cannot move attendance to another tenant", assertFails(updateDoc(doc(asStaffA, "staff_check_ins", "check-in-a"), { businessId: BUSINESS_B })));
+await expect("staff cannot forge attendance timestamps or owner", assertFails(updateDoc(doc(asStaffA, "staff_check_ins", "check-in-a"), { checkInTime: new Date(0), ownerUid: "owner-b" })));
+await expect("staff cannot create unsupported attendance records", assertFails(setDoc(doc(asStaffA, "staff_check_ins", "forged"), { staffId: "staff-a", businessId: BUSINESS_A, unexpected: true })));
+const inactiveAgentDb = testEnv.authenticatedContext("inactive-agent", { role: "call_center" }).firestore();
+await expect("inactive agent cannot read conversations with stale role claim", assertFails(getDoc(doc(inactiveAgentDb, "conversations", "active-room"))));
+for (const collection of ["account_activations", "security_rate_limits", "payment_checkout_sessions", "payment_receipts"]) {
+  await expect("client cannot alter " + collection, assertFails(setDoc(doc(asSuperAdmin, collection, "forged"), { businessId: BUSINESS_A })));
 }
 
 console.log("\nbusiness-mailbox data is server-only (Admin SDK)");

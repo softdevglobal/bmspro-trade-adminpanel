@@ -155,6 +155,7 @@ export async function processStripeWebhookEvent(
     case "customer.subscription.deleted":
       await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
       break;
+    case "checkout.session.async_payment_succeeded":
     case "checkout.session.completed":
       // Deposit / invoice Direct Charges arrive from the connected account
       // (event.account). Non-payment sessions are ignored by the handler.

@@ -375,14 +375,8 @@ export function CustomerAuthProvider({
         throw error;
       }
     }
-
-    if (password === "00001111") {
-      localStorage.setItem(`customer-password-change:${credential.user.uid}`, "required");
-      setPasswordChangeUid(credential.user.uid);
-    } else {
-      localStorage.removeItem(`customer-password-change:${credential.user.uid}`);
-      setPasswordChangeUid(null);
-    }
+    localStorage.removeItem(`customer-password-change:${credential.user.uid}`);
+    setPasswordChangeUid(null);
     const token = await credential.user.getIdToken();
     void postSessionAudit(token, "login", { bookingSlug: slug });
   }, []);
@@ -432,14 +426,8 @@ export function CustomerAuthProvider({
           ? error
           : new Error("Could not save your profile. Please try again.");
       }
-
-      if (params.password === "00001111") {
-      localStorage.setItem(`customer-password-change:${credential.user.uid}`, "required");
-      setPasswordChangeUid(credential.user.uid);
-    } else {
-      localStorage.removeItem(`customer-password-change:${credential.user.uid}`);
-      setPasswordChangeUid(null);
-    }
+    localStorage.removeItem(`customer-password-change:${credential.user.uid}`);
+    setPasswordChangeUid(null);
     const token = await credential.user.getIdToken();
       void postSessionAudit(token, "login", { bookingSlug: slug });
     },

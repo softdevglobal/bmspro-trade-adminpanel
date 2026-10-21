@@ -1,3 +1,4 @@
+import { imageType, isPdf } from "@/lib/security/file-types";
 /**
  * Server-side image upload (`lib/onboarding/services/upload.ts`).
  *
@@ -16,85 +17,8 @@ const MAX_BYTES = 5 * 1024 * 1024;
 /** Maximum allowed PDF upload size (10 MB). */
 const PDF_MAX_BYTES = 10 * 1024 * 1024;
 
-/** MIME types accepted for service images. */
-const ALLOWED_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-]);
-
-const EXT_TO_MIME: Record<string, string> = {
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-  gif: "image/gif",
-};
-
-/** Resolves a trusted image MIME type when clients send octet-stream or omit it. */
-function resolveImageContentType(
-  reportedType: string,
-  filename: string,
-  file: Buffer,
-): string | null {
-  const normalized = reportedType.trim().toLowerCase();
-  if (ALLOWED_TYPES.has(normalized)) return normalized;
-
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  if (ext && EXT_TO_MIME[ext] && ALLOWED_TYPES.has(EXT_TO_MIME[ext])) {
-    return EXT_TO_MIME[ext];
-  }
-
-  if (file.length >= 3 && file[0] === 0xff && file[1] === 0xd8 && file[2] === 0xff) {
-    return "image/jpeg";
-  }
-  if (
-    file.length >= 8 &&
-    file[0] === 0x89 &&
-    file[1] === 0x50 &&
-    file[2] === 0x4e &&
-    file[3] === 0x47
-  ) {
-    return "image/png";
-  }
-  if (
-    file.length >= 12 &&
-    file.subarray(0, 4).toString("ascii") === "RIFF" &&
-    file.subarray(8, 12).toString("ascii") === "WEBP"
-  ) {
-    return "image/webp";
-  }
-  const header = file.subarray(0, 6).toString("ascii");
-  if (header === "GIF87a" || header === "GIF89a") {
-    return "image/gif";
-  }
-
-  if (!normalized || normalized === "application/octet-stream") {
-    return EXT_TO_MIME[ext] ?? "image/jpeg";
-  }
-
-  return null;
-}
-
-/** Resolves a trusted PDF MIME type when clients send octet-stream or omit it. */
-function resolvePdfContentType(
-  reportedType: string,
-  filename: string,
-  file: Buffer,
-): string | null {
-  const normalized = reportedType.trim().toLowerCase();
-  if (normalized === "application/pdf") return normalized;
-
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "pdf") return "application/pdf";
-
-  if (file.length >= 5 && file.subarray(0, 5).toString("ascii") === "%PDF-") {
-    return "application/pdf";
-  }
-
-  return null;
-}
+function resolveImageContentType(_reportedType: string, _filename: string, file: Buffer): string | null { return imageType(file); }
+function resolvePdfContentType(_reportedType: string, _filename: string, file: Buffer): string | null { return isPdf(file) ? "application/pdf" : null; }
 
 async function saveQuotationFileToStorage(
   file: Buffer,
@@ -219,12 +143,14 @@ export async function uploadBusinessLogo(
   contentType: string,
   options: { businessId?: string | null },
 ): Promise<{ ok: true; imageUrl: string } | { ok: false; error: string }> {
-  if (!ALLOWED_TYPES.has(contentType)) {
+  const detectedType = imageType(file);
+  if (!detectedType || (contentType && contentType !== "application/octet-stream" && contentType !== detectedType)) {
     return {
       ok: false,
       error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF.",
     };
   }
+  contentType = detectedType;
   if (file.length > MAX_BYTES) {
     return { ok: false, error: "Logo must be 5 MB or smaller." };
   }

@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import type { Metadata } from "next";
 import { Bitter, Saira } from "next/font/google";
 import { Providers } from "@/components/providers";
@@ -20,11 +21,12 @@ export const metadata: Metadata = {
   description: "Admin portal for BMS Pro Trade",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await connection();
   return (
     <html lang="en" className={`${saira.variable} ${bitter.variable} h-full antialiased`}>
       <head>

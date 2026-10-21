@@ -1,6 +1,6 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
-import { adminAuth } from "@/lib/firebase/admin";
 import {
   listCatalogItems,
   parseCatalogItemInput,
@@ -27,7 +27,7 @@ async function authenticate(
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = typeof decoded.role === "string" ? decoded.role : "";

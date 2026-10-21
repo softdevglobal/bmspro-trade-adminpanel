@@ -8,8 +8,11 @@ export type ExportCell = string | number | boolean | null | undefined;
 export type ExportRow = Record<string, ExportCell>;
 
 function csvEscape(value: ExportCell): string {
-  const normalized =
+  let normalized =
     value == null ? "" : typeof value === "boolean" ? (value ? "Yes" : "No") : String(value);
+  if (typeof value === "string" && /^[\s\u0000-\u001f]*[=+\-@]|^[\t\r\n]/.test(normalized)) {
+    normalized = `'${normalized}`;
+  }
   if (
     normalized.includes(",") ||
     normalized.includes('"') ||

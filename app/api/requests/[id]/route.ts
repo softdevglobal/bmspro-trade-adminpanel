@@ -1,9 +1,10 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import {
   parseJobInstructionDescription,
   parseJobInstructionTasks,
 } from "@/lib/bookings/job-instructions";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   applyOwnerAction,
   applyAssignedEndVisit,
@@ -125,7 +126,7 @@ async function requireBusinessOwner(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
@@ -269,7 +270,7 @@ async function requireAssignedInspector(request: Request, requestId: string) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

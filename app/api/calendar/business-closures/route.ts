@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import {
@@ -8,7 +9,6 @@ import {
   loadClosureConflicts,
 } from "@/lib/calendar/business-closures/server";
 import { parseCreateBusinessClosureInput } from "@/lib/calendar/business-closures/types";
-import { adminAuth } from "@/lib/firebase/admin";
 import { formatIsoDateInPlatformTimeZone } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
 
@@ -26,7 +26,7 @@ async function requireBusinessOwner(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
