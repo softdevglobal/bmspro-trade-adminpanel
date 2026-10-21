@@ -356,6 +356,13 @@ export type BusinessProfilePlan = {
   period: string;
 };
 
+export type BankTransferDetails = {
+  bankName: string;
+  businessName: string;
+  bsb: string;
+  accountNumber: string;
+};
+
 /** Reads a small profile for the current owner's business. */
 export type BusinessProfile = {
   businessName: string | null;
@@ -386,6 +393,7 @@ export type BusinessProfile = {
   stripeConnectAccountId: string | null;
   /** True once the connected account can accept charges. */
   stripeConnectOnboarded: boolean;
+  bankTransferDetails: BankTransferDetails | null;
 };
 
 function parseGstPercentage(raw: unknown): number | null {
@@ -477,6 +485,18 @@ export async function getBusinessProfile(
         ? data.stripeConnectAccountId.trim()
         : null,
     stripeConnectOnboarded: data.stripeConnectOnboarded === true,
+    bankTransferDetails: (() => {
+      const details = data.bankTransferDetails;
+      if (!details || typeof details !== "object") return null;
+      const raw = details as Record<string, unknown>;
+      const bankName = typeof raw.bankName === "string" ? raw.bankName.trim() : "";
+      const businessName = typeof raw.businessName === "string" ? raw.businessName.trim() : "";
+      const bsb = typeof raw.bsb === "string" ? raw.bsb.trim() : "";
+      const accountNumber = typeof raw.accountNumber === "string" ? raw.accountNumber.trim() : "";
+      return bankName && businessName && bsb && accountNumber
+        ? { bankName, businessName, bsb, accountNumber }
+        : null;
+    })(),
   };
 }
 
@@ -501,6 +521,7 @@ export async function updateBusinessProfile(
     workingHours?: BusinessWorkingHours;
     enabledModules?: BusinessModuleSettings;
     feePayerMode?: FeePayerMode;
+    bankTransferDetails?: BankTransferDetails | null;
   },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
@@ -509,6 +530,10 @@ export async function updateBusinessProfile(
 
   if ("feePayerMode" in updates && updates.feePayerMode) {
     payload.feePayerMode = updates.feePayerMode;
+  }
+
+  if ("bankTransferDetails" in updates) {
+    payload.bankTransferDetails = updates.bankTransferDetails;
   }
 
   if ("businessName" in updates) {

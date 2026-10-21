@@ -623,3 +623,16 @@ export function computeDocumentTotals(input: {
 export function buildCustomerAddressLine(address: InspectionAddress): string {
   return formatAddress(address);
 }
+
+/** Street on the first line, suburb / state / postcode on the second. */
+export function customerAddressDisplayLines(
+  address: InspectionAddress | null | undefined,
+): string[] {
+  if (!address) return [];
+  const street = typeof address.street === "string" ? address.street.trim() : "";
+  const locality = [address.suburb, address.state, address.postcode]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter((part) => part.length > 0)
+    .join(" ");
+  return [street, locality].filter((line) => line.length > 0);
+}

@@ -376,6 +376,34 @@ await expect("inactive agent cannot read conversations with stale role claim", a
 for (const collection of ["account_activations", "security_rate_limits", "payment_checkout_sessions", "payment_receipts"]) {
   await expect("client cannot alter " + collection, assertFails(setDoc(doc(asSuperAdmin, collection, "forged"), { businessId: BUSINESS_A })));
 }
+
+console.log("\nbusiness-mailbox data is server-only (Admin SDK)");
+const EMAIL_FIXTURES = [
+  ["email_connections", "conn-a"],
+  ["email_connection_credentials", "conn-a"],
+  ["email_outbox", "outbox-a"],
+  ["email_events", "event-a"],
+  ["email_oauth_states", "state-a"],
+  ["email_messages", "message-a"],
+  ["email_sync_state", "sync-a"],
+];
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  for (const [collection, id] of EMAIL_FIXTURES) {
+    await setDoc(doc(context.firestore(), collection, id), { businessId: BUSINESS_A });
+  }
+});
+for (const [name, db] of [
+  ["owner", asOwnerA], ["other tenant owner", asOwnerB], ["staff", asStaffA],
+  ["super admin", asSuperAdmin], ["customer", asCustomerA], ["anonymous", anonymous],
+]) {
+  for (const [collection, id] of EMAIL_FIXTURES) {
+    await expect(`${name} cannot read ${collection}`,
+      assertFails(getDoc(doc(db, collection, id))));
+    await expect(`${name} cannot write ${collection}`,
+      assertFails(setDoc(doc(db, collection, id), { businessId: BUSINESS_A, status: "accepted" })));
+  }
+}
+
 await testEnv.cleanup();
 
 console.log(`\n${passed} passed, ${failed} failed`);

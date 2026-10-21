@@ -1,4 +1,3 @@
-import { readTrustedStorage } from "@/lib/security/storage-read";
 import "server-only";
 
 import { logQuotationAuditForActor } from "@/lib/audit/action-logs";
@@ -49,6 +48,7 @@ import {
 } from "@/lib/reference-codes.server";
 import { FieldValue } from "firebase-admin/firestore";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
+import type { BankTransferDetails } from "@/lib/onboarding/server";
 
 export const QUOTATION_COLLECTION = "quotations";
 
@@ -430,6 +430,7 @@ type QuotationBusinessBranding = {
   registeredForGst: boolean;
   gstPercentage: number | null;
   timezone: string;
+  bankTransferDetails: BankTransferDetails | null;
 };
 
 async function loadQuotationBusinessBranding(
@@ -446,6 +447,22 @@ async function loadQuotationBusinessBranding(
       typeof businessData.bookingSlug === "string"
         ? businessData.bookingSlug
         : null;
+    const bankRaw = businessData.bankTransferDetails;
+    const bank = bankRaw && typeof bankRaw === "object"
+      ? bankRaw as Record<string, unknown>
+      : null;
+    const bankTransferDetails = bank &&
+      typeof bank.bankName === "string" && bank.bankName.trim() &&
+      typeof bank.businessName === "string" && bank.businessName.trim() &&
+      typeof bank.bsb === "string" && bank.bsb.trim() &&
+      typeof bank.accountNumber === "string" && bank.accountNumber.trim()
+      ? {
+          bankName: bank.bankName.trim(),
+          businessName: bank.businessName.trim(),
+          bsb: bank.bsb.trim(),
+          accountNumber: bank.accountNumber.trim(),
+        }
+      : null;
     return {
       businessName:
         typeof businessData.businessName === "string"
@@ -475,6 +492,7 @@ async function loadQuotationBusinessBranding(
       abn: typeof businessData.abn === "string" ? businessData.abn : null,
       registeredForGst,
       gstPercentage: registeredForGst ? gstPercentage : null,
+      bankTransferDetails,
       timezone:
         typeof businessData.timezone === "string" && businessData.timezone.trim()
           ? businessData.timezone.trim()
@@ -493,6 +511,7 @@ async function loadQuotationBusinessBranding(
       registeredForGst: false,
       gstPercentage: null,
       timezone: PLATFORM_TIME_ZONE,
+      bankTransferDetails: null,
     };
   }
 }
@@ -767,6 +786,7 @@ export async function createQuotationForInspection(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      bankTransferDetails: businessBranding.bankTransferDetails,
       payUrl,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
@@ -1173,6 +1193,7 @@ export async function updateDraftQuotation(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      bankTransferDetails: businessBranding.bankTransferDetails,
       payUrl,
       inspectionRequestCode:
         typeof requestData.requestCode === "string"
@@ -1978,6 +1999,7 @@ export async function createStandaloneQuotation(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      bankTransferDetails: businessBranding.bankTransferDetails,
       payUrl,
       inspectionRequestCode: requestCode,
     });
@@ -2317,25 +2339,6 @@ export async function getBusinessQuotationPdf(
     return { ok: false, status: 404, error: "Quotation not found." };
   }
 
-  const pdfUrl = quotation.pdfUrl?.trim();
-  if (pdfUrl) {
-    try {
-      const pdfBytes = await readTrustedStorage(pdfUrl, [`quotations/${businessId}/`], "pdf");
-      {
-        if (pdfBytes.length) {
-          const code = quotation.quotationCode?.trim() || "quotation";
-          return {
-            ok: true,
-            pdfBytes,
-            fileName: `${code}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
-          };
-        }
-      }
-    } catch (error) {
-      console.error("[quotation] stored PDF fetch failed:", error);
-    }
-  }
-
   const businessBranding = await loadQuotationBusinessBranding(businessId);
   const payUrl = await resolveQuotationPayUrl(businessId, quotation);
   let inspectionRequestCode: string | null = null;
@@ -2372,6 +2375,7 @@ export async function getBusinessQuotationPdf(
       registeredForGst: businessBranding.registeredForGst,
       gstPercentage: businessBranding.gstPercentage,
       timezone: businessBranding.timezone,
+      bankTransferDetails: businessBranding.bankTransferDetails,
       payUrl,
       inspectionRequestCode,
     });

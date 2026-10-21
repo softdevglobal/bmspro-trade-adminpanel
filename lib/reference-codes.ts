@@ -8,7 +8,8 @@ export const BOOKING_CODE_PREFIX = "BK";
 /** Shared random suffix length for visit + booking codes. */
 export const REFERENCE_CODE_SEGMENT_LENGTH = 9;
 
-const TENANT_CODE_DIGITS = 3;
+/** Minimum width; tenants past 99 naturally grow to 3+ digits. */
+const TENANT_CODE_DIGITS = 2;
 
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const SEGMENT_PATTERN = new RegExp(

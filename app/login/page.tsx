@@ -59,7 +59,8 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="relative grid grid-cols-2 gap-3">
+        <div className="relative">
+        <div className="grid grid-cols-2 gap-3">
           <FeatureCard
             icon="calendar_today"
             label="Today"
@@ -80,6 +81,30 @@ export default function LoginPage() {
             label="Partners"
             description="Coverage & jobs"
           />
+        </div>
+
+        <nav
+          aria-label="Legal"
+          className="mt-5 flex items-center gap-3 font-body text-[12px] text-outline-variant"
+        >
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline-offset-2 transition-colors hover:text-inverse-on-surface hover:underline"
+          >
+            Terms of Service
+          </a>
+          <span aria-hidden className="h-1 w-1 rounded-full bg-outline-variant/60" />
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline-offset-2 transition-colors hover:text-inverse-on-surface hover:underline"
+          >
+            Privacy Policy
+          </a>
+        </nav>
         </div>
       </aside>
 

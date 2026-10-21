@@ -22,6 +22,7 @@ import {
   getCareplusIntegration,
 } from "@/lib/integrations/careplus/mapping";
 import { deliverCareplusOutboxEvent, parkCareplusOutboxFailure } from "@/lib/integrations/careplus/outbox";
+import { isCareplusOutboundPayloadAllowed } from "@/lib/integrations/careplus/outbound-policy";
 import type {
   CareplusEnqueueInput,
   CareplusEnqueueResult,
@@ -314,6 +315,8 @@ export async function enqueueCareplusRecord(
 ): Promise<CareplusEnqueueResult> {
   if (!payload.eventId || !payload.businessId) return "skipped";
 
+  if (!isCareplusOutboundPayloadAllowed(payload)) return "skipped";
+
   const mapping = await getCareplusIntegration(payload.businessId);
   if (!mapping || mapping.status !== "active") return "skipped";
   if (!isCareplusSecretConfigured(payload.businessId)) return "skipped";
@@ -326,6 +329,7 @@ export async function enqueueCareplusRecord(
 export async function enqueueCareplusJobCompleted(
   input: CareplusEnqueueInput,
 ): Promise<CareplusEnqueueResult> {
+  if (!isCareplusOutboundPayloadAllowed({ eventType: "activity.completed" })) return "skipped";
   if (!input.id || !input.businessId) return "skipped";
   const payload = await buildCareplusActivityCompletedPayload(input);
   const queued = await enqueueCareplusRecord(payload, input.id);
@@ -362,6 +366,7 @@ export async function enqueueCareplusActivitySafe(
   input: CareplusEnqueueInput,
   eventType: CareplusActivityEvent,
 ): Promise<void> {
+  if (!isCareplusOutboundPayloadAllowed({ eventType })) return;
   if (!input.id || !input.businessId) return;
   try {
     const resolved = resolveCareplusVisitEvent(input, eventType);

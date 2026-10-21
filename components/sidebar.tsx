@@ -3,6 +3,7 @@
 import { SignOutConfirmModal } from "@/components/sign-out-confirm-modal";
 import { useAuth, type AuthRole } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useEmailSending } from "@/lib/email-integration/client";
 import { countPendingInspectionRequests } from "@/lib/inspection/request-counts";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
@@ -36,6 +37,8 @@ type NavItem = {
   businessOwner?: boolean;
   /** When set, only these dashboard roles see the link. */
   roles?: Exclude<AuthRole, null>[];
+  /** Hidden unless business-mailbox sending is enabled for this business. */
+  requiresEmailSending?: boolean;
   children?: Array<{
     href: string;
     label: string;
@@ -102,6 +105,13 @@ const NAV_ITEMS: NavItem[] = [
     label: "Invoices",
     icon: "receipt_long",
     businessOwner: true,
+  },
+  {
+    href: "/dashboard/emails",
+    label: "Emails",
+    icon: "forward_to_inbox",
+    businessOwner: true,
+    requiresEmailSending: true,
   },
   { href: "/dashboard/services", label: "Services", icon: "settings_suggest" },
   {
@@ -258,6 +268,9 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout, role } = useAuth();
+  const { enabled: emailSendingEnabled } = useEmailSending({
+    skip: role !== "business_owner",
+  });
   const business = useBusinessProfile();
   const { requests } = useInspectionRequests();
   const pendingRequestCount = useMemo(
@@ -425,6 +438,7 @@ export function Sidebar({
             if (role === "business_owner" && subscriptionAccessBlocked) {
               return item.href === "/dashboard/subscription";
             }
+            if (item.requiresEmailSending && !emailSendingEnabled) return false;
             return isNavItemVisible(item, role);
           }).map((item) => {
             const childItems = filterNavChildren(item.children ?? [], role);

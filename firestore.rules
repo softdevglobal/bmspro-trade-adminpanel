@@ -455,8 +455,24 @@ service cloud.firestore {
       ];
     }
 
+    // Business-mailbox sending: credentials, queued emails and audit events are
+    // only ever touched by the server (Admin SDK), never by any client.
+    function isEmailIntegrationCollection() {
+      return request.path[3] in [
+        'email_connections',
+        'email_connection_credentials',
+        'email_outbox',
+        'email_events',
+        'email_oauth_states',
+        'email_messages',
+        'email_sync_state'
+      ];
+    }
+
     function isAdminSdkOnlyCollection() {
-      return isCareplusCollection() || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions'];
+      return isCareplusCollection()
+        || isEmailIntegrationCollection()
+        || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions'];
     }
 
     // Super admins can access remaining collections in the admin portal.

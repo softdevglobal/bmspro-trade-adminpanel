@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/careplus-outbox",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/email-outbox",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/email-sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
