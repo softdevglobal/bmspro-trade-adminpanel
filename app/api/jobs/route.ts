@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import { createDirectJob, createDirectJobSeries, listBusinessBookings } from "@/lib/bookings/server";
@@ -9,7 +10,7 @@ import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
 import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
 import { parseWorkingHoursFromBusiness } from "@/lib/calendar/working-hours";
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   parseInspectionRequestInput,
   sortInspectionSlots,
@@ -37,7 +38,7 @@ async function requireBusinessOwner(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

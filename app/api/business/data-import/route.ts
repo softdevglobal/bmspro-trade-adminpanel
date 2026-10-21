@@ -1,8 +1,9 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import type { ExportDatasetKey } from "@/lib/export/business-data";
 import { IMPORT_MAX_ROWS } from "@/lib/export/import-shared";
 import { importBusinessDataset } from "@/lib/export/import-server";
 import type { ExportRow } from "@/lib/export/tabular";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -27,7 +28,7 @@ async function requireBusinessOwner(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     let role = typeof decoded.role === "string" ? decoded.role : null;

@@ -20,7 +20,6 @@ import type {
 import { formatDepositPaymentNote } from "@/lib/quotations/document";
 import {
   parseInvoicePaymentEntries,
-  type StripePaymentRecord,
 } from "@/lib/payments/types";
 import { resolveInvoicePayUrl } from "@/lib/payments/document-pay-link";
 import { getBusinessProfile } from "@/lib/onboarding/server";
@@ -586,75 +585,6 @@ export async function sendInvoiceReviewRequest(
   });
 
   return { ok: true };
-}
-
-/**
- * Records a settled Stripe payment against an invoice: decrements the remaining
- * balance, appends to the payment history, and marks the invoice paid once the
- * balance reaches zero. Idempotent per Stripe checkout session.
- */
-export async function recordInvoiceStripePayment(
-  businessId: string,
-  invoiceId: string,
-  payment: StripePaymentRecord,
-): Promise<
-  | { ok: true; invoice: InvoiceDetail; alreadyRecorded: boolean }
-  | { ok: false; status: number; error: string }
-> {
-  const id = invoiceId.trim();
-  if (!id) {
-    return { ok: false, status: 400, error: "Invoice is required." };
-  }
-
-  const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
-  const snap = await docRef.get();
-  if (!snap.exists || snap.data()?.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Invoice not found." };
-  }
-
-  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
-
-  // Idempotency: never apply the same checkout session twice.
-  const alreadyRecorded = invoice.payments.some(
-    (entry) =>
-      entry.stripeCheckoutSessionId === payment.stripeCheckoutSessionId,
-  );
-  if (alreadyRecorded) {
-    return { ok: true, invoice, alreadyRecorded: true };
-  }
-
-  const newAmountPaid =
-    Math.round((invoice.amountPaidAud + payment.amountAud) * 100) / 100;
-  const newBalanceDue =
-    Math.round(Math.max(0, invoice.balanceDueAud - payment.amountAud) * 100) /
-    100;
-  const settled = newBalanceDue <= 0;
-
-  const entry = {
-    amountAud: payment.amountAud,
-    feeAud: payment.feeAud,
-    totalChargedAud: payment.totalChargedAud,
-    feePayerMode: payment.feePayerMode,
-    stripeCheckoutSessionId: payment.stripeCheckoutSessionId,
-    stripePaymentIntentId: payment.stripePaymentIntentId,
-    paidAt: payment.paidAt,
-  };
-
-  await docRef.update({
-    payments: FieldValue.arrayUnion(entry),
-    amountPaidAud: newAmountPaid,
-    balanceDueAud: newBalanceDue,
-    ...(settled ? { status: "paid" } : {}),
-    lastPaymentAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-
-  const updated = await docRef.get();
-  const nextInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
-  if (settled) {
-    await mirrorInvoiceToInspectionRequest(nextInvoice);
-  }
-  return { ok: true, invoice: nextInvoice, alreadyRecorded: false };
 }
 
 /**
@@ -1305,4 +1235,12 @@ export async function deleteBusinessInvoice(
   }
 
   return { ok: true, invoice };
+}
+
+/** Retryable projection after the payment transaction has committed. */
+export async function syncSettledInvoice(businessId: string, invoiceId: string) {
+  const snap = await adminDb.collection(INVOICE_COLLECTION).doc(invoiceId).get();
+  if (snap.exists && snap.data()?.businessId === businessId) {
+    await mirrorInvoiceToInspectionRequest(mapInvoiceDoc(snap.id, snap.data() ?? {}));
+  }
 }

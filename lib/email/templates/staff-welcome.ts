@@ -5,7 +5,7 @@ import { sendEmail } from "@/lib/email/zeptomail";
 import { sendSms } from "@/lib/sms/textbee";
 import { firstName } from "@/lib/email/templates/_shared/first-name";
 import { platformBrandLogoSrc } from "@/lib/email/templates/_shared/platform-logo";
-import { appBaseUrl, loginUrl } from "@/lib/email/templates/_shared/urls";
+import { appBaseUrl } from "@/lib/email/templates/_shared/urls";
 
 function resolveBusinessLogoUrl(url: string | null | undefined): string | null {
   if (!url?.trim()) return null;
@@ -22,7 +22,7 @@ export type StaffWelcomeEmailInput = {
   fullName: string;
   businessName: string;
   staffType: string;
-  temporaryPassword: string;
+  activationUrl: string;
   logoUrl?: string | null;
   businessId?: string | null;
 };
@@ -34,7 +34,7 @@ export type StaffWelcomeEmailInput = {
 export async function sendStaffWelcomeEmail(
   input: StaffWelcomeEmailInput,
 ): Promise<boolean> {
-  const login = loginUrl();
+  const login = input.activationUrl;
   const details: EmailDetailRow[] = [
     { label: "Business", value: input.businessName },
     { label: "Role", value: input.staffType },
@@ -52,15 +52,10 @@ export async function sendStaffWelcomeEmail(
     bodyLogoUrl: resolveBusinessLogoUrl(input.logoUrl),
     title: `You've joined ${input.businessName}`,
     greetingName: firstName(input.fullName),
-    body: `${input.businessName} added you to their team on BMS Pro Trade. Use the login credentials below to access your dashboard, view assigned requests, and manage your availability.\n\nPlease change your password after your first sign-in.`,
+    body: `${input.businessName} added you to their team on BMS Pro Trade. Use the secure link below to choose your password and activate your account.`,
     details,
-    loginCredentials: {
-      email: input.email,
-      password: input.temporaryPassword,
-      label: "Your login credentials",
-    },
     ctaUrl: login,
-    ctaLabel: "Sign in now",
+    ctaLabel: "Activate my account",
     footnote:
       "Keep this email private. If you weren't expecting this invitation, contact your business owner.",
     businessName: input.businessName,

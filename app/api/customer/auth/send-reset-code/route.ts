@@ -1,4 +1,4 @@
-import { allowResetCodeRequest, generateResetCode } from "@/lib/auth/reset-codes";
+import { allowResetCodeRequest, generateResetCode, resetCodeDigest } from "@/lib/auth/reset-codes";
 import { sendCustomerPasswordResetCodeEmail } from "@/lib/email/templates";
 import { CUSTOMER_COLLECTION } from "@/lib/customer/types";
 import {
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
     // Throttled before the account lookup, so a throttled response cannot be
     // used to tell an existing address from an unknown one. Scoped per booking
     // slug, matching how customer accounts are namespaced.
-    if (!(await allowResetCodeRequest(`customer:${bookingSlug}`, trimmed))) {
+    if (!(await allowResetCodeRequest(`customer:${bookingSlug}`, trimmed, req))) {
       return NextResponse.json(
         {
           error:
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     const expiresAt = Timestamp.fromMillis(Date.now() + 2 * 60 * 1000);
 
     await docRef.set({
-      code,
+      codeDigest: resetCodeDigest(code),
       expiresAt,
       createdAt: FieldValue.serverTimestamp(),
       attempts: 0,

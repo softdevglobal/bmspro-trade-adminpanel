@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Public branding; writes always pass through the bounded, quota-controlled API.
+    match /business-logos/{path=**} { allow read: if true; allow write: if false; }
+    // Evidence and operational files are served through authorized APIs or the
+    // narrowly issued download URLs. No client can list or upload bucket objects.
+    match /{path=**} { allow read, write: if false; }
+  }
+}

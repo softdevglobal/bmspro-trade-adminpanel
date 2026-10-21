@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 /**
  * Server-side CRUD and auth for the services system.
  *
@@ -7,7 +8,7 @@
 
 import "server-only";
 
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   COLLECTIONS,
   LEGACY_COLLECTIONS,
@@ -71,7 +72,7 @@ async function verifyBearerToken(
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     return {
       ok: true,
       uid: decoded.uid,

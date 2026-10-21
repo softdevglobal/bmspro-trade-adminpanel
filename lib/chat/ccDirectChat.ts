@@ -257,9 +257,17 @@ export async function getCcChat(chatId: string): Promise<CcDirectChat | null> {
 
 export async function getCcMessages(
   chatId: string,
+  caller: { uid: string; businessId?: string },
   limit = 40,
   beforeMessageId?: string | null,
 ): Promise<CcDirectMessage[]> {
+  const room = await getCcChat(chatId);
+  if (!room || !room.participantIds.includes(caller.uid)) return [];
+  if (caller.businessId) {
+    const tenantUser = await adminDb.collection("users").doc(room.tenantUserUid).get();
+    if (tenantUser.data()?.businessId !== caller.businessId) return [];
+  }
+  limit = Math.max(1, Math.min(100, Math.floor(Number.isFinite(limit) ? limit : 40)));
   let query = adminDb
     .collection(CC_DIRECT_CHATS_COLLECTION)
     .doc(chatId)

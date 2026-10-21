@@ -1,4 +1,5 @@
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   businessRecordQuotationCustomerDecision,
   cancelQuotation,
@@ -26,7 +27,7 @@ async function requireBusinessAuthor(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     let businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     let role = typeof decoded.role === "string" ? decoded.role : null;

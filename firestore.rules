@@ -4,7 +4,18 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.token.get("role", "") != "pending_owner"
+        && accountReady("users") && accountReady("customers");
+    }
+
+    function accountReady(collection) {
+      let path = /databases/$(database)/documents/$(collection)/$(request.auth.uid);
+      return !exists(path) || (
+        get(path).data.get('activationRequired', false) == false
+        && get(path).data.get('mustChangePassword', false) == false
+        && get(path).data.get('emailVerificationRequired', false) == false
+      );
     }
 
     function isSuperAdmin() {
@@ -127,7 +138,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
       allow create: if userSelfFcmCreate(uid);
       allow update: if userSelfFcmWrite(uid);
       allow delete: if false;
@@ -158,15 +169,8 @@ service cloud.firestore {
     match /staff_check_ins/{checkInId} {
       allow read: if isSuperAdmin()
         || (isSignedIn() && resource.data.staffId == request.auth.uid);
-      allow create: if isSignedIn()
-        && request.resource.data.staffId == request.auth.uid
-        && request.resource.data.businessId is string
-        && belongsToActiveBusiness(request.resource.data.businessId);
-      allow update: if isSignedIn()
-        && resource.data.staffId == request.auth.uid
-        && request.resource.data.staffId == request.auth.uid
-        && resource.data.businessId is string
-        && belongsToActiveBusiness(resource.data.businessId);
+      // Attendance is recorded by the API with server identity and timestamps.
+      allow create, update: if false;
       allow delete: if false;
     }
 
@@ -342,7 +346,13 @@ service cloud.firestore {
     }
 
     function isCallCenterAgent() {
-      return isSignedIn() && request.auth.token.role == 'call_center';
+      return isSignedIn() && request.auth.token.role == 'call_center'
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDocData().get('isActive', true) == true
+        && !(userDocData().get('status', 'active') in ['inactive', 'disabled', 'suspended'])
+        && (!exists(/databases/$(database)/documents/call_center_agents/$(request.auth.uid))
+          || (get(/databases/$(database)/documents/call_center_agents/$(request.auth.uid)).data.get('isActive', true) == true
+              && !(get(/databases/$(database)/documents/call_center_agents/$(request.auth.uid)).data.get('status', 'active') in ['inactive', 'disabled', 'suspended'])));
     }
 
     match /conversations/{conversationId} {
@@ -462,7 +472,7 @@ service cloud.firestore {
     function isAdminSdkOnlyCollection() {
       return isCareplusCollection()
         || isEmailIntegrationCollection()
-        || request.path[3] in ['document_counters', 'participant_onboarding'];
+        || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions'];
     }
 
     // Super admins can access remaining collections in the admin portal.

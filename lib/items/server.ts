@@ -1,3 +1,4 @@
+import { readTrustedStorage } from "@/lib/security/storage-read";
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -439,9 +440,7 @@ export async function getCatalogItemDocument(
 
   let pdfBytes: Buffer;
   try {
-    const response = await fetch(item.documentUrl);
-    if (!response.ok) throw new Error(`status ${response.status}`);
-    pdfBytes = Buffer.from(await response.arrayBuffer());
+    pdfBytes = await readTrustedStorage(item.documentUrl, [`items/${businessId}/`], "pdf");
   } catch (error) {
     console.error("[item] document fetch failed:", error);
     return { ok: false, status: 502, error: "Could not load this document." };

@@ -16,7 +16,7 @@ async function requireStaffUser(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await adminAuth.verifyIdToken(match[1], true);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
@@ -91,6 +91,12 @@ export async function PATCH(request: Request) {
     );
   }
 
+  const body = await request.json().catch(() => null);
+  if (typeof body?.newPassword !== "string" || body.newPassword.length < 12 || body.newPassword.length > 128) {
+    return NextResponse.json({ error: "Provide a new password of 12–128 characters." }, { status: 400 });
+  }
+  await adminAuth.updateUser(auth.uid, { password: body.newPassword });
+  await adminAuth.revokeRefreshTokens(auth.uid);
   await ref.update({
     mustChangePassword: false,
     passwordChangedAt: FieldValue.serverTimestamp(),

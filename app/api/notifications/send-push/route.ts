@@ -1,6 +1,6 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { NextResponse } from "next/server";
 
-import { adminAuth } from "@/lib/firebase/admin";
 import { sendStaffMobilePush } from "@/lib/notifications/push";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ async function requireAuthenticatedUser(request: Request) {
     return { ok: false as const, status: 401, error: "Missing authorization header." };
   }
   try {
-    await adminAuth.verifyIdToken(match[1]);
+    await verifyAccountIdToken(match[1]);
     return { ok: true as const };
   } catch {
     return { ok: false as const, status: 401, error: "Invalid or expired session." };

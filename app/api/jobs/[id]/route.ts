@@ -1,3 +1,4 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import {
@@ -22,7 +23,7 @@ import {
   parseSeriesUpdateMode,
   recurrenceFirestorePayload,
 } from "@/lib/bookings/recurrence";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   findApprovedLeaveBlocking,
   findLeaveBlockingAssignment,
@@ -165,7 +166,7 @@ async function requireAssignedBookingOperator(
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
@@ -431,7 +432,7 @@ export async function PATCH(
     let ownerUid: string;
     let ownerEmail: string | undefined;
     try {
-      const decoded = await adminAuth.verifyIdToken(match[1]);
+      const decoded = await verifyAccountIdToken(match[1]);
       ownerUid = decoded.uid;
       ownerEmail = decoded.email;
     } catch {
@@ -639,7 +640,7 @@ export async function PATCH(
     let actorEmail: string | undefined;
     let actorRole = "";
     try {
-      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      const decoded = await verifyAccountIdToken(token ?? "");
       actorUid = decoded.uid;
       actorEmail = decoded.email;
       actorRole = typeof decoded.role === "string" ? decoded.role : "";
@@ -1054,7 +1055,7 @@ export async function PATCH(
     let actorEmail: string | undefined;
     let actorRole = "";
     try {
-      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      const decoded = await verifyAccountIdToken(token ?? "");
       actorUid = decoded.uid;
       actorEmail = decoded.email;
       actorRole = typeof decoded.role === "string" ? decoded.role : "";
@@ -1099,7 +1100,7 @@ export async function PATCH(
     let actorEmail: string | undefined;
     let actorRole = "";
     try {
-      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      const decoded = await verifyAccountIdToken(token ?? "");
       actorUid = decoded.uid;
       actorEmail = decoded.email;
       actorRole = typeof decoded.role === "string" ? decoded.role : "";
@@ -1143,7 +1144,7 @@ export async function PATCH(
     let actorEmail: string | undefined;
     let actorRole = "";
     try {
-      const decoded = await adminAuth.verifyIdToken(token ?? "");
+      const decoded = await verifyAccountIdToken(token ?? "");
       actorUid = decoded.uid;
       actorEmail = decoded.email;
       actorRole = typeof decoded.role === "string" ? decoded.role : "";
@@ -1209,7 +1210,7 @@ export async function DELETE(
   let actorEmail: string | undefined;
   let actorRole = "";
   try {
-    const decoded = await adminAuth.verifyIdToken(token ?? "");
+    const decoded = await verifyAccountIdToken(token ?? "");
     actorUid = decoded.uid;
     actorEmail = decoded.email;
     actorRole = typeof decoded.role === "string" ? decoded.role : "";

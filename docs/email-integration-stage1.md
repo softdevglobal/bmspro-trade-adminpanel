@@ -200,8 +200,10 @@ only ever creates image/PDF blobs; everything else is opaque bytes.
 
 Safety of the preview: email HTML is cleaned on the server (scripts, frames,
 forms, event handlers and `javascript:` links removed) and shown in an iframe
-with `sandbox` (no `allow-scripts`) and a CSP of `default-src 'none'`. Remote
-images load only after the user clicks "Show images". Links open in a new tab.
+with `sandbox` (no `allow-scripts`) and a CSP of `default-src 'none'` that
+allows only images. Images always show (web and app), like a normal mail app;
+this means senders' tracking pixels can see when mail is opened. Links open in
+a new tab.
 
 Replies keep the conversation threaded: Gmail `threadId` plus `In-Reply-To` and
 `References` from the original. Every send (new, reply, forward) goes through

@@ -1,4 +1,5 @@
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   decideLeaveRequest,
   findLeaveAssignmentConflicts,
@@ -24,7 +25,7 @@ async function requireBusinessOwner(request: Request) {
     };
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

@@ -1,9 +1,9 @@
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import {
   deletePersonalCalendarEvent,
   updatePersonalCalendarEvent,
 } from "@/lib/calendar/personal-events/server";
 import { parseUpdatePersonalEventInput } from "@/lib/calendar/personal-events/types";
-import { adminAuth } from "@/lib/firebase/admin";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -20,7 +20,7 @@ async function requireBusinessOwner(request: Request) {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;

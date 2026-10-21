@@ -1,4 +1,5 @@
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { verifyAccountIdToken } from "@/lib/auth/account-access";
+import { adminDb } from "@/lib/firebase/admin";
 import {
   filterAttendanceByDateRange,
   parseAttendanceRangeParams,
@@ -24,7 +25,7 @@ async function requireBusinessUser(request: Request): Promise<
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(match[1]);
+    const decoded = await verifyAccountIdToken(match[1]);
     const businessId =
       typeof decoded.businessId === "string" ? decoded.businessId : null;
     const role = decoded.role;
@@ -79,6 +80,7 @@ export async function GET(request: Request) {
   const merged = new Map<string, TeamAttendanceRecord>();
   for (const snap of [byOwnerSnap, byBusinessSnap]) {
     for (const doc of snap.docs) {
+      if (doc.data().businessId !== auth.businessId) continue;
       const record = serializeAttendanceRecord(doc.id, doc.data());
       if (record) merged.set(doc.id, record);
     }

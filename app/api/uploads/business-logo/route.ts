@@ -1,3 +1,5 @@
+import { boundedUploadForm } from "@/lib/security/upload-request";
+import { clientAddress, consumeRateLimits } from "@/lib/security/rate-limit";
 /**
  * Business logo upload API.
  *
@@ -16,9 +18,15 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  try {
+    if (!(await consumeRateLimits([
+      { key: "uploads:logo:ip:" + clientAddress(request), limit: 20, windowMs: 3600_000 },
+      { key: "uploads:logo:global", limit: 1000, windowMs: 86400_000 },
+    ]))) return NextResponse.json({ error: "Upload limit reached. Please try later." }, { status: 429 });
+  } catch { return NextResponse.json({ error: "Upload service temporarily unavailable." }, { status: 503 }); }
   let formData: FormData;
   try {
-    formData = await request.formData();
+    formData = await boundedUploadForm(request);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Invalid upload request." },
@@ -36,6 +44,9 @@ export async function POST(request: Request) {
 
   // Authenticated owners/admins store under their business; onboarding is public.
   const auth = await requireSession(request);
+  if (request.headers.has("authorization") && !auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
   const businessId =
     auth.ok && auth.role === "business_owner" ? auth.businessId : null;
 

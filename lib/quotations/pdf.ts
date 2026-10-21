@@ -1,3 +1,5 @@
+import { readTrustedStorage } from "@/lib/security/storage-read";
+import { imageType } from "@/lib/security/file-types";
 import "server-only";
 
 import {
@@ -171,10 +173,8 @@ async function embedLogoFromUrl(
   logoUrl: string,
 ): Promise<PDFImage | null> {
   try {
-    const res = await fetch(logoUrl.trim());
-    if (!res.ok) return null;
-    const bytes = await res.arrayBuffer();
-    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    const bytes = await readTrustedStorage(logoUrl.trim(), ["business-logos/"], "image");
+    const contentType = imageType(bytes) ?? "";
     if (contentType.includes("png")) return doc.embedPng(bytes);
     if (contentType.includes("jpeg") || contentType.includes("jpg")) {
       return doc.embedJpg(bytes);

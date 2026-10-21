@@ -18,51 +18,22 @@ export async function resolveCallCenterAgentProfile(
   uid: string,
   email: string,
 ): Promise<CallCenterAgentProfile | null> {
-  const normalizedEmail = email.trim().toLowerCase();
-
-  const userByUid = await adminDb.collection("users").doc(uid).get();
-  if (userByUid.exists) {
-    const data = userByUid.data() ?? {};
-    const role = typeof data.role === "string" ? data.role : "";
-    if (role === "call_center") {
-      return mapAgentProfile(data);
-    }
-  }
-
-  const usersByEmail = await adminDb
-    .collection("users")
-    .where("email", "==", normalizedEmail)
-    .limit(1)
-    .get();
-  if (!usersByEmail.empty) {
-    const data = usersByEmail.docs[0].data();
-    const role = typeof data.role === "string" ? data.role : "";
-    if (role === "call_center") {
-      return mapAgentProfile(data);
-    }
-  }
-
-  const agentByUid = await adminDb.collection("call_center_agents").doc(uid).get();
-  if (agentByUid.exists) {
-    return mapAgentProfile(agentByUid.data() ?? {});
-  }
-
-  const agentsByEmail = await adminDb
-    .collection("call_center_agents")
-    .where("email", "==", normalizedEmail)
-    .limit(1)
-    .get();
-  if (!agentsByEmail.empty) {
-    return mapAgentProfile(agentsByEmail.docs[0].data());
-  }
-
+  const [user, agent] = await Promise.all([
+    adminDb.collection("users").doc(uid).get(), adminDb.collection("call_center_agents").doc(uid).get(),
+  ]);
+  const profiles = [user.exists && user.data()?.role === "call_center" ? mapAgentProfile(user.data() ?? {}) : null,
+    agent.exists ? mapAgentProfile(agent.data() ?? {}) : null].filter((profile): profile is CallCenterAgentProfile => profile !== null);
+  if (profiles.some((profile) => !profile.isActive)) return profiles.find((profile) => !profile.isActive)!;
+  if (profiles.length) return profiles[0];
+  // Never authorize a different UID merely because its profile has the same email.
+  void email;
   return null;
 }
 
 function mapAgentProfile(data: Record<string, unknown>): CallCenterAgentProfile {
   const status = typeof data.status === "string" ? data.status : "active";
   const isActive =
-    data.isActive !== false && status !== "inactive" && status !== "disabled";
+    data.isActive !== false && status !== "inactive" && status !== "disabled" && status !== "suspended";
 
   return {
     fullName:
@@ -84,6 +55,12 @@ export async function ensureCallCenterAgentClaims(
   uid: string,
   profile: CallCenterAgentProfile,
 ): Promise<void> {
+  if (!profile.isActive) {
+    await adminAuth.updateUser(uid, { disabled: true });
+    await adminAuth.setCustomUserClaims(uid, {});
+    await adminAuth.revokeRefreshTokens(uid);
+    return;
+  }
   await adminAuth.setCustomUserClaims(uid, {
     role: "call_center",
     ...(profile.agentType ? { agentType: profile.agentType } : {}),
@@ -96,6 +73,7 @@ export async function syncCallCenterUserDoc(
   email: string,
   profile: CallCenterAgentProfile,
 ): Promise<void> {
+  if (!profile.isActive) await ensureCallCenterAgentClaims(uid, profile);
   const ref = adminDb.collection("users").doc(uid);
   const snap = await ref.get();
   const base = {

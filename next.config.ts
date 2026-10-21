@@ -4,86 +4,6 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
-const isDev = process.env.NODE_ENV === "development";
-
-/**
- * CSP rollout switch. Leave unset (or anything but "enforce") to ship the policy
- * as `Content-Security-Policy-Report-Only`, which reports violations to
- * `/api/security/csp-report` without blocking anything. Set `CSP_MODE=enforce`
- * in the host env once the report log is clean.
- */
-const cspEnforced = process.env.CSP_MODE === "enforce";
-
-/**
- * Firebase Auth keeps session state in a hidden iframe served from the
- * project's `authDomain` (e.g. `bmspro-trade.firebaseapp.com`), so that origin
- * has to be allowed in `frame-src`. Read from the same env var the client SDK
- * uses so the policy follows the project rather than hard-coding a host.
- */
-const firebaseAuthDomain =
-  process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN?.trim() || "";
-const firebaseAuthFrameSources = [
-  firebaseAuthDomain ? `https://${firebaseAuthDomain}` : "",
-  // Firebase also serves the auth helper from the *.web.app alias of a project.
-  firebaseAuthDomain.endsWith(".firebaseapp.com")
-    ? `https://${firebaseAuthDomain.replace(/\.firebaseapp\.com$/, ".web.app")}`
-    : "",
-]
-  .filter(Boolean)
-  .join(" ");
-
-/**
- * Third-party origins the browser legitimately talks to:
- * - fonts.googleapis.com / fonts.gstatic.com — Finlandica + Material Symbols in app/layout.tsx
- * - *.googleapis.com — Firebase Auth (identitytoolkit, securetoken), Firestore, Storage
- * - *.stripe.com — hosted checkout / billing portal redirects
- * - api.dicebear.com — generated staff + customer avatars
- * - unpkg.com — pdf.js worker in components/pdf-canvas-viewer.tsx
- * - <project>.firebaseapp.com — Firebase Auth's hidden session-management iframe
- *
- * `'unsafe-inline'` and `'unsafe-eval'` are deliberate starting points, not the
- * end state: tighten script-src to nonces or hashes (see
- * node_modules/next/dist/docs/01-app/02-guides/content-security-policy.md) once
- * the report-only phase confirms the rest of the policy holds.
- */
-const cspDirectives = [
-  "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "img-src 'self' data: blob: https:",
-  "media-src 'self' data: blob:",
-  [
-    "connect-src 'self' blob: data:",
-    "https://*.googleapis.com",
-    "https://*.firebaseio.com",
-    "https://*.firebase.com",
-    "https://*.stripe.com",
-    "https://api.dicebear.com",
-    "https://unpkg.com",
-    "wss://*.firebaseio.com",
-    // Turbopack HMR socket + dev asset fetches.
-    isDev ? "ws://localhost:* http://localhost:*" : "",
-  ]
-    .filter(Boolean)
-    .join(" "),
-  "worker-src 'self' blob: https://unpkg.com",
-  ["frame-src 'self' https://*.stripe.com", firebaseAuthFrameSources]
-    .filter(Boolean)
-    .join(" "),
-  "form-action 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  // Browsers ignore this directive in report-only CSP (it would change
-  // requests). Only emit it when the policy is enforced. HSTS already
-  // upgrades HTTP on production.
-  !isDev && cspEnforced ? "upgrade-insecure-requests" : "",
-  "report-uri /api/security/csp-report",
-]
-  .filter(Boolean)
-  .join("; ");
-
 const securityHeaders = [
   {
     key: "Strict-Transport-Security",
@@ -103,12 +23,6 @@ const securityHeaders = [
   // indexed from an inbound link. This is the part that actually keeps the
   // portal out of search results. See app/robots.ts.
   { key: "X-Robots-Tag", value: "noindex, nofollow" },
-  {
-    key: cspEnforced
-      ? "Content-Security-Policy"
-      : "Content-Security-Policy-Report-Only",
-    value: cspDirectives,
-  },
 ];
 
 /**
