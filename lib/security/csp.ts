@@ -1,4 +1,7 @@
+import { commandCentreBackendUrl } from "@/lib/commandCentreBackendUrl";
+
 const isDev = process.env.NODE_ENV === "development";
+const commandCentreOrigin = new URL(commandCentreBackendUrl(process.env.NEXT_PUBLIC_COMMAND_CENTRE_BACKEND_URL, isDev)).origin;
 
 const cspEnforced = process.env.CSP_MODE !== "report-only";
 
@@ -24,6 +27,8 @@ export function contentSecurityPolicy(nonce: string) { return [
   "media-src 'self' data: blob:",
   [
     "connect-src 'self' blob: data:",
+    // Owner review reads/approvals use this authenticated Command Centre API.
+    commandCentreOrigin,
     "https://*.googleapis.com",
     "https://*.firebaseio.com",
     "https://*.firebase.com",

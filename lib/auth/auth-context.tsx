@@ -93,8 +93,11 @@ async function verifyBusinessActive(businessId: string): Promise<boolean> {
   const snap = await getDoc(doc(db, "businesses", businessId));
   if (!snap.exists()) return false;
   const data = snap.data();
-  if (data?.isActive === false) return false;
-  if (data?.status === "suspended") return false;
+  const status = typeof data?.status === "string" ? data.status.toLowerCase() : "";
+  const commandCentreSetupAccess = data?.dashboardAccessEnabled === true &&
+    data?.source === "command_centre_ai" && status === "pending_review";
+  if (data?.isActive === false && !commandCentreSetupAccess) return false;
+  if (status === "suspended") return false;
   return true;
 }
 
