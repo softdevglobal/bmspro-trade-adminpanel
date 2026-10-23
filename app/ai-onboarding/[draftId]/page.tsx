@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
+import { commandCentreBackendUrl } from "@/lib/commandCentreBackendUrl";
 
 type Review = {
   draftId: string;
@@ -13,7 +14,7 @@ type Review = {
   approval: unknown;
 };
 
-const backend = (process.env.NEXT_PUBLIC_COMMAND_CENTRE_BACKEND_URL || "http://127.0.0.1:5050/api").replace(/\/+$/, "");
+const backend = commandCentreBackendUrl(process.env.NEXT_PUBLIC_COMMAND_CENTRE_BACKEND_URL, process.env.NODE_ENV === "development");
 
 export default function AiOnboardingReviewPage() {
   const params = useParams<{ draftId: string }>();
