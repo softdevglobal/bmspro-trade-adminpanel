@@ -1,4 +1,5 @@
 import "server-only";
+import { createAiAssignedInspection, commitAiInspectionApproval } from "@/lib/team/ai-assignment-server";
 
 
 import {
@@ -171,6 +172,11 @@ export async function createInspectionRequest(
     customerId?: string | null;
     createdSource: InspectionRequestCreatedSource;
     scheduleOnCreate?: CalendarScheduleInput;
+    autoAssignStaff?: boolean;
+    autoConfirmStaff?: boolean;
+    assignmentSource?: "sophie" | "customer_portal";
+    /** Route handlers can schedule delivery after returning the saved result. */
+    scheduleNotifications?: (task: () => Promise<void>) => void;
   },
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
@@ -226,7 +232,7 @@ export async function createInspectionRequest(
       }
     : null;
 
-  await ref.set({
+  const record = {
     id: ref.id,
     businessId,
     requestCode,
@@ -254,14 +260,29 @@ export async function createInspectionRequest(
     customerImageUrls: input.customerImageUrls,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  if (options.autoAssignStaff && !schedule && input.serviceId) {
+    await createAiAssignedInspection(adminDb, ref, record, options.assignmentSource ?? "sophie", options.autoConfirmStaff === true);
+  } else {
+    await ref.set(record);
+  }
 
   const snap = await ref.get();
   const request = mapInspectionDoc(ref.id, snap.data() ?? {});
 
-  const summary = await loadBusinessSummary(businessId);
-  await notifyBusinessOfNewRequest(request, summary);
-  await notifyCustomerOfNewRequest(request, summary);
+  const notify = async () => {
+    const summary = await loadBusinessSummary(businessId);
+    await notifyBusinessOfNewRequest(request, summary);
+    if (request.status === "scheduled") await notifyCustomerOfStatusChange(request, "scheduled", summary);
+    else await notifyCustomerOfNewRequest(request, summary);
+    if (options.autoAssignStaff && request.assignedTo?.type === "staff") {
+      await sendStaffMobilePush({ uid: request.assignedTo.uid, title: request.status === "scheduled" ? "Confirmed inspection assigned to you" : "New inspection assignment for review",
+        body: request.status === "scheduled" ? `${request.serviceName || "Inspection"} is confirmed for ${request.scheduledSlot?.date || "the selected date"} · ${request.scheduledStartTime || ""}–${request.scheduledEndTime || ""}.` : `${request.serviceName || "Inspection"} is awaiting business approval.`,
+        data: { type: "staff_assignment", requestId: request.id, audience: "staff" } });
+    }
+  };
+  if (options.scheduleNotifications) options.scheduleNotifications(notify);
+  else await notify();
   return { ok: true, request };
 }
 
@@ -408,6 +429,10 @@ export async function applyOwnerAction(
     updates.scheduledSlot = null;
     updates.scheduledStartTime = null;
     updates.scheduledEndTime = null;
+    if (current.aiAssignment && current.assignedTo) {
+      updates.assignedTo = null;
+      updates.aiAssignment = { status: "needs_review", assignedBy: current.aiAssignment.assignedBy, reason: "Visit preferences changed. Reassign staff after agreeing the new schedule." };
+    }
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "assign") {
     if (current.status !== "scheduled") {
@@ -533,7 +558,12 @@ export async function applyOwnerAction(
     if (typeof action.note === "string") updates.ownerNote = action.note;
   }
 
-  await ref.update(updates);
+  if (current.aiAssignment && current.assignedTo?.type === "staff" && (action.type === "accept" || action.type === "set_time")) {
+    const saved = await commitAiInspectionApproval(adminDb, ref, snap.updateTime!, updates);
+    if (!saved) return { ok: false, status: 409, error: "The assigned inspector's availability or this request changed. Review staff and visit time before confirming." };
+  } else {
+    await ref.update(updates);
+  }
 
   if (action.type === "mark_awaiting_decision") {
     try {

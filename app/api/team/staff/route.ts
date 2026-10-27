@@ -37,6 +37,7 @@ type DayAvailability = {
 };
 
 type StaffPayload = {
+  serviceIds?: string[];
   fullName: string;
   email: string;
   phone: string;
@@ -49,6 +50,12 @@ type StaffPayload = {
 type StaffUpdatePayload = StaffPayload & {
   id: string;
 };
+
+async function staffServicesBelongToBusiness(businessId: string, serviceIds: string[] | undefined): Promise<boolean> {
+  if (!serviceIds?.length) return true;
+  const services = await adminDb.getAll(...serviceIds.map(id => adminDb.collection("services").doc(id)));
+  return services.every(service => service.exists && service.data()?.businessId === businessId);
+}
 
 type StaffStatus = "active" | "suspended";
 
@@ -173,6 +180,10 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
   const email = sanitizeString(input.email).toLowerCase();
   const phone = sanitizeString(input.phone).replace(/\D/g, "");
   const staffType = sanitizeString(input.staffType);
+  const serviceIds = input.serviceIds;
+  if (serviceIds !== undefined && (!Array.isArray(serviceIds) || serviceIds.length > 100 || serviceIds.some(id => typeof id !== "string" || !id.trim() || id.includes("/") || id.length > 128))) {
+    return { ok: false, error: "Choose valid services for this staff member." };
+  }
   const availability = parseAvailability(input.availability, allowedServiceAreas);
   const canget_qutaion = input.canget_qutaion === true;
   const photoUrl = sanitizePhotoUrl(input.photoUrl);
@@ -210,6 +221,7 @@ function parseStaffPayload(raw: unknown, allowedServiceAreas: string[]):
       email,
       phone,
       staffType,
+      ...(Array.isArray(serviceIds) ? { serviceIds: [...new Set(serviceIds.map(id => id.trim()))] } : {}),
       availability: normalizedAvailability,
       canget_qutaion,
       photoUrl,
@@ -361,6 +373,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
   }
+  if (!await staffServicesBelongToBusiness(auth.businessId, parsed.value.serviceIds)) return NextResponse.json({ ok: false, error: "Selected services must belong to this business." }, { status: 400 });
 
   const existing = await adminDb
     .collection("users")
@@ -437,6 +450,7 @@ export async function POST(request: Request) {
       businessId: auth.businessId,
       role: "staff",
       staffType: parsed.value.staffType,
+      ...(parsed.value.serviceIds !== undefined ? { serviceIds: parsed.value.serviceIds } : {}),
       availability: parsed.value.availability,
       canget_qutaion: parsed.value.canget_qutaion,
       photoUrl: parsed.value.photoUrl,
@@ -553,6 +567,7 @@ export async function GET(request: Request) {
         phone: sanitizeString(data.phone) || null,
         role: sanitizeString(data.role),
         staffType: staffType(data.staffType, data.skills),
+        serviceIds: Array.isArray(data.serviceIds) ? sanitizeStringArray(data.serviceIds) : undefined,
         canget_qutaion: data.canget_qutaion === true,
         photoUrl: staffPhotoUrl(data),
         availability,
@@ -570,6 +585,7 @@ export async function GET(request: Request) {
       email: member.email,
       phone: member.phone,
       staffType: member.staffType,
+      serviceIds: member.serviceIds,
       canget_qutaion: member.canget_qutaion,
       photoUrl: member.photoUrl,
       availability: member.availability,
@@ -677,6 +693,7 @@ export async function PATCH(request: Request) {
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
   }
+  if (!await staffServicesBelongToBusiness(auth.businessId, parsed.value.serviceIds)) return NextResponse.json({ ok: false, error: "Selected services must belong to this business." }, { status: 400 });
 
   const owned = await getOwnedStaffRef(parsed.value.id, auth.businessId);
   if (!owned.ok) {
@@ -741,6 +758,7 @@ export async function PATCH(request: Request) {
     fullName: parsed.value.fullName,
     phone: parsed.value.phone,
     staffType: parsed.value.staffType,
+    ...(parsed.value.serviceIds !== undefined ? { serviceIds: parsed.value.serviceIds } : {}),
     availability: parsed.value.availability,
     canget_qutaion: parsed.value.canget_qutaion,
     ...(includesPhoto

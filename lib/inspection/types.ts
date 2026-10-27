@@ -60,6 +60,7 @@ export function timeRangeFromStartTime(startTime: string): InspectionTimeRange {
 
 /** Where a new requests document was created. */
 export const INSPECTION_CREATED_SOURCES = [
+  "call_center",
   "booking_engine",
   "owner_dashboard",
   "owner_mobile",
@@ -74,6 +75,7 @@ export const CREATED_SOURCE_LABELS: Record<
   InspectionRequestCreatedSource,
   string
 > = {
+  call_center: "Call center",
   booking_engine: "Booking engine",
   owner_dashboard: "Admin panel",
   owner_mobile: "Mobile app",
@@ -175,6 +177,7 @@ export type InspectionRequestDetail = {
   scheduledStartTime: string | null; // "HH:MM" 24h
   scheduledEndTime: string | null; // "HH:MM" 24h
   assignedTo: InspectionAssignment | null;
+  aiAssignment?: import("@/lib/team/ai-assignment-planner").AiStaffAssignment | null;
   ownerNote: string | null;
   customerNotes: string | null;
   budgetAud: number | null;

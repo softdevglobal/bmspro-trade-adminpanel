@@ -10,7 +10,7 @@ const ZEPTOMAIL_URL =
  *  - `system`  → noreply@bmspros.com.au (account creation, onboarding, etc.)
  *  - `request` → request@bmspros.com.au (inspection / booking request updates)
  */
-export type EmailSender = "system" | "request";
+export type EmailSender = "system" | "request" | "sophie";
 
 type SenderConfig = {
   token: string;
@@ -19,6 +19,18 @@ type SenderConfig = {
 };
 
 function readSenderConfig(sender: EmailSender): SenderConfig {
+  if (sender === "sophie") {
+    return {
+      token:
+        process.env.ZEPTOMAIL_SOPHIE_TOKEN ??
+        process.env.ZEPTOMAIL_REQUEST_TOKEN ??
+        process.env.ZEPTOMAIL_TOKEN ??
+        "",
+      fromAddress:
+        process.env.ZEPTOMAIL_SOPHIE_FROM_ADDRESS ?? "Sophie@bmspros.com",
+      fromName: process.env.ZEPTOMAIL_SOPHIE_FROM_NAME ?? "Sophie",
+    };
+  }
   if (sender === "request") {
     return {
       token:

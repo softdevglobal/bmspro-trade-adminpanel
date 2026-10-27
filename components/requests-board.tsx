@@ -1866,6 +1866,13 @@ function DetailDrawerContent({
               }
             />
             {request.assignedTo ? <AssignmentSummary request={request} /> : null}
+            {request.status === "pending" && request.aiAssignment ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                <p className="font-semibold">{request.aiAssignment.assignedBy === "sophie" ? "Sophie’s staff assignment" : "Automatic staff assignment"} · awaiting review</p>
+                <p className="mt-1">{request.aiAssignment.reason}</p>
+                {request.aiAssignment.proposedSlot ? <p className="mt-1">Proposed work: {request.aiAssignment.proposedSlot.date}, {request.aiAssignment.proposedSlot.startTime}–{request.aiAssignment.proposedSlot.endTime}. Confirm the schedule before promising this visit.</p> : null}
+              </div>
+            ) : null}
             {request.ownerNote ? (
               <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
                 <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
