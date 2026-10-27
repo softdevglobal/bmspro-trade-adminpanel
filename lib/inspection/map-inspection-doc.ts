@@ -1,4 +1,15 @@
 import { bookingScheduleSortKey } from "@/lib/bookings/map-booking-doc";
+import type { AiStaffAssignment } from "@/lib/team/ai-assignment-planner";
+
+function parseAiAssignment(value: unknown): AiStaffAssignment | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if ((row.status !== "assigned" && row.status !== "needs_review") || !["sophie", "customer_portal"].includes(String(row.assignedBy)) || typeof row.reason !== "string") return null;
+  const proposed = row.proposedSlot as Record<string, unknown> | undefined;
+  const proposedSlot = proposed && typeof proposed.date === "string" && (proposed.timeRange === "morning" || proposed.timeRange === "afternoon") && typeof proposed.startTime === "string" && typeof proposed.endTime === "string"
+    ? { date: proposed.date, timeRange: proposed.timeRange, startTime: proposed.startTime, endTime: proposed.endTime } as const : undefined;
+  return { status: row.status, assignedBy: row.assignedBy as "sophie" | "customer_portal", reason: row.reason, ...(proposedSlot ? { proposedSlot } : {}) };
+}
 import type { BookingDetail } from "@/lib/bookings/types";
 import { parseBookingStatus } from "@/lib/bookings/types";
 import { toMillis } from "@/lib/onboarding/services/display";
@@ -145,6 +156,7 @@ export function mapInspectionDoc(
       ? data.scheduledEndTime
       : null,
     assignedTo: parseAssignment(data.assignedTo),
+    aiAssignment: parseAiAssignment(data.aiAssignment),
     ownerNote: typeof data.ownerNote === "string" ? data.ownerNote : null,
     customerNotes:
       typeof data.customerNotes === "string" && data.customerNotes.trim()

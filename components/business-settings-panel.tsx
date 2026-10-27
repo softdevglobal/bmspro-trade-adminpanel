@@ -12,6 +12,7 @@ import { BusinessProfileSettings } from "@/components/business-profile-settings"
 import { BusinessServiceAreasSettings } from "@/components/business-service-areas-settings";
 import { BusinessSecuritySettings } from "@/components/business-security-settings";
 import { BusinessTermsSettings } from "@/components/business-terms-settings";
+import { BusinessAiBookingSettings } from "@/components/business-ai-booking-settings";
 import { BusinessTimezoneSettings } from "@/components/business-timezone-settings";
 import { SettingsIdentityHero } from "@/components/settings-identity-hero";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -40,6 +41,7 @@ type ProfileMeta = {
   logoUrl: string | null;
   slotCapacityJobs: number | null;
   slotCapacityInspectionRequests: number | null;
+  sophieBookingAuthority: boolean;
   workingHours: BusinessWorkingHours | null;
   serviceAreas: string[];
   enabledModules: BusinessModuleSettingsType | null;
@@ -57,6 +59,7 @@ export function BusinessSettingsPanel() {
     logoUrl: null,
     slotCapacityJobs: null,
     slotCapacityInspectionRequests: null,
+    sophieBookingAuthority: false,
     workingHours: null,
     serviceAreas: [],
     enabledModules: null,
@@ -102,6 +105,7 @@ export function BusinessSettingsPanel() {
             logoUrl?: string | null;
             slotCapacityJobs?: number | null;
             slotCapacityInspectionRequests?: number | null;
+            sophieBookingAuthority?: boolean;
             workingHours?: BusinessWorkingHours | null;
             serviceAreas?: string[];
             enabledModules?: BusinessModuleSettingsType | null;
@@ -130,6 +134,7 @@ export function BusinessSettingsPanel() {
             typeof p.slotCapacityInspectionRequests === "number"
               ? p.slotCapacityInspectionRequests
               : null,
+          sophieBookingAuthority: p.sophieBookingAuthority === true,
           workingHours:
             p.workingHours?.startTime && p.workingHours?.endTime
               ? {
@@ -198,6 +203,10 @@ export function BusinessSettingsPanel() {
     setMeta((current) => ({ ...current, enabledModules }));
   }
 
+  function handleSophieBookingAuthoritySaved(enabled: boolean) {
+    setMeta((current) => ({ ...current, sophieBookingAuthority: enabled }));
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
@@ -243,6 +252,12 @@ export function BusinessSettingsPanel() {
         slotCapacityInspectionRequests={meta.slotCapacityInspectionRequests}
         loading={metaLoading}
         onSaved={handleSlotCapacitySaved}
+      />
+
+      <BusinessAiBookingSettings
+        enabled={meta.sophieBookingAuthority}
+        loading={metaLoading}
+        onSaved={handleSophieBookingAuthoritySaved}
       />
 
       <BusinessGstSettings />

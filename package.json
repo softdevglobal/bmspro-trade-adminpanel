@@ -16,6 +16,8 @@
     "test:careplus-records": "tsx --test scripts/test-careplus-capture-records.ts",
     "test:invoice-customer": "tsx --test scripts/test-invoice-customer.ts",
     "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts",
+    "test:ai-staff-assignment": "tsx --test scripts/test-ai-staff-assignment.ts",
+    "test:booking-auth": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-call-center-bookings.ts",
     "prebuild": "node scripts/copy-pdf-worker.mjs",
     "predev": "node scripts/copy-pdf-worker.mjs",
     "test:security": "firebase emulators:exec --only auth,firestore,storage --project demo-bms-security-test \"node scripts/test-security.mjs\""

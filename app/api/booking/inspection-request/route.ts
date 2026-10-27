@@ -9,6 +9,7 @@ import { createInspectionRequest } from "@/lib/inspection/server";
 import { parseInspectionRequestInput } from "@/lib/inspection/types";
 import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 import { NextResponse } from "next/server";
+import { sendSophieInspectionOwnerAlert } from "@/lib/notifications/sophie-owner-alert";
 
 export const runtime = "nodejs";
 
@@ -28,11 +29,12 @@ async function readCustomer(
   } catch {
     return { uid: null, email: null, name: null };
   }
+
 }
 
 async function resolveBusinessFromSlug(
   slug: string,
-): Promise<{ id: string; timeZone: string } | null> {
+): Promise<{ id: string; timeZone: string; sophieBookingAuthority: boolean } | null> {
   const snap = await adminDb
     .collection("businesses")
     .where("bookingSlug", "==", slug)
@@ -50,6 +52,7 @@ async function resolveBusinessFromSlug(
       typeof data.timezone === "string" && data.timezone.trim()
         ? data.timezone.trim()
         : PLATFORM_TIME_ZONE,
+    sophieBookingAuthority: data.sophieBookingAuthority === true,
   };
 }
 
@@ -63,6 +66,12 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  // AI agents must use their scoped Firebase identity at the protected endpoint.
+  if (request.headers.has("x-bmspro-ai-signature")) {
+    return NextResponse.json({ ok: false, error: "Use the authenticated call-center booking endpoint for AI bookings." }, { status: 403 });
+  }
+  const staffAutomationEnabled = process.env.AI_AUTO_ASSIGN_STAFF_ENABLED === "true";
 
   const slug =
     body && typeof body === "object" && "slug" in body
@@ -88,6 +97,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const autoAssignStaff = staffAutomationEnabled && business.sophieBookingAuthority;
+
   const parsed = parseInspectionRequestInput(body, business.timeZone);
   if (!parsed.ok) {
     return NextResponse.json(parsed, { status: 400 });
@@ -107,9 +118,29 @@ export async function POST(request: Request) {
   const result = await createInspectionRequest(business.id, parsed.value, {
     customerId: customer.uid,
     createdSource: "booking_engine",
+    autoAssignStaff,
+    autoConfirmStaff: autoAssignStaff,
+    assignmentSource: "customer_portal",
   });
   if (!result.ok) {
     return NextResponse.json(result, { status: 400 });
+  }
+
+  const createdRequest = result.request;
+  const shouldAlertOwner = createdRequest.aiAssignment?.assignedBy === "customer_portal";
+  if (shouldAlertOwner) {
+    await sendSophieInspectionOwnerAlert({
+      businessId: business.id,
+      requestCode: createdRequest.requestCode || createdRequest.id,
+      customerName: createdRequest.customer.fullName || "Customer",
+      serviceName: createdRequest.serviceName || createdRequest.customRequest?.title || "Inspection request",
+      status: createdRequest.status === "scheduled" ? "scheduled" : "pending",
+      date: createdRequest.scheduledSlot?.date || createdRequest.aiAssignment?.proposedSlot?.date || null,
+      timeRange: createdRequest.scheduledSlot?.timeRange || createdRequest.aiAssignment?.proposedSlot?.timeRange || null,
+      startTime: createdRequest.scheduledStartTime || createdRequest.aiAssignment?.proposedSlot?.startTime || null,
+      endTime: createdRequest.scheduledEndTime || createdRequest.aiAssignment?.proposedSlot?.endTime || null,
+      staffName: createdRequest.assignedTo?.type === "staff" ? createdRequest.assignedTo.name : null,
+    });
   }
 
   await logAuditEvent({
@@ -138,5 +169,11 @@ export async function POST(request: Request) {
     },
   });
 
-  return NextResponse.json({ ok: true, requestId: result.request.id });
+  return NextResponse.json({
+    ok: true,
+    requestId: result.request.id,
+    status: result.request.status,
+    confirmed: result.request.status === "scheduled",
+    ...(result.request.aiAssignment ? { staffAssignment: result.request.aiAssignment } : {}),
+  });
 }

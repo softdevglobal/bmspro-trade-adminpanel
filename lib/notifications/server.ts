@@ -250,8 +250,14 @@ export async function notifyBusinessOfNewRequest(
 ): Promise<void> {
   const headline = requestHeadline(request);
   const who = request.customer.fullName?.trim() || "A customer";
-  const title = "New request";
-  const body = `${who} requested ${headline}.`;
+  const confirmed = request.status === "scheduled";
+  const title = confirmed ? "Inspection visit confirmed" : "New request";
+  const staffName = request.assignedTo?.type === "staff" ? request.assignedTo.name : null;
+  const scheduledDate = request.scheduledSlot ? slotLabel(request.scheduledSlot, context.timezone) : null;
+  const visitWindow = formatVisitWindow(request.scheduledStartTime, request.scheduledEndTime);
+  const body = confirmed
+    ? `${who}'s ${headline} was confirmed${staffName ? ` with ${staffName}` : ""}${scheduledDate ? ` for ${scheduledDate}` : ""}${visitWindow ? `, ${visitWindow}` : ""}.`
+    : `${who} requested ${headline}.`;
   try {
     await createNotification({
       audience: "business",
@@ -263,7 +269,7 @@ export async function notifyBusinessOfNewRequest(
       bookingSlug: context.bookingSlug ?? null,
       businessName: context.businessName ?? null,
       requestId: request.id,
-      status: "pending",
+      status: request.status,
       type: "request_created",
       title,
       body,

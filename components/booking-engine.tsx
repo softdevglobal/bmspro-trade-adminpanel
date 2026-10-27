@@ -947,6 +947,13 @@ function ServiceBookingFlow({
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(
     null,
   );
+  const [submittedSchedule, setSubmittedSchedule] = useState<{
+    confirmed: boolean;
+    date: string;
+    timeRange: "morning" | "afternoon";
+    startTime: string | null;
+    endTime: string | null;
+  } | null>(null);
   const [workingDayPage, setWorkingDayPage] = useState(0);
   const [unavailableSlots, setUnavailableSlots] = useState<
     { date: string; timeRange: InspectionTimeRange }[]
@@ -1290,6 +1297,10 @@ function ServiceBookingFlow({
         ok?: boolean;
         error?: string;
         requestId?: string;
+        confirmed?: boolean;
+        scheduledSlot?: { date?: string; timeRange?: "morning" | "afternoon" };
+        scheduledStartTime?: string | null;
+        scheduledEndTime?: string | null;
       };
 
       if (!response.ok || !payload.ok) {
@@ -1298,6 +1309,15 @@ function ServiceBookingFlow({
         );
       }
 
+      if (payload.confirmed && payload.scheduledSlot?.date && payload.scheduledSlot.timeRange) {
+        setSubmittedSchedule({
+          confirmed: true,
+          date: payload.scheduledSlot.date,
+          timeRange: payload.scheduledSlot.timeRange,
+          startTime: payload.scheduledStartTime ?? null,
+          endTime: payload.scheduledEndTime ?? null,
+        });
+      }
       setSubmittedRequestId(payload.requestId ?? "ok");
     } catch (error) {
       setSubmitError(
@@ -1352,6 +1372,8 @@ function ServiceBookingFlow({
         phoneHref={phoneHref}
         emailHref={emailHref}
         reducedMotion={reducedMotion}
+        confirmed={submittedSchedule?.confirmed === true}
+        scheduledSlot={submittedSchedule}
       />
     );
   }
@@ -2080,6 +2102,8 @@ function SubmittedConfirmation({
   phoneHref,
   emailHref,
   reducedMotion,
+  confirmed,
+  scheduledSlot,
 }: {
   businessName: string;
   requestType: RequestType;
@@ -2090,6 +2114,14 @@ function SubmittedConfirmation({
   phoneHref: string | null;
   emailHref: string | null;
   reducedMotion: boolean;
+  confirmed: boolean;
+  scheduledSlot: {
+    confirmed: boolean;
+    date: string;
+    timeRange: "morning" | "afternoon";
+    startTime: string | null;
+    endTime: string | null;
+  } | null;
 }) {
   return (
     <motion.div
@@ -2106,23 +2138,20 @@ function SubmittedConfirmation({
         </span>
         <div className="flex-1">
           <h3 className="font-display text-headline-sm font-semibold text-on-surface">
-            Request sent to {businessName}
+            {confirmed ? `Visit confirmed with ${businessName}` : `Request sent to ${businessName}`}
           </h3>
           <p className="mt-1 font-body text-body-md text-on-surface-variant">
-            Thanks — the team will review your{" "}
-            {requestType === "existing_service"
-              ? "service request"
-              : "custom quote request"}
-            {selectedServiceName ? ` for ${selectedServiceName}` : ""} and
-            confirm an inspection time at {formatServiceAddress(address)}.
+            {confirmed && scheduledSlot
+              ? `Your ${requestType === "existing_service" ? "service visit" : "inspection"}${selectedServiceName ? ` for ${selectedServiceName}` : ""} is scheduled for ${formatPrettyDate(scheduledSlot.date, timeZone)} · ${scheduledSlot.timeRange}${scheduledSlot.startTime && scheduledSlot.endTime ? `, ${scheduledSlot.startTime}–${scheduledSlot.endTime}` : ""} at ${formatServiceAddress(address)}.`
+              : <>Thanks — the team will review your {requestType === "existing_service" ? "service request" : "custom quote request"}{selectedServiceName ? ` for ${selectedServiceName}` : ""} and confirm an inspection time at {formatServiceAddress(address)}.</>}
           </p>
 
           <div className="mt-4 rounded-xl border border-stone-200 bg-[#faf8f5] p-4">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-              Your preferred windows
+              {confirmed ? "Confirmed visit" : "Your preferred windows"}
             </p>
             <ul className="mt-2 space-y-1.5 font-body text-[13px] text-on-surface">
-              {preferredSlots.map((slot, index) => (
+              {(confirmed && scheduledSlot ? [scheduledSlot] : preferredSlots).map((slot, index) => (
                 <li key={index} className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-[16px] text-primary">
                     event_available

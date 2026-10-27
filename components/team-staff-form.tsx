@@ -34,6 +34,7 @@ type DayAvailability = {
 };
 
 type StaffFormState = {
+  serviceIds: string[];
   fullName: string;
   phone: string;
   email: string;
@@ -46,6 +47,7 @@ type StaffFormState = {
 type StaffStatus = "active" | "suspended";
 
 type StaffMember = {
+  serviceIds?: string[];
   id: string;
   fullName: string;
   email: string;
@@ -70,6 +72,7 @@ function defaultAvailability(): DayAvailability[] {
 
 function emptyForm(): StaffFormState {
   return {
+    serviceIds: [],
     fullName: "",
     phone: "",
     email: "",
@@ -104,6 +107,20 @@ export function TeamStaffForm() {
   const [search, setSearch] = useState("");
   const [showDetailsErrors, setShowDetailsErrors] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [serviceChoices, setServiceChoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [serviceChoiceError, setServiceChoiceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user || !setupOpen) return;
+    let active = true;
+    setServiceChoiceError(null);
+    void user.getIdToken().then(token => fetch("/api/services", { headers: { Authorization: `Bearer ${token}` } })).then(async response => {
+      const result = await response.json();
+      if (!response.ok || !result.ok || !Array.isArray(result.services)) throw new Error("Could not load services. Reopen this staff member to try again.");
+      if (active) setServiceChoices(result.services.filter((service: { isActive?: boolean }) => service.isActive !== false));
+    }).catch(error => { if (active) setServiceChoiceError(error instanceof Error ? error.message : "Could not load services."); });
+    return () => { active = false; };
+  }, [user, setupOpen]);
 
   const canSubmit = useMemo(
     () => staffFormValidationError(form) === null,
@@ -240,6 +257,7 @@ export function TeamStaffForm() {
 
   function openEditStaff(member: StaffMember) {
     setForm({
+      serviceIds: member.serviceIds ?? [],
       fullName: member.fullName,
       phone: toAuLocalPhoneDigits(member.phone ?? ""),
       email: member.email,
@@ -379,6 +397,7 @@ export function TeamStaffForm() {
           phone: form.phone.replace(/\D/g, ""),
           email: form.email.trim(),
           staffType: form.staffType.trim(),
+          serviceIds: form.serviceIds,
           availability: form.availability.map((day) => ({
             ...day,
             serviceAreas: [],
@@ -564,6 +583,9 @@ export function TeamStaffForm() {
               isUploadingPhoto={isUploadingPhoto}
               onUpdateField={updateField}
               onStaffTypeChange={updateStaffType}
+              serviceChoices={serviceChoices}
+              serviceChoiceError={serviceChoiceError}
+              onToggleService={(id) => setForm(current => ({ ...current, serviceIds: current.serviceIds.includes(id) ? current.serviceIds.filter(value => value !== id) : [...current.serviceIds, id] }))}
               onCanGetQuotationChange={updateCanGetQuotation}
               onToggleOffDay={toggleOffDay}
               onPhotoSelected={uploadStaffPhoto}
@@ -636,6 +658,9 @@ function StaffSetupStepContent({
   isUploadingPhoto,
   onUpdateField,
   onStaffTypeChange,
+  serviceChoices,
+  serviceChoiceError,
+  onToggleService,
   onCanGetQuotationChange,
   onToggleOffDay,
   onPhotoSelected,
@@ -647,6 +672,9 @@ function StaffSetupStepContent({
   isUploadingPhoto: boolean;
   onUpdateField: (field: "fullName" | "phone" | "email", value: string) => void;
   onStaffTypeChange: (staffType: string) => void;
+  serviceChoices: Array<{ id: string; name: string }>;
+  serviceChoiceError: string | null;
+  onToggleService: (id: string) => void;
   onCanGetQuotationChange: (value: boolean) => void;
   onToggleOffDay: (day: WeekDayId) => void;
   onPhotoSelected: (file: File) => void;
@@ -777,6 +805,18 @@ function StaffSetupStepContent({
             onChange={onStaffTypeChange}
             required
           />
+        </StaffWizardSection>
+
+        <StaffWizardSection
+          icon="calendar_month"
+          title="Services this staff member can perform"
+          subtitle="Choose the services Sophie can assign to this person. Leave all unchecked to exclude them from automatic assignment."
+        >
+          {serviceChoiceError ? <p role="alert" className="text-sm text-red-600">{serviceChoiceError}</p> : null}
+          <div className="grid gap-2 sm:grid-cols-2">
+            {serviceChoices.map(service => <label key={service.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-outline-variant p-3 text-sm"><input type="checkbox" checked={form.serviceIds.includes(service.id)} onChange={() => onToggleService(service.id)} />{service.name}</label>)}
+          </div>
+          {!serviceChoiceError && serviceChoices.length === 0 ? <p className="text-sm text-on-surface-variant">Add a business service to configure staff assignments.</p> : null}
         </StaffWizardSection>
 
         <StaffWizardSection
