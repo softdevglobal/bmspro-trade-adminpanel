@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireBookingBusiness } from "@/lib/callcenter/booking-access";
+import { readTenantId } from "@/lib/callcenter/tenant";
 import { computeUnavailableSlots } from "@/lib/booking/slot-availability";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const query = new URL(request.url).searchParams;
-  const auth = await requireBookingBusiness(request, query.get("businessId"));
+  const auth = await requireBookingBusiness(request, readTenantId(request));
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   const from = query.get("from") ?? "";
   const to = query.get("to") ?? "";

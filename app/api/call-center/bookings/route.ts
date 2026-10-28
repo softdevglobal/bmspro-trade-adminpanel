@@ -1,5 +1,14 @@
 import { after, NextResponse } from "next/server";
 import { requireBookingBusiness } from "@/lib/callcenter/booking-access";
+import { requireCallCenterAgent } from "@/lib/callcenter/auth";
+import { isRequestStatus, listBookingsForBusinesses } from "@/lib/callcenter/bookings";
+import {
+  agentBusinessIds,
+  callCenterError,
+  intParam,
+  readTenantId,
+  requireCallCenterTenant,
+} from "@/lib/callcenter/tenant";
 import { validatePreferredSlotsAvailable } from "@/lib/booking/slot-availability";
 import { createInspectionRequest } from "@/lib/inspection/server";
 import { parseInspectionRequestInput } from "@/lib/inspection/types";
@@ -22,7 +31,7 @@ export async function POST(request: Request) {
   let body;
   try { body = await request.json(); }
   catch { return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 }); }
-  const auth = await requireBookingBusiness(request, body?.businessId);
+  const auth = await requireBookingBusiness(request, readTenantId(request, body));
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
   const parsed = parseInspectionRequestInput(body, auth.timeZone);
   if (!parsed.ok) return NextResponse.json(parsed, { status: 400 });
@@ -61,4 +70,43 @@ export async function POST(request: Request) {
     staffName: created.assignedTo?.type === "staff" ? created.assignedTo.name : null }));
   return NextResponse.json({ ok: true, requestId: created.id, status: created.status,
     confirmed: created.status === "scheduled", ...(created.aiAssignment ? { staffAssignment: created.aiAssignment } : {}) });
+}
+
+/**
+ * GET /api/call-center/bookings?status=&date=&phone=&createdSource=&limit=
+ * Lists inspection requests (call-center bookings), newest first.
+ * With a tenant (X-Tenant-Id / ?businessId=) → that business.
+ * Without one → every business assigned to the agent (super admins must pass one).
+ */
+export async function GET(request: Request) {
+  const query = new URL(request.url).searchParams;
+  const status = query.get("status")?.trim() ?? "";
+  const date = query.get("date")?.trim() ?? "";
+  if (status && !isRequestStatus(status)) {
+    return callCenterError(400, "status must be one of: pending, owner_proposed, scheduled, awaiting_decision, cancelled, completed.");
+  }
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return callCenterError(400, "date must be YYYY-MM-DD.");
+
+  let businessIds: string[];
+  if (readTenantId(request)) {
+    const auth = await requireCallCenterTenant(request);
+    if (!auth.ok) return callCenterError(auth.status, auth.error);
+    businessIds = [auth.businessId];
+  } else {
+    const auth = await requireCallCenterAgent(request);
+    if (!auth.ok) return callCenterError(auth.status, auth.error);
+    if (auth.isSuperAdmin) {
+      return callCenterError(400, "Missing businessId (X-Tenant-Id header or ?businessId=).");
+    }
+    businessIds = await agentBusinessIds(auth.uid);
+  }
+
+  const bookings = await listBookingsForBusinesses(businessIds, {
+    status: status || undefined,
+    date: date || undefined,
+    phone: query.get("phone")?.trim() || undefined,
+    createdSource: query.get("createdSource")?.trim() || undefined,
+    limit: query.get("all") === "1" || query.get("all") === "true" ? 500 : intParam(query.get("limit"), 100, 1, 500),
+  });
+  return NextResponse.json({ ok: true, bookings, total: bookings.length }, { headers: { "Cache-Control": "no-store" } });
 }
