@@ -2,7 +2,6 @@
 
 import { Phone, PhoneIncoming, Delete, Minus, Power } from "lucide-react";
 import { useRightDrawerInset } from "@/lib/ui/right-drawer-slot";
-import type { CSSProperties } from "react";
 import { CallerCustomerDrawer } from "@/components/caller-customer-drawer";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -340,7 +339,7 @@ export function YeastarSoftphone() {
   if (authStatus !== "authenticated" || (role !== "business_owner" && role !== "staff")) return null;
 
   return (
-    <div style={{ "--caller-drawer-inset": `${drawerInset}px` } as CSSProperties} className={`fixed transition-[right] duration-300 motion-reduce:transition-none ${drawerInset ? "z-[90] lg:right-[calc(var(--caller-drawer-inset)+24px)]" : "z-[60]"} w-[min(360px,calc(100vw-2rem))] ${role === "business_owner" ? "bottom-[84px] right-4 sm:bottom-[92px] sm:right-6" : "bottom-4 right-4 sm:bottom-6 sm:right-6"}`}>
+    <div className={`fixed ${drawerInset ? (calls.length === 0 ? "z-[30]" : "z-[90]") : "z-[60]"} w-[min(360px,calc(100vw-2rem))] ${role === "business_owner" ? "bottom-[84px] right-4 sm:bottom-[92px] sm:right-6" : "bottom-4 right-4 sm:bottom-6 sm:right-6"}`}>
       {selectedCustomer ? <CallerCustomerDrawer key={selectedCustomer.uid} customer={selectedCustomer} onClose={closeCustomer} /> : null}
       {open ? (
         <section className="max-h-[calc(100dvh-8rem)] overflow-y-auto rounded-3xl border border-outline-variant bg-surface shadow-[0_20px_60px_rgba(15,23,42,.24)]" aria-label="Yeastar softphone">
