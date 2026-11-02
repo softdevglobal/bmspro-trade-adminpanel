@@ -174,3 +174,20 @@ body {
     --tw-ring-shadow: 0 0 #0000 !important;
   }
 }
+
+@keyframes phone-ring {
+  0%, 100% { transform: rotate(0deg); }
+  20%, 60% { transform: rotate(-18deg); }
+  40%, 80% { transform: rotate(18deg); }
+}
+
+.yeastar-phone-ringing {
+  animation: yeastar-phone-vibrate 0.65s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes yeastar-phone-vibrate {
+  0%, 60%, 100% { transform: translateX(0) rotate(0deg); }
+  10%, 30%, 50% { transform: translateX(-3px) rotate(-15deg); }
+  20%, 40% { transform: translateX(3px) rotate(15deg); }
+}
+

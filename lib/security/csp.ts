@@ -17,6 +17,20 @@ const firebaseAuthFrameSources = [
   .filter(Boolean)
   .join(" ");
 
+const yeastarConnectSources = (() => {
+  const configured = process.env.YEASTAR_PBX_URL?.trim();
+  if (!configured) return [];
+  try {
+    const url = new URL(configured);
+    if (url.protocol !== "https:" || url.username || url.password) return [];
+    const secureWebSocket = new URL(url);
+    secureWebSocket.protocol = "wss:";
+    return [url.origin, secureWebSocket.origin];
+  } catch {
+    return [];
+  }
+})();
+
 export function contentSecurityPolicy(nonce: string) { return [
   "default-src 'self'",
   `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
@@ -34,6 +48,7 @@ export function contentSecurityPolicy(nonce: string) { return [
     "https://*.firebase.com",
     "https://*.stripe.com",
     "https://api.dicebear.com",
+    ...yeastarConnectSources,
     "wss://*.firebaseio.com",
     // Turbopack HMR socket + dev asset fetches.
     isDev ? "ws://localhost:* http://localhost:*" : "",

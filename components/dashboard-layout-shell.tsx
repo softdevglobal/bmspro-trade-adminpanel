@@ -1,6 +1,7 @@
 "use client";
 
 import { DashboardShell } from "@/components/dashboard-shell";
+import { YeastarSoftphone } from "@/components/yeastar-softphone";
 import { resolveDashboardPageMeta } from "@/lib/dashboard/page-meta";
 import {
   DashboardPageMetaProvider,
@@ -26,6 +27,7 @@ function DashboardLayoutShellInner({ children }: { children: ReactNode }) {
       fullBleed={meta.fullBleed}
     >
       {children}
+      <YeastarSoftphone />
     </DashboardShell>
   );
 }

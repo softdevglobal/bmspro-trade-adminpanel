@@ -46,6 +46,7 @@ A **Next.js 16 (App Router)** admin portal for trade businesses. It covers super
 | `react` / `react-dom` | 19.2.4 | UI rendering |
 | `firebase` | ^12 | Client-side Auth + Firestore (browser) |
 | `firebase-admin` | ^13 | Server-side Auth + Firestore + Storage (API routes) |
+| `ys-webrtc-sdk-core` | ^1.1 | Yeastar Linkus WebRTC softphone |
 | `zeptomail` | ^8 | Transactional email (welcome, reset codes, notifications) |
 | `framer-motion` | ^12 | Animations |
 | `lucide-react` | ^1 | Icons |
@@ -89,7 +90,14 @@ ZEPTOMAIL_SYSTEM_FROM_NAME=          # BMS Pro Trade
 ZEPTOMAIL_REQUEST_TOKEN=             # request@ sender token
 ZEPTOMAIL_REQUEST_FROM_ADDRESS=      # request@yourdomain.com
 ZEPTOMAIL_REQUEST_FROM_NAME=         # BMS Pro Trade
+
+# ── Yeastar Linkus SDK (server only — never expose these values) ───────────
+YEASTAR_PBX_URL=                     # HTTPS PBX URL, e.g. https://pbx.example.com
+YEASTAR_SDK_ACCESS_ID=               # Yeastar SDK Open API access ID
+YEASTAR_SDK_ACCESS_KEY=              # Yeastar SDK Open API access key
 ```
+
+The dashboard softphone is available to signed-in business owners and staff. It signs the Firebase-authenticated member's email on the server, so that email must match the member email configured for Linkus on the Yeastar PBX. Users explicitly connect and grant microphone access. The PBX host is added to the Content Security Policy from `YEASTAR_PBX_URL`.
 
 ---
 
