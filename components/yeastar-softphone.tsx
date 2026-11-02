@@ -52,10 +52,28 @@ export function YeastarSoftphone() {
   const [incomingIds, setIncomingIds] = useState<string[]>([]);
   const [answeringIds, setAnsweringIds] = useState<string[]>([]);
   const phoneRef = useRef<PhoneOperator | null>(null);
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+  const shouldPlayRingtone = incomingIds.some((id) => !answeringIds.includes(id));
   const connectionGeneration = useRef(0);
   const autoConnectedUser = useRef<string | null>(null);
   const destroyRef = useRef<(() => void) | null>(null);
   const activeSessionsRef = useRef(new Map<string, CallStatus>());
+
+  useEffect(() => {
+    if (!shouldPlayRingtone) return;
+    const ringtone = new Audio("/audio/incoming-call.wav");
+    ringtone.loop = true;
+    ringtone.volume = 0.5;
+    ringtoneRef.current = ringtone;
+    void ringtone.play().catch(() => { /* Retry on the next user interaction. */ });
+    return () => {
+      if (ringtoneRef.current === ringtone) ringtoneRef.current = null;
+      ringtone.pause();
+      ringtone.currentTime = 0;
+      ringtone.removeAttribute("src");
+      ringtone.load();
+    };
+  }, [shouldPlayRingtone]);
 
   const updateCall = useCallback((status: CallStatus) => {
     activeSessionsRef.current.set(status.callId, status);
@@ -140,6 +158,8 @@ export function YeastarSoftphone() {
 
   useEffect(() => {
     const retryAudio = () => {
+      const ringtone = ringtoneRef.current;
+      if (ringtone?.paused) void ringtone.play().catch(() => {});
       const audio = document.getElementById("trade-yeastar-remote-audio") as HTMLAudioElement | null;
       if (audio?.srcObject && audio.paused) void audio.play().catch(() => {});
     };
@@ -372,7 +392,7 @@ export function YeastarSoftphone() {
                   <button type="submit" disabled={!dialNumber.trim() || ringing} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-40"><Phone className="h-5 w-5" /> Call</button>
                 </form>
                 {calls.map((call) => (
-                  <div key={call.id} className={`rounded-2xl border p-4 ${incomingIds.includes(call.id) ? "border-emerald-200 bg-emerald-50 yeastar-phone-ringing" : "border-outline-variant bg-surface-container-low"}`}>
+                  <div key={call.id} className={`rounded-2xl border p-4 ${incomingIds.includes(call.id) ? "border-emerald-200 bg-emerald-50" : "border-outline-variant bg-surface-container-low"}`}>
                     <p className="text-sm font-semibold">{call.name || call.number || "Call"}</p>
                     <p className="text-xs text-on-surface-variant">{call.direction === "inbound" ? "Incoming" : "Outgoing"} - {call.status}</p>
                     {incomingIds.includes(call.id) ? (
