@@ -207,6 +207,12 @@ const NAV_ITEMS: NavItem[] = [
     superAdmin: true,
   },
   {
+    href: "/dashboard/did-mappings",
+    label: "DID mappings",
+    icon: "phone_forwarded",
+    superAdmin: true,
+  },
+  {
     href: "/dashboard/careplus",
     label: "CarePlus records",
     icon: "health_and_safety",

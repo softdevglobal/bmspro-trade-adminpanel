@@ -373,7 +373,7 @@ await expect("staff cannot forge attendance timestamps or owner", assertFails(up
 await expect("staff cannot create unsupported attendance records", assertFails(setDoc(doc(asStaffA, "staff_check_ins", "forged"), { staffId: "staff-a", businessId: BUSINESS_A, unexpected: true })));
 const inactiveAgentDb = testEnv.authenticatedContext("inactive-agent", { role: "call_center" }).firestore();
 await expect("inactive agent cannot read conversations with stale role claim", assertFails(getDoc(doc(inactiveAgentDb, "conversations", "active-room"))));
-for (const collection of ["account_activations", "security_rate_limits", "payment_checkout_sessions", "payment_receipts"]) {
+for (const collection of ["account_activations", "security_rate_limits", "payment_checkout_sessions", "payment_receipts", "ai_voice_submissions", "ai_did_mappings"]) {
   await expect("client cannot alter " + collection, assertFails(setDoc(doc(asSuperAdmin, collection, "forged"), { businessId: BUSINESS_A })));
 }
 

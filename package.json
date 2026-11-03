@@ -17,12 +17,14 @@
     "test:invoice-customer": "tsx --test scripts/test-invoice-customer.ts",
     "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts",
     "test:ai-staff-assignment": "tsx --test scripts/test-ai-staff-assignment.ts",
+    "test:ai-voice-bridge": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-voice-bridge.ts scripts/test-ai-did-mappings.ts",
     "test:booking-auth": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-call-center-bookings.ts",
     "prebuild": "node scripts/copy-pdf-worker.mjs",
     "predev": "node scripts/copy-pdf-worker.mjs",
     "test:security": "firebase emulators:exec --only auth,firestore,storage --project demo-bms-security-test \"node scripts/test-security.mjs\""
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "firebase": "^12.13.0",
     "firebase-admin": "^13.10.0",
     "framer-motion": "^12.40.0",
@@ -38,7 +40,8 @@
     "react-dom": "19.2.4",
     "stripe": "^22.2.3",
     "ys-webrtc-sdk-core": "^1.1.0",
-    "zeptomail": "^8.0.0"
+    "zeptomail": "^8.0.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
