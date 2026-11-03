@@ -31,7 +31,6 @@ test("real MCP handshake exposes exactly profile/services and rejects all remove
   const reads = {
     profile: async () => ({ brand: "trade", did: "0359111403", businessId: "business-a", businessName: "Test Trade", timezone: "Australia/Melbourne" }),
     services: async () => [{ id: "service-a", name: "Electrical" }],
-    availability: async () => { forbiddenCalls++; return {}; },
     submitInspection: async () => { forbiddenCalls++; return {}; },
   };
   const client = new Client({ name: "voice-bridge-test", version: "1.0.0" });

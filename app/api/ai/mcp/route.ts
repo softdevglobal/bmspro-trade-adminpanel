@@ -1,5 +1,6 @@
 import { authenticateVoiceBridge } from "@/lib/ai/config";
 import { createTradeVoiceReads, handleTradeVoiceMcp } from "@/lib/ai/mcp/mcp-server";
+import { after } from "next/server";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,9 @@ export async function POST(request: Request) {
     if (!await consumeRateLimits([{ key: `trade-voice:${auth.binding.did}`, limit: 120, windowMs: 60_000 }])) {
       return Response.json({ error: "Trade voice request limit reached." }, { status: 429, headers: { "Retry-After": "60", "Cache-Control": "no-store" } });
     }
-    const reads = await createTradeVoiceReads(auth.binding);
+    const reads = await createTradeVoiceReads(auth.binding, (stage, task) => after(async () => {
+      try { await task(); } catch { console.error("[trade-voice] Post-save task failed", { stage }); }
+    }));
     return await handleTradeVoiceMcp(request, reads);
   } catch {
     return Response.json({ error: "Trade voice business is unavailable." }, { status: 503, headers: { "Cache-Control": "no-store" } });
