@@ -278,6 +278,8 @@ export async function ensureCustomerAccount(input: {
   context?: "quotation" | "inspection" | "onboarding" | null;
   /** When false, skip the welcome email even for new accounts. Defaults to true. */
   sendWelcomeEmail?: boolean;
+  /** Voice intake cannot edit or take over an existing customer profile. */
+  preserveExistingProfile?: boolean;
 }): Promise<EnsuredCustomerAccount> {
   const email = normalizeEmail(input.email);
   const fullName = input.fullName.trim();
@@ -328,8 +330,19 @@ export async function ensureCustomerAccount(input: {
   // New to the customers collection - even if a login already existed.
   const isNewCustomer = !snap.exists;
 
+  if (input.preserveExistingProfile && created && snap.exists) throw new Error("Customer setup requires staff verification.");
+
+  if (input.preserveExistingProfile && !created) {
+    const data = snap.data();
+    if (!data || data.registeredBusinessId !== input.businessId || normalizeEmail(String(data.email ?? "")) !== email ||
+        normalizePhone(String(data.phone ?? "")) !== phone || (await adminAuth.getUser(uid)).disabled) {
+      throw new Error("Customer contact details could not be matched. Ask staff to verify the existing account.");
+    }
+    return { uid, email, created: false, welcomeEmailSent: false, welcomePreviouslySent: data.welcomeEmailSent === true };
+  }
+
   if (isNewCustomer) {
-    await ref.set({
+    const profile = {
       uid,
       email,
       fullName,
@@ -340,7 +353,9 @@ export async function ensureCustomerAccount(input: {
       registeredBusinessName: input.businessName ?? null,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    if (input.preserveExistingProfile) await ref.create(profile);
+    else await ref.set(profile);
   } else {
     const data = snap.data() ?? {};
     const update: Record<string, unknown> = { email, updatedAt: now };
