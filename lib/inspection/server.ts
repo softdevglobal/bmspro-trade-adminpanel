@@ -261,7 +261,7 @@ export async function createInspectionRequest(
     createdAt: now,
     updatedAt: now,
   };
-  if (options.autoAssignStaff && !schedule && input.serviceId) {
+  if (options.autoAssignStaff && !schedule && (input.serviceId || input.requestType === "custom_quote")) {
     await createAiAssignedInspection(adminDb, ref, record, options.assignmentSource ?? "sophie", options.autoConfirmStaff === true);
   } else {
     await ref.set(record);

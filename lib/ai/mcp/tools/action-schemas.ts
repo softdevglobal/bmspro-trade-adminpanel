@@ -16,7 +16,10 @@ export const registerCustomerArguments = z.object({
 }).strict();
 export const availabilityArguments = z.object({ from: voiceDate, to: voiceDate }).strict();
 export const inspectionArguments = z.object({
-  requestKey: z.string().trim().min(16).max(128), customerConfirmed: z.literal(true), serviceId: voiceId,
+  requestKey: z.string().trim().min(16).max(128), customerConfirmed: z.literal(true),
+  requestType: z.enum(["existing_service", "custom_quote"]).default("existing_service"),
+  serviceId: voiceId.nullable().default(null),
+  customRequest: z.object({ title: z.string().trim().min(3).max(120), description: z.string().trim().max(1500).default("") }).strict().nullable().default(null),
   customerId: voiceId.nullable().default(null), customer: voiceCustomer,
   address: z.object({ street: z.string().trim().max(300), suburb: z.string().trim().min(1).max(200), state: z.string().trim().min(1).max(100), postcode: z.string().regex(/^\d{4}$/) }).strict(),
   preferredSlots: z.array(z.object({ date: voiceDate, timeRange: z.enum(["morning", "afternoon"]) }).strict()).min(1).max(3),
@@ -28,7 +31,7 @@ export type VoiceInspectionInput = z.infer<typeof inspectionArguments>;
 export type VoiceActionResult = {
   status: "MATCHED" | "NOT_FOUND" | "CREATED" | "EXISTS" | "PENDING_REVIEW" | "CONFIRMED" | "REJECTED" | "UNKNOWN" | "UNAVAILABLE";
   message: string; code?: string; customerId?: string; requestId?: string; welcomeEmailPending?: boolean;
-  appointment?: { date: string; session: string; startTime: string | null; endTime: string | null; timezone: string };
+  appointment?: { date: string; session: string; startTime: string | null; endTime: string | null; timezone: string; inspectorName?: string };
 };
 export type ScheduleVoiceTask = (stage: string, task: () => Promise<unknown>) => void;
 

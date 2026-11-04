@@ -57,7 +57,7 @@ export function BusinessAiBookingSettings({ enabled, loading = false, onSaved }:
             <span className="min-w-0">
               <span className="block font-body text-[13px] font-semibold text-on-surface">Allow Sophie to assign staff and confirm bookings</span>
               <span className="mt-1 block font-body text-[12px] leading-relaxed text-on-surface-variant">
-                Only requests with an eligible service, available staff member, and valid preferred visit time are confirmed. Other requests stay pending for your review. This applies to new customer portal and Sophie requests.
+                Existing-service requests need a qualified staff member. Advice requests need an inspector permitted to receive quotation requests. Both need an available preferred visit time; otherwise they stay pending for your review. This applies to new customer portal and Sophie requests.
               </span>
             </span>
             <input
