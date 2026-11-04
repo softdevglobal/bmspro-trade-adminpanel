@@ -216,13 +216,14 @@ export function LoginForm() {
       </button>
 
       {/* On large screens these links sit in the blue panel; the panel is hidden on small ones. */}
-      <p className="text-center font-body text-[12px] leading-relaxed text-on-surface-variant lg:hidden">
-        By signing in you agree to our{" "}
+      <p className="text-center font-body text-[13px] leading-relaxed text-on-surface-variant lg:hidden">
+        By signing in you agree to our
+        <br />
         <a
           href="/terms"
           target="_blank"
           rel="noopener noreferrer"
-          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+          className="inline-block whitespace-nowrap py-1 font-medium text-primary underline underline-offset-2 hover:text-primary/80"
         >
           Terms of Service
         </a>{" "}
@@ -231,11 +232,10 @@ export function LoginForm() {
           href="/privacy"
           target="_blank"
           rel="noopener noreferrer"
-          className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+          className="inline-block whitespace-nowrap py-1 font-medium text-primary underline underline-offset-2 hover:text-primary/80"
         >
           Privacy Policy
         </a>
-        .
       </p>
     </form>
 

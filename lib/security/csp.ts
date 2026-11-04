@@ -34,7 +34,9 @@ const yeastarConnectSources = (() => {
 export function contentSecurityPolicy(nonce: string) { return [
   "default-src 'self'",
   `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
-  `style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com`,
+  // The Next dev indicator injects un-nonced <style> tags; a nonce would make
+  // browsers ignore 'unsafe-inline', so dev drops the nonce. Production is unchanged.
+  `style-src 'self' ${isDev ? "'unsafe-inline'" : `'nonce-${nonce}'`} https://fonts.googleapis.com`,
   "style-src-attr 'unsafe-inline'",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
