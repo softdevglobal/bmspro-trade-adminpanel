@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": [
+    "../next-env.d.ts",
+    "../lib/team/ai-assignment-server.ts",
+    "../lib/inspection/server.ts",
+    "../lib/ai/mcp/tools/booking.tools.ts",
+    "../components/business-ai-booking-settings.tsx",
+    "../scripts/test-ai-assignment-transaction.ts",
+    "../scripts/test-ai-staff-assignment.ts",
+    "../scripts/test-ai-voice-actions.ts"
+  ],
+  "exclude": ["../node_modules", "../.next"]
+}

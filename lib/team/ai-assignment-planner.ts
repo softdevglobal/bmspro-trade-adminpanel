@@ -20,13 +20,22 @@ export function staffCanPerformService(member: Row, service: Row): boolean {
 }
 
 export function planTradeStaffAssignment(input: {
-  service: Row; staff: Row[]; slots: Row[]; leave: Row[]; work: Row[];
+  service: Row | null; requestType?: "existing_service" | "custom_quote"; staff: Row[]; slots: Row[]; leave: Row[]; work: Row[];
   closures: string[]; timezone: string; workingHours: { startTime: string; endTime: string };
   now: Date; durationMinutes: number; travelBufferMinutes: number; assignedBy?: AiStaffAssignment["assignedBy"];
 }): { assignedTo: Row | null; aiAssignment: AiStaffAssignment } {
   const assignedBy = input.assignedBy ?? "sophie";
   const fail = (reason: string) => ({ assignedTo: null, aiAssignment: { status: "needs_review" as const, reason, assignedBy } });
-  if (input.service.isActive !== true) return fail("Service is inactive.");
+  const advice = input.requestType === "custom_quote";
+  if (!advice && input.service?.isActive !== true) return fail("Service is inactive.");
+  if (advice && input.service !== null) return fail("An advice inspection must not use an inferred service.");
+  const activeStaff = input.staff.filter(member => member.role === "staff" && member.status === "active" && member.suspended !== true && member.isActive !== false);
+  if (!activeStaff.length) return fail("No active staff member is available for automatic assignment. Review the staff member's active status in Team.");
+  const service = input.service;
+  const eligibleStaff = activeStaff.filter(member => advice ? member.canget_qutaion === true : !!service && staffCanPerformService(member, service));
+  if (!eligibleStaff.length) return fail(advice
+    ? 'No active staff member is permitted to handle advice inspections. In Team, enable "receive and handle quotation requests" for an appropriate inspector.'
+    : 'No staff member is configured to perform this service automatically. In Team, edit an eligible staff member and select the service under "Services this staff member can perform". Manual assignment does not configure automatic service eligibility.');
   const open = clockMinutes(input.workingHours.startTime), close = clockMinutes(input.workingHours.endTime);
   if (open == null || close == null || close <= open || !Number.isInteger(input.durationMinutes) || input.durationMinutes <= 0 || input.durationMinutes > 540 || !Number.isInteger(input.travelBufferMinutes) || input.travelBufferMinutes < 0 || input.travelBufferMinutes > 180) return fail("Inspection duration or scheduling settings need review.");
   let localParts: Intl.DateTimeFormatPart[];
@@ -43,8 +52,8 @@ export function planTradeStaffAssignment(input: {
     const earliest = Math.max(open, sessionOpen, slot.date === today ? Math.ceil((currentMinutes + 1) / 15) * 15 : 0);
     const latest = Math.min(close, sessionClose);
     const candidates: Array<{ member: Row; start: number; load: number }> = [];
-    for (const member of input.staff) {
-      if (member.role !== "staff" || member.status !== "active" || member.suspended === true || !Array.isArray(member.availability) || !member.availability.length || !staffCanPerformService(member, input.service)) continue;
+    for (const member of eligibleStaff) {
+      if (!Array.isArray(member.availability) || !member.availability.length) continue;
       if (member.availability.some((entry: unknown) => entry && typeof entry === "object") && !member.availability.some((entry: Row) => entry?.day === weekday && entry.isOff === false)) continue;
       if (normalizeStaffDayAvailability(member.availability).find(day => day.day === weekday)?.isOff !== false) continue;
       const memberWork = input.work.filter(item => item.assignedTo?.uid === member.id && !["cancelled", "completed", "missed"].includes(item.status));
@@ -68,7 +77,7 @@ export function planTradeStaffAssignment(input: {
     const chosen = candidates[0];
     if (chosen) return {
       assignedTo: { type: "staff", uid: chosen.member.id, name: chosen.member.fullName || "Staff member", email: chosen.member.email || null },
-      aiAssignment: { status: "assigned", assignedBy, reason: "Qualified staff member and available visit time selected.", proposedSlot: { date: slot.date, timeRange: slot.timeRange, startTime: clock(chosen.start), endTime: clock(chosen.start + input.durationMinutes) } },
+      aiAssignment: { status: "assigned", assignedBy, reason: advice ? "An inspector permitted to handle advice requests and an available visit time were selected." : "Qualified staff member and available visit time selected.", proposedSlot: { date: slot.date, timeRange: slot.timeRange, startTime: clock(chosen.start), endTime: clock(chosen.start + input.durationMinutes) } },
     };
   }
   return fail("No qualified staff member is available for the customer's preferred sessions.");
