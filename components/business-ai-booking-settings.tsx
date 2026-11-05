@@ -7,6 +7,33 @@ import { useState } from "react";
 type SavedPermissions = { inspections: boolean; jobs: boolean };
 type Props = { enabled: boolean; jobsEnabled: boolean; loading?: boolean; onSaved?: (saved: SavedPermissions) => void };
 
+// Same switch style as the module settings.
+function Toggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (next: boolean) => void }) {
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1.5 pt-0.5">
+      <span className={`font-body text-[11px] font-bold uppercase tracking-wide ${checked ? "text-primary" : "text-outline"}`}>
+        {checked ? "On" : "Off"}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
+          checked ? "bg-primary" : "bg-outline-variant/80"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all duration-200 ${
+            checked ? "left-[22px]" : "left-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 export function BusinessAiBookingSettings({ enabled, jobsEnabled, loading = false, onSaved }: Props) {
   const { user } = useAuth();
   const [value, setValue] = useState(enabled);
@@ -62,33 +89,31 @@ export function BusinessAiBookingSettings({ enabled, jobsEnabled, loading = fals
         </div>
       ) : (
         <div className="space-y-4">
-          <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3.5">
+          <div className="flex items-start justify-between gap-4 rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3.5">
             <span className="min-w-0">
               <span className="block font-body text-[13px] font-semibold text-on-surface">Allow Sophie to assign staff and confirm bookings</span>
               <span className="mt-1 block font-body text-[12px] leading-relaxed text-on-surface-variant">
                 Existing-service requests need a qualified staff member. Advice requests need an inspector permitted to receive quotation requests. Both need an available preferred visit time; otherwise they stay pending for your review. This applies to new customer portal and Sophie requests.
               </span>
             </span>
-            <input
-              type="checkbox"
-              className="mt-1 size-5 shrink-0 accent-primary"
+            <Toggle
               checked={value}
-              onChange={(event) => { setValue(event.target.checked); setSaved(false); setError(null); }}
+              label="Allow Sophie to assign staff and confirm bookings"
+              onChange={(next) => { setValue(next); setSaved(false); setError(null); }}
             />
-          </label>
-          <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3.5">
+          </div>
+          <div className="flex items-start justify-between gap-4 rounded-xl border border-outline-variant bg-surface-container-low px-4 py-3.5">
             <span className="min-w-0">
               <span className="block font-body text-[13px] font-semibold text-on-surface">Allow Sophie to confirm, reschedule and cancel jobs</span>
               <span className="mt-1 block font-body text-[12px] leading-relaxed text-on-surface-variant">
                 Callers can always ask for a job on an existing service. With this on, Sophie books it at an exact time with a qualified, available staff member; otherwise it waits under Site inspections for you to choose Create job. With their job reference, email and phone, callers can also move or cancel a confirmed job. Recurring, multi-day and started jobs stay with your team. Sophie never quotes a price: set it before invoicing. Advice work still goes through an inspection.</span>
             </span>
-            <input
-              type="checkbox"
-              className="mt-1 size-5 shrink-0 accent-primary"
+            <Toggle
               checked={jobsValue}
-              onChange={(event) => { setJobsValue(event.target.checked); setSaved(false); setError(null); }}
+              label="Allow Sophie to confirm, reschedule and cancel jobs"
+              onChange={(next) => { setJobsValue(next); setSaved(false); setError(null); }}
             />
-          </label>
+          </div>
           {error ? <p role="alert" className="font-body text-[12px] text-error">{error}</p> : null}
           {saved ? <p role="status" className="font-body text-[12px] text-primary">Booking permissions saved.</p> : null}
           <button
