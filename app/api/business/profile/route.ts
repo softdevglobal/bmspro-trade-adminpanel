@@ -136,6 +136,7 @@ export async function PATCH(request: Request) {
     slotCapacityJobs?: number;
     slotCapacityInspectionRequests?: number;
     sophieBookingAuthority?: boolean;
+    sophieJobAuthority?: boolean;
     workingHours?: { startTime: string; endTime: string };
     enabledModules?: {
       quotations: boolean;
@@ -400,6 +401,16 @@ export async function PATCH(request: Request) {
       );
     }
     updates.sophieBookingAuthority = raw.sophieBookingAuthority;
+  }
+
+  if ("sophieJobAuthority" in raw) {
+    if (typeof raw.sophieJobAuthority !== "boolean") {
+      return NextResponse.json(
+        { ok: false, error: "Sophie job authority must be enabled or disabled." },
+        { status: 400 },
+      );
+    }
+    updates.sophieJobAuthority = raw.sophieJobAuthority;
   }
 
   if ("workingHours" in raw) {

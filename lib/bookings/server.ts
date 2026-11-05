@@ -48,7 +48,7 @@ import {
   resolveBusinessOwnerUid,
   sendStaffMobilePush,
 } from "@/lib/notifications/push";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { sortBookingsNewestFirst } from "@/lib/bookings/map-booking-doc";
 import type { BookingStatus } from "@/lib/bookings/types";
 import {
@@ -515,6 +515,30 @@ export async function updateBusinessBookingSchedule(
     ok: true,
     booking,
   };
+}
+
+/**
+ * Side effects after Sophie moves a job inside her own transaction: the same customer
+ * notice and CarePlus update as an owner reschedule, plus a staff push when reassigned.
+ */
+export async function finishAiJobReschedule(
+  businessId: string,
+  bookingId: string,
+  reassigned: boolean,
+): Promise<BookingDetail | null> {
+  const booking = await getBusinessBooking(businessId, bookingId);
+  if (!booking) return null;
+  const summary = await loadBusinessSummary(businessId);
+  await notifyCustomerOfJobRescheduled(booking, summary);
+  await enqueueCareplusActivitySafe(
+    {
+      ...booking,
+      amendmentReason: `Rescheduled by Sophie to ${booking.scheduledSlot?.date ?? ""} ${booking.scheduledStartTime ?? ""}–${booking.scheduledEndTime ?? ""}.`,
+    },
+    "activity.scheduled",
+  );
+  if (reassigned) await notifyStaffOfJobAssignment(booking);
+  return booking;
 }
 
 async function loadBusinessSummary(businessId: string): Promise<{
@@ -1164,6 +1188,11 @@ export type CreateDirectJobInput = {
   };
   skipCustomerNotify?: boolean;
   skipStaffNotify?: boolean;
+  /** Voice intake: never create an account without consent; use this verified reference or none. */
+  skipCustomerAccount?: boolean;
+  customerId?: string | null;
+  /** Runs first inside the write transaction; throw to abort when the plan is no longer valid. */
+  verifyInTransaction?: (transaction: Transaction) => Promise<void>;
 };
 
 async function lookupBusinessServiceForJob(
@@ -1289,8 +1318,8 @@ export async function createDirectJob(
   const finalPriceAud = priceAud;
   const balanceDueAud = finalPriceAud;
 
-  let customerId: string | null = null;
-  try {
+  let customerId: string | null = input.skipCustomerAccount ? input.customerId ?? null : null;
+  if (!input.skipCustomerAccount) try {
     const businessSnap = await adminDb.collection("businesses").doc(businessId).get();
     const businessData = businessSnap.data() ?? {};
     const account = await ensureCustomerAccount({
@@ -1450,6 +1479,7 @@ export async function createDirectJob(
   };
 
   await adminDb.runTransaction(async (transaction) => {
+    await input.verifyInTransaction?.(transaction);
     transaction.set(inspectionRef, inspectionPayload);
     transaction.set(quotationRef, quotationPayload);
     transaction.set(bookingRef, bookingPayload);
@@ -1504,6 +1534,116 @@ export async function createDirectJob(
   }
 
   return { ok: true, booking, request };
+}
+
+/**
+ * A voice job Sophie could not confirm: a completed request plus an accepted
+ * quotation awaiting a job, holding the caller's preferred job days. It appears
+ * on the owner's request drawer under "Create job", like an accepted quote,
+ * so the owner schedules it with the existing flow. No booking is created.
+ */
+export async function createPendingJobRequest(
+  businessId: string,
+  input: {
+    serviceId: string;
+    customer: InspectionCustomer;
+    customerId: string | null;
+    address: InspectionAddress;
+    customerNotes: string | null;
+    preferredSlots: InspectionSlot[];
+    reason: string;
+  },
+): Promise<
+  | { ok: true; request: InspectionRequestDetail }
+  | { ok: false; error: string }
+> {
+  const service = await lookupBusinessServiceForJob(businessId, input.serviceId);
+  if (!service) return { ok: false, error: "Selected service is no longer available." };
+  const now = FieldValue.serverTimestamp();
+  const inspectionRef = adminDb.collection(REQUESTS_COLLECTION).doc();
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc();
+  const [requestCode, quotationCode] = await Promise.all([
+    allocateInspectionRequestCode(),
+    allocateQuotationCode(businessId),
+  ]);
+  const lineItems: QuotationLineItem[] = [
+    { name: service.name, priceAud: 0, quantity: 1, description: "Agreed work" },
+  ];
+  const quotationSummary = {
+    id: quotationRef.id,
+    quotationCode,
+    finalPriceAud: 0,
+    subtotalAud: 0,
+    balanceDueAud: 0,
+    pdfUrl: null,
+    status: "sent",
+    customerDecision: "accepted",
+    customerDecisionAt: now,
+    createdAt: now,
+  };
+  await adminDb.runTransaction(async (transaction) => {
+    transaction.set(inspectionRef, {
+      id: inspectionRef.id,
+      businessId,
+      requestCode,
+      status: "completed",
+      requestType: "existing_service",
+      serviceId: input.serviceId,
+      serviceName: service.name,
+      serviceBusinessType: service.businessType,
+      customRequest: null,
+      customer: input.customer,
+      customerId: input.customerId,
+      createdSource: "call_center",
+      sophieJobRequest: true,
+      sophieJobReviewReason: input.reason,
+      address: input.address,
+      preferredSlots: [],
+      ownerProposedSlots: [],
+      jobPreferredSlots: input.preferredSlots,
+      adminJobPreferredSlots: [],
+      jobProposedSlots: [],
+      scheduledSlot: null,
+      assignedTo: null,
+      customerNotes: input.customerNotes,
+      budgetAud: null,
+      quotation: quotationSummary,
+      bookingStatus: "awaiting",
+      bookingStatusAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    transaction.set(quotationRef, {
+      quotationCode,
+      businessId,
+      inspectionRequestId: inspectionRef.id,
+      serviceTitle: service.name,
+      serviceDescription: null,
+      customer: input.customer,
+      address: input.address,
+      lineItems: serializeLineItemsForFirestore(lineItems),
+      subtotalAud: 0,
+      finalPriceAud: 0,
+      balanceDueAud: 0,
+      imageUrls: [],
+      notes: input.customerNotes,
+      paymentInstructions: null,
+      termsAndConditions: null,
+      discountAud: 0,
+      depositRequest: null,
+      validUntil: null,
+      status: "sent",
+      customerDecision: "accepted",
+      customerDecisionAt: now,
+      bookingStatus: "awaiting",
+      bookingStatusAt: now,
+      createdBy: "sophie",
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+  const snap = await inspectionRef.get();
+  return { ok: true, request: mapInspectionDoc(snap.id, snap.data() ?? {}) };
 }
 
 function seriesSortKey(booking: BookingDetail): string {

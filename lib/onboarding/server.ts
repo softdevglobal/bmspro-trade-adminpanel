@@ -387,6 +387,8 @@ export type BusinessProfile = {
   slotCapacityInspectionRequests: number;
   /** Owner permission for Sophie to confirm assigned inspection requests. */
   sophieBookingAuthority: boolean;
+  /** Owner permission for Sophie to book, reschedule and cancel jobs by voice. */
+  sophieJobAuthority: boolean;
   workingHours: BusinessWorkingHours;
   enabledModules: BusinessModuleSettings;
   /** Who covers the Stripe processing fee on customer payments. */
@@ -479,6 +481,7 @@ export async function getBusinessProfile(
     slotCapacityInspectionRequests:
       parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
     sophieBookingAuthority: data.sophieBookingAuthority === true,
+    sophieJobAuthority: data.sophieJobAuthority === true,
     workingHours: parseWorkingHoursFromBusiness(data),
     enabledModules: parseBusinessModuleSettings(data),
     feePayerMode: parseFeePayerMode(data.feePayerMode),
@@ -522,6 +525,7 @@ export async function updateBusinessProfile(
     slotCapacityJobs?: number;
     slotCapacityInspectionRequests?: number;
     sophieBookingAuthority?: boolean;
+    sophieJobAuthority?: boolean;
     workingHours?: BusinessWorkingHours;
     enabledModules?: BusinessModuleSettings;
     feePayerMode?: FeePayerMode;
@@ -603,6 +607,11 @@ export async function updateBusinessProfile(
   if ("sophieBookingAuthority" in updates) {
     payload.sophieBookingAuthority = updates.sophieBookingAuthority === true;
     payload.sophieBookingAuthorityUpdatedAt = FieldValue.serverTimestamp();
+  }
+
+  if ("sophieJobAuthority" in updates) {
+    payload.sophieJobAuthority = updates.sophieJobAuthority === true;
+    payload.sophieJobAuthorityUpdatedAt = FieldValue.serverTimestamp();
   }
 
   if ("workingHours" in updates && updates.workingHours) {

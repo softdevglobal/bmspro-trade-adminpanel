@@ -86,3 +86,47 @@ export async function commitAiInspectionApproval(db: Firestore, ref: DocumentRef
     return true;
   });
 }
+
+export type AiJobVisitPlan =
+  | { ok: true; assignedTo: { type: "staff"; uid: string; name: string; email: string | null }; slot: { date: string; timeRange: "morning" | "afternoon" }; startTime: string; endTime: string }
+  | { ok: false; reason: string };
+
+/**
+ * Plan one exact job visit inside the caller's transaction: owner job authority, an active owned service,
+ * qualified staff, leave, closures and existing work. The shared guard serialises concurrent Sophie writes.
+ * Firestore needs every read before a write, so callers must finish their own reads first.
+ */
+export async function planAiJobVisitInTransaction(db: Firestore, tx: Transaction, input: {
+  businessId: string; serviceId: string; slots: Array<{ date: string; timeRange: "morning" | "afternoon"; startTime?: string | null }>;
+  durationMinutes: number; excludeJobId?: string | null; staffUids?: string[] | null;
+}): Promise<AiJobVisitPlan> {
+  const guard = db.collection("aiAssignmentGuards").doc(createHash("sha256").update(input.businessId).digest("hex"));
+  const [business, service, staff, leaves, jobs, requests, closures] = await Promise.all([
+    tx.get(db.collection("businesses").doc(input.businessId)),
+    tx.get(db.collection("services").doc(input.serviceId)),
+    tx.get(db.collection("users").where("businessId", "==", input.businessId)),
+    tx.get(db.collection("leaveRequests").where("businessId", "==", input.businessId)),
+    tx.get(db.collection("jobs").where("businessId", "==", input.businessId)),
+    tx.get(db.collection("requests").where("businessId", "==", input.businessId)),
+    tx.get(db.collection("business_closures").where("businessId", "==", input.businessId)),
+    tx.get(guard),
+  ]);
+  const businessData = business.data(), serviceData = service.data();
+  if (!businessData || !isTenantAccessAllowed(businessData.status, businessData.isActive)) return { ok: false, reason: "Business is unavailable." };
+  if (businessData.sophieJobAuthority !== true) return { ok: false, reason: "The business has not allowed Sophie to schedule jobs." };
+  if (serviceData?.businessId !== input.businessId) return { ok: false, reason: "Service is unavailable." };
+  const plan = planTradeStaffAssignment({
+    service: { ...serviceData, id: service.id }, requestType: "existing_service",
+    staff: staff.docs.filter(doc => !input.staffUids || input.staffUids.includes(doc.id)).map(doc => ({ ...doc.data(), id: doc.id })),
+    slots: input.slots, leave: leaves.docs.map(doc => mapLeaveDoc(doc.id, doc.data())),
+    work: [...jobs.docs.filter(doc => doc.id !== input.excludeJobId), ...requests.docs].map(doc => doc.data()),
+    closures: closures.docs.map(doc => String(doc.data().date)), timezone: businessData.timezone || "Australia/Melbourne",
+    workingHours: parseWorkingHoursFromBusiness(businessData), now: new Date(), durationMinutes: input.durationMinutes,
+    travelBufferMinutes: businessData.aiAssignmentTravelBufferMin ?? 30, assignedBy: "sophie", allowRunPastSession: true,
+  });
+  const proposed = plan.aiAssignment.proposedSlot;
+  if (plan.aiAssignment.status !== "assigned" || !plan.assignedTo || !proposed) return { ok: false, reason: plan.aiAssignment.reason };
+  tx.set(guard, { updatedAt: new Date() });
+  return { ok: true, assignedTo: { type: "staff", uid: String(plan.assignedTo.uid), name: String(plan.assignedTo.name), email: plan.assignedTo.email ?? null },
+    slot: { date: proposed.date, timeRange: proposed.timeRange }, startTime: proposed.startTime, endTime: proposed.endTime };
+}
