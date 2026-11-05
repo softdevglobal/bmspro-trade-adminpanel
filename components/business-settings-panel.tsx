@@ -42,6 +42,7 @@ type ProfileMeta = {
   slotCapacityJobs: number | null;
   slotCapacityInspectionRequests: number | null;
   sophieBookingAuthority: boolean;
+  sophieJobAuthority: boolean;
   workingHours: BusinessWorkingHours | null;
   serviceAreas: string[];
   enabledModules: BusinessModuleSettingsType | null;
@@ -60,6 +61,7 @@ export function BusinessSettingsPanel() {
     slotCapacityJobs: null,
     slotCapacityInspectionRequests: null,
     sophieBookingAuthority: false,
+    sophieJobAuthority: false,
     workingHours: null,
     serviceAreas: [],
     enabledModules: null,
@@ -106,6 +108,7 @@ export function BusinessSettingsPanel() {
             slotCapacityJobs?: number | null;
             slotCapacityInspectionRequests?: number | null;
             sophieBookingAuthority?: boolean;
+            sophieJobAuthority?: boolean;
             workingHours?: BusinessWorkingHours | null;
             serviceAreas?: string[];
             enabledModules?: BusinessModuleSettingsType | null;
@@ -135,6 +138,7 @@ export function BusinessSettingsPanel() {
               ? p.slotCapacityInspectionRequests
               : null,
           sophieBookingAuthority: p.sophieBookingAuthority === true,
+          sophieJobAuthority: p.sophieJobAuthority === true,
           workingHours:
             p.workingHours?.startTime && p.workingHours?.endTime
               ? {
@@ -203,12 +207,16 @@ export function BusinessSettingsPanel() {
     setMeta((current) => ({ ...current, enabledModules }));
   }
 
-  function handleSophieBookingAuthoritySaved(enabled: boolean) {
-    setMeta((current) => ({ ...current, sophieBookingAuthority: enabled }));
+  function handleSophieBookingAuthoritySaved(saved: { inspections: boolean; jobs: boolean }) {
+    setMeta((current) => ({
+      ...current,
+      sophieBookingAuthority: saved.inspections,
+      sophieJobAuthority: saved.jobs,
+    }));
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-4 sm:gap-6">
       <SettingsIdentityHero {...heroData} loading={metaLoading} />
 
       <BookingLinkCard variant="permanent" />
@@ -256,6 +264,7 @@ export function BusinessSettingsPanel() {
 
       <BusinessAiBookingSettings
         enabled={meta.sophieBookingAuthority}
+        jobsEnabled={meta.sophieJobAuthority}
         loading={metaLoading}
         onSaved={handleSophieBookingAuthoritySaved}
       />

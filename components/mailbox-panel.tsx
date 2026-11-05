@@ -96,6 +96,27 @@ export function MailboxPanel() {
     }
   }, [user, connection]);
 
+  const reconnect = useCallback(async () => {
+    if (!user || !connection) return;
+    // App-password mailboxes reconnect through the form in the connection card above.
+    if (providerInfo(connection.provider)?.authMethod === "app_password") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setEnabling(true);
+    setError(null);
+    try {
+      const { url } = await emailApi<{ url: string }>(user, `/api/email/connect/${connection.provider}`, {
+        method: "POST",
+        body: JSON.stringify({ return_to: "emails" }),
+      });
+      window.location.assign(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start the reconnection.");
+      setEnabling(false);
+    }
+  }, [user, connection]);
+
   if (loading) return null;
 
   if (!connection) {
@@ -103,6 +124,29 @@ export function MailboxPanel() {
       <p className="rounded-2xl border border-dashed border-outline-variant/60 px-5 py-8 text-center font-body text-[13px] text-on-surface-variant">
         Connect your business email above to use your mailbox here.
       </p>
+    );
+  }
+
+  if (connection.status === "needs_reconnect") {
+    const providerName = providerInfo(connection.provider)?.label ?? "Your mailbox";
+    return (
+      <div className="flex flex-col items-center rounded-2xl border border-amber-200 bg-amber-50/60 px-6 py-12 text-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
+          <span className="material-symbols-outlined text-[28px] text-amber-600">link_off</span>
+        </span>
+        <h3 className="mt-4 font-display text-[18px] font-bold text-on-surface">Your mailbox is disconnected</h3>
+        <p className="mt-1.5 max-w-md font-body text-[13px] leading-relaxed text-on-surface-variant">
+          {providerName} sign-in for <span className="font-semibold text-on-surface">{connection.address}</span> has expired.
+          Reconnect to see your inbox and send quotes and invoices again. Emails waiting to send are kept on hold until then.
+        </p>
+        {error ? (
+          <p role="alert" className="mt-3 font-body text-[12px] text-rose-700">{error}</p>
+        ) : null}
+        <button type="button" onClick={() => void reconnect()} disabled={enabling} className={`${BUTTON_PRIMARY} mt-5`}>
+          <span className={`material-symbols-outlined text-[18px] ${enabling ? "animate-spin" : ""}`}>{enabling ? "progress_activity" : "sync"}</span>
+          {enabling ? "Opening sign-in…" : "Reconnect mailbox"}
+        </button>
+      </div>
     );
   }
 

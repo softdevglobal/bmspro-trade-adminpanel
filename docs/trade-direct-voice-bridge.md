@@ -116,6 +116,46 @@ Command Center routing for Black/Pink. Discovery outages may still use a verifie
 Black/Pink route, but never Command Center's Trade tools. Onboarding keeps its
 separate route and credential.
 
+## Jobs by voice
+
+Jobs follow the same model as inspections. With `AI_VOICE_ACTIONS_ENABLED=true`
+Trade advertises `find_job` and `create_job_booking`; no extra flag is needed.
+
+- **Booking.** A caller can always ask for a job on a listed service. Sophie
+  confirms it only when Trade has `AI_AUTO_ASSIGN_STAFF_ENABLED=true`, the owner
+  turns on **Settings → Sophie booking authority → Allow Sophie to confirm,
+  reschedule and cancel jobs** (`sophieJobAuthority`), and a qualified staff
+  member is free for the whole job. Otherwise the job is saved as
+  `PENDING_REVIEW`: a request with an accepted $0 quotation and the caller's
+  preferred job days, shown under Site inspections with **Create job** (the
+  usual accepted-quote flow). The owner gets an email/SMS either way.
+- **Exact time.** Each preferred session (morning/afternoon) may carry the
+  caller's exact `startTime` (24-hour `HH:MM`). The planner uses the service's
+  `defaultDurationMin` (capped at 9 hours), leave, closures, other jobs and
+  inspections (every day of multi-day jobs), the travel buffer and hourly job
+  capacity. A job may start in the session and run until closing.
+- **Atomic booking.** The plan is re-checked for the same staff member and time
+  inside the write transaction; if another booking took it, the next preference
+  is tried.
+- **Existing jobs.** `find_job` needs the job reference (`BK` + nine
+  characters) plus the email and mobile on the job, and shares only status,
+  service, date, times, staff name and suburb. With job authority, Sophie can
+  `cancel_job`; with staff automation as well, `reschedule_job` (keeping the
+  current staff member when free). Started, today/past, repeating, multi-day and
+  custom-quote jobs stay with the team.
+- **Customers and price.** No account is created without consent; guests are
+  allowed. Sophie never quotes a price.
+- Every action uses the durable `ai_voice_submissions` retry ledger.
+
+The bridge mirrors the inspection flow: `prepare_job_booking` validates and holds
+the details before the readback, then `create_job_booking` sends only
+`customerConfirmed=true`. Deploy Trade first, then upload `trade-tools.mjs` and
+`trade-action-policy.mjs` together and restart the bridge.
+
+Owner and staff actions (assign, edit details/instructions, mark missed, undo
+cancel, delete, start, complete, photos, recurring series) stay in the dashboard,
+as they do for inspections.
+
 ## Manage numbers
 
 Super admins manage `/dashboard/did-mappings`: add, reassign, enable or disable

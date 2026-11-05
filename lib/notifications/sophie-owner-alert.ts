@@ -17,6 +17,9 @@ export async function sendSophieInspectionOwnerAlert(input: {
   startTime?: string | null;
   endTime?: string | null;
   staffName?: string | null;
+  /** Overrides the inspection wording for Sophie job actions. */
+  title?: string;
+  reviewNote?: string;
 }) {
   try {
     const businessSnap = await adminDb.collection("businesses").doc(input.businessId).get();
@@ -29,7 +32,7 @@ export async function sendSophieInspectionOwnerAlert(input: {
     const phone = [owner.phone, owner.phoneNumber, owner.mobile, owner.contactPhone, business.ownerPhone, business.businessPhone]
       .find(value => typeof value === "string" && value.trim()) as string | undefined;
     const confirmed = input.status === "scheduled";
-    const title = confirmed ? "Sophie scheduled an inspection" : "Sophie created an inspection request";
+    const title = input.title ?? (confirmed ? "Sophie scheduled an inspection" : "Sophie created an inspection request");
     const tasks: Promise<unknown>[] = [];
     if (email) {
       tasks.push(sendEmail({
@@ -58,7 +61,7 @@ export async function sendSophieInspectionOwnerAlert(input: {
         source: "sophie_inspection_owner_alert",
         senderName: "BMS Pro Trade",
         receiverName: typeof owner.name === "string" ? owner.name : "Business owner",
-        message: `${title}. ${input.requestCode}: ${input.customerName}, ${input.serviceName || "Inspection"}${input.date ? `, ${input.date} ${input.timeRange || ""}` : ""}${input.startTime && input.endTime ? ` ${input.startTime}–${input.endTime}` : ""}. ${confirmed ? `Staff: ${input.staffName || "assigned"}.` : "Please review the request."}`,
+        message: `${title}. ${input.requestCode}: ${input.customerName}, ${input.serviceName || "Inspection"}${input.date ? `, ${input.date} ${input.timeRange || ""}` : ""}${input.startTime && input.endTime ? ` ${input.startTime}–${input.endTime}` : ""}. ${confirmed ? `Staff: ${input.staffName || "assigned"}.` : input.reviewNote ?? "Please review the request."}`,
       }));
     }
     const results = await Promise.allSettled(tasks);
