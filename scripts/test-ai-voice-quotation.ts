@@ -4,6 +4,7 @@ import {
   audioExtension,
   draftFromTranscript,
   draftUserMessage,
+  isPromptEcho,
   resolveDraft,
   transcribeVoiceNote,
   VoiceDraftError,
@@ -109,6 +110,19 @@ function fakeFetch(transcript: string, answer: unknown, calls: Array<{ url: stri
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }));
   }) as typeof fetch;
 }
+
+test("a transcript that only repeats the spelling hint counts as nothing heard", async () => {
+  const prompt = vocabularyPrompt(services, items);
+  assert.equal(prompt.startsWith("Hot water system replacement"), true, "names only, no sentence");
+  assert.equal(isPromptEcho("Rheem 250L electric hot water unit, Tempering valve 15mm.", prompt), true);
+  assert.equal(isPromptEcho("   ", prompt), true);
+  assert.equal(isPromptEcho("The Rheem 250L electric hot water unit is leaking, replace it", prompt), false);
+  await assert.rejects(
+    transcribeVoiceNote({ config, audio: new Blob(["x"]), filename: "a.m4a", services, items,
+      fetchImpl: fakeFetch("Hot water system replacement, Blocked drain, Rheem 250L electric hot water unit.", {}, []) }),
+    (error: unknown) => error instanceof VoiceDraftError && error.status === 422,
+  );
+});
 
 test("step 1 transcribes with vocabulary hints and returns text only", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];

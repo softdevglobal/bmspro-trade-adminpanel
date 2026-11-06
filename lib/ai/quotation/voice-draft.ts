@@ -101,15 +101,28 @@ export function audioExtension(filename: string): string | null {
 const normalizeName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, " ");
 const clip = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
 
-/** Item and service names help the speech model spell trade terms correctly. */
+/**
+ * Item and service names help the speech model spell trade terms correctly.
+ * Only names, no sentence: when the audio has no clear speech, speech models
+ * tend to repeat their prompt, and a sentence would look like real notes.
+ */
 export function vocabularyPrompt(services: VoiceDraftService[], items: VoiceDraftCatalogItem[]): string {
-  const words = [...services.map((s) => s.name), ...items.map((i) => i.name)];
-  let prompt = "Australian trade site inspection notes. Terms:";
+  const words = [...new Set([...services.map((s) => s.name.trim()), ...items.map((i) => i.name.trim())])].filter(Boolean);
+  let prompt = "";
   for (const word of words) {
     if (prompt.length + word.length + 2 > 800) break;
-    prompt += ` ${word},`;
+    prompt += prompt ? `, ${word}` : word;
   }
-  return prompt.replace(/,$/, ".");
+  return prompt;
+}
+
+const comparable = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** True when the "transcript" is only the prompt repeated back, meaning no speech was heard. */
+export function isPromptEcho(transcript: string, prompt: string): boolean {
+  const said = comparable(transcript);
+  if (!said) return true;
+  return prompt.length > 0 && comparable(prompt).includes(said);
 }
 
 type FetchLike = typeof fetch;
@@ -351,14 +364,15 @@ export async function transcribeVoiceNote(input: {
   items: VoiceDraftCatalogItem[];
   fetchImpl?: FetchLike;
 }): Promise<string> {
+  const prompt = vocabularyPrompt(input.services, input.items);
   const transcript = await transcribeAudio(
     input.config,
     input.audio,
     input.filename,
-    vocabularyPrompt(input.services, input.items),
+    prompt,
     input.fetchImpl ?? fetch,
   );
-  if (wordCount(transcript) < 3) {
+  if (wordCount(transcript) < 3 || isPromptEcho(transcript, prompt)) {
     throw new VoiceDraftError(422, "We couldn't hear enough detail. Record again and describe the work.");
   }
   return transcript.slice(0, MAX_TRANSCRIPT_CHARS);
