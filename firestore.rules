@@ -113,6 +113,44 @@ service cloud.firestore {
             .hasOnly(userFcmFieldKeys());
     }
 
+    // Profile details a signed-in user may change on their own user document
+    // (the mobile app's Edit Profile). Role, business, status and activation
+    // fields stay server-only.
+    function userProfileFieldKeys() {
+      return ['displayName', 'name', 'phone', 'contactPhone', 'updatedAt'];
+    }
+
+    function ownerProfileFieldKeys() {
+      return ['abn', 'locationText', 'address', 'logoUrl'];
+    }
+
+    function isTextUpTo(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function userSelfProfileWrite(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let next = request.resource.data;
+      let isOwner = resource.data.get('role', '') in
+        ['owner', 'admin', 'business_owner', 'salon_owner'];
+      let allowed = isOwner
+        ? userProfileFieldKeys().concat(ownerProfileFieldKeys()).concat(userFcmFieldKeys())
+        : userProfileFieldKeys().concat(userFcmFieldKeys());
+      return isSignedIn()
+        && request.auth.uid == userId
+        && changed.hasOnly(allowed)
+        && (!changed.hasAny(['name']) || (isTextUpTo(next.name, 80) && next.name.size() > 0))
+        && (!changed.hasAny(['displayName']) || isTextUpTo(next.displayName, 80))
+        && (!changed.hasAny(['phone']) || isTextUpTo(next.phone, 30))
+        && (!changed.hasAny(['contactPhone']) || isTextUpTo(next.contactPhone, 30))
+        && (!changed.hasAny(['updatedAt']) || next.updatedAt == request.time)
+        && (!changed.hasAny(['abn']) || isTextUpTo(next.abn, 20))
+        && (!changed.hasAny(['locationText']) || isTextUpTo(next.locationText, 300))
+        && (!changed.hasAny(['address']) || isTextUpTo(next.address, 300))
+        && (!changed.hasAny(['logoUrl'])
+            || (isTextUpTo(next.logoUrl, 2000) && next.logoUrl.matches('https://.*')));
+    }
+
     function userSelfFcmCreate(userId) {
       return isSignedIn()
         && request.auth.uid == userId
@@ -140,7 +178,7 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow create: if userSelfFcmCreate(uid);
-      allow update: if userSelfFcmWrite(uid);
+      allow update: if userSelfFcmWrite(uid) || userSelfProfileWrite(uid);
       allow delete: if false;
     }
 
