@@ -19,7 +19,7 @@ import {
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import { readFileSync } from "node:fs";
-import { doc, getDoc, setDoc, deleteDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 
 const PROJECT_ID = "demo-bms-security-test";
 
@@ -252,6 +252,68 @@ await expect(
 await expect(
   "cannot read another user's document",
   assertFails(getDoc(doc(asStaffA, "users", "owner-b"))),
+);
+
+console.log("\nusers edit their own profile details only");
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, "users", "profile-staff"), { role: "staff", businessId: BUSINESS_A, name: "Old" });
+  await setDoc(doc(db, "users", "profile-owner"), { role: "owner", businessId: BUSINESS_A, name: "Owner" });
+});
+const asProfileStaff = testEnv.authenticatedContext("profile-staff", staffA).firestore();
+const asProfileOwner = testEnv.authenticatedContext("profile-owner", ownerA).firestore();
+await expect(
+  "staff can change their own name and phone (as the app saves them)",
+  assertSucceeds(
+    setDoc(doc(asProfileStaff, "users", "profile-staff"), {
+      displayName: "Nimal",
+      name: "Nimal",
+      phone: "0412345678",
+      contactPhone: "0412345678",
+      updatedAt: serverTimestamp(),
+    }, { merge: true }),
+  ),
+);
+await expect(
+  "staff cannot set an empty name",
+  assertFails(updateDoc(doc(asProfileStaff, "users", "profile-staff"), { name: "" })),
+);
+await expect(
+  "staff cannot change role alongside their name",
+  assertFails(updateDoc(doc(asProfileStaff, "users", "profile-staff"), { name: "Nimal", role: "owner" })),
+);
+await expect(
+  "staff cannot move themselves to another business",
+  assertFails(updateDoc(doc(asProfileStaff, "users", "profile-staff"), { businessId: BUSINESS_B })),
+);
+await expect(
+  "staff cannot set owner-only fields",
+  assertFails(updateDoc(doc(asProfileStaff, "users", "profile-staff"), { abn: "12345678901" })),
+);
+await expect(
+  "updatedAt must be the server time",
+  assertFails(updateDoc(doc(asProfileStaff, "users", "profile-staff"), { name: "Nimal", updatedAt: 1 })),
+);
+await expect(
+  "users cannot edit someone else's profile",
+  assertFails(updateDoc(doc(asProfileStaff, "users", "profile-owner"), { name: "Hacked" })),
+);
+await expect(
+  "owners can change ABN, address and logo",
+  assertSucceeds(
+    setDoc(doc(asProfileOwner, "users", "profile-owner"), {
+      name: "Owner Two",
+      abn: "12345678901",
+      address: "1 Test Street",
+      locationText: "1 Test Street",
+      logoUrl: "https://firebasestorage.googleapis.com/v0/b/x/o/logo.png",
+      updatedAt: serverTimestamp(),
+    }, { merge: true }),
+  ),
+);
+await expect(
+  "owners cannot set a non-https logo",
+  assertFails(updateDoc(doc(asProfileOwner, "users", "profile-owner"), { logoUrl: "javascript:alert(1)" })),
 );
 
 console.log("\nleave requests stay inside the requester's tenant");
