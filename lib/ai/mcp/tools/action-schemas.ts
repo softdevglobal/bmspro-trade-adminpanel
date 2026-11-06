@@ -23,6 +23,10 @@ export const inspectionArguments = z.object({
   budgetAud: z.number().finite().positive().max(99_999_999).nullable().default(null),
   customerNotes: z.string().trim().max(2000).default(""),
 }).strict();
+/** One short, self-contained question about this business. No business ID. */
+export const knowledgeQuestionArguments = z.object({
+  question: z.string().trim().min(3).max(300),
+}).strict();
 export type VoiceCustomerInput = z.infer<typeof voiceCustomer>;
 export type VoiceInspectionInput = z.infer<typeof inspectionArguments>;
 export type VoiceActionResult = {

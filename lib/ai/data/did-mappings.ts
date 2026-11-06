@@ -17,8 +17,9 @@ function parseStored(did: string, data: Record<string, unknown> | undefined): St
 const setupMappings = () => parseVoiceBusinesses(process.env.AI_VOICE_TRADE_DID_CONFIG_JSON ?? "[]");
 
 export type VoiceDidRoute = { state: "unmapped" } | { state: "disabled" } | { state: "active"; binding: VoiceBusiness };
+
+/** Always reads Firestore. Used by call-start discovery, which runs once per call. */
 export async function lookupVoiceDidRoute(did: string): Promise<VoiceDidRoute> {
-  if (!/^\d{6,15}$/.test(did)) return { state: "unmapped" };
   const snapshot = await adminDb.collection(DID_MAPPINGS_COLLECTION).doc(did).get();
   const stored = parseStored(did, snapshot.data());
   if (!stored) return { state: "unmapped" };
@@ -28,9 +29,27 @@ export async function lookupVoiceDidRoute(did: string): Promise<VoiceDidRoute> {
   return { state: "active", binding: { did, businessId: stored.businessId } };
 }
 
+/**
+ * During a call the bridge makes many back-to-back MCP requests, and each one
+ * resolves the DID. A short per-process cache avoids two sequential Firestore
+ * reads per request. Call-start discovery stays live (lookupVoiceDidRoute), saves
+ * on this instance clear the cache at once, and elsewhere a change applies within
+ * the TTL. Lookup failures are never cached.
+ */
+const ROUTE_CACHE_TTL_MS = 10_000;
+const routeCache = new Map<string, { binding: VoiceBusiness | null; expiresAt: number }>();
+export function clearVoiceDidRouteCache(did?: string) {
+  if (did) routeCache.delete(did); else routeCache.clear();
+}
+
 export async function resolveVoiceDidMapping(did: string): Promise<VoiceBusiness | null> {
+  const cached = routeCache.get(did);
+  if (cached && cached.expiresAt > Date.now()) return cached.binding;
   const route = await lookupVoiceDidRoute(did);
-  return route.state === "active" ? route.binding : null;
+  const binding = route.state === "active" ? route.binding : null;
+  if (routeCache.size > 1000) routeCache.clear();
+  routeCache.set(did, { binding, expiresAt: Date.now() + ROUTE_CACHE_TTL_MS });
+  return binding;
 }
 
 export async function listVoiceDidMappings(): Promise<{ mappings: DidMappingRow[]; businesses: DidBusinessOption[] }> {
@@ -78,6 +97,7 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
       createdBy: existing.data()?.createdBy ?? actor.uid, updatedBy: actor.uid, updatedAt: FieldValue.serverTimestamp() });
     return { version, previousBusinessId: current?.businessId ?? null };
   });
+  clearVoiceDidRouteCache(input.did);
   await logAuditEvent({ businessId: input.businessId, category: "integration", action: "voice.did_mapping.updated",
     actor: { uid: actor.uid, role: actor.role, email: actor.email ?? null, name: null }, source: actor.role === "system" ? "system" : "admin_panel",
     summary: `Phone number ${input.did} ${input.isActive ? "assigned" : "disabled"} for AI reception.`, targetId: input.did, targetLabel: input.did,

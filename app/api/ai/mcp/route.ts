@@ -1,17 +1,43 @@
-import { authenticateVoiceBridge } from "@/lib/ai/config";
+import { authenticateVoiceBridge, authenticateVoiceBridgeCredential } from "@/lib/ai/config";
 import { createTradeVoiceReads, handleTradeVoiceMcp } from "@/lib/ai/mcp/mcp-server";
 import { after } from "next/server";
 
 export const runtime = "nodejs";
 
+const unauthorized = (status: number) => Response.json({ error: "Trade voice connection unavailable or unauthorized." }, {
+  status, headers: { "Cache-Control": "no-store" },
+});
+
+/**
+ * Per-DID request limit for the bridge-only MCP route, counted in memory.
+ * The Firestore transaction used elsewhere cost 1–2.6 s on every MCP request,
+ * and one call makes several requests. This route is reachable only with the
+ * bridge's shared secret, so the limit guards against a runaway bridge rather
+ * than public abuse; per-instance counting is enough for that. Call-start
+ * discovery (/api/ai/voice) keeps its durable Firestore limit.
+ */
+const RATE_LIMIT = 120, RATE_WINDOW_MS = 60_000;
+const rateWindows = new Map<string, { count: number; until: number }>();
+function allowVoiceRequest(did: string, now = Date.now()) {
+  const current = rateWindows.get(did);
+  if (!current || current.until <= now) {
+    if (rateWindows.size > 1000) rateWindows.clear();
+    rateWindows.set(did, { count: 1, until: now + RATE_WINDOW_MS });
+    return true;
+  }
+  current.count++;
+  return current.count <= RATE_LIMIT;
+}
+
 export async function POST(request: Request) {
+  // The bearer secret and DID format are checked first, so only authenticated
+  // bridge requests are counted.
+  const credential = authenticateVoiceBridgeCredential(request);
+  if (!credential.ok) return unauthorized(credential.status);
   const auth = await authenticateVoiceBridge(request);
-  if (!auth.ok) return Response.json({ error: "Trade voice connection unavailable or unauthorized." }, {
-    status: auth.status, headers: { "Cache-Control": "no-store" },
-  });
+  if (!auth.ok) return unauthorized(auth.status);
   try {
-    const { consumeRateLimits } = await import("@/lib/security/rate-limit");
-    if (!await consumeRateLimits([{ key: `trade-voice:${auth.binding.did}`, limit: 120, windowMs: 60_000 }])) {
+    if (!allowVoiceRequest(auth.binding.did)) {
       return Response.json({ error: "Trade voice request limit reached." }, { status: 429, headers: { "Retry-After": "60", "Cache-Control": "no-store" } });
     }
     const reads = await createTradeVoiceReads(auth.binding, (stage, task) => after(async () => {

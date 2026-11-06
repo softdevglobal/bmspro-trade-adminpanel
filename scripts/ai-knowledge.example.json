@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "faq",
+    "title": "Opening hours",
+    "body": "REPLACE WITH THE OWNER'S REAL ANSWER. Example: We work Monday to Friday, 7am to 4pm. We are closed on weekends and public holidays."
+  },
+  {
+    "kind": "policy",
+    "title": "Call-out fee",
+    "body": "REPLACE WITH THE OWNER'S REAL ANSWER. Example: We charge a call-out fee within our service area. The team confirms the amount when they book the visit."
+  },
+  {
+    "kind": "faq",
+    "title": "Licensing and insurance",
+    "body": "REPLACE WITH THE OWNER'S REAL ANSWER. Example: All our electricians are licensed and the business holds public liability insurance."
+  }
+]

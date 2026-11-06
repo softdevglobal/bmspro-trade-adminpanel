@@ -1,11 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Unanswered questions - BMS Pro Trade" };
-
+/** Unanswered questions are reviewed on the AI knowledge page, next to the entries they become. */
 export default function AiUnansweredPage() {
-  return (
-    <section className="p-6">
-      <h1 className="font-display text-2xl font-semibold text-on-surface">Unanswered questions</h1>
-    </section>
-  );
+  redirect("/dashboard/ai/knowledge");
 }

@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
+import { BusinessOwnerGuard } from "@/components/business-owner-guard";
+import { AiKnowledgeBoard } from "@/components/ai-knowledge-board";
 
 export const metadata: Metadata = { title: "AI knowledge - BMS Pro Trade" };
 
 export default function AiKnowledgePage() {
   return (
-    <section className="p-6">
-      <h1 className="font-display text-2xl font-semibold text-on-surface">AI knowledge</h1>
-    </section>
+    <BusinessOwnerGuard>
+      <AiKnowledgeBoard />
+    </BusinessOwnerGuard>
   );
 }
