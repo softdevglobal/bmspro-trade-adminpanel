@@ -6,32 +6,39 @@ in the normal quotation form, then saves or sends it.
 
 ## Flow
 
-1. **Mobile:** On the quotation form, the staff member taps **Record voice note**
-   and speaks for up to 10 minutes. The app records 32 kbps mono AAC, about
-   2.4 MB at the 10-minute limit.
-2. **Mobile → Trade:** The app sends `POST /api/quotations/voice-draft` as a
-   multipart form, with `audio` and an optional `requestId`.
-3. **Trade:** The server checks the caller:
-   - The caller must be an owner or admin, or staff with quotation permission.
-   - Staff may only use visits assigned to them.
-   - The business must have the Quotations module turned on.
-4. **Speech-to-text:** Trade sends the recording to the configured transcription
-   API. It includes the business's service and item names as spelling hints.
-5. **Draft:** A language model receives the transcript, the business's active
-   services and its item list. Prices are not sent. It returns:
+1. **Record (mobile):** On the quotation form, the staff member taps **Record
+   voice note** and speaks for up to 10 minutes. The app records 32 kbps mono
+   AAC, about 2.4 MB at the 10-minute limit.
+2. **Transcribe:** The app sends `POST /api/quotations/voice-transcript` as a
+   multipart form, with `audio` and an optional `requestId`. Trade sends the
+   recording to the configured transcription API, with the business's service
+   and item names as spelling hints, and returns only the text.
+3. **Review (mobile):** The staff member reads the text in an editable box.
+   - They fix misheard item names or quantities, or add anything missed.
+   - **Record more** adds another recording to the end of the text.
+   - **Create quotation** confirms the text.
+4. **Draft:** The app sends the confirmed text to `POST /api/quotations/voice-draft`
+   as JSON (`transcript`, optional `requestId`). A language model receives the
+   text, the business's active services and its item list. Prices are not sent.
+   It returns:
    - a title;
    - a customer-facing scope of work;
    - lines, each either a catalog item id or a new item name, with a quantity;
    - checks for the staff member.
-6. **Safety pass** (`resolveDraft`):
+5. **Safety pass** (`resolveDraft`):
    - Unknown service or item ids are dropped.
    - Catalog lines take the catalog's name, code and price.
    - Duplicates are merged.
    - Anything not in the catalog is marked **Price needed**, with a $0 rate.
-7. **Mobile:** The form fills in the title, scope and line items:
+6. **Fill the form (mobile):** The form fills in the title, scope and line items.
    - Unpriced lines are shown in orange.
    - Saving with a $0 unpriced line asks for confirmation.
    - When the staff member prices a new item, the existing form adds it to the item list.
+
+Both routes run the same checks:
+- The caller must be an owner or admin, or staff with quotation permission.
+- Staff may only use visits assigned to them.
+- The business must have the Quotations module turned on.
 
 Nothing is saved by the voice step. The recording is not stored. The audit log
 records counts only, because the transcript can contain customer details.

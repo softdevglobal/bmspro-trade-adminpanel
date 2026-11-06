@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   audioExtension,
-  buildVoiceQuotationDraft,
+  draftFromTranscript,
   draftUserMessage,
   resolveDraft,
+  transcribeVoiceNote,
   VoiceDraftError,
   voiceDraftConfig,
   vocabularyPrompt,
@@ -109,41 +110,56 @@ function fakeFetch(transcript: string, answer: unknown, calls: Array<{ url: stri
   }) as typeof fetch;
 }
 
-test("full pipeline transcribes, drafts with strict JSON schema, and resolves", async () => {
+test("step 1 transcribes with vocabulary hints and returns text only", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const answer = { serviceId: "svc-hws", title: "Hot water", scopeOfWork: "Replace unit.", checks: [],
-    lines: [{ catalogItemId: "it-hws", name: "unit", quantity: 1, note: "" }] };
-  const draft = await buildVoiceQuotationDraft({
+  const text = await transcribeVoiceNote({
     config, audio: new Blob([new Uint8Array(10)], { type: "audio/mp4" }), filename: "note.m4a",
-    services, items, fetchImpl: fakeFetch("The hot water unit in the garage is leaking badly", answer, calls),
+    services, items, fetchImpl: fakeFetch("  The hot water unit in the garage is leaking badly ", {}, calls),
   });
-  assert.equal(draft.lineItems[0].rateAud, 1450);
+  assert.equal(text, "The hot water unit in the garage is leaking badly");
+  assert.equal(calls.length, 1, "no AI drafting until the staff member confirms the text");
   assert.equal(calls[0].url, "https://stt.test/v1/audio/transcriptions");
   assert.equal((calls[0].init.headers as Record<string, string>).Authorization, "Bearer stt-key");
   const form = calls[0].init.body as FormData;
   assert.equal(form.get("model"), "gpt-4o-transcribe");
+  assert.match(String(form.get("prompt")), /Rheem 250L/);
   assert.ok(form.get("file") instanceof Blob);
-  assert.equal(calls[1].url, "https://llm.test/v1/chat/completions");
-  const body = JSON.parse(String(calls[1].init.body));
-  assert.equal(body.response_format.json_schema.strict, true);
-  assert.equal(body.model, "gpt-4.1-mini");
 });
 
-test("silent recordings and service failures give clear errors", async () => {
+test("step 2 drafts from the confirmed (edited) text with strict JSON schema", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const answer = { serviceId: "svc-hws", title: "Hot water", scopeOfWork: "Replace unit.", checks: [],
+    lines: [{ catalogItemId: "it-hws", name: "unit", quantity: 1, note: "" }] };
+  const edited = "Replace the leaking hot water unit with a Rheem 250 litre";
+  const draft = await draftFromTranscript({ config, transcript: edited, services, items, fetchImpl: fakeFetch("", answer, calls) });
+  assert.equal(draft.transcript, edited);
+  assert.equal(draft.lineItems[0].rateAud, 1450);
+  assert.equal(calls.length, 1, "no transcription in step 2");
+  assert.equal(calls[0].url, "https://llm.test/v1/chat/completions");
+  const body = JSON.parse(String(calls[0].init.body));
+  assert.equal(body.response_format.json_schema.strict, true);
+  assert.equal(body.model, "gpt-4.1-mini");
+  assert.equal(JSON.parse(body.messages[1].content).transcript, edited);
+});
+
+test("silent recordings, empty text and service failures give clear errors", async () => {
+  const audio = new Blob(["x"]);
   await assert.rejects(
-    buildVoiceQuotationDraft({ config, audio: new Blob(["x"]), filename: "a.m4a", services, items, fetchImpl: fakeFetch("um", {}, []) }),
+    transcribeVoiceNote({ config, audio, filename: "a.m4a", services, items, fetchImpl: fakeFetch("um", {}, []) }),
+    (error: unknown) => error instanceof VoiceDraftError && error.status === 422,
+  );
+  await assert.rejects(
+    draftFromTranscript({ config, transcript: "  ok  ", services, items, fetchImpl: fakeFetch("", {}, []) }),
     (error: unknown) => error instanceof VoiceDraftError && error.status === 422,
   );
   const down = (async () => new Response("nope", { status: 500 })) as typeof fetch;
   await assert.rejects(
-    buildVoiceQuotationDraft({ config, audio: new Blob(["x"]), filename: "a.m4a", services, items, fetchImpl: down }),
+    transcribeVoiceNote({ config, audio, filename: "a.m4a", services, items, fetchImpl: down }),
     (error: unknown) => error instanceof VoiceDraftError && error.status === 502,
   );
-  const badJson = (async (url: string | URL | Request) => String(url).endsWith("/audio/transcriptions")
-    ? new Response(JSON.stringify({ text: "replace the leaking hot water unit" }))
-    : new Response(JSON.stringify({ choices: [{ message: { content: "not json" } }] }))) as typeof fetch;
+  const badJson = (async () => new Response(JSON.stringify({ choices: [{ message: { content: "not json" } }] }))) as typeof fetch;
   await assert.rejects(
-    buildVoiceQuotationDraft({ config, audio: new Blob(["x"]), filename: "a.m4a", services, items, fetchImpl: badJson }),
+    draftFromTranscript({ config, transcript: "replace the leaking hot water unit", services, items, fetchImpl: badJson }),
     (error: unknown) => error instanceof VoiceDraftError && error.status === 502,
   );
 });

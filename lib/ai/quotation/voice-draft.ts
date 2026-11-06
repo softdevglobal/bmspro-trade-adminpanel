@@ -338,31 +338,49 @@ export function resolveDraft(
   };
 }
 
-/** Full pipeline: transcribe, draft, resolve. */
-export async function buildVoiceQuotationDraft(input: {
+export const MAX_TRANSCRIPT_CHARS = 20_000;
+
+const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
+
+/** Step 1: turn the recording into text for the staff member to review. */
+export async function transcribeVoiceNote(input: {
   config: VoiceDraftConfig;
   audio: Blob;
   filename: string;
   services: VoiceDraftService[];
   items: VoiceDraftCatalogItem[];
-  context?: VoiceDraftContext;
   fetchImpl?: FetchLike;
-}): Promise<VoiceQuotationDraft> {
-  const fetchImpl = input.fetchImpl ?? fetch;
+}): Promise<string> {
   const transcript = await transcribeAudio(
     input.config,
     input.audio,
     input.filename,
     vocabularyPrompt(input.services, input.items),
-    fetchImpl,
+    input.fetchImpl ?? fetch,
   );
-  if (transcript.split(/\s+/).filter(Boolean).length < 3) {
+  if (wordCount(transcript) < 3) {
     throw new VoiceDraftError(422, "We couldn't hear enough detail. Record again and describe the work.");
+  }
+  return transcript.slice(0, MAX_TRANSCRIPT_CHARS);
+}
+
+/** Step 2: build the quotation draft from the text the staff member confirmed. */
+export async function draftFromTranscript(input: {
+  config: VoiceDraftConfig;
+  transcript: string;
+  services: VoiceDraftService[];
+  items: VoiceDraftCatalogItem[];
+  context?: VoiceDraftContext;
+  fetchImpl?: FetchLike;
+}): Promise<VoiceQuotationDraft> {
+  const transcript = input.transcript.trim().slice(0, MAX_TRANSCRIPT_CHARS);
+  if (wordCount(transcript) < 3) {
+    throw new VoiceDraftError(422, "Add a few more words describing the work.");
   }
   const raw = await requestDraft(
     input.config,
     draftUserMessage(transcript, input.services, input.items, input.context),
-    fetchImpl,
+    input.fetchImpl ?? fetch,
   );
   return resolveDraft(raw, transcript, input.services, input.items);
 }
