@@ -12,7 +12,9 @@ import {
   sendInvoiceReviewRequest,
   undoCancelBusinessInvoice,
 } from "@/lib/invoices/server";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { resolveInvoicePaymentDue } from "@/lib/invoices/payment-due";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 
 export const runtime = "nodejs";
 
@@ -305,6 +307,18 @@ export async function POST(request: Request) {
     );
   }
 
+  if (sharedInput.send && result.invoice.status === "sent") {
+    after(async () => {
+      try {
+        const profile = await getBusinessProfile(auth.businessId);
+        if (!resolveInvoicePaymentDue(result.invoice, profile?.timezone).isOverdue) return;
+        const { notifyOverdueInvoice } = await import("@/lib/ai/mcp/tools/overdue-invoice.tools");
+        await notifyOverdueInvoice(auth, result.invoice.id);
+      } catch {
+        console.error("[invoices] Automatic overdue reminder failed", { invoiceId: result.invoice.id });
+      }
+    });
+  }
   return NextResponse.json({ ok: true, invoice: result.invoice }, { status: 201 });
 }
 

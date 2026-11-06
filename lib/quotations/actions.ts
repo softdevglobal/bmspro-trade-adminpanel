@@ -20,7 +20,8 @@ export function canCancelQuotation(
 export function quotationJobActionsLocked(quotation: QuotationDetail): boolean {
   if (!quotationHasInvoice(quotation)) return false;
   return (
-    quotation.bookingStatus === "completed" || Boolean(quotation.bookingId)
+    quotation.bookingStatus === "completed" ||
+    (quotation.invoiceStatus !== "draft" && Boolean(quotation.bookingId))
   );
 }
 

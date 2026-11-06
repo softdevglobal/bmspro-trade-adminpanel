@@ -322,6 +322,19 @@ export async function POST(request: Request) {
     );
   }
 
+  const quotationId = result.booking.quotation?.id;
+  if (quotationId) {
+    try {
+      const { draftAcceptedQuotationInvoice } = await import("@/lib/ai/mcp/tools/invoice.tools");
+      const draft = await draftAcceptedQuotationInvoice(auth.businessId, quotationId);
+      if (draft.status === "REJECTED") {
+        console.error("[direct-job] Automatic invoice draft rejected", { quotationId, message: draft.message });
+      }
+    } catch {
+      console.error("[direct-job] Automatic invoice draft failed", { quotationId });
+    }
+  }
+
   await logAuditEvent({
     businessId: auth.businessId,
     category: "inspection",

@@ -2503,7 +2503,20 @@ async function applyQuotationCustomerDecision(
       error: "This quotation has already been converted into a job.",
     };
   }
+  const draftInvoiceIfAccepted = async () => {
+    if (decision !== "accepted") return;
+    try {
+      const { draftAcceptedQuotationInvoice } = await import("@/lib/ai/mcp/tools/invoice.tools");
+      const result = await draftAcceptedQuotationInvoice(request.businessId, quotationId);
+      if (result.status === "REJECTED") {
+        console.error("[quotations] Automatic invoice draft rejected", { quotationId, message: result.message });
+      }
+    } catch {
+      console.error("[quotations] Automatic invoice draft failed", { quotationId });
+    }
+  };
   if (summary.customerDecision === decision) {
+    await draftInvoiceIfAccepted();
     return { ok: true, request };
   }
 
@@ -2551,6 +2564,7 @@ async function applyQuotationCustomerDecision(
       : null,
   };
   request = updatedRequest;
+  await draftInvoiceIfAccepted();
 
   if (options.notifyBusiness) {
     try {
