@@ -368,83 +368,84 @@ async function generateInvoicePdfBytes(
 async function mirrorInvoiceToInspectionRequest(
   invoice: InvoiceDetail,
 ): Promise<void> {
-  const requestId = invoice.inspectionRequestId?.trim();
-  if (!requestId) return;
-
-  const closesRequest = invoice.status === "sent" || invoice.status === "paid";
-  const now = FieldValue.serverTimestamp();
-  const requestPatch: Record<string, unknown> = {
-    invoice: {
-      id: invoice.id,
-      invoiceCode: invoice.invoiceCode?.trim() || null,
-      pdfUrl: invoice.pdfUrl?.trim() || null,
-      finalPriceAud: invoice.finalPriceAud,
-      balanceDueAud: invoice.balanceDueAud,
-      status: invoice.status,
-      invoiceDate: invoice.invoiceDate,
-      dueDate: invoice.dueDate,
-    },
-    updatedAt: now,
-  };
-
-  if (closesRequest) {
-    requestPatch.status = "completed";
-    requestPatch.bookingStatus = "completed";
-    requestPatch.bookingStatusAt = now;
-  }
-
   try {
-    await adminDb
-      .collection(REQUESTS_COLLECTION)
-      .doc(requestId)
-      .set(requestPatch, { merge: true });
+    await adminDb.runTransaction(async (tx) => {
+      const source = await tx.get(adminDb.collection(INVOICE_COLLECTION).doc(invoice.id));
+      if (!source.exists || source.data()?.businessId !== invoice.businessId) return;
+      const current = mapInvoiceDoc(source.id, source.data() ?? {});
+      if (!current.inspectionRequestId.trim()) return;
+      const requestRef = adminDb
+        .collection(REQUESTS_COLLECTION)
+        .doc(current.inspectionRequestId);
+      const request = await tx.get(requestRef);
+      if (!request.exists || request.data()?.businessId !== current.businessId) return;
+      const closesRequest = current.status === "sent" || current.status === "paid";
+      const now = FieldValue.serverTimestamp();
+      tx.set(requestRef, {
+        invoice: {
+          id: current.id,
+          invoiceCode: current.invoiceCode.trim() || null,
+          pdfUrl: current.pdfUrl,
+          finalPriceAud: current.finalPriceAud,
+          balanceDueAud: current.balanceDueAud,
+          status: current.status,
+          invoiceDate: current.invoiceDate,
+          dueDate: current.dueDate,
+        },
+        ...(closesRequest ? {
+          status: "completed",
+          bookingStatus: "completed",
+          bookingStatusAt: now,
+        } : {}),
+        updatedAt: now,
+      }, { merge: true });
+    });
   } catch (error) {
     console.error("[invoice] request mirror failed:", error);
   }
 }
 
-/** Generates an invoice PDF, uploads it, and persists the public URL on the doc. */
+/** Publishes a PDF only if the invoice revision used to render it is still current. */
 async function persistInvoicePdf(
   invoice: InvoiceDetail,
   businessId: string,
-  pdfBytes?: Buffer | null,
 ): Promise<{ invoice: InvoiceDetail; pdfBytes: Buffer | null }> {
-  if (invoice.pdfUrl?.trim()) {
-    const bytes =
-      pdfBytes?.length
-        ? pdfBytes
-        : await generateInvoicePdfBytes(invoice, businessId);
-    return { invoice, pdfBytes: bytes };
-  }
-
-  const bytes = pdfBytes ?? (await generateInvoicePdfBytes(invoice, businessId));
-  if (!bytes?.length) {
+  const ref = adminDb.collection(INVOICE_COLLECTION).doc(invoice.id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists || snapshot.data()?.businessId !== businessId) {
     return { invoice, pdfBytes: null };
   }
+  const current = mapInvoiceDoc(snapshot.id, snapshot.data() ?? {});
+  const bytes = await generateInvoicePdfBytes(current, businessId);
+  if (!bytes?.length) return { invoice: current, pdfBytes: null };
 
   try {
-    const { uploadInvoicePdf } = await import("@/lib/onboarding/services/upload");
-    const uploaded = await uploadInvoicePdf(bytes, {
-      businessId,
-      inspectionRequestId: invoice.inspectionRequestId,
-      invoiceId: invoice.id,
-    });
-    if (!uploaded.ok) {
-      return { invoice, pdfBytes: bytes };
+    let pdfUrl = current.pdfUrl;
+    if (!pdfUrl) {
+      const { uploadInvoicePdf } = await import("@/lib/onboarding/services/upload");
+      const uploaded = await uploadInvoicePdf(bytes, {
+        businessId,
+        inspectionRequestId: current.inspectionRequestId,
+        invoiceId: current.id,
+      });
+      if (!uploaded.ok) return { invoice: current, pdfBytes: null };
+      pdfUrl = uploaded.url;
     }
-
-    await adminDb.collection(INVOICE_COLLECTION).doc(invoice.id).update({
-      pdfUrl: uploaded.url,
-      updatedAt: FieldValue.serverTimestamp(),
+    return await adminDb.runTransaction(async (tx) => {
+      const latest = await tx.get(ref);
+      if (!latest.exists || latest.data()?.businessId !== businessId) {
+        return { invoice: current, pdfBytes: null };
+      }
+      const latestInvoice = mapInvoiceDoc(latest.id, latest.data() ?? {});
+      if (!snapshot.updateTime!.isEqual(latest.updateTime!)) {
+        return { invoice: latestInvoice, pdfBytes: null };
+      }
+      if (!current.pdfUrl) tx.update(ref, { pdfUrl });
+      return { invoice: { ...latestInvoice, pdfUrl }, pdfBytes: bytes };
     });
-
-    return {
-      invoice: { ...invoice, pdfUrl: uploaded.url },
-      pdfBytes: bytes,
-    };
   } catch (error) {
-    console.error("[invoice] PDF upload failed:", error);
-    return { invoice, pdfBytes: bytes };
+    console.error("[invoice] PDF persistence failed:", error);
+    return { invoice: current, pdfBytes: null };
   }
 }
 
@@ -487,33 +488,42 @@ export async function markBusinessInvoicePaid(
   }
 
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
-  const snap = await docRef.get();
-  if (!snap.exists || snap.data()?.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Invoice not found." };
-  }
+  const transition = await adminDb.runTransaction(async (tx) => {
+    const current = await tx.get(docRef);
+    if (!current.exists || current.data()?.businessId !== businessId) {
+      return { ok: false as const, status: 404, error: "Invoice not found." };
+    }
 
-  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
-  if (invoice.status === "draft") {
-    return {
-      ok: false,
-      status: 400,
-      error: "Draft invoices must be sent before they can be marked paid.",
-    };
-  }
-  if (invoice.status === "paid") {
-    return { ok: true, invoice };
-  }
+    const invoice = mapInvoiceDoc(current.id, current.data() ?? {});
+    if (invoice.status === "draft") {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Draft invoices must be sent before they can be marked paid.",
+      };
+    }
+    if (invoice.status === "cancelled") {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Cancelled invoices cannot be marked paid. Restore the invoice first.",
+      };
+    }
+    if (invoice.status === "paid") return { ok: true as const, changed: false };
 
-  await docRef.update({
-    status: "paid",
-    balanceDueAud: 0,
-    updatedAt: FieldValue.serverTimestamp(),
+    tx.update(docRef, {
+      status: "paid",
+      balanceDueAud: 0,
+      pdfUrl: null,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true as const, changed: true };
   });
 
-  const updated = await docRef.get();
-  const paidInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
-  await mirrorInvoiceToInspectionRequest(paidInvoice);
-  return { ok: true, invoice: paidInvoice };
+  if (!transition.ok) return transition;
+  if (transition.changed) await syncSettledInvoice(businessId, id);
+  const latest = await docRef.get();
+  return { ok: true, invoice: mapInvoiceDoc(latest.id, latest.data() ?? {}) };
 }
 
 /**
@@ -605,33 +615,31 @@ export async function cancelBusinessInvoice(
   }
 
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
-  const snap = await docRef.get();
-  if (!snap.exists || snap.data()?.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Invoice not found." };
-  }
+  const transition = await adminDb.runTransaction(async (tx) => {
+    const current = await tx.get(docRef);
+    if (!current.exists || current.data()?.businessId !== businessId) {
+      return { ok: false as const, status: 404, error: "Invoice not found." };
+    }
 
-  const invoice = mapInvoiceDoc(snap.id, snap.data() ?? {});
-  if (invoice.status === "cancelled") {
-    return { ok: true, invoice };
-  }
-  if (invoice.status === "paid") {
-    return {
-      ok: false,
-      status: 400,
-      error: "Paid invoices cannot be cancelled.",
-    };
-  }
+    const invoice = mapInvoiceDoc(current.id, current.data() ?? {});
+    if (invoice.status === "paid") {
+      return { ok: false as const, status: 400, error: "Paid invoices cannot be cancelled." };
+    }
+    if (invoice.status === "cancelled") return { ok: true as const, changed: false };
 
-  await docRef.update({
-    status: "cancelled",
-    cancelledFromStatus: invoice.status,
-    cancelledAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
+    tx.update(docRef, {
+      status: "cancelled",
+      cancelledFromStatus: invoice.status,
+      cancelledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true as const, changed: true };
   });
 
+  if (!transition.ok) return transition;
   const updated = await docRef.get();
   const cancelledInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
-  await mirrorInvoiceToInspectionRequest(cancelledInvoice);
+  if (transition.changed) await mirrorInvoiceToInspectionRequest(cancelledInvoice);
   return { ok: true, invoice: cancelledInvoice };
 }
 
@@ -652,30 +660,33 @@ export async function undoCancelBusinessInvoice(
   }
 
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(id);
-  const snap = await docRef.get();
-  if (!snap.exists || snap.data()?.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Invoice not found." };
-  }
+  const transition = await adminDb.runTransaction(async (tx) => {
+    const current = await tx.get(docRef);
+    if (!current.exists || current.data()?.businessId !== businessId) {
+      return { ok: false as const, status: 404, error: "Invoice not found." };
+    }
 
-  const data = snap.data() ?? {};
-  const invoice = mapInvoiceDoc(snap.id, data);
-  if (invoice.status !== "cancelled") {
-    return {
-      ok: false,
-      status: 400,
-      error: "Only cancelled invoices can be restored.",
-    };
-  }
+    const data = current.data() ?? {};
+    const invoice = mapInvoiceDoc(current.id, data);
+    if (invoice.status !== "cancelled") {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Only cancelled invoices can be restored.",
+      };
+    }
 
-  const restoredStatus = data.cancelledFromStatus === "sent" ? "sent" : "draft";
-
-  await docRef.update({
-    status: restoredStatus,
-    cancelledFromStatus: FieldValue.delete(),
-    cancelledAt: FieldValue.delete(),
-    updatedAt: FieldValue.serverTimestamp(),
+    const restoredStatus = data.cancelledFromStatus === "sent" ? "sent" : "draft";
+    tx.update(docRef, {
+      status: restoredStatus,
+      cancelledFromStatus: FieldValue.delete(),
+      cancelledAt: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return { ok: true as const };
   });
 
+  if (!transition.ok) return transition;
   const updated = await docRef.get();
   const restoredInvoice = mapInvoiceDoc(updated.id, updated.data() ?? {});
   await mirrorInvoiceToInspectionRequest(restoredInvoice);
@@ -758,277 +769,171 @@ export async function createInvoiceFromQuotation(
   input: CreateInvoiceInput,
 ): Promise<
   | { ok: true; invoice: InvoiceDetail }
-  | { ok: false; status: number; error: string }
+  | { ok: false; status: number; error: string; invoice?: InvoiceDetail }
 > {
   const quotation = await getBusinessQuotationById(
     businessId,
     input.quotationId.trim(),
   );
-  if (!quotation) {
-    return { ok: false, status: 404, error: "Quotation not found." };
-  }
+  if (!quotation) return { ok: false, status: 404, error: "Quotation not found." };
 
   const values = buildInvoiceValues(input);
   if (!values.ok) return values;
-  const { customer: invoiceCustomer, address: invoiceAddress } =
-    resolveInvoiceCustomer(input, quotation);
-
+  const { customer, address } = resolveInvoiceCustomer(input, quotation);
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(quotation.id);
   const existing = await docRef.get();
-  if (existing.exists && existing.data()?.businessId === businessId) {
-    const existingInvoice = mapInvoiceDoc(
-      existing.id,
-      existing.data() ?? {},
-    );
-    if (
-      existingInvoice.status === "draft" ||
-      existingInvoice.status === "sent"
-    ) {
-      const canUpdateDirectDetails =
-        quotation.createdSource === "invoice_direct" ||
-        existingInvoice.status === "sent";
-      // Customer details can be corrected on a draft as well as a sent invoice.
-      const customer = invoiceCustomer;
-      const address = invoiceAddress;
-      const serviceTitle =
-        canUpdateDirectDetails && input.serviceTitle?.trim()
-          ? input.serviceTitle.trim()
-          : quotation.serviceTitle;
-      const booking = await completeBookingForInvoicedQuotation({
-        businessId,
-        inspectionRequestId: quotation.inspectionRequestId,
-        quotation: {
-          id: quotation.id,
-          quotationCode: quotation.quotationCode,
-          serviceTitle,
-          customer,
-          address,
-          finalPriceAud: values.finalPriceAud,
-          subtotalAud: values.subtotalAud,
-          balanceDueAud: values.balanceDueAud,
-          status: quotation.status,
-        },
-      });
-
-      const now = FieldValue.serverTimestamp();
-      const nextStatus = input.send
-        ? "sent"
-        : existingInvoice.status === "sent"
-          ? "sent"
-          : "draft";
-      await docRef.update({
-        serviceTitle,
-        customer,
-        address,
-        lineItems: serializeLineItemsForFirestore(values.lineItems),
-        subtotalAud: values.subtotalAud,
-        discountAud: values.discountAud,
-        gstAud: values.gstAud,
-        gstPricing: values.gstPricing,
-        finalPriceAud: values.finalPriceAud,
-        balanceDueAud: values.balanceDueAud,
-        depositRequest: values.depositRequestData,
-        notes: input.notes?.trim() || null,
-        termsAndConditions: values.termsAndConditions,
-        invoiceDate: input.invoiceDate.trim(),
-        dueDate: input.dueDate.trim(),
-        status: nextStatus,
-        bookingId: booking?.bookingId ?? existingInvoice.bookingId,
-        bookingCode: booking?.bookingCode ?? existingInvoice.bookingCode,
-        bookingStatus: booking?.bookingStatus ?? existingInvoice.bookingStatus,
-        bookingStatusAt: booking ? now : existingInvoice.bookingStatusAt,
-        pdfUrl: null,
-        updatedAt: now,
-      });
-
-      const saved = await docRef.get();
-      let invoice = mapInvoiceDoc(saved.id, saved.data() ?? {});
-      const persisted = await persistInvoicePdf(invoice, businessId);
-      invoice = persisted.invoice;
-      if (input.send) {
-        await sendInvoiceEmailForDetail(
-          invoice,
-          businessId,
-          persisted.pdfBytes,
-        );
-      }
-      await mirrorInvoiceToInspectionRequest(invoice);
-      return { ok: true, invoice };
-    }
-
-    if (existingInvoice.status === "paid") {
-      return {
-        ok: false,
-        status: 400,
-        error: "Paid invoices cannot be edited.",
-      };
-    }
-
-    if (existingInvoice.status === "cancelled") {
-      return {
-        ok: false,
-        status: 400,
-        error: "Cancelled invoices cannot be edited.",
-      };
-    }
-
-    if (!input.send) {
-      return { ok: true, invoice: existingInvoice };
-    }
-
-    const booking = await completeBookingForInvoicedQuotation({
-      businessId,
-      inspectionRequestId: quotation.inspectionRequestId,
-      quotation: {
-        id: quotation.id,
-        quotationCode: quotation.quotationCode,
-        serviceTitle: quotation.serviceTitle,
-        customer: quotation.customer,
-        address: quotation.address,
-        finalPriceAud: existingInvoice.finalPriceAud,
-        subtotalAud: existingInvoice.subtotalAud,
-        balanceDueAud: existingInvoice.balanceDueAud,
-        status: quotation.status,
-      },
-      audit: await resolveInvoiceBookingAudit(
-        author,
-        existingInvoice.invoiceCode,
-        quotation.quotationCode,
-      ),
-    });
-
-    const resendPatch: Record<string, unknown> = {
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (existingInvoice.status !== "sent") {
-      resendPatch.status = "sent";
-    }
-    if (booking) {
-      if (!existingInvoice.bookingId) {
-        resendPatch.bookingId = booking.bookingId;
-        resendPatch.bookingCode = booking.bookingCode;
-      }
-      if (!existingInvoice.bookingStatus) {
-        resendPatch.bookingStatus = booking.bookingStatus;
-        resendPatch.bookingStatusAt = FieldValue.serverTimestamp();
-      }
-    }
-    await docRef.update(resendPatch);
-
-    const sent = await docRef.get();
-    let invoice = mapInvoiceDoc(sent.id, sent.data() ?? {});
-    const persisted = await persistInvoicePdf(invoice, businessId);
-    invoice = persisted.invoice;
-    await sendInvoiceEmailForDetail(
-      invoice,
-      businessId,
-      persisted.pdfBytes,
-    );
-    await mirrorInvoiceToInspectionRequest(invoice);
-    await logInvoiceAuditEvent(businessId, author, invoice, "invoice.sent");
-    return { ok: true, invoice };
+  if (existing.exists && existing.data()?.businessId !== businessId) {
+    return { ok: false, status: 404, error: "Invoice not found." };
   }
-
-  if (quotation.status === "cancelled") {
-    return {
-      ok: false,
-      status: 400,
-      error: "Cancelled quotations cannot be invoiced.",
-    };
+  if (!existing.exists && quotation.status === "cancelled") {
+    return { ok: false, status: 400, error: "Cancelled quotations cannot be invoiced." };
   }
-
   if (
-    quotation.status === "sent" &&
+    !existing.exists && quotation.status === "sent" &&
     quotation.customerDecision !== "accepted"
   ) {
     return {
       ok: false,
       status: 400,
-      error:
-        quotation.customerDecision === "rejected"
-          ? "The customer rejected this quotation, so it cannot be invoiced."
-          : "Wait for the customer to accept the quotation before issuing an invoice.",
+      error: "Wait for the customer to accept the quotation before issuing an invoice.",
     };
   }
+  const invoiceCode = existing.exists
+    ? existing.data()?.invoiceCode
+    : await allocateInvoiceCode(businessId);
+  const result = await adminDb.runTransaction(async (tx): Promise<
+    | { ok: true; created: boolean }
+    | { ok: false; status: number; error: string; invoice?: InvoiceDetail }
+  > => {
+    const current = await tx.get(docRef);
+    if (current.exists && current.data()?.businessId !== businessId) {
+      return { ok: false, status: 404, error: "Invoice not found." };
+    }
+    const invoice = current.exists
+      ? mapInvoiceDoc(current.id, current.data() ?? {})
+      : null;
+    // Compare with the snapshot read before any asynchronous preparation. A retry
+    // must reject a concurrent payment/edit rather than replaying the stale form.
+    const changed = existing.exists !== current.exists || (
+      existing.exists && !existing.updateTime!.isEqual(current.updateTime!)
+    );
+    if (
+      changed ||
+      (input.createOnly === true && invoice !== null) ||
+      (input.expectedUpdatedAt !== undefined && invoice?.updatedAt !== input.expectedUpdatedAt) ||
+      invoice?.status === "paid" || invoice?.status === "cancelled"
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        error: "This invoice changed. Reload and review the current invoice before saving.",
+        ...(invoice ? { invoice } : {}),
+      };
+    }
+    // Old documents may have a ledger without the aggregate amountPaidAud.
+    const paidAud = invoice ? Math.max(
+      invoice.amountPaidAud,
+      invoice.payments.reduce((sum, payment) => sum + payment.amountAud, 0),
+    ) : 0;
+    const deposit = invoice?.depositRequest?.paid
+      ? invoice.depositRequest
+      : values.depositRequest;
+    const effectiveValues = buildInvoiceValues({ ...input, depositRequest: deposit });
+    if (!effectiveValues.ok) return effectiveValues;
+    const depositAud = deposit?.paid ? deposit.amountAud : 0;
+    const balanceCents = Math.round(values.finalPriceAud * 100)
+      - Math.round(depositAud * 100) - Math.round(paidAud * 100);
+    if (balanceCents < 0) {
+      return {
+        ok: false,
+        status: 409,
+        error: "The invoice total cannot be less than payments already received.",
+        ...(invoice ? { invoice } : {}),
+      };
+    }
+    const canUpdateServiceTitle = quotation.createdSource === "invoice_direct" || invoice?.status === "sent";
+    const serviceTitle = canUpdateServiceTitle && input.serviceTitle?.trim()
+      ? input.serviceTitle.trim()
+      : quotation.serviceTitle;
+    const patch = {
+      serviceTitle,
+      customer,
+      address,
+      lineItems: serializeLineItemsForFirestore(values.lineItems),
+      subtotalAud: values.subtotalAud,
+      discountAud: values.discountAud,
+      gstAud: values.gstAud,
+      gstPricing: values.gstPricing,
+      finalPriceAud: values.finalPriceAud,
+      balanceDueAud: balanceCents / 100,
+      amountPaidAud: paidAud,
+      depositRequest: deposit ? { ...deposit } : null,
+      notes: input.notes?.trim() || null,
+      termsAndConditions: effectiveValues.termsAndConditions,
+      invoiceDate: input.invoiceDate.trim(),
+      dueDate: input.dueDate.trim(),
+      status: balanceCents === 0 && paidAud + depositAud > 0
+        ? "paid"
+        : input.send || invoice?.status === "sent" ? "sent" : "draft",
+      pdfUrl: null,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (invoice) {
+      tx.update(docRef, patch);
+    } else {
+      tx.create(docRef, {
+        ...patch,
+        invoiceCode,
+        businessId,
+        quotationId: quotation.id,
+        quotationCode: quotation.quotationCode,
+        inspectionRequestId: quotation.inspectionRequestId,
+        bookingId: null,
+        bookingCode: null,
+        bookingStatus: null,
+        bookingStatusAt: null,
+        createdBy: author.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+    return { ok: true, created: !invoice };
+  });
+  if (!result.ok) return result;
 
-  const invoiceCode = await allocateInvoiceCode(businessId);
-  const now = FieldValue.serverTimestamp();
-
-  // Mark (or create) the linked booking as completed.
+  // Linked booking work and external effects happen only after the financial commit.
+  const committed = await docRef.get();
+  let invoice = mapInvoiceDoc(committed.id, committed.data() ?? {});
   const booking = await completeBookingForInvoicedQuotation({
     businessId,
-    inspectionRequestId: quotation.inspectionRequestId,
+    inspectionRequestId: invoice.inspectionRequestId,
     quotation: {
       id: quotation.id,
       quotationCode: quotation.quotationCode,
-      serviceTitle: quotation.serviceTitle,
-      customer: invoiceCustomer,
-      address: invoiceAddress,
-      finalPriceAud: values.finalPriceAud,
-      subtotalAud: values.subtotalAud,
-      balanceDueAud: values.balanceDueAud,
+      serviceTitle: invoice.serviceTitle,
+      customer: invoice.customer,
+      address: invoice.address,
+      finalPriceAud: invoice.finalPriceAud,
+      subtotalAud: invoice.subtotalAud,
+      balanceDueAud: invoice.balanceDueAud,
       status: quotation.status,
     },
-    audit: await resolveInvoiceBookingAudit(
-      author,
-      invoiceCode,
-      quotation.quotationCode,
-    ),
+    ...(result.created ? {
+      audit: await resolveInvoiceBookingAudit(author, invoice.invoiceCode, quotation.quotationCode),
+    } : {}),
   });
-
-  await docRef.set({
-    invoiceCode,
-    businessId,
-    quotationId: quotation.id,
-    quotationCode: quotation.quotationCode,
-    inspectionRequestId: quotation.inspectionRequestId,
-    serviceTitle: quotation.serviceTitle,
-    customer: invoiceCustomer,
-    address: invoiceAddress,
-    lineItems: serializeLineItemsForFirestore(values.lineItems),
-    subtotalAud: values.subtotalAud,
-    discountAud: values.discountAud,
-    gstAud: values.gstAud,
-    gstPricing: values.gstPricing,
-    finalPriceAud: values.finalPriceAud,
-    balanceDueAud: values.balanceDueAud,
-    depositRequest: values.depositRequestData,
-    notes: input.notes?.trim() || null,
-    termsAndConditions: values.termsAndConditions,
-    invoiceDate: input.invoiceDate.trim(),
-    dueDate: input.dueDate.trim(),
-    status: input.send ? "sent" : "draft",
-    bookingId: booking?.bookingId ?? null,
-    bookingCode: booking?.bookingCode ?? null,
-    bookingStatus: booking?.bookingStatus ?? null,
-    bookingStatusAt: booking ? now : null,
-    createdBy: author.uid,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const saved = await docRef.get();
-  let invoice = mapInvoiceDoc(saved.id, saved.data() ?? {});
+  if (booking) {
+    await docRef.update({ ...booking, bookingStatusAt: FieldValue.serverTimestamp() });
+  }
   const persisted = await persistInvoicePdf(invoice, businessId);
   invoice = persisted.invoice;
-
-  await logInvoiceAuditEvent(businessId, author, invoice, "invoice.created");
-
-  if (input.send) {
-    await sendInvoiceEmailForDetail(
-      invoice,
-      businessId,
-      persisted.pdfBytes,
-    );
-    await logInvoiceAuditEvent(businessId, author, invoice, "invoice.sent");
+  if (result.created) await logInvoiceAuditEvent(businessId, author, invoice, "invoice.created");
+  if (input.send && invoice.status === "sent" && persisted.pdfBytes) {
+    await sendInvoiceEmailForDetail(invoice, businessId, persisted.pdfBytes);
+    if (result.created) await logInvoiceAuditEvent(businessId, author, invoice, "invoice.sent");
   }
-
   await mirrorInvoiceToInspectionRequest(invoice);
-
-  return {
-    ok: true,
-    invoice,
-  };
+  const latest = await docRef.get();
+  return { ok: true, invoice: mapInvoiceDoc(latest.id, latest.data() ?? {}) };
 }
 
 /**
@@ -1111,6 +1016,7 @@ export async function createDirectInvoice(
 
   return createInvoiceFromQuotation(businessId, { uid }, {
     quotationId: quotation.id,
+    createOnly: true,
     lineItems: input.lineItems,
     finalPriceAud: input.finalPriceAud,
     discountAud: input.discountAud,
@@ -1134,18 +1040,14 @@ async function sendInvoiceEmailForDetail(
   if (!email) return;
 
   const profile = await getBusinessProfile(businessId);
-
-  const bytes =
-    pdfBytes?.length
-      ? pdfBytes
-      : await generateInvoicePdfBytes(invoice, businessId);
-
+  const bytes = pdfBytes?.length
+    ? pdfBytes
+    : await generateInvoicePdfBytes(invoice, businessId);
   if (!bytes?.length) return;
 
   const { sendInvoiceSentEmail } = await import(
     "@/lib/email/templates/invoice-sent"
   );
-
   const invoiceCode = invoice.invoiceCode.trim() || "invoice";
   const connected = Boolean(
     profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
@@ -1241,6 +1143,7 @@ export async function deleteBusinessInvoice(
 export async function syncSettledInvoice(businessId: string, invoiceId: string) {
   const snap = await adminDb.collection(INVOICE_COLLECTION).doc(invoiceId).get();
   if (snap.exists && snap.data()?.businessId === businessId) {
-    await mirrorInvoiceToInspectionRequest(mapInvoiceDoc(snap.id, snap.data() ?? {}));
+    const persisted = await persistInvoicePdf(mapInvoiceDoc(snap.id, snap.data() ?? {}), businessId);
+    await mirrorInvoiceToInspectionRequest(persisted.invoice);
   }
 }

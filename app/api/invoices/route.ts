@@ -182,6 +182,10 @@ export async function POST(request: Request) {
       : ("exclusive" as const);
 
   const sharedInput = {
+    createOnly: payload.createOnly === true,
+    expectedUpdatedAt: payload.expectedUpdatedAt === null ? null
+      : typeof payload.expectedUpdatedAt === "number" && Number.isFinite(payload.expectedUpdatedAt)
+        ? payload.expectedUpdatedAt : undefined,
     lineItems: Array.isArray(payload.lineItems) ? payload.lineItems : [],
     finalPriceAud:
       typeof payload.finalPriceAud === "number" &&
@@ -300,7 +304,7 @@ export async function POST(request: Request) {
 
   if (!result.ok) {
     return NextResponse.json(
-      { ok: false, error: result.error },
+      { ok: false, error: result.error, ...("invoice" in result ? { invoice: result.invoice } : {}) },
       { status: result.status },
     );
   }

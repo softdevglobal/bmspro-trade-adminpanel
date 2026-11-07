@@ -1,5 +1,9 @@
 import { adminDb } from "@/lib/firebase/admin";
 import type { InspectionAssignment } from "@/lib/inspection/types";
+import { mapBookingDoc, bookingScheduleDays } from "@/lib/bookings/map-booking-doc";
+import { JOBS_COLLECTION } from "@/lib/bookings/types";
+import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
+import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import {
   findApprovedLeaveBlocking,
   findLeaveBlockingAssignment,
@@ -57,7 +61,21 @@ export async function resolveOwnerAssignment(
 type ValidateStaffAssignmentOptions = {
   notifyOnConflict?: boolean;
   notifyContext?: { kind: "job"; id: string };
+  excludeBookingId?: string;
+  excludeSeriesId?: string | null;
 };
+
+function visitWindowOverlaps(
+  startTime: string | null | undefined,
+  endTime: string | null | undefined,
+  timeRange: unknown,
+  startMin: number,
+  endMin: number,
+): boolean {
+  const start = clockToMinutes(startTime) ?? (timeRange === "afternoon" ? 12 * 60 : 8 * 60);
+  const end = clockToMinutes(endTime) ?? (timeRange === "morning" ? 12 * 60 : 17 * 60);
+  return start < endMin && startMin < end;
+}
 
 export async function validateStaffAssignmentForSchedule(
   businessId: string,
@@ -69,6 +87,25 @@ export async function validateStaffAssignmentForSchedule(
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   if (assignment.type !== "staff" || !scheduledDate) {
     return { ok: true };
+  }
+
+  const profile = await adminDb.collection("users").doc(assignment.uid).get();
+  const staff = profile.data();
+  if (
+    !profile.exists ||
+    !staff ||
+    staff.businessId !== businessId ||
+    staff.role !== "staff" ||
+    staff.isActive === false ||
+    staff.disabled === true ||
+    staff.suspended === true ||
+    ["inactive", "disabled", "suspended"].includes(String(staff.status ?? ""))
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      error: `${assignment.name} is no longer an active team member and cannot be assigned.`,
+    };
   }
 
   const startMin = clockToMinutes(scheduledStartTime) ?? undefined;
@@ -143,6 +180,86 @@ export async function validateStaffAssignmentForSchedule(
       status: 409,
       error: `${assignment.name} is not scheduled to work on ${scheduledDate} and cannot be assigned that day.`,
     };
+  }
+
+  const [jobsSnap, requestsSnap] = await Promise.all([
+    adminDb
+      .collection(JOBS_COLLECTION)
+      .where("businessId", "==", businessId)
+      .get(),
+    adminDb
+      .collection(REQUESTS_COLLECTION)
+      .where("businessId", "==", businessId)
+      .where("assignedTo.uid", "==", assignment.uid)
+      .get(),
+  ]);
+
+  for (const doc of jobsSnap.docs) {
+    if (doc.id === options.excludeBookingId) continue;
+    const booking = mapBookingDoc(doc.id, doc.data() ?? {});
+    if (
+      booking.assignedTo?.uid !== assignment.uid ||
+      !["awaiting", "scheduled", "ongoing"].includes(booking.status)
+    ) {
+      continue;
+    }
+    const days =
+      options.excludeSeriesId && booking.seriesId === options.excludeSeriesId
+        ? [
+            ...(booking.scheduledSlot?.date
+              ? [{
+                  date: booking.scheduledSlot.date,
+                  slot: booking.scheduledSlot,
+                  startTime: booking.scheduledStartTime,
+                  endTime: booking.scheduledEndTime,
+                }]
+              : []),
+            ...booking.additionalJobDays.map((slot) => ({
+              date: slot.date,
+              slot,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+            })),
+          ]
+        : bookingScheduleDays(booking);
+    const visit = days.find((day) => day.date === scheduledDate);
+    if (
+      visit &&
+      visitWindowOverlaps(
+        visit.startTime,
+        visit.endTime,
+        visit.slot.timeRange,
+        startMin ?? 8 * 60,
+        endMin ?? 17 * 60,
+      )
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        error: `${assignment.name} already has a job scheduled on ${scheduledDate} during that time.`,
+      };
+    }
+  }
+
+  for (const doc of requestsSnap.docs) {
+    const request = mapInspectionDoc(doc.id, doc.data() ?? {});
+    const slot = request.scheduledSlot;
+    if (request.status !== "scheduled" || !slot || slot.date !== scheduledDate) continue;
+    if (
+      visitWindowOverlaps(
+        request.scheduledStartTime,
+        request.scheduledEndTime,
+        slot.timeRange,
+        startMin ?? 8 * 60,
+        endMin ?? 17 * 60,
+      )
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        error: `${assignment.name} already has an inspection scheduled on ${scheduledDate} during that time.`,
+      };
+    }
   }
 
   return { ok: true };

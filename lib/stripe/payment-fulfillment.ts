@@ -48,7 +48,7 @@ export async function fulfillPaymentCheckoutSession(input: { session: Stripe.Che
       fulfilledAt: FieldValue.serverTimestamp() });
     if (!needsReview && expected.paymentType === "invoice_payment") {
       tx.update(targetRef, { payments: FieldValue.arrayUnion(entry), amountPaidAud: Math.round((Number(data!.amountPaidAud ?? 0) * 100 + expected.baseCents)) / 100,
-        balanceDueAud: 0, status: "paid", lastPaymentAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+        balanceDueAud: 0, status: "paid", pdfUrl: null, lastPaymentAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     } else if (!needsReview) {
       tx.update(targetRef, { depositPayment: { ...entry, status: "paid" }, depositPayments: FieldValue.arrayUnion(entry),
         "depositRequest.paid": true, updatedAt: FieldValue.serverTimestamp() });

@@ -53,7 +53,7 @@ export function EmailSendRow({
   const href = showDocument ? emailDocumentHref(item) : null;
 
   async function retry() {
-    if (!user) return;
+    if (!user || retrying) return;
     const confirmUnknown = item.status === "unknown";
     if (
       confirmUnknown &&
@@ -68,12 +68,19 @@ export function EmailSendRow({
     try {
       await emailApi(user, `/api/email/outbox/${encodeURIComponent(item.id)}/retry`, {
         method: "POST",
-        body: JSON.stringify({ confirm_unknown: confirmUnknown }),
+        body: JSON.stringify({
+          confirm_unknown: confirmUnknown,
+          retry_generation: item.retryGeneration ?? 0,
+        }),
       });
-      await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not resend the email.");
     } finally {
+      try {
+        await onChanged();
+      } catch {
+        // Preserve the retry result if refreshing history also fails.
+      }
       setRetrying(false);
     }
   }

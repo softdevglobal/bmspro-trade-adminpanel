@@ -13,6 +13,8 @@ import {
   undoCancelBusinessBooking,
   updateBookingCompletionPhotos,
   updateBusinessBookingSchedule,
+  validateBusinessBookingSchedule,
+  notifyBusinessBookingRescheduled,
   getBusinessBooking,
   startBusinessBookingJob,
   startBusinessBookingVisit,
@@ -25,10 +27,22 @@ import {
 } from "@/lib/bookings/recurrence";
 import { adminDb } from "@/lib/firebase/admin";
 import {
+  computeDaySlotOccupancy,
+  rangeOverlapsFullSlots,
+} from "@/lib/calendar/slot-occupancy";
+import { BUSINESS_CLOSURES_COLLECTION } from "@/lib/calendar/business-closures/types";
+import { validateStaffAssignmentForSchedule } from "@/lib/bookings/resolve-job-assignment";
+import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
+import {
   findApprovedLeaveBlocking,
   findLeaveBlockingAssignment,
 } from "@/lib/leave/server";
-import type { InspectionAssignment } from "@/lib/inspection/types";
+import {
+  isClockTime,
+  isIsoDate,
+  parseOptionalInspectionAddress,
+  type InspectionAssignment,
+} from "@/lib/inspection/types";
 import {
   extractBearerToken,
   requireBusinessOwnerFromToken,
@@ -41,7 +55,7 @@ import { enqueueCareplusActivitySafe } from "@/lib/integrations/careplus/enqueue
 import { staffIsOffOnDate } from "@/lib/team/staff-off-day-server";
 import { getRequestDocumentRef } from "@/lib/inspection/request-document";
 import { COLLECTIONS } from "@/lib/onboarding/services/collections";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -73,7 +87,7 @@ async function lookupBusinessService(
     .get();
   if (!snap.exists) return null;
   const data = snap.data();
-  if (!data || data.businessId !== businessId) return null;
+  if (!data || data.businessId !== businessId || data.isActive === false) return null;
   const name = typeof data.name === "string" ? data.name.trim() : "";
   const businessType =
     typeof data.businessType === "string"
@@ -669,13 +683,15 @@ export async function PATCH(
   }
 
   if (action === "update_details") {
-    const booking = await getBusinessBooking(auth.businessId, id);
-    if (!booking) {
+    const bookingRef = adminDb.collection("jobs").doc(id);
+    const original = await bookingRef.get();
+    if (!original.exists || original.data()?.businessId !== auth.businessId) {
       return NextResponse.json(
         { ok: false, error: "Job not found." },
         { status: 404 },
       );
     }
+    const booking = mapBookingDoc(original.id, original.data() ?? {});
     if (
       booking.status === "cancelled" ||
       booking.status === "completed" ||
@@ -685,6 +701,15 @@ export async function PATCH(
         { ok: false, error: "Only active jobs can be edited." },
         { status: 400 },
       );
+    }
+
+    if (
+      (payload.customer !== undefined && (!payload.customer || typeof payload.customer !== "object" || Array.isArray(payload.customer))) ||
+      (payload.address !== undefined && (!payload.address || typeof payload.address !== "object" || Array.isArray(payload.address))) ||
+      (payload.customRequest !== undefined && payload.customRequest !== null &&
+        (typeof payload.customRequest !== "object" || Array.isArray(payload.customRequest)))
+    ) {
+      return NextResponse.json({ ok: false, error: "Check the customer, address and scope fields." }, { status: 400 });
     }
 
     const customerRaw =
@@ -716,7 +741,7 @@ export async function PATCH(
     const endTime =
       typeof payload.endTime === "string" ? payload.endTime.trim() : "";
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !timeRange) {
+    if (!isIsoDate(date) || !timeRange) {
       return NextResponse.json(
         { ok: false, error: "Choose a valid date and time of day." },
         { status: 400 },
@@ -724,25 +749,10 @@ export async function PATCH(
     }
     const startMin = clockToMinutes(startTime);
     const endMin = clockToMinutes(endTime);
-    if (startMin == null || endMin == null || endMin <= startMin) {
+    if (!isClockTime(startTime) || !isClockTime(endTime) || startMin == null || endMin == null || endMin <= startMin) {
       return NextResponse.json(
         { ok: false, error: "Choose a valid time window." },
         { status: 400 },
-      );
-    }
-
-    const seriesModeEarly = parseSeriesUpdateMode(payload.seriesUpdateMode);
-    const scheduleResult = await updateBusinessBookingSchedule(auth.businessId, id, {
-      slot: { date, timeRange },
-      startTime,
-      endTime,
-      notifyCustomer: seriesModeEarly === "this_visit",
-      skipCareplus: true,
-    });
-    if (!scheduleResult.ok) {
-      return NextResponse.json(
-        { ok: false, error: scheduleResult.error },
-        { status: scheduleResult.status },
       );
     }
 
@@ -778,6 +788,23 @@ export async function PATCH(
           ? addressRaw.postcode.trim()
           : booking.address.postcode,
     };
+    if (
+      ["fullName", "email", "phone"].some((key) => customerRaw?.[key] !== undefined && typeof customerRaw[key] !== "string") ||
+      ["street", "suburb", "state", "postcode"].some((key) => addressRaw?.[key] !== undefined && typeof addressRaw[key] !== "string") ||
+      !customer.fullName || customer.fullName.length > 200 ||
+      customer.email.length > 254 || (customer.email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)) ||
+      customer.phone.length > 50 || (customer.phone !== "" && !/^[+\d()\s.-]+$/.test(customer.phone))
+    ) {
+      return NextResponse.json({ ok: false, error: "Enter valid customer contact details." }, { status: 400 });
+    }
+    const parsedAddress = parseOptionalInspectionAddress(address);
+    if (!parsedAddress.ok) {
+      return NextResponse.json({ ok: false, error: parsedAddress.error }, { status: 400 });
+    }
+    Object.assign(address, parsedAddress.value);
+    if (["title", "description"].some((key) => customRequestRaw?.[key] !== undefined && typeof customRequestRaw[key] !== "string")) {
+      return NextResponse.json({ ok: false, error: "Enter a valid scope of work." }, { status: 400 });
+    }
     const requestTypeRaw =
       typeof payload.requestType === "string" ? payload.requestType.trim() : "";
     const requestType =
@@ -885,10 +912,11 @@ export async function PATCH(
       );
     }
 
-    const seriesMode = seriesModeEarly;
+    const seriesMode = parseSeriesUpdateMode(payload.seriesUpdateMode);
     const cutoffDate = booking.scheduledSlot?.date ?? date;
     const scheduleChanged =
       date !== (booking.scheduledSlot?.date ?? "") ||
+      timeRange !== booking.scheduledSlot?.timeRange ||
       startTime !== (booking.scheduledStartTime ?? "") ||
       endTime !== (booking.scheduledEndTime ?? "");
 
@@ -907,131 +935,201 @@ export async function PATCH(
       updatedAt: FieldValue.serverTimestamp(),
     };
 
-    await adminDb.collection("jobs").doc(id).update(detailUpdates);
+    if (scheduleChanged) {
+      const validation = await validateBusinessBookingSchedule(auth.businessId, id, {
+        slot: { date, timeRange }, startTime, endTime,
+      });
+      if (!validation.ok) {
+        return NextResponse.json({ ok: false, error: validation.error }, { status: validation.status });
+      }
+      if (booking.assignedTo?.type === "staff") {
+        const staff = await adminDb.collection("users").doc(booking.assignedTo.uid).get();
+        const profile = staff.data();
+        if (!profile || profile.businessId !== auth.businessId || profile.role !== "staff" ||
+            profile.isActive === false || profile.disabled === true || profile.suspended === true ||
+            ["inactive", "disabled", "suspended"].includes(profile.status)) {
+          return NextResponse.json({ ok: false, error: "The assigned staff member is unavailable." }, { status: 409 });
+        }
+        const leave = await findLeaveBlockingAssignment(auth.businessId, staff.id, date, startMin, endMin);
+        const offDay = await staffIsOffOnDate(staff.id, date, auth.businessId);
+        if (leave || offDay) {
+          return NextResponse.json({ ok: false, error: "The assigned staff member is unavailable on the selected date." }, { status: 409 });
+        }
+      }
+      Object.assign(detailUpdates, {
+        scheduledSlot: { date, timeRange }, scheduledStartTime: startTime, scheduledEndTime: endTime,
+      });
+    }
 
     const seriesMembers = booking.seriesId
       ? await listBookingsInSeries(auth.businessId, booking.seriesId)
       : [];
-    const siblingJobs = seriesMembers.filter((member) => member.id !== id);
-
-    // Hoisted function declarations lose the `auth.ok` narrowing above, so read
-    // the id once here.
-    const ownerBusinessId = auth.businessId;
-    async function cancelOpenSiblings() {
-      for (const member of siblingJobs) {
-        if (isSeriesScheduleLocked(member)) continue;
-        await cancelBusinessBooking(ownerBusinessId, member.id);
-      }
+    const cancelsSiblings = seriesMode !== "this_visit" || !wantsRecurrence;
+    const cancelledMembers = cancelsSiblings ? seriesMembers.filter((member) =>
+      member.id !== id && !isSeriesScheduleLocked(member),
+    ) : [];
+    const updates = new Map<string, { ref: DocumentReference; fields: Record<string, unknown> }>();
+    function planUpdate(ref: DocumentReference, fields: Record<string, unknown>) {
+      updates.set(ref.path, { ref, fields: { ...updates.get(ref.path)?.fields, ...fields } });
     }
 
     if (seriesMode === "this_visit") {
       if ((booking.seriesId || booking.recurrence) && scheduleChanged) {
-        await adminDb.collection("jobs").doc(id).update({
-          seriesException: true,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      }
-      if (!wantsRecurrence && (booking.seriesId || booking.recurrence)) {
-        await cancelOpenSiblings();
-        await adminDb.collection("jobs").doc(id).update({
-          seriesId: FieldValue.delete(),
-          seriesIndex: FieldValue.delete(),
-          seriesCount: FieldValue.delete(),
-          recurrence: FieldValue.delete(),
-          seriesException: false,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+        detailUpdates.seriesException = true;
       }
     } else if (wantsRecurrence && parsedRecurrence) {
-      const rule =
-        seriesMode === "this_and_future"
-          ? { ...parsedRecurrence, startDate: cutoffDate }
-          : parsedRecurrence;
+      const rule = seriesMode === "this_and_future"
+        ? { ...parsedRecurrence, startDate: cutoffDate } : parsedRecurrence;
       const visitCount = expandRecurrenceDates(rule).length;
-      await cancelOpenSiblings();
-      await adminDb.collection("jobs").doc(id).update({
-        ...detailUpdates,
-        recurrence: recurrenceFirestorePayload(rule),
-        seriesId: booking.seriesId || id,
-        seriesIndex: 1,
-        seriesCount: visitCount,
-        seriesException: false,
-        additionalJobDays: [],
-        updatedAt: FieldValue.serverTimestamp(),
+      if (visitCount === 0) {
+        return NextResponse.json({ ok: false, error: "The repeat rule must include at least one visit." }, { status: 400 });
+      }
+      Object.assign(detailUpdates, {
+        recurrence: recurrenceFirestorePayload(rule), seriesId: booking.seriesId || id,
+        seriesIndex: 1, seriesCount: visitCount, seriesException: false, additionalJobDays: [],
       });
-    } else if (!wantsRecurrence && (booking.seriesId || booking.recurrence)) {
-      await cancelOpenSiblings();
-      await adminDb.collection("jobs").doc(id).update({
-        seriesId: FieldValue.delete(),
-        seriesIndex: FieldValue.delete(),
-        seriesCount: FieldValue.delete(),
-        recurrence: FieldValue.delete(),
-        seriesException: false,
-        updatedAt: FieldValue.serverTimestamp(),
+    }
+    if (!wantsRecurrence && (booking.seriesId || booking.recurrence)) {
+      Object.assign(detailUpdates, {
+        seriesId: FieldValue.delete(), seriesIndex: FieldValue.delete(),
+        seriesCount: FieldValue.delete(), recurrence: FieldValue.delete(), seriesException: false,
       });
     }
 
-    if (booking.inspectionRequestId) {
-      try {
-        const requestRef = await getRequestDocumentRef(
-          booking.inspectionRequestId,
-        );
-        if (requestRef) {
-          await requestRef.update({
-            requestType,
-            serviceId,
-            serviceName,
-            serviceBusinessType,
-            customRequest,
-            customer,
-            address,
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+    try {
+      for (const member of cancelledMembers) {
+        planUpdate(adminDb.collection("jobs").doc(member.id), {
+          status: "cancelled", cancelledFromStatus: member.status,
+          cancelledAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+        });
+        if (!member.inspectionRequestId) continue;
+        const cancellationMirror = {
+          bookingStatus: "cancelled", bookingId: member.id, bookingCode: member.bookingCode,
+          bookingStatusAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+        };
+        const requestRef = await getRequestDocumentRef(member.inspectionRequestId);
+        if (requestRef) planUpdate(requestRef, cancellationMirror);
+        const quotations = await adminDb.collection("quotations")
+          .where("businessId", "==", auth.businessId)
+          .where("inspectionRequestId", "==", member.inspectionRequestId).get();
+        for (const quotation of quotations.docs) planUpdate(quotation.ref, cancellationMirror);
+      }
+      planUpdate(bookingRef, detailUpdates);
+      if (booking.inspectionRequestId) {
+        const requestRef = await getRequestDocumentRef(booking.inspectionRequestId);
+        if (requestRef) planUpdate(requestRef, {
+          requestType, serviceId, serviceName, serviceBusinessType, customRequest, customer, address,
+          bookingId: id, bookingCode: booking.bookingCode, bookingStatus: booking.status,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      if (booking.quotationId) {
+        const quotationRef = adminDb.collection("quotations").doc(booking.quotationId);
+        if ((await quotationRef.get()).exists) planUpdate(quotationRef, {
+          serviceTitle: requestType === "custom_quote" ? (customRequest?.title ?? serviceName) : serviceName,
+          serviceDescription: requestType === "custom_quote" ? (customRequest?.description ?? null) : null,
+          customer, address, bookingId: id, bookingCode: booking.bookingCode, bookingStatus: booking.status,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      const committed = await adminDb.runTransaction(async (tx) => {
+        let capacityLockRef: DocumentReference | null = null;
+        if (scheduleChanged) {
+          capacityLockRef = adminDb
+            .collection("job_capacity_locks")
+            .doc(`${auth.businessId}__${date}`);
+          await tx.get(capacityLockRef);
+          const closure = await tx.get(
+            adminDb
+              .collection(BUSINESS_CLOSURES_COLLECTION)
+              .doc(`${auth.businessId}__${date}`),
+          );
+          if (closure.exists) return "closed" as const;
         }
-      } catch {
-        // Job update already succeeded; linked request sync is best-effort.
-      }
-    }
-
-    if (booking.quotationId) {
-      try {
-        await adminDb
-          .collection("quotations")
-          .doc(booking.quotationId)
-          .update({
-            serviceTitle:
-              requestType === "custom_quote"
-                ? (customRequest?.title ?? serviceName)
-                : serviceName,
-            serviceDescription:
-              requestType === "custom_quote"
-                ? (customRequest?.description ?? null)
-                : null,
-            customer,
-            address,
-            updatedAt: FieldValue.serverTimestamp(),
+        const planned = [...updates.values()];
+        const snapshots = await tx.getAll(...planned.map((update) => update.ref));
+        if (serviceId) {
+          const service = await tx.get(adminDb.collection(COLLECTIONS.SERVICES).doc(serviceId));
+          if (!service.exists || service.data()?.businessId !== auth.businessId || service.data()?.isActive === false) return false;
+        }
+        if (scheduleChanged && booking.assignedTo?.type === "staff") {
+          const staff = await tx.get(adminDb.collection("users").doc(booking.assignedTo.uid));
+          const profile = staff.data();
+          if (!profile || profile.businessId !== auth.businessId || profile.role !== "staff" ||
+              profile.isActive === false || profile.disabled === true || profile.suspended === true ||
+              ["inactive", "disabled", "suspended"].includes(profile.status)) return false;
+        }
+        const main = snapshots.find((snapshot) => snapshot.ref.path === bookingRef.path)!;
+        if (!main.exists || !original.updateTime!.isEqual(main.updateTime!)) return false;
+        for (const snapshot of snapshots) {
+          if (!snapshot.exists || snapshot.data()?.businessId !== auth.businessId) return false;
+          const member = snapshot.ref.parent.id === "jobs"
+            ? cancelledMembers.find((job) => job.id === snapshot.id) : undefined;
+          if (member && (snapshot.data()?.status !== member.status ||
+              mapBookingDoc(snapshot.id, snapshot.data() ?? {}).updatedAt !== member.updatedAt)) return false;
+        }
+        if (scheduleChanged) {
+          if (booking.assignedTo?.type === "staff") {
+            const staffCheck = await validateStaffAssignmentForSchedule(
+              auth.businessId,
+              booking.assignedTo,
+              date,
+              startTime,
+              endTime,
+              { excludeBookingId: id, excludeSeriesId: booking.seriesId },
+            );
+            if (!staffCheck.ok) return `staff:${staffCheck.error}` as const;
+          }
+          const occupancy = await computeDaySlotOccupancy(auth.businessId, date, {
+            excludeBookingId: id,
           });
-      } catch {
-        // Best-effort quotation sync.
+          if (rangeOverlapsFullSlots(occupancy.slots, startTime, endTime, "job")) {
+            return "capacity" as const;
+          }
+          if (capacityLockRef) {
+            tx.set(capacityLockRef, { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+          }
+        }
+        for (const update of planned) tx.update(update.ref, update.fields);
+        return true;
+      });
+      if (committed === "closed") {
+        return NextResponse.json({ ok: false, error: `The business is closed on ${date}.` }, { status: 409 });
       }
+      if (committed === "capacity") {
+        return NextResponse.json({ ok: false, error: `Job capacity is full on ${date}. Choose another time.` }, { status: 409 });
+      }
+      if (typeof committed === "string" && committed.startsWith("staff:")) {
+        return NextResponse.json({ ok: false, error: committed.slice("staff:".length) }, { status: 409 });
+      }
+      if (!committed) {
+        return NextResponse.json({ ok: false, error: "This job or a linked record changed. Reload and try again." }, { status: 409 });
+      }
+    } catch (error) {
+      console.error("[jobs] job edit commit failed:", error);
+      return NextResponse.json({ ok: false, error: "Could not save the job. Please try again." }, { status: 500 });
     }
 
     const updated = await getBusinessBooking(auth.businessId, id);
     if (!updated) {
-      return NextResponse.json(
-        { ok: false, error: "Job not found." },
-        { status: 404 },
-      );
+      return NextResponse.json({ ok: false, error: "Job not found." }, { status: 404 });
     }
-
-    await enqueueCareplusActivitySafe(
-      {
-        ...updated,
-        amendmentReason: "Job details updated in BMS.",
-      },
-      "activity.amended",
-    );
-
+    if (
+      scheduleChanged && seriesMode === "this_visit" &&
+      ["awaiting", "scheduled", "ongoing"].includes(updated.status) &&
+      updated.scheduledSlot?.date === date &&
+      updated.scheduledStartTime === startTime && updated.scheduledEndTime === endTime
+    ) {
+      try {
+        await notifyBusinessBookingRescheduled(updated);
+      } catch (error) {
+        console.error("[jobs] reschedule notification failed:", error);
+      }
+    }
+    for (const member of cancelledMembers) {
+      await enqueueCareplusActivitySafe(member, "activity.cancelled");
+    }
+    await enqueueCareplusActivitySafe({ ...updated, amendmentReason: "Job details updated in BMS." }, "activity.amended");
     return NextResponse.json({ ok: true, booking: updated });
   }
 

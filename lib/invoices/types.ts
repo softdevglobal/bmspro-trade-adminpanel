@@ -53,6 +53,10 @@ export type InvoiceDetail = {
 
 export type CreateInvoiceInput = {
   quotationId: string;
+  /** Updated timestamp of the invoice loaded by the editor, including null for legacy records. */
+  expectedUpdatedAt?: number | null;
+  /** Reject a repeated creation request if this quotation already has an invoice. */
+  createOnly?: boolean;
   lineItems: QuotationLineItem[];
   finalPriceAud: number;
   customer?: { fullName: string; email: string; phone: string };

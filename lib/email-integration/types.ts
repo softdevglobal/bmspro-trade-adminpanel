@@ -66,6 +66,7 @@ export type EmailSendHistoryItem = {
   attachmentName: string | null;
   actorName: string | null;
   attemptCount: number;
+  retryGeneration: number;
   errorCode: string | null;
   errorDetail: string | null;
   createdAt: number | null;

@@ -599,8 +599,8 @@ export async function uploadInvoicePdf(
 
   const bucket = getStorage().bucket(bucketName);
   const requestPart = options.inspectionRequestId.trim() || "general";
-  const path = `invoices/${options.businessId}/${requestPart}/pdf/${options.invoiceId}.pdf`;
   const token = randomUUID();
+  const path = `invoices/${options.businessId}/${requestPart}/pdf/${options.invoiceId}-${token}.pdf`;
 
   try {
     await bucket.file(path).save(file, {
