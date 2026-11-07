@@ -91,29 +91,21 @@
  *   { "ok": false, "error": "Could not fetch items." }                      500
  */
 
-import { adminDb } from "@/lib/firebase/admin";
-import { requireCallCenterAgent } from "@/lib/callcenter/auth";
+import { requireCallCenterTenant } from "@/lib/callcenter/tenant";
 import { listCatalogItems } from "@/lib/items/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-/**
- * Verifies that a business document exists in the `businesses` collection.
- */
-async function businessExists(businessId: string): Promise<boolean> {
-  const snap = await adminDb.collection("businesses").doc(businessId).get();
-  return snap.exists;
-}
 
 /**
  * GET /api/callcenter/items?businessId=<businessId>
  *
  * Returns all catalog items for the given business (sorted by name).
- * Requires a valid call-center agent Bearer token.
+ * Requires an active human agent assigned to the business, or a super admin.
  */
 export async function GET(request: Request) {
-  const auth = await requireCallCenterAgent(request);
+  const auth = await requireCallCenterTenant(request, { humanOnly: true });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
@@ -121,25 +113,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const url = new URL(request.url);
-  const businessId = url.searchParams.get("businessId")?.trim() ?? "";
+  const businessId = auth.businessId;
 
-  if (!businessId) {
-    return NextResponse.json(
-      { ok: false, error: "businessId is required." },
-      { status: 400 },
-    );
-  }
 
   try {
-    const exists = await businessExists(businessId);
-    if (!exists) {
-      return NextResponse.json(
-        { ok: false, error: "Business not found." },
-        { status: 404 },
-      );
-    }
-
     const items = await listCatalogItems(businessId);
 
     return NextResponse.json({

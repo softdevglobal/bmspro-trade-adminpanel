@@ -21,7 +21,6 @@ export async function PATCH(
   const ok = await markNotificationRead(id, {
     audience: "customer",
     customerId: auth.customer.uid,
-    customerEmail: auth.customer.email,
     businessId: auth.customer.businessId,
   });
   if (!ok) {
@@ -45,7 +44,6 @@ export async function DELETE(
   const ok = await deleteNotification(id, {
     audience: "customer",
     customerId: auth.customer.uid,
-    customerEmail: auth.customer.email,
     businessId: auth.customer.businessId,
   });
   if (!ok) {

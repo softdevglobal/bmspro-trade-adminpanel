@@ -117,8 +117,7 @@
  *   { "ok": false, "error": "Could not fetch quotations." }                 500
  */
 
-import { adminDb } from "@/lib/firebase/admin";
-import { requireCallCenterAgent } from "@/lib/callcenter/auth";
+import { requireCallCenterTenant } from "@/lib/callcenter/tenant";
 import { listBusinessQuotations } from "@/lib/quotations/server";
 import { NextResponse } from "next/server";
 
@@ -126,29 +125,22 @@ export const runtime = "nodejs";
 
 const VALID_STATUSES = new Set(["draft", "sent"]);
 
-/**
- * Verifies that a business document exists in the `businesses` collection.
- */
-async function businessExists(businessId: string): Promise<boolean> {
-  const snap = await adminDb.collection("businesses").doc(businessId).get();
-  return snap.exists;
-}
 
 /**
  * GET /api/callcenter/quotations?businessId=<businessId>
  *
  * Returns all quotations for the given business (newest first, max 80).
- * Requires a valid call-center agent Bearer token.
+ * Requires an active human agent assigned to the business, or a super admin.
  *
  * Steps:
- *  1. Verify call-center agent Bearer token.
- *  2. Read and validate the required `businessId` query parameter.
- *  3. Confirm the business exists in Firestore.
+ *  1. Authenticate the agent and resolve the requested business.
+ *  2. Require business assignment, with a super admin exception.
+ *  3. Require an available business.
  *  4. Load quotations via listBusinessQuotations(businessId).
  *  5. Optionally filter by status if `status=draft` or `status=sent`.
  */
 export async function GET(request: Request) {
-  const auth = await requireCallCenterAgent(request);
+  const auth = await requireCallCenterTenant(request, { humanOnly: true });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
@@ -157,15 +149,9 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const businessId = url.searchParams.get("businessId")?.trim() ?? "";
+  const businessId = auth.businessId;
   const statusFilter = url.searchParams.get("status")?.trim().toLowerCase() ?? "";
 
-  if (!businessId) {
-    return NextResponse.json(
-      { ok: false, error: "businessId is required." },
-      { status: 400 },
-    );
-  }
 
   if (statusFilter && !VALID_STATUSES.has(statusFilter)) {
     return NextResponse.json(
@@ -175,14 +161,6 @@ export async function GET(request: Request) {
   }
 
   try {
-    const exists = await businessExists(businessId);
-    if (!exists) {
-      return NextResponse.json(
-        { ok: false, error: "Business not found." },
-        { status: 404 },
-      );
-    }
-
     let quotations = await listBusinessQuotations(businessId);
 
     if (statusFilter) {

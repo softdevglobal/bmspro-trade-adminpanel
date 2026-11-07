@@ -1,6 +1,6 @@
 import {
   authenticateCustomerRequest,
-  getOrCreateCustomerProfile,
+  getCustomerProfile,
   updateCustomerProfile,
 } from "@/lib/customer/server";
 import { validateCustomerProfileInput } from "@/lib/customer/types";
@@ -22,9 +22,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const profile = await getOrCreateCustomerProfile(auth.customer, {
-    bookingSlug,
-  });
+  const profile = await getCustomerProfile(auth.customer.uid);
+  if (!profile) {
+    return NextResponse.json({ ok: false, error: "Customer profile not found." }, { status: 404 });
+  }
   return NextResponse.json({ ok: true, profile });
 }
 

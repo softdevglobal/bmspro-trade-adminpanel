@@ -5,17 +5,47 @@ service cloud.firestore {
 
     function isSignedIn() {
       return request.auth != null
-        && request.auth.token.get("role", "") != "pending_owner"
+        && request.auth.token.get("role", "") != "pending_owner";
+    }
+
+    function hasAccountAccess() {
+      return isSignedIn()
+        && businessAccessIfPresent(request.auth.token.get('businessId', ''))
         && accountReady("users") && accountReady("customers");
+    }
+
+    // Keep these checks aligned with lib/auth/account-access.ts. The database
+    // state is checked even when a client still holds a previously issued token.
+    function businessAccessible(businessId) {
+      let path = /databases/$(database)/documents/businesses/$(businessId);
+      return businessId is string && businessId != '' && exists(path)
+        && get(path).data.get('isActive', true) != false
+        && get(path).data.get('status', '') != 'suspended';
+    }
+
+    function businessAccessIfPresent(businessId) {
+      return businessId == '' || businessId == null || businessAccessible(businessId);
+    }
+
+    function profileReady(data) {
+      return data.get('activationRequired', false) == false
+        && data.get('mustChangePassword', false) == false
+        && data.get('emailVerificationRequired', false) == false
+        && data.get('disabled', false) != true
+        && data.get('suspended', false) != true
+        && data.get('isActive', true) != false
+        && !(data.get('status', '') in ['inactive', 'disabled', 'suspended'])
+        && businessAccessIfPresent(data.get('businessId', ''))
+        && businessAccessIfPresent(data.get('registeredBusinessId', ''));
+    }
+
+    function recordBusinessAccessible() {
+      return businessAccessible(resource.data.get('businessId', ''));
     }
 
     function accountReady(collection) {
       let path = /databases/$(database)/documents/$(collection)/$(request.auth.uid);
-      return !exists(path) || (
-        get(path).data.get('activationRequired', false) == false
-        && get(path).data.get('mustChangePassword', false) == false
-        && get(path).data.get('emailVerificationRequired', false) == false
-      );
+      return !exists(path) || profileReady(get(path).data);
     }
 
     function isSuperAdmin() {
@@ -76,16 +106,18 @@ service cloud.firestore {
 
     // Login gate: each user may read only their own super_admins document.
     match /super_admins/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read: if hasAccountAccess() && (isSignedIn() && request.auth.uid == uid);
       allow create, update, delete: if false;
     }
 
     // Business owners read their workspace; super admins read all.
     match /businesses/{businessId} {
-      allow read: if isSuperAdmin()
-        || ownsBusiness(businessId)
-        || userOwnsBusiness(businessId)
-        || (signedInUserDocExists() && resource.data.ownerUid == request.auth.uid);
+      allow read: if hasAccountAccess() && (isSuperAdmin()
+        || (businessAccessible(businessId) && (
+          ownsBusiness(businessId)
+          || userOwnsBusiness(businessId)
+          || (signedInUserDocExists() && resource.data.ownerUid == request.auth.uid)
+        )));
       allow create, update, delete: if false;
     }
 
@@ -177,36 +209,35 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
-      allow create: if userSelfFcmCreate(uid);
-      allow update: if userSelfFcmWrite(uid) || userSelfProfileWrite(uid);
+      allow create: if hasAccountAccess() && (userSelfFcmCreate(uid));
+      allow update: if hasAccountAccess() && (userSelfFcmWrite(uid) || userSelfProfileWrite(uid));
       allow delete: if false;
     }
 
     // Legacy salon staff profiles (FCM token + self read).
     match /salon_staff/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
-      allow update: if salonStaffSelfFcmWrite(uid);
+      allow read: if hasAccountAccess() && (isSignedIn() && request.auth.uid == uid);
+      allow update: if hasAccountAccess() && (salonStaffSelfFcmWrite(uid));
       allow create, delete: if false;
     }
 
     // Legacy in-app notifications (salon + trade mobile).
     match /notifications/{notificationId} {
-      allow read: if isSuperAdmin() || ownsLegacyNotification();
-      allow update: if isSuperAdmin()
-        || (ownsLegacyNotification() && notificationReadOnlyUpdate());
+      allow read: if hasAccountAccess() && (isSuperAdmin() || ownsLegacyNotification());
+      allow update: if hasAccountAccess() && (isSuperAdmin()
+        || (ownsLegacyNotification() && notificationReadOnlyUpdate()));
       allow create, delete: if false;
     }
 
     function belongsToActiveBusiness(businessId) {
       return belongsToBusiness(businessId)
-        && get(/databases/$(database)/documents/businesses/$(businessId)).data.isActive == true
-        && get(/databases/$(database)/documents/businesses/$(businessId)).data.status != 'suspended';
+        && businessAccessible(businessId);
     }
 
     // Staff attendance / GPS check-ins (mobile background location).
     match /staff_check_ins/{checkInId} {
-      allow read: if isSuperAdmin()
-        || (isSignedIn() && resource.data.staffId == request.auth.uid);
+      allow read: if hasAccountAccess() && (isSuperAdmin()
+        || (isSignedIn() && recordBusinessAccessible() && resource.data.staffId == request.auth.uid));
       // Attendance is recorded by the API with server identity and timestamps.
       allow create, update: if false;
       allow delete: if false;
@@ -214,19 +245,19 @@ service cloud.firestore {
 
     // Booking intake attempts: write-only audit log from server; admins/owners read.
     match /booking_intake_attempts/{attemptId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || (isBusinessOwner()
-            && resource.data.businessId == request.auth.token.businessId);
+            && resource.data.businessId == request.auth.token.businessId));
       allow create, update, delete: if false;
     }
 
     match /service_templates/{templateId} {
-      allow read: if isSuperAdmin() || (isBusinessOwner() && resource.data.isActive == true);
+      allow read: if hasAccountAccess() && (isSuperAdmin() || (isBusinessOwner() && resource.data.isActive == true));
       allow create, update, delete: if false;
     }
 
     match /services/{serviceId} {
-      allow read: if isSuperAdmin() || belongsToBusiness(resource.data.businessId);
+      allow read: if hasAccountAccess() && (isSuperAdmin() || belongsToActiveBusiness(resource.data.businessId));
       allow create, update, delete: if false;
     }
 
@@ -241,10 +272,10 @@ service cloud.firestore {
     }
 
     match /business_notifications/{notificationId} {
-      allow read: if isSuperAdmin() || ownsBusinessNotification();
-      allow update: if isSuperAdmin()
-        || (ownsBusinessNotification() && notificationReadOnlyUpdate());
-      allow delete: if isSuperAdmin() || ownsBusinessNotification();
+      allow read: if hasAccountAccess() && (isSuperAdmin() || ownsBusinessNotification());
+      allow update: if hasAccountAccess() && (isSuperAdmin()
+        || (ownsBusinessNotification() && notificationReadOnlyUpdate()));
+      allow delete: if hasAccountAccess() && (isSuperAdmin() || ownsBusinessNotification());
       allow create: if false;
     }
 
@@ -256,29 +287,31 @@ service cloud.firestore {
     // own data through /api/customer/*, which resolves the email server-side
     // from an authenticated profile.
     function ownsCustomerNotification() {
-      return isSignedIn() && resource.data.customerId == request.auth.uid;
+      return isSignedIn() && recordBusinessAccessible()
+        && resource.data.customerId == request.auth.uid;
     }
 
     match /customer_notifications/{notificationId} {
-      allow read: if isSuperAdmin() || ownsCustomerNotification();
-      allow update: if isSuperAdmin()
-        || (ownsCustomerNotification() && notificationReadOnlyUpdate());
-      allow delete: if isSuperAdmin() || ownsCustomerNotification();
+      allow read: if hasAccountAccess() && (isSuperAdmin() || ownsCustomerNotification());
+      allow update: if hasAccountAccess() && (isSuperAdmin()
+        || (ownsCustomerNotification() && notificationReadOnlyUpdate()));
+      allow delete: if hasAccountAccess() && (isSuperAdmin() || ownsCustomerNotification());
       allow create: if false;
     }
 
     /** uid only — see the note on ownsCustomerNotification. */
     function ownsCustomerInspection() {
-      return isSignedIn() && resource.data.customerId == request.auth.uid;
+      return isSignedIn() && recordBusinessAccessible()
+        && resource.data.customerId == request.auth.uid;
     }
 
     match /requests/{requestId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
         || userOwnsBusiness(resource.data.businessId)
         || ownsStaffInspection()
-        || ownsCustomerInspection();
+        || ownsCustomerInspection());
       allow create, update, delete: if false;
     }
 
@@ -290,26 +323,33 @@ service cloud.firestore {
     }
 
     function ownsAssignedTradeBooking() {
-      return isSignedIn()
+      return isSignedIn() && recordBusinessAccessible()
         && resource.data.assignedTo is map
         && resource.data.assignedTo.uid == request.auth.uid;
     }
 
     /** uid only — see the note on ownsCustomerNotification. */
     function ownsCustomerBooking() {
-      return isSignedIn() && resource.data.customerId == request.auth.uid;
+      return isSignedIn() && recordBusinessAccessible()
+        && resource.data.customerId == request.auth.uid;
     }
 
     function ownsOwnerUidJob() {
-      return isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      return isSignedIn() && resource.data.ownerUid == request.auth.uid
+        && (('businessId' in resource.data)
+          ? recordBusinessAccessible()
+          : (signedInUserDocExists() && businessAccessible(userDocData().get('businessId', ''))));
     }
 
     function ownsOwnerUidBookingRequest() {
-      return isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      return isSignedIn() && resource.data.ownerUid == request.auth.uid
+        && (('businessId' in resource.data)
+          ? recordBusinessAccessible()
+          : (signedInUserDocExists() && businessAccessible(userDocData().get('businessId', ''))));
     }
 
     function canReadBusinessJob() {
-      return resource.data.businessId is string
+      return recordBusinessAccessible()
         && (
           (isBusinessOwner()
               && resource.data.businessId == request.auth.token.businessId)
@@ -324,30 +364,30 @@ service cloud.firestore {
 
     // Trade jobs (businessId) + owner-scoped jobs (ownerUid).
     match /jobs/{jobId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || ownsOwnerUidJob()
-        || canReadBusinessJob();
+        || canReadBusinessJob());
       allow create, update, delete: if false;
     }
 
     // Legacy booking-engine intake (salon / ownerUid-scoped).
     match /bookingRequests/{requestId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || ownsOwnerUidBookingRequest()
-        || canReadBusinessJob();
+        || canReadBusinessJob());
       allow create, update, delete: if false;
     }
 
     match /quotations/{quotationId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
-        || userOwnsBusiness(resource.data.businessId);
+        || userOwnsBusiness(resource.data.businessId));
       allow create, update, delete: if false;
     }
 
     function canReadBusinessInvoice() {
-      return resource.data.businessId is string
+      return recordBusinessAccessible()
         && (
           (isBusinessOwner()
               && resource.data.businessId == request.auth.token.businessId)
@@ -358,7 +398,7 @@ service cloud.firestore {
     }
 
     match /invoices/{invoiceId} {
-      allow read: if isSuperAdmin() || canReadBusinessInvoice();
+      allow read: if hasAccountAccess() && (isSuperAdmin() || canReadBusinessInvoice());
       allow create, update, delete: if false;
     }
 
@@ -368,7 +408,7 @@ service cloud.firestore {
     }
 
     function canReadBusinessItem() {
-      return resource.data.businessId is string
+      return recordBusinessAccessible()
         && (
           (isBusinessOwner()
               && resource.data.businessId == request.auth.token.businessId)
@@ -379,7 +419,7 @@ service cloud.firestore {
     }
 
     match /items/{itemId} {
-      allow read: if isSuperAdmin() || canReadBusinessItem();
+      allow read: if hasAccountAccess() && (isSuperAdmin() || canReadBusinessItem());
       allow create, update, delete: if false;
     }
 
@@ -394,19 +434,19 @@ service cloud.firestore {
     }
 
     match /conversations/{conversationId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || isCallCenterAgent()
-        || (isSignedIn() && resource.data.userId == request.auth.uid);
+        || (isSignedIn() && resource.data.userId == request.auth.uid));
       allow create, update, delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSuperAdmin()
+        allow read: if hasAccountAccess() && (isSuperAdmin()
           || isCallCenterAgent()
           || (
             isSignedIn()
             && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId
               == request.auth.uid
-          );
+          ));
         allow create, update, delete: if false;
       }
     }
@@ -420,11 +460,11 @@ service cloud.firestore {
     }
 
     match /cc_direct_chats/{chatId} {
-      allow read: if isSuperAdmin() || ownsCcDirectChat();
+      allow read: if hasAccountAccess() && (isSuperAdmin() || ownsCcDirectChat());
       allow create, update, delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSuperAdmin()
+        allow read: if hasAccountAccess() && (isSuperAdmin()
           || (
             isSignedIn()
             && (
@@ -432,14 +472,14 @@ service cloud.firestore {
               || get(/databases/$(database)/documents/cc_direct_chats/$(chatId)).data.tenantUserUid
                   == request.auth.uid
             )
-          );
+          ));
         allow create, update, delete: if false;
       }
     }
 
     match /call_center_agents/{uid} {
-      allow read: if isSuperAdmin()
-        || (isSignedIn() && request.auth.uid == uid);
+      allow read: if hasAccountAccess() && (isSuperAdmin()
+        || (isSignedIn() && request.auth.uid == uid));
       allow create, update, delete: if false;
     }
 
@@ -457,30 +497,30 @@ service cloud.firestore {
 
     // SMS delivery audit log — written via Admin SDK when messages are sent.
     match /sms_logs/{logId} {
-      allow read: if isSuperAdmin()
-        || userOwnsBusiness(resource.data.businessId);
+      allow read: if hasAccountAccess() && (isSuperAdmin()
+        || userOwnsBusiness(resource.data.businessId));
       allow create, update, delete: if false;
     }
 
     // Staff time-off / leave requests. Staff create their own (pending); owners
     // and the requester read; approvals/rejections happen via the Admin SDK.
     match /leaveRequests/{leaveId} {
-      allow read: if isSuperAdmin()
+      allow read: if hasAccountAccess() && (isSuperAdmin()
         || (isSignedIn() && resource.data.requesterUid == request.auth.uid)
         || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
         || (isBusinessOwner()
             && resource.data.businessId == request.auth.token.businessId)
-        || userOwnsBusiness(resource.data.businessId);
+        || userOwnsBusiness(resource.data.businessId));
       // businessId is optional because legacy salon staff documents predate it,
       // but when present it must be the requester's own business — otherwise a
       // staff member can file a request into another tenant's approval queue.
-      allow create: if isSignedIn()
+      allow create: if hasAccountAccess() && (isSignedIn()
         && request.resource.data.requesterUid == request.auth.uid
         && request.resource.data.status == 'pending'
         && (
           !('businessId' in request.resource.data)
-          || belongsToBusiness(request.resource.data.businessId)
-        );
+          || belongsToActiveBusiness(request.resource.data.businessId)
+        ));
       allow update, delete: if false;
     }
 
@@ -515,7 +555,7 @@ service cloud.firestore {
 
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
-      allow read, write: if isSuperAdmin() && !isAdminSdkOnlyCollection();
+      allow read, write: if isSuperAdmin() && !isAdminSdkOnlyCollection() && hasAccountAccess();
     }
   }
 }

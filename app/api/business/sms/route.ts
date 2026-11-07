@@ -3,7 +3,6 @@ import { isStripeConfigured } from "@/lib/stripe/config";
 import {
   getBusinessSmsBalance,
   listSmsPackages,
-  purchaseSmsPackageForBusiness,
 } from "@/lib/sms-packages/server";
 import { NextResponse } from "next/server";
 export const runtime = "nodejs";
@@ -33,19 +32,8 @@ export async function GET(request: Request) {
   return NextResponse.json({ ok: true, balance, packages });
 }
 
-/** Business owner — purchase an SMS top-up package (adds credits to limit). */
+/** Direct billing changes are retired; fulfillment runs through Stripe Checkout. */
 export async function POST(request: Request) {
-  if (isStripeConfigured() && process.env.NODE_ENV === "production") {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "SMS top-ups are processed through Stripe Checkout. Open SMS Credits and pay with Stripe.",
-      },
-      { status: 403 },
-    );
-  }
-
   const auth = await requireBusinessOwner(request);
   if (!auth.ok) {
     return NextResponse.json(
@@ -54,46 +42,14 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid request body." },
-      { status: 400 },
-    );
-  }
-
-  const packageId =
-    body &&
-    typeof body === "object" &&
-    typeof (body as { packageId?: unknown }).packageId === "string"
-      ? (body as { packageId: string }).packageId.trim()
-      : "";
-
-  if (!packageId) {
-    return NextResponse.json(
-      { ok: false, error: "SMS package id is required." },
-      { status: 400 },
-    );
-  }
-
-  try {
-    const balance = await purchaseSmsPackageForBusiness(
-      auth.businessId,
-      packageId,
-    );
-    return NextResponse.json({ ok: true, balance });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not purchase SMS package.",
-      },
-      { status: 400 },
-    );
-  }
+  const stripeConfigured = isStripeConfigured();
+  return NextResponse.json(
+    {
+      ok: false,
+      error: stripeConfigured
+        ? "SMS top-ups are processed through Stripe Checkout. Open SMS Credits and pay with Stripe."
+        : "Billing is currently unavailable. Please try again later.",
+    },
+    { status: stripeConfigured ? 403 : 503 },
+  );
 }
