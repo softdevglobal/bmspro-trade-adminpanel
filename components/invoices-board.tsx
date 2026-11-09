@@ -31,6 +31,8 @@ import { useOpenFromViewParam } from "@/lib/ui/use-view-param";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ValueSummaryCards } from "@/components/value-summary-cards";
+import { summarizeInvoiceValues } from "@/lib/invoices/summary";
 type InvoiceFilter = "due" | "draft" | "paid" | "cancelled" | "all";
 
 /** A draft or sent invoice can be cancelled; paid/cancelled cannot. */
@@ -1075,6 +1077,11 @@ export function InvoicesBoard() {
     [invoices],
   );
 
+  const valueSummary = useMemo(
+    () => summarizeInvoiceValues(invoices),
+    [invoices],
+  );
+
   const selected = useMemo(
     () => invoices.find((invoice) => invoice.id === selectedId) ?? null,
     [invoices, selectedId],
@@ -1297,6 +1304,25 @@ export function InvoicesBoard() {
           </Link>
         </div>
       </div>
+
+      <ValueSummaryCards
+        items={[
+          {
+            label: "Paid invoice value",
+            valueAud: valueSummary.paidAud,
+            detail: `${valueSummary.paidCount} paid in full · includes part-payments`,
+            icon: "paid",
+            tone: "green",
+          },
+          {
+            label: "Unpaid invoice value",
+            valueAud: valueSummary.unpaidAud,
+            detail: `${valueSummary.unpaidCount} invoice${valueSummary.unpaidCount === 1 ? "" : "s"} with money owing`,
+            icon: "pending_actions",
+            tone: "rose",
+          },
+        ]}
+      />
 
       <div className="mb-4 flex flex-wrap gap-2">
         <FilterChip

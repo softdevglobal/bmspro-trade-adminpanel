@@ -61,6 +61,8 @@ import { useOpenFromViewParam } from "@/lib/ui/use-view-param";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ValueSummaryCards } from "@/components/value-summary-cards";
+import { summarizeQuotationValues } from "@/lib/quotations/summary";
 
 function formatAud(value: number | null): string {
   if (value == null) return "—";
@@ -1665,6 +1667,13 @@ export function QuotationsBoard() {
     [boardQuotations],
   );
 
+  // Every quotation, as the mobile app sums them (the board collapses a
+  // recurring job's quotes into one card, but each carries its own value).
+  const valueSummary = useMemo(
+    () => summarizeQuotationValues(quotations),
+    [quotations],
+  );
+
   const visibleQuotations = useMemo(
     () => {
       if (filter === "all") return boardQuotations;
@@ -1952,6 +1961,25 @@ export function QuotationsBoard() {
           </Link>
         </div>
       </div>
+
+      <ValueSummaryCards
+        items={[
+          {
+            label: "Pending quote value",
+            valueAud: valueSummary.pendingAud,
+            detail: `${valueSummary.pendingCount} draft or awaiting customer`,
+            icon: "hourglass_top",
+            tone: "amber",
+          },
+          {
+            label: "Approved quote value",
+            valueAud: valueSummary.approvedAud,
+            detail: `${valueSummary.approvedCount} accepted by customer`,
+            icon: "task_alt",
+            tone: "green",
+          },
+        ]}
+      />
 
       <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/60 bg-surface-container-low p-1">
         {QUOTATION_TABS.map((tab) => {

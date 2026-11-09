@@ -27,7 +27,9 @@ export type InvoicePaymentDue = {
  * Money still owed on an issued invoice, after any paid deposit and any
  * Stripe payments already settled against it.
  */
-export function outstandingAmountAud(invoice: InvoiceDetail): number {
+export function outstandingAmountAud(
+  invoice: Pick<InvoiceDetail, "balanceDueAud" | "amountPaidAud">,
+): number {
   // `balanceDueAud` already nets off a *paid* deposit; payments settle the rest.
   const outstanding = invoice.balanceDueAud - (invoice.amountPaidAud || 0);
   return Math.round(Math.max(0, outstanding) * 100) / 100;
