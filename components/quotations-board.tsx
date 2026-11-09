@@ -61,6 +61,12 @@ import { useOpenFromViewParam } from "@/lib/ui/use-view-param";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ValueSummaryCards } from "@/components/value-summary-cards";
+import {
+  isApprovedQuotation,
+  isPendingValueQuotation,
+  summarizeQuotationValues,
+} from "@/lib/quotations/summary";
 
 function formatAud(value: number | null): string {
   if (value == null) return "—";
@@ -1561,6 +1567,10 @@ export function QuotationsBoard() {
   const [previewMode, setPreviewMode] =
     useState<QuotationPreviewMode>("review");
   const [filter, setFilter] = useState<QuotationFilter>("pending");
+  // Set by clicking a value tile: shows exactly the quotes that tile adds up.
+  const [valueFilter, setValueFilter] = useState<"pending" | "approved" | null>(
+    null,
+  );
   const [cancelTarget, setCancelTarget] = useState<QuotationDetail | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<QuotationDetail | null>(null);
@@ -1665,8 +1675,21 @@ export function QuotationsBoard() {
     [boardQuotations],
   );
 
+  // Every quotation, as the mobile app sums them (the board collapses a
+  // recurring job's quotes into one card, but each carries its own value).
+  const valueSummary = useMemo(
+    () => summarizeQuotationValues(quotations),
+    [quotations],
+  );
+
   const visibleQuotations = useMemo(
     () => {
+      if (valueFilter === "pending") {
+        return quotations.filter(isPendingValueQuotation);
+      }
+      if (valueFilter === "approved") {
+        return quotations.filter(isApprovedQuotation);
+      }
       if (filter === "all") return boardQuotations;
       if (filter === "pending") {
         return boardQuotations.filter(isPendingQuotation);
@@ -1682,7 +1705,7 @@ export function QuotationsBoard() {
           quotation.status === filter && !isCompletedQuotation(quotation),
       );
     },
-    [filter, boardQuotations],
+    [filter, valueFilter, quotations, boardQuotations],
   );
 
   const linkedInspection = useMemo(() => {
@@ -1953,14 +1976,48 @@ export function QuotationsBoard() {
         </div>
       </div>
 
+      <ValueSummaryCards
+        items={[
+          {
+            label: "Pending quote value",
+            valueAud: valueSummary.pendingAud,
+            count: valueSummary.pendingCount,
+            countNoun: "quote",
+            icon: "hourglass_top",
+            tone: "amber",
+            selected: valueFilter === "pending",
+            onClick: () =>
+              setValueFilter((current) =>
+                current === "pending" ? null : "pending",
+              ),
+          },
+          {
+            label: "Approved quote value",
+            valueAud: valueSummary.approvedAud,
+            count: valueSummary.approvedCount,
+            countNoun: "quote",
+            icon: "task_alt",
+            tone: "green",
+            selected: valueFilter === "approved",
+            onClick: () =>
+              setValueFilter((current) =>
+                current === "approved" ? null : "approved",
+              ),
+          },
+        ]}
+      />
+
       <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl border border-outline-variant/60 bg-surface-container-low p-1">
         {QUOTATION_TABS.map((tab) => {
-          const selectedTab = filter === tab.id;
+          const selectedTab = valueFilter === null && filter === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setFilter(tab.id)}
+              onClick={() => {
+                setFilter(tab.id);
+                setValueFilter(null);
+              }}
               className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 font-body text-[12px] font-bold transition-colors ${
                 selectedTab
                   ? "bg-primary text-on-primary shadow-sm"
@@ -2008,9 +2065,11 @@ export function QuotationsBoard() {
         <section className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-5 py-8 text-center">
           <p className="font-display text-[17px] font-semibold text-on-surface">
             No{" "}
-            {filter === "all"
-              ? ""
-              : `${quotationFilterLabel(filter).toLowerCase()} `}
+            {valueFilter
+              ? `${valueFilter} `
+              : filter === "all"
+                ? ""
+                : `${quotationFilterLabel(filter).toLowerCase()} `}
             quotations
           </p>
           <p className="mt-1 font-body text-[13px] text-on-surface-variant">
