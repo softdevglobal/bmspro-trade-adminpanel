@@ -33,6 +33,24 @@ function roundCents(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** Money received so far (paid in full, or deposits/part-payments). */
+export function receivedInvoiceAud(invoice: SummaryInvoice): number {
+  if (invoice.status === "paid") return amount(invoice.finalPriceAud);
+  if (invoice.status !== "sent") return 0;
+  const total = amount(invoice.finalPriceAud);
+  return roundCents(total - Math.min(total, outstandingAmountAud(invoice)));
+}
+
+/** Invoices that make up the Paid Invoice Value card. */
+export function isPaidValueInvoice(invoice: SummaryInvoice): boolean {
+  return receivedInvoiceAud(invoice) > 0;
+}
+
+/** Invoices that make up the Unpaid Invoice Value card. */
+export function isUnpaidValueInvoice(invoice: SummaryInvoice): boolean {
+  return invoice.status === "sent" && outstandingAmountAud(invoice) > 0;
+}
+
 export function summarizeInvoiceValues(
   invoices: readonly SummaryInvoice[],
 ): InvoiceValueSummary {

@@ -6,8 +6,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { summarizeInvoiceValues } from "../lib/invoices/summary";
-import { summarizeQuotationValues } from "../lib/quotations/summary";
+import {
+  isPaidValueInvoice,
+  isUnpaidValueInvoice,
+  receivedInvoiceAud,
+  summarizeInvoiceValues,
+} from "../lib/invoices/summary";
+import {
+  isApprovedQuotation,
+  isPendingValueQuotation,
+  summarizeQuotationValues,
+} from "../lib/quotations/summary";
 
 type Q = Parameters<typeof summarizeQuotationValues>[0][number];
 type I = Parameters<typeof summarizeInvoiceValues>[0][number];
@@ -102,5 +111,36 @@ describe("summarizeInvoiceValues", () => {
       invoice({ finalPriceAud: 200, balanceDueAud: 200, amountPaidAud: 200 }),
     ]);
     assert.deepEqual(result, { paidAud: 200, paidCount: 0, unpaidAud: 0, unpaidCount: 0 });
+  });
+});
+
+describe("tile filters show exactly what each tile adds up", () => {
+  it("quotes", () => {
+    const quotes = [
+      quote({ status: "draft", finalPriceAud: 50 }),
+      quote({ finalPriceAud: 200 }),
+      quote({ customerDecision: "accepted", finalPriceAud: 300 }),
+      quote({ customerDecision: "rejected", finalPriceAud: 600 }),
+    ];
+    const summary = summarizeQuotationValues(quotes);
+    const pending = quotes.filter(isPendingValueQuotation);
+    assert.equal(pending.length, summary.pendingCount);
+    assert.equal(pending.reduce((t, q) => t + q.finalPriceAud, 0), summary.pendingAud);
+    assert.equal(quotes.filter(isApprovedQuotation).length, summary.approvedCount);
+  });
+
+  it("invoices", () => {
+    const invoices = [
+      invoice({ status: "paid", finalPriceAud: 500 }),
+      invoice({ finalPriceAud: 300, balanceDueAud: 200, amountPaidAud: 50 }), // both
+      invoice({ finalPriceAud: 300, balanceDueAud: 300 }), // unpaid only
+      invoice({ status: "draft", finalPriceAud: 900 }), // neither
+    ];
+    const summary = summarizeInvoiceValues(invoices);
+    const paid = invoices.filter(isPaidValueInvoice);
+    const unpaid = invoices.filter(isUnpaidValueInvoice);
+    assert.equal(paid.length, 2);
+    assert.equal(paid.reduce((t, i) => t + receivedInvoiceAud(i), 0), summary.paidAud);
+    assert.equal(unpaid.length, summary.unpaidCount);
   });
 });

@@ -32,7 +32,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ValueSummaryCards } from "@/components/value-summary-cards";
-import { summarizeInvoiceValues } from "@/lib/invoices/summary";
+import {
+  isPaidValueInvoice,
+  isUnpaidValueInvoice,
+  summarizeInvoiceValues,
+} from "@/lib/invoices/summary";
 type InvoiceFilter = "due" | "draft" | "paid" | "cancelled" | "all";
 
 /** A draft or sent invoice can be cancelled; paid/cancelled cannot. */
@@ -1002,6 +1006,10 @@ export function InvoicesBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<InvoiceFilter>("due");
+  // Set by clicking a value tile: shows exactly the invoices it adds up.
+  const [valueFilter, setValueFilter] = useState<"paid" | "unpaid" | null>(
+    null,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useOpenFromViewParam(setSelectedId);
   const [deleteTarget, setDeleteTarget] = useState<InvoiceDetail | null>(null);
@@ -1058,12 +1066,14 @@ export function InvoicesBoard() {
   }, [load]);
 
   const filtered = useMemo(() => {
+    if (valueFilter === "paid") return invoices.filter(isPaidValueInvoice);
+    if (valueFilter === "unpaid") return invoices.filter(isUnpaidValueInvoice);
     if (filter === "due") {
       return invoices.filter((invoice) => invoice.status === "sent");
     }
     if (filter === "all") return invoices;
     return invoices.filter((invoice) => invoice.status === filter);
-  }, [invoices, filter]);
+  }, [invoices, filter, valueFilter]);
 
   const counts = useMemo(
     () => ({
@@ -1310,16 +1320,26 @@ export function InvoicesBoard() {
           {
             label: "Paid invoice value",
             valueAud: valueSummary.paidAud,
-            detail: `${valueSummary.paidCount} paid in full · includes part-payments`,
+            count: invoices.filter(isPaidValueInvoice).length,
+            countNoun: "invoice",
             icon: "paid",
             tone: "green",
+            selected: valueFilter === "paid",
+            onClick: () =>
+              setValueFilter((current) => (current === "paid" ? null : "paid")),
           },
           {
             label: "Unpaid invoice value",
             valueAud: valueSummary.unpaidAud,
-            detail: `${valueSummary.unpaidCount} invoice${valueSummary.unpaidCount === 1 ? "" : "s"} with money owing`,
+            count: valueSummary.unpaidCount,
+            countNoun: "invoice",
             icon: "pending_actions",
             tone: "rose",
+            selected: valueFilter === "unpaid",
+            onClick: () =>
+              setValueFilter((current) =>
+                current === "unpaid" ? null : "unpaid",
+              ),
           },
         ]}
       />
@@ -1328,32 +1348,47 @@ export function InvoicesBoard() {
         <FilterChip
           label="Due"
           count={counts.due}
-          active={filter === "due"}
-          onClick={() => setFilter("due")}
+          active={valueFilter === null && filter === "due"}
+          onClick={() => {
+            setFilter("due");
+            setValueFilter(null);
+          }}
         />
         <FilterChip
           label="Draft"
           count={counts.draft}
-          active={filter === "draft"}
-          onClick={() => setFilter("draft")}
+          active={valueFilter === null && filter === "draft"}
+          onClick={() => {
+            setFilter("draft");
+            setValueFilter(null);
+          }}
         />
         <FilterChip
           label="Paid"
           count={counts.paid}
-          active={filter === "paid"}
-          onClick={() => setFilter("paid")}
+          active={valueFilter === null && filter === "paid"}
+          onClick={() => {
+            setFilter("paid");
+            setValueFilter(null);
+          }}
         />
         <FilterChip
           label="Cancelled"
           count={counts.cancelled}
-          active={filter === "cancelled"}
-          onClick={() => setFilter("cancelled")}
+          active={valueFilter === null && filter === "cancelled"}
+          onClick={() => {
+            setFilter("cancelled");
+            setValueFilter(null);
+          }}
         />
         <FilterChip
           label="All"
           count={counts.all}
-          active={filter === "all"}
-          onClick={() => setFilter("all")}
+          active={valueFilter === null && filter === "all"}
+          onClick={() => {
+            setFilter("all");
+            setValueFilter(null);
+          }}
         />
       </div>
 
@@ -1369,7 +1404,9 @@ export function InvoicesBoard() {
       {filtered.length === 0 ? (
         <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-low px-5 py-10 text-center">
           <p className="font-body text-[14px] text-on-surface-variant">
-            No {filter} invoices.
+            {valueFilter === "unpaid"
+              ? "No invoices with money owing."
+              : `No ${valueFilter ?? filter} invoices.`}
           </p>
         </div>
       ) : (
