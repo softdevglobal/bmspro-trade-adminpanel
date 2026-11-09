@@ -322,16 +322,24 @@ export async function markConnectionNeedsReconnect(
   connection: EmailConnectionRecord,
   code: string,
 ): Promise<void> {
-  await adminDb.collection(EMAIL_CONNECTIONS_COLLECTION).doc(connection.id).update({
-    status: "needs_reconnect",
-    lastErrorCode: code,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-  await recordEmailEvent({
-    businessId: connection.businessId,
-    eventType: "needs_reconnect",
-    connectionId: connection.id,
-    safeErrorDetail: code,
+  const ref = adminDb.collection(EMAIL_CONNECTIONS_COLLECTION).doc(connection.id);
+  await adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.exists ? mapConnectionDoc(snap.id, snap.data() ?? {}) : null;
+    if (!current || current.businessId !== connection.businessId ||
+        current.status === "disconnected" || current.generation !== connection.generation ||
+        current.providerAccountId !== connection.providerAccountId) return;
+    tx.update(ref, {
+      status: "needs_reconnect",
+      lastErrorCode: code,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    await recordEmailEvent({
+      businessId: connection.businessId,
+      eventType: "needs_reconnect",
+      connectionId: connection.id,
+      safeErrorDetail: code,
+    }, tx);
   });
 }
 
@@ -383,20 +391,27 @@ export async function disconnectEmailConnection(
     .where("status", "in", ["queued", "retry_wait"])
     .get();
   for (const doc of pending.docs) {
-    await doc.ref.update({
-      status: "held",
-      errorCode: "connection_disconnected",
-      safeErrorDetail: "The mailbox was disconnected before this email was sent.",
-      leaseUntil: null,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    await recordEmailEvent({
-      businessId: connection.businessId,
-      eventType: "held",
-      outboxId: doc.id,
-      connectionId: connection.id,
-      actorId: uid,
-      safeErrorDetail: "connection_disconnected",
+    await adminDb.runTransaction(async (tx) => {
+      const current = await tx.get(doc.ref);
+      const data = current.data();
+      if (!current.exists || data?.connectionId !== connection.id ||
+          data.businessId !== connection.businessId || !["queued", "retry_wait"].includes(data.status)) return;
+      tx.update(doc.ref, {
+        status: "held",
+        errorCode: "connection_disconnected",
+        safeErrorDetail: "The mailbox was disconnected before this email was sent.",
+        leaseUntil: null,
+        leaseOwner: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      await recordEmailEvent({
+        businessId: connection.businessId,
+        eventType: "held",
+        outboxId: doc.id,
+        connectionId: connection.id,
+        actorId: uid,
+        safeErrorDetail: "connection_disconnected",
+      }, tx);
     });
   }
 

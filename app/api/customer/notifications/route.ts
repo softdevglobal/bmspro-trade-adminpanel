@@ -21,7 +21,6 @@ export async function GET(request: Request) {
 
   const notifications = await listCustomerNotifications(
     auth.customer.uid,
-    auth.customer.email,
     auth.customer.businessId,
   );
   return NextResponse.json({ ok: true, notifications });
@@ -38,7 +37,6 @@ export async function PATCH(request: Request) {
   await markAllNotificationsRead({
     audience: "customer",
     customerId: auth.customer.uid,
-    customerEmail: auth.customer.email,
     businessId: auth.customer.businessId,
   });
   return NextResponse.json({ ok: true });
@@ -55,7 +53,6 @@ export async function DELETE(request: Request) {
   await deleteAllNotifications({
     audience: "customer",
     customerId: auth.customer.uid,
-    customerEmail: auth.customer.email,
     businessId: auth.customer.businessId,
   });
   return NextResponse.json({ ok: true });

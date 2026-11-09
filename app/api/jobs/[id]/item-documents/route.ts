@@ -1,5 +1,5 @@
 import { getBusinessBooking } from "@/lib/bookings/server";
-import { resolveItemDocumentsByName } from "@/lib/items/server";
+import { resolveItemDocumentsForLines } from "@/lib/items/server";
 import { requireBusinessMember } from "@/lib/onboarding/server";
 import {
   getBusinessQuotationById,
@@ -54,20 +54,28 @@ export async function GET(
     );
   }
 
-  const names = await jobItemNames(auth.businessId, booking);
-  const documents = await resolveItemDocumentsByName(auth.businessId, names);
+  const lines = await jobItemLines(auth.businessId, booking);
+  const resolution = await resolveItemDocumentsForLines(auth.businessId, lines);
 
-  return NextResponse.json({ ok: true, documents });
+  return NextResponse.json({
+    ok: true,
+    documents: resolution.documents,
+    ambiguousLegacyNames: resolution.ambiguousLegacyNames,
+  });
 }
 
 /**
  * Line item names for the job, falling back to the booked service or custom
  * request title when the job has no quotation behind it.
  */
-async function jobItemNames(
+async function jobItemLines(
   businessId: string,
   booking: Awaited<ReturnType<typeof getBusinessBooking>>,
-): Promise<string[]> {
+): Promise<Array<{
+  name: string;
+  catalogItemId?: string | null;
+  catalogDocumentVersionId?: string | null;
+}>> {
   if (!booking) return [];
 
   const quotationId = booking.quotationId ?? booking.quotation?.id ?? null;
@@ -83,9 +91,13 @@ async function jobItemNames(
       : null;
 
   if (quotation && quotation.lineItems.length > 0) {
-    return quotation.lineItems.map((line) => line.name);
+    return quotation.lineItems.map((line) => ({
+      name: line.name,
+      catalogItemId: line.catalogItemId,
+      catalogDocumentVersionId: line.catalogDocumentVersionId,
+    }));
   }
 
   const fallback = booking.serviceName ?? booking.customRequest?.title ?? "";
-  return fallback.trim() ? [fallback] : [];
+  return fallback.trim() ? [{ name: fallback }] : [];
 }

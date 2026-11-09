@@ -1,9 +1,6 @@
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { isStripeConfigured } from "@/lib/stripe/config";
-import {
-  applyPlanChangeToTenant,
-  listAvailablePlansForTenant,
-} from "@/lib/subscription-plans/tenant-subscription";
+import { listAvailablePlansForTenant } from "@/lib/subscription-plans/tenant-subscription";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -42,19 +39,8 @@ export async function GET(request: Request) {
   }
 }
 
-/** Business owner — change plan without Stripe (local/dev only). */
+/** Direct billing changes are retired; fulfillment runs through Stripe Checkout. */
 export async function POST(request: Request) {
-  if (isStripeConfigured()) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Plan changes are completed through Stripe Checkout. Use Upgrade or Downgrade on a plan card.",
-      },
-      { status: 403 },
-    );
-  }
-
   const auth = await requireBusinessOwner(request);
   if (!auth.ok) {
     return NextResponse.json(
@@ -63,44 +49,14 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Invalid request body." },
-      { status: 400 },
-    );
-  }
-
-  const planId =
-    body &&
-    typeof body === "object" &&
-    typeof (body as { planId?: unknown }).planId === "string"
-      ? (body as { planId: string }).planId.trim()
-      : "";
-
-  if (!planId) {
-    return NextResponse.json(
-      { ok: false, error: "planId is required." },
-      { status: 400 },
-    );
-  }
-
-  try {
-    await applyPlanChangeToTenant(auth.businessId, planId);
-    const { snapshot, plans } = await listAvailablePlansForTenant(
-      auth.businessId,
-    );
-    return NextResponse.json({ ok: true, subscription: snapshot, plans });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error ? error.message : "Could not change plan.",
-      },
-      { status: 400 },
-    );
-  }
+  const stripeConfigured = isStripeConfigured();
+  return NextResponse.json(
+    {
+      ok: false,
+      error: stripeConfigured
+        ? "Plan changes are completed through Stripe Checkout. Use Upgrade or Downgrade on a plan card."
+        : "Billing is currently unavailable. Please try again later.",
+    },
+    { status: stripeConfigured ? 403 : 503 },
+  );
 }

@@ -10,6 +10,10 @@ import type {
 
 export type QuotationLineItem = {
   name: string;
+  /** Stable tenant catalog identity; display names may change over time. */
+  catalogItemId?: string | null;
+  /** Immutable attached-document version selected when the line was saved. */
+  catalogDocumentVersionId?: string | null;
   priceAud: number;
   code?: string | null;
   description?: string | null;

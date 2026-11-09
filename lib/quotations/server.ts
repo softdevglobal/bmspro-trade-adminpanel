@@ -159,6 +159,8 @@ function mapQuotationDoc(
         typeof value === "number" && Number.isFinite(value) ? value : undefined;
       return {
         name,
+        catalogItemId: readOptionalString(item.catalogItemId),
+        catalogDocumentVersionId: readOptionalString(item.catalogDocumentVersionId),
         priceAud,
         code: readOptionalString(item.code),
         description: readOptionalString(item.description),
@@ -388,6 +390,8 @@ export function parseLineItems(raw: unknown): QuotationLineItem[] | null {
       typeof value === "number" && Number.isFinite(value) ? value : undefined;
     items.push({
       name,
+      catalogItemId: readOptionalString(item.catalogItemId),
+      catalogDocumentVersionId: readOptionalString(item.catalogDocumentVersionId),
       priceAud,
       code: readOptionalString(item.code),
       description: readOptionalString(item.description),
@@ -403,6 +407,8 @@ export function parseLineItems(raw: unknown): QuotationLineItem[] | null {
 function serializeLineItemForFirestore(item: QuotationLineItem) {
   return {
     name: item.name,
+    catalogItemId: item.catalogItemId?.trim() || null,
+    catalogDocumentVersionId: item.catalogDocumentVersionId?.trim() || null,
     priceAud: item.priceAud,
     code: item.code?.trim() || null,
     description: item.description?.trim() || null,
@@ -1347,60 +1353,50 @@ export async function cancelQuotation(
   }
 
   const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
-  const quotationSnap = await quotationRef.get();
-  if (!quotationSnap.exists) {
-    return { ok: false, status: 404, error: "Quotation not found." };
-  }
+  const invoiceRef = adminDb.collection("invoices").doc(id);
+  const transition = await adminDb.runTransaction(async (tx) => {
+    const quotationSnap = await tx.get(quotationRef);
+    if (!quotationSnap.exists || quotationSnap.data()?.businessId !== businessId) {
+      return { ok: false as const, status: 404, error: "Quotation not found." };
+    }
 
-  const quotationData = quotationSnap.data() ?? {};
-  if (quotationData.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Quotation not found." };
-  }
-  if (quotationData.status === "cancelled") {
-    return { ok: true, quotation: mapQuotationDoc(quotationSnap.id, quotationData) };
-  }
-  if (typeof quotationData.invoiceId === "string" && quotationData.invoiceId) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Quotations with invoices cannot be cancelled.",
-    };
-  }
-  const invoiceSnap = await adminDb.collection("invoices").doc(id).get();
-  if (invoiceSnap.exists && invoiceSnap.data()?.businessId === businessId) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Quotations with invoices cannot be cancelled.",
-    };
-  }
+    const quotationData = quotationSnap.data() ?? {};
+    const inspectionRequestId =
+      typeof quotationData.inspectionRequestId === "string"
+        ? quotationData.inspectionRequestId.trim()
+        : "";
+    const requestRef = inspectionRequestId
+      ? adminDb.collection(REQUESTS_COLLECTION).doc(inspectionRequestId)
+      : null;
+    const [invoiceSnap, requestSnap] = await Promise.all([
+      tx.get(invoiceRef),
+      requestRef ? tx.get(requestRef) : Promise.resolve(null),
+    ]);
 
-  const inspectionRequestId =
-    typeof quotationData.inspectionRequestId === "string"
-      ? quotationData.inspectionRequestId.trim()
-      : "";
-  const now = FieldValue.serverTimestamp();
-  let cancelledFromRequestStatus: string | null = null;
-  let cancelledFromRequestBookingStatus: string | null = null;
-  let cancelledFromRequestBookingStatusAt: unknown = null;
+    if (quotationData.status === "cancelled") return { ok: true as const };
+    if (
+      (typeof quotationData.invoiceId === "string" && quotationData.invoiceId) ||
+      invoiceSnap.exists
+    ) {
+      return {
+        ok: false as const,
+        status: 400,
+        error: "Quotations with invoices cannot be cancelled.",
+      };
+    }
 
-  if (inspectionRequestId) {
-    const requestSnap = await adminDb
-      .collection("requests")
-      .doc(inspectionRequestId)
-      .get();
-    const requestData = requestSnap.data() ?? {};
-    cancelledFromRequestStatus =
-      typeof requestData.status === "string" ? requestData.status : null;
-    cancelledFromRequestBookingStatus =
-      typeof requestData.bookingStatus === "string"
-        ? requestData.bookingStatus
-        : null;
-    cancelledFromRequestBookingStatusAt = requestData.bookingStatusAt ?? null;
-  }
-
-  await quotationRef.set(
-    {
+    const requestData = requestSnap?.exists ? requestSnap.data() ?? {} : null;
+    const summary = requestData?.quotation as
+      | { id?: string; createdAt?: unknown }
+      | null
+      | undefined;
+    const mirrorsThisQuotation = Boolean(
+      requestData &&
+      requestData.businessId === businessId &&
+      summary?.id === quotationRef.id,
+    );
+    const now = FieldValue.serverTimestamp();
+    tx.set(quotationRef, {
       status: "cancelled",
       cancelledFromStatus:
         quotationData.status === "sent" || quotationData.status === "draft"
@@ -1417,73 +1413,60 @@ export async function cancelQuotation(
           ? quotationData.bookingStatus
           : null,
       cancelledFromBookingStatusAt: quotationData.bookingStatusAt ?? null,
-      cancelledFromRequestStatus,
-      cancelledFromRequestBookingStatus,
-      cancelledFromRequestBookingStatusAt,
+      cancelledFromRequestStatus:
+        typeof requestData?.status === "string" ? requestData.status : null,
+      cancelledFromRequestBookingStatus:
+        typeof requestData?.bookingStatus === "string"
+          ? requestData.bookingStatus
+          : null,
+      cancelledFromRequestBookingStatusAt: requestData?.bookingStatusAt ?? null,
       customerDecision: null,
       customerDecisionAt: null,
       bookingStatus: null,
       bookingStatusAt: null,
       updatedAt: now,
-    },
-    { merge: true },
-  );
+    }, { merge: true });
 
-  if (inspectionRequestId) {
-    const requestRef = adminDb.collection("requests").doc(inspectionRequestId);
-    const requestSnap = await requestRef.get();
-    if (requestSnap.exists) {
-      const requestData = requestSnap.data() ?? {};
-      const summary = requestData.quotation as
-        | { id?: string; createdAt?: unknown }
-        | null
-        | undefined;
-      if (
-        requestData.businessId === businessId &&
-        summary?.id === quotationRef.id
-      ) {
-        await requestRef.set(
-          {
-            quotation: {
-              ...summary,
-              id: quotationRef.id,
-              quotationCode:
-                typeof quotationData.quotationCode === "string"
-                  ? quotationData.quotationCode
-                  : null,
-              finalPriceAud:
-                typeof quotationData.finalPriceAud === "number"
-                  ? quotationData.finalPriceAud
-                  : 0,
-              subtotalAud:
-                typeof quotationData.subtotalAud === "number"
-                  ? quotationData.subtotalAud
-                  : 0,
-              balanceDueAud:
-                typeof quotationData.balanceDueAud === "number"
-                  ? quotationData.balanceDueAud
-                  : 0,
-              pdfUrl:
-                typeof quotationData.pdfUrl === "string"
-                  ? quotationData.pdfUrl
-                  : null,
-              status: "cancelled",
-            },
-            ...(requestData.status === "awaiting_decision"
-              ? {
-                  status: "completed" satisfies InspectionRequestStatus,
-                  bookingStatus: null,
-                  bookingStatusAt: null,
-                }
-              : {}),
-            updatedAt: now,
-          },
-          { merge: true },
-        );
-      }
+    if (requestRef && requestSnap?.exists && mirrorsThisQuotation) {
+      tx.set(requestRef, {
+        quotation: {
+          ...summary,
+          id: quotationRef.id,
+          quotationCode:
+            typeof quotationData.quotationCode === "string"
+              ? quotationData.quotationCode
+              : null,
+          finalPriceAud:
+            typeof quotationData.finalPriceAud === "number"
+              ? quotationData.finalPriceAud
+              : 0,
+          subtotalAud:
+            typeof quotationData.subtotalAud === "number"
+              ? quotationData.subtotalAud
+              : 0,
+          balanceDueAud:
+            typeof quotationData.balanceDueAud === "number"
+              ? quotationData.balanceDueAud
+              : 0,
+          pdfUrl:
+            typeof quotationData.pdfUrl === "string"
+              ? quotationData.pdfUrl
+              : null,
+          status: "cancelled",
+        },
+        ...(requestData?.status === "awaiting_decision"
+          ? {
+              status: "completed" satisfies InspectionRequestStatus,
+              bookingStatus: null,
+              bookingStatusAt: null,
+            }
+          : {}),
+        updatedAt: now,
+      }, { merge: true });
     }
-  }
-
+    return { ok: true as const };
+  });
+  if (!transition.ok) return transition;
   const saved = await quotationRef.get();
   return { ok: true, quotation: mapQuotationDoc(saved.id, saved.data() ?? {}) };
 }
@@ -2475,94 +2458,189 @@ async function applyQuotationCustomerDecision(
   options: {
     notifyBusiness?: boolean;
     jobPreferredSlots?: InspectionSlot[];
+    customerIdentity?: CustomerOwnershipIdentity;
+    expectedBusinessId?: string;
   } = {},
 ): Promise<
   | { ok: true; request: ReturnType<typeof mapInspectionDoc> }
   | { ok: false; status: number; error: string }
 > {
-  const data = requestSnap.data() ?? {};
-  let request = mapInspectionDoc(requestSnap.id, data);
-  const summary = request.quotation;
+  const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(quotationId);
+  const requestRef = requestSnap.ref;
+  const invoiceRef = adminDb.collection("invoices").doc(quotationId);
+  const transition = await adminDb.runTransaction(async (tx) => {
+    const currentQuotation = await tx.get(quotationRef);
+    const currentRequest = await tx.get(requestRef);
+    const currentInvoice = await tx.get(invoiceRef);
+    if (!currentQuotation.exists) {
+      return { ok: false as const, status: 404, error: "Quotation not found." };
+    }
+    if (!currentRequest.exists) {
+      return { ok: false as const, status: 404, error: "Linked request not found." };
+    }
 
-  if (!summary || summary.id !== quotationId) {
-    return { ok: false, status: 404, error: "Quotation not found." };
-  }
+    const quotationData = currentQuotation.data() ?? {};
+    const requestData = currentRequest.data() ?? {};
+    const request = mapInspectionDoc(currentRequest.id, requestData);
+    const rawSummary = requestData.quotation;
+    const summary =
+      rawSummary && typeof rawSummary === "object"
+        ? rawSummary as Record<string, unknown>
+        : null;
+    const linkedRequestId =
+      typeof quotationData.inspectionRequestId === "string"
+        ? quotationData.inspectionRequestId.trim()
+        : "";
 
-  // Legacy mirrors may lack `status`; they were always sent on creation.
-  if (summary.status === "draft") {
-    return {
-      ok: false,
-      status: 400,
-      error: "There is no sent quotation awaiting a decision.",
-    };
-  }
-  if (request.bookingId) {
-    return {
-      ok: false,
-      status: 400,
-      error: "This quotation has already been converted into a job.",
-    };
-  }
-  if (summary.customerDecision === decision) {
-    return { ok: true, request };
-  }
+    if (
+      typeof quotationData.businessId !== "string" ||
+      !quotationData.businessId.trim() ||
+      (options.expectedBusinessId && quotationData.businessId !== options.expectedBusinessId) ||
+      quotationData.businessId !== requestData.businessId ||
+      linkedRequestId !== currentRequest.id ||
+      requestData.businessId !== quotationData.businessId ||
+      summary?.id !== quotationId
+    ) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "This quotation or its linked request changed. Refresh and try again.",
+      };
+    }
 
-  const decidedAt = FieldValue.serverTimestamp();
-  const jobSlots =
-    decision === "accepted" && options.jobPreferredSlots?.length
-      ? options.jobPreferredSlots
-      : null;
+    if (options.customerIdentity && !customerOwnsRequestRecord(request, options.customerIdentity)) {
+      return { ok: false as const, status: 404, error: "Request not found." };
+    }
 
-  await adminDb
-    .collection(QUOTATION_COLLECTION)
-    .doc(quotationId)
-    .set(
-      {
-        customerDecision: decision,
-        customerDecisionAt: decidedAt,
-        updatedAt: decidedAt,
-      },
-      { merge: true },
-    );
-  await requestSnap.ref.set(
-    {
+    const quotationCustomer = quotationData.customer as
+      | { email?: unknown }
+      | null
+      | undefined;
+    const requestCustomer = requestData.customer as
+      | { email?: unknown }
+      | null
+      | undefined;
+    const quotationEmail =
+      typeof quotationCustomer?.email === "string"
+        ? quotationCustomer.email.trim().toLowerCase()
+        : "";
+    const requestEmail =
+      typeof requestCustomer?.email === "string"
+        ? requestCustomer.email.trim().toLowerCase()
+        : "";
+    if (quotationEmail && requestEmail && quotationEmail !== requestEmail) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "Quotation customer details no longer match the linked request. Contact the business.",
+      };
+    }
+
+    if (quotationData.status === "cancelled" || requestData.status === "cancelled") {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "This quotation was cancelled. Refresh to see the current status.",
+      };
+    }
+    if (
+      quotationData.status !== "sent" ||
+      requestData.status !== "awaiting_decision" ||
+      (typeof summary.status === "string" && summary.status !== "sent")
+    ) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "This quotation is no longer awaiting a decision. Refresh to see its current status.",
+      };
+    }
+    if (
+      currentInvoice.exists ||
+      (typeof quotationData.invoiceId === "string" && quotationData.invoiceId.trim()) ||
+      request.bookingId ||
+      (typeof quotationData.bookingId === "string" && quotationData.bookingId.trim())
+    ) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "This quotation has already been converted into a job or invoice.",
+      };
+    }
+
+    const existingDecision =
+      quotationData.customerDecision === "accepted" ||
+      quotationData.customerDecision === "rejected"
+        ? quotationData.customerDecision
+        : null;
+    if (existingDecision && existingDecision !== decision) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "A different decision is already recorded. Contact the business to correct it.",
+      };
+    }
+    if (summary.customerDecision && summary.customerDecision !== existingDecision) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "The quotation decision records do not match. Contact the business.",
+      };
+    }
+    if (existingDecision === decision) {
+      return { ok: true as const, changed: false, request };
+    }
+
+    const decidedAt = FieldValue.serverTimestamp();
+    const jobSlots =
+      decision === "accepted" && options.jobPreferredSlots?.length
+        ? options.jobPreferredSlots
+        : null;
+    tx.update(quotationRef, {
+      customerDecision: decision,
+      customerDecisionAt: decidedAt,
+      updatedAt: decidedAt,
+    });
+    tx.set(requestRef, {
       quotation: {
-        ...(typeof data.quotation === "object" && data.quotation
-          ? data.quotation
-          : {}),
+        ...summary,
+        status: "sent",
         customerDecision: decision,
         customerDecisionAt: decidedAt,
       },
       ...(jobSlots ? { jobPreferredSlots: jobSlots } : {}),
       updatedAt: decidedAt,
-    },
-    { merge: true },
-  );
+    }, { merge: true });
 
-  const updatedRequest = {
-    ...request,
-    ...(jobSlots ? { jobPreferredSlots: jobSlots } : {}),
-    quotation: summary
-      ? {
-          ...summary,
-          customerDecision: decision,
-          customerDecisionAt: Date.now(),
-        }
-      : null,
-  };
-  request = updatedRequest;
+    return {
+      ok: true as const,
+      changed: true,
+      request: {
+        ...request,
+        ...(jobSlots ? { jobPreferredSlots: jobSlots } : {}),
+        quotation: request.quotation
+          ? {
+              ...request.quotation,
+              status: "sent",
+              customerDecision: decision,
+              customerDecisionAt: Date.now(),
+            }
+          : null,
+      },
+    };
+  });
+  if (!transition.ok) return transition;
 
-  if (options.notifyBusiness) {
+  if (transition.changed && options.notifyBusiness) {
     try {
       const { notifyBusinessOfQuotationDecision } = await import(
         "@/lib/notifications/server"
       );
       const businessSnap = await adminDb
         .collection("businesses")
-        .doc(request.businessId)
+        .doc(transition.request.businessId)
         .get();
       const businessData = businessSnap.data() ?? {};
-      await notifyBusinessOfQuotationDecision(updatedRequest, decision, {
+      await notifyBusinessOfQuotationDecision(transition.request, decision, {
         businessName:
           typeof businessData.businessName === "string"
             ? businessData.businessName
@@ -2577,7 +2655,7 @@ async function applyQuotationCustomerDecision(
     }
   }
 
-  return { ok: true, request: updatedRequest };
+  return { ok: true, request: transition.request };
 }
 
 /**
@@ -2622,6 +2700,7 @@ export async function customerDecideQuotation(
     decision,
     {
       notifyBusiness: true,
+      customerIdentity: identity,
       ...(decision === "accepted" && jobPreferredSlots?.length
         ? { jobPreferredSlots }
         : {}),
@@ -2679,7 +2758,7 @@ export async function businessRecordQuotationCustomerDecision(
     requestSnap,
     quotationSnap.id,
     decision,
-    { notifyBusiness: false },
+    { notifyBusiness: false, expectedBusinessId: businessId },
   );
 }
 

@@ -2,6 +2,8 @@ import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import {
+  CatalogItemNameConflictError,
+  type CatalogItem,
   listCatalogItems,
   parseCatalogItemInput,
   upsertCatalogItem,
@@ -88,7 +90,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const item = await upsertCatalogItem(auth.businessId, auth.uid, input);
+  let item: CatalogItem;
+  try {
+    item = await upsertCatalogItem(auth.businessId, auth.uid, input);
+  } catch (error) {
+    if (error instanceof CatalogItemNameConflictError) {
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 409 },
+      );
+    }
+    throw error;
+  }
 
   await logAuditEvent({
     businessId: auth.businessId,

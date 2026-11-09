@@ -20,9 +20,13 @@ import { logAuditEvent } from "@/lib/audit/server";
 import type { AuditActor, AuditSource } from "@/lib/audit/types";
 import {
   computeDaySlotOccupancy,
+  loadBusinessWorkingHours,
   rangeOverlapsFullSlots,
 } from "@/lib/calendar/slot-occupancy";
+import { validateCalendarVisitWindow } from "@/lib/calendar/visit-window";
 import { isBusinessClosedOnDate } from "@/lib/calendar/business-closures/server";
+import { BUSINESS_CLOSURES_COLLECTION } from "@/lib/calendar/business-closures/types";
+import { validateStaffAssignmentForSchedule } from "@/lib/bookings/resolve-job-assignment";
 import {
   allocateBookingCode,
   allocateInspectionRequestCode,
@@ -58,7 +62,7 @@ import {
   recurrenceWindowForDate,
   type JobRecurrenceRule,
 } from "@/lib/bookings/recurrence";
-import { PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
+import { isIsoDateBeforeToday, PLATFORM_TIME_ZONE } from "@/lib/platform/timezone";
 
 export const BOOKING_LIST_LIMIT = 80;
 
@@ -286,10 +290,52 @@ export async function createBookingFromInspection(
     inspectionUpdates.ownerNote = input.note;
   }
 
-  await adminDb.runTransaction(async (transaction) => {
-    transaction.set(bookingRef, bookingPayload);
-    transaction.update(inspectionRef, inspectionUpdates);
-  });
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const lockRef = jobCapacityLockRef(input.businessId, input.slot.date);
+      await transaction.get(lockRef);
+      if ((await transaction.get(businessClosureRef(input.businessId, input.slot.date))).exists) {
+        throw new Error(`BUSINESS_CLOSED:${input.slot.date}`);
+      }
+      const occupancy = await computeDaySlotOccupancy(input.businessId, input.slot.date);
+      if (rangeOverlapsFullSlots(occupancy.slots, input.startTime, input.endTime, "job")) {
+        throw new Error(`CAPACITY_CONFLICT:${input.slot.date}`);
+      }
+      if (input.assignedTo?.type === "staff") {
+        const staffCheck = await validateStaffAssignmentForSchedule(
+          input.businessId,
+          input.assignedTo,
+          input.slot.date,
+          input.startTime,
+          input.endTime,
+          { excludeBookingId: bookingRef.id },
+        );
+        if (!staffCheck.ok) throw new Error(`STAFF_CONFLICT:${staffCheck.error}`);
+      }
+      transaction.set(lockRef, { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(bookingRef, bookingPayload);
+      transaction.update(inspectionRef, inspectionUpdates);
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("CAPACITY_CONFLICT:")) {
+      return {
+        ok: false,
+        status: 409,
+        error: `Job capacity is full on ${input.slot.date}. Choose another time.`,
+      };
+    }
+    if (error instanceof Error && error.message.startsWith("BUSINESS_CLOSED:")) {
+      return {
+        ok: false,
+        status: 409,
+        error: `The business is closed on ${input.slot.date}. Choose another date.`,
+      };
+    }
+    if (error instanceof Error && error.message.startsWith("STAFF_CONFLICT:")) {
+      return { ok: false, status: 409, error: error.message.slice("STAFF_CONFLICT:".length) };
+    }
+    throw error;
+  }
 
   const [bookingSnap, requestSnap] = await Promise.all([
     bookingRef.get(),
@@ -427,7 +473,7 @@ export async function assignBusinessBooking(
  * rules as creating a job. The schedule reminder cron reads the updated
  * `scheduledStartTime`, so reminders automatically follow the new time.
  */
-export async function updateBusinessBookingSchedule(
+export async function validateBusinessBookingSchedule(
   businessId: string,
   bookingId: string,
   input: {
@@ -441,6 +487,21 @@ export async function updateBusinessBookingSchedule(
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
 > {
+  const dateParts = input.slot.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const dateValues = dateParts?.slice(1).map(Number);
+  const parsedDate = dateValues
+    ? new Date(Date.UTC(dateValues[0]!, dateValues[1]! - 1, dateValues[2]!))
+    : null;
+  if (
+    !dateValues ||
+    !parsedDate ||
+    parsedDate.getUTCFullYear() !== dateValues[0] ||
+    parsedDate.getUTCMonth() + 1 !== dateValues[1] ||
+    parsedDate.getUTCDate() !== dateValues[2]
+  ) {
+    return { ok: false, status: 400, error: "Choose a real calendar date." };
+  }
+
   const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
   const snap = await ref.get();
   if (!snap.exists) {
@@ -462,6 +523,39 @@ export async function updateBusinessBookingSchedule(
       status: 400,
       error: "Only active jobs can be rescheduled.",
     };
+  }
+
+  const businessSnap = await adminDb.collection("businesses").doc(businessId).get();
+  const timeZone =
+    typeof businessSnap.data()?.timezone === "string" && businessSnap.data()?.timezone.trim()
+      ? String(businessSnap.data()?.timezone).trim()
+      : PLATFORM_TIME_ZONE;
+  if (isIsoDateBeforeToday(input.slot.date, timeZone)) {
+    return { ok: false, status: 400, error: "Past dates cannot be used for a rescheduled job." };
+  }
+
+  const hoursError = validateCalendarVisitWindow(
+    input.startTime,
+    input.endTime,
+    await loadBusinessWorkingHours(businessId),
+  );
+  if (hoursError) {
+    return { ok: false, status: 400, error: hoursError };
+  }
+
+  if (current.assignedTo?.type === "staff") {
+    const staffCheck = await validateStaffAssignmentForSchedule(
+      businessId,
+      current.assignedTo,
+      input.slot.date,
+      input.startTime,
+      input.endTime,
+      {
+        excludeBookingId: bookingId,
+        excludeSeriesId: current.seriesId,
+      },
+    );
+    if (!staffCheck.ok) return staffCheck;
   }
 
   if (await isBusinessClosedOnDate(businessId, input.slot.date)) {
@@ -487,19 +581,105 @@ export async function updateBusinessBookingSchedule(
     };
   }
 
-  await ref.update({
-    scheduledSlot: input.slot,
-    scheduledStartTime: input.startTime,
-    scheduledEndTime: input.endTime,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  return { ok: true, booking: current };
+}
+
+export async function notifyBusinessBookingRescheduled(booking: BookingDetail): Promise<void> {
+  const summary = await loadBusinessSummary(booking.businessId);
+  await notifyCustomerOfJobRescheduled(booking, summary);
+}
+
+export async function updateBusinessBookingSchedule(
+  businessId: string,
+  bookingId: string,
+  input: {
+    slot: InspectionSlot;
+    startTime: string;
+    endTime: string;
+    notifyCustomer?: boolean;
+    skipCareplus?: boolean;
+  },
+): Promise<
+  | { ok: true; booking: BookingDetail }
+  | { ok: false; status: number; error: string }
+> {
+  const validation = await validateBusinessBookingSchedule(businessId, bookingId, input);
+  if (!validation.ok) return validation;
+  const ref = adminDb.collection(JOBS_COLLECTION).doc(bookingId);
+
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const currentSnap = await transaction.get(ref);
+      if (!currentSnap.exists) throw new Error("BOOKING_CHANGED");
+      const currentBooking = mapBookingDoc(currentSnap.id, currentSnap.data() ?? {});
+      if (
+        currentBooking.businessId !== businessId ||
+        !["awaiting", "scheduled", "ongoing"].includes(currentBooking.status)
+      ) {
+        throw new Error("BOOKING_CHANGED");
+      }
+      const lockRef = jobCapacityLockRef(businessId, input.slot.date);
+      await transaction.get(lockRef);
+      if ((await transaction.get(businessClosureRef(businessId, input.slot.date))).exists) {
+        throw new Error(`BUSINESS_CLOSED:${input.slot.date}`);
+      }
+      const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date, {
+        excludeBookingId: bookingId,
+      });
+      if (rangeOverlapsFullSlots(occupancy.slots, input.startTime, input.endTime, "job")) {
+        throw new Error(`CAPACITY_CONFLICT:${input.slot.date}`);
+      }
+      if (currentBooking.assignedTo?.type === "staff") {
+        const staffCheck = await validateStaffAssignmentForSchedule(
+          businessId,
+          currentBooking.assignedTo,
+          input.slot.date,
+          input.startTime,
+          input.endTime,
+          {
+            excludeBookingId: bookingId,
+            excludeSeriesId: currentBooking.seriesId,
+          },
+        );
+        if (!staffCheck.ok) throw new Error(`STAFF_CONFLICT:${staffCheck.error}`);
+      }
+      transaction.set(lockRef, { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.update(ref, {
+        scheduledSlot: input.slot,
+        scheduledStartTime: input.startTime,
+        scheduledEndTime: input.endTime,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("CAPACITY_CONFLICT:")) {
+      return {
+        ok: false,
+        status: 409,
+        error: `Job capacity is full on ${input.slot.date}. Choose another time.`,
+      };
+    }
+    if (error instanceof Error && error.message.startsWith("BUSINESS_CLOSED:")) {
+      return {
+        ok: false,
+        status: 409,
+        error: `The business is closed on ${input.slot.date}. Choose another date.`,
+      };
+    }
+    if (error instanceof Error && error.message.startsWith("STAFF_CONFLICT:")) {
+      return { ok: false, status: 409, error: error.message.slice("STAFF_CONFLICT:".length) };
+    }
+    if (error instanceof Error && error.message === "BOOKING_CHANGED") {
+      return { ok: false, status: 409, error: "This job changed while it was being rescheduled. Reload and try again." };
+    }
+    throw error;
+  }
 
   const updated = await ref.get();
   const booking = mapBookingDoc(updated.id, updated.data() ?? {});
 
   if (input.notifyCustomer !== false) {
-    const summary = await loadBusinessSummary(businessId);
-    await notifyCustomerOfJobRescheduled(booking, summary);
+    await notifyBusinessBookingRescheduled(booking);
   }
   if (!input.skipCareplus) {
     await enqueueCareplusActivitySafe(
@@ -1166,6 +1346,28 @@ export type CreateDirectJobInput = {
   skipStaffNotify?: boolean;
 };
 
+type DirectJobSeriesOccurrence = {
+  date: string;
+  startTime: string;
+  endTime: string;
+  index: number;
+  count: number;
+  seriesId: string;
+  recurrence: JobRecurrenceRule;
+};
+
+function jobCapacityLockRef(businessId: string, date: string) {
+  return adminDb
+    .collection("job_capacity_locks")
+    .doc(`${businessId}__${date}`);
+}
+
+function businessClosureRef(businessId: string, date: string) {
+  return adminDb
+    .collection(BUSINESS_CLOSURES_COLLECTION)
+    .doc(`${businessId}__${date}`);
+}
+
 async function lookupBusinessServiceForJob(
   businessId: string,
   serviceId: string,
@@ -1198,34 +1400,44 @@ export async function createDirectJob(
   createdBy: string,
   input: CreateDirectJobInput,
   audit?: { actor: AuditActor; source: AuditSource },
+  seriesOccurrences?: DirectJobSeriesOccurrence[],
 ): Promise<
   | { ok: true; booking: BookingDetail; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
 > {
-  if (await isBusinessClosedOnDate(businessId, input.slot.date)) {
-    return {
-      ok: false,
-      status: 400,
-      error:
-        "This business is closed on the selected date. Reactivate the day on the calendar to schedule work.",
-    };
-  }
+  const occurrences = seriesOccurrences?.length
+    ? seriesOccurrences
+    : [{
+        date: input.slot.date,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        index: input.series?.seriesIndex ?? 1,
+        count: input.series?.seriesCount ?? 1,
+        seriesId: input.series?.seriesId?.trim() || "",
+        recurrence: input.series?.recurrence as JobRecurrenceRule,
+      }];
 
-  const occupancy = await computeDaySlotOccupancy(businessId, input.slot.date);
-  if (
-    rangeOverlapsFullSlots(
-      occupancy.slots,
-      input.startTime,
-      input.endTime,
-      "job",
-    )
-  ) {
-    return {
-      ok: false,
-      status: 400,
-      error:
-        "One or more time slots in that range are full for jobs. Choose another time or update capacity in Settings.",
-    };
+  const workingHours = await loadBusinessWorkingHours(businessId);
+  for (const occurrence of occurrences) {
+    const hoursError = validateCalendarVisitWindow(
+      occurrence.startTime,
+      occurrence.endTime,
+      workingHours,
+    );
+    if (hoursError) {
+      return {
+        ok: false,
+        status: 400,
+        error: `${hoursError} The visit on ${occurrence.date} is outside business hours. No visits in the series were created.`,
+      };
+    }
+    if (await isBusinessClosedOnDate(businessId, occurrence.date)) {
+      return {
+        ok: false,
+        status: 400,
+        error: `The business is closed on ${occurrence.date}. No visits in the series were created.`,
+      };
+    }
   }
 
   let serviceName: string | null = null;
@@ -1449,11 +1661,176 @@ export async function createDirectJob(
     updatedAt: now,
   };
 
-  await adminDb.runTransaction(async (transaction) => {
-    transaction.set(inspectionRef, inspectionPayload);
-    transaction.set(quotationRef, quotationPayload);
-    transaction.set(bookingRef, bookingPayload);
-  });
+  const additionalRecords: Array<{
+    inspectionRef: FirebaseFirestore.DocumentReference;
+    quotationRef: FirebaseFirestore.DocumentReference;
+    bookingRef: FirebaseFirestore.DocumentReference;
+    inspectionPayload: Record<string, unknown>;
+    quotationPayload: Record<string, unknown>;
+    bookingPayload: Record<string, unknown>;
+  }> = [];
+
+  const seriesId = input.series
+    ? input.series.seriesId?.trim() || bookingRef.id
+    : null;
+  for (const occurrence of occurrences.slice(1)) {
+    const visitInspectionRef = adminDb.collection(REQUESTS_COLLECTION).doc();
+    const visitQuotationRef = adminDb.collection(QUOTATION_COLLECTION).doc();
+    const visitBookingRef = adminDb.collection(JOBS_COLLECTION).doc();
+    const [visitRequestCode, visitQuotationCode, visitBookingCode] =
+      await Promise.all([
+        allocateInspectionRequestCode(),
+        allocateQuotationCode(businessId),
+        allocateBookingCode(),
+      ]);
+    const visitNow = FieldValue.serverTimestamp();
+    const visitQuotationSummary = {
+      ...quotationSummary,
+      id: visitQuotationRef.id,
+      quotationCode: visitQuotationCode,
+      createdAt: visitNow,
+    };
+    const visitSlot = {
+      date: occurrence.date,
+      timeRange: timeRangeFromStartTime(occurrence.startTime),
+      startTime: occurrence.startTime,
+      endTime: occurrence.endTime,
+    };
+    additionalRecords.push({
+      inspectionRef: visitInspectionRef,
+      quotationRef: visitQuotationRef,
+      bookingRef: visitBookingRef,
+      inspectionPayload: {
+        ...inspectionPayload,
+        id: visitInspectionRef.id,
+        requestCode: visitRequestCode,
+        scheduledSlot: visitSlot,
+        scheduledStartTime: occurrence.startTime,
+        scheduledEndTime: occurrence.endTime,
+        quotation: visitQuotationSummary,
+        bookingId: visitBookingRef.id,
+        bookingCode: visitBookingCode,
+        createdAt: visitNow,
+        updatedAt: visitNow,
+      },
+      quotationPayload: {
+        ...quotationPayload,
+        quotationCode: visitQuotationCode,
+        inspectionRequestId: visitInspectionRef.id,
+        bookingId: visitBookingRef.id,
+        bookingCode: visitBookingCode,
+        createdAt: visitNow,
+        updatedAt: visitNow,
+      },
+      bookingPayload: {
+        ...bookingPayload,
+        bookingCode: visitBookingCode,
+        inspectionRequestId: visitInspectionRef.id,
+        inspectionRequestCode: visitRequestCode,
+        quotationId: visitQuotationRef.id,
+        scheduledSlot: visitSlot,
+        scheduledStartTime: occurrence.startTime,
+        scheduledEndTime: occurrence.endTime,
+        quotation: visitQuotationSummary,
+        seriesId,
+        seriesIndex: occurrence.index,
+        seriesCount: occurrence.count,
+        recurrence: recurrenceFirestorePayload(occurrence.recurrence),
+        createdAt: visitNow,
+        updatedAt: visitNow,
+      },
+    });
+  }
+
+  const lockRefs = [...new Set(occurrences.map((occurrence) => occurrence.date))]
+    .map((date) => jobCapacityLockRef(businessId, date));
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      // Every job writer reads and updates this date lock. Firestore retries a
+      // competing transaction, which then sees the newly committed job before
+      // checking capacity again.
+      for (const lockRef of lockRefs) await transaction.get(lockRef);
+      const closureSnapshots = await Promise.all(
+        occurrences.map((occurrence) =>
+          transaction.get(businessClosureRef(businessId, occurrence.date)),
+        ),
+      );
+      const closedIndex = closureSnapshots.findIndex((closure) => closure.exists);
+      if (closedIndex >= 0) {
+        throw new Error(`BUSINESS_CLOSED:${occurrences[closedIndex]?.date ?? ""}`);
+      }
+      const occupancies = await Promise.all(
+        occurrences.map((occurrence) =>
+          computeDaySlotOccupancy(businessId, occurrence.date),
+        ),
+      );
+      for (const [index, occurrence] of occurrences.entries()) {
+        const occupancy = occupancies[index];
+        if (
+          occupancy &&
+          rangeOverlapsFullSlots(
+            occupancy.slots,
+            occurrence.startTime,
+            occurrence.endTime,
+            "job",
+          )
+        ) {
+          throw new Error(`CAPACITY_CONFLICT:${occurrence.date}`);
+        }
+        if (input.assignedTo?.type === "staff") {
+          const staffCheck = await validateStaffAssignmentForSchedule(
+            businessId,
+            input.assignedTo,
+            occurrence.date,
+            occurrence.startTime,
+            occurrence.endTime,
+            { excludeBookingId: bookingRef.id },
+          );
+          if (!staffCheck.ok) {
+            throw new Error(`STAFF_CONFLICT:${occurrence.date}:${staffCheck.error}`);
+          }
+        }
+      }
+      for (const lockRef of lockRefs) {
+        transaction.set(lockRef, { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+      transaction.set(inspectionRef, inspectionPayload);
+      transaction.set(quotationRef, quotationPayload);
+      transaction.set(bookingRef, bookingPayload);
+      for (const record of additionalRecords) {
+        transaction.set(record.inspectionRef, record.inspectionPayload);
+        transaction.set(record.quotationRef, record.quotationPayload);
+        transaction.set(record.bookingRef, record.bookingPayload);
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.startsWith("CAPACITY_CONFLICT:")) {
+      const conflictDate = message.slice("CAPACITY_CONFLICT:".length);
+      return {
+        ok: false,
+        status: 409,
+        error: `Job capacity is full on ${conflictDate}. No visits in the series were created.`,
+      };
+    }
+    if (message.startsWith("BUSINESS_CLOSED:")) {
+      const conflictDate = message.slice("BUSINESS_CLOSED:".length);
+      return {
+        ok: false,
+        status: 409,
+        error: `The business is closed on ${conflictDate}. No visits in the series were created.`,
+      };
+    }
+    if (message.startsWith("STAFF_CONFLICT:")) {
+      const [, conflictDate, ...detail] = message.split(":");
+      return {
+        ok: false,
+        status: 409,
+        error: `${detail.join(":")} No visits in the series were created${conflictDate ? ` (conflict on ${conflictDate})` : ""}.`,
+      };
+    }
+    throw error;
+  }
 
   const [bookingSnap, requestSnap] = await Promise.all([
     bookingRef.get(),
@@ -1476,6 +1853,29 @@ export async function createDirectJob(
       await notifyStaffOfJobAssignment(booking);
     } catch (error) {
       console.error("[direct-job] staff assignment push failed:", error);
+    }
+  }
+  if (seriesOccurrences?.length && seriesOccurrences.length > 1) {
+    const createdSeries = await listBookingsInSeries(
+      businessId,
+      input.series?.seriesId?.trim() || booking.id,
+    );
+    for (const visit of createdSeries) {
+      if (visit.id === booking.id) continue;
+      if (!input.skipCustomerNotify) {
+        try {
+          await notifyCustomerOfJobScheduled(visit, await loadBusinessSummary(businessId));
+        } catch (error) {
+          console.error("[direct-job] customer notification failed:", error);
+        }
+      }
+      if (!input.skipStaffNotify) {
+        try {
+          await notifyStaffOfJobAssignment(visit);
+        } catch (error) {
+          console.error("[direct-job] staff assignment push failed:", error);
+        }
+      }
     }
   }
   await enqueueCareplusActivitySafe(booking, "activity.scheduled");
@@ -1587,6 +1987,19 @@ export async function createDirectJobSeries(
   }
 
   const firstWindow = recurrenceWindowForDate(rule, firstDate);
+  const seriesId = adminDb.collection(JOBS_COLLECTION).doc().id;
+  const occurrences = dates.map((date, index) => {
+    const window = recurrenceWindowForDate(rule, date);
+    return {
+      date,
+      startTime: window.startTime,
+      endTime: window.endTime,
+      index: index + 1,
+      count: dates.length,
+      seriesId,
+      recurrence: rule,
+    };
+  });
 
   const result = await createDirectJob(
     businessId,
@@ -1603,12 +2016,14 @@ export async function createDirectJobSeries(
       endTime: firstWindow.endTime,
       additionalJobDays: [],
       series: {
+        seriesId,
         seriesIndex: 1,
         seriesCount: dates.length,
         recurrence: rule,
       },
     },
     audit,
+    occurrences,
   );
 
   if (!result.ok) return result;
@@ -1617,7 +2032,7 @@ export async function createDirectJobSeries(
     ok: true,
     booking: result.booking,
     request: result.request,
-    createdCount: 1,
+    createdCount: dates.length,
     skippedDates: [],
   };
 }

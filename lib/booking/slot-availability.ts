@@ -5,7 +5,7 @@ import {
   closureUnavailableSlots,
   listBusinessClosuresInRange,
 } from "@/lib/calendar/business-closures/server";
-import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
+import { bookingScheduleDays, mapBookingDoc } from "@/lib/bookings/map-booking-doc";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
@@ -101,8 +101,51 @@ async function listAssignableTeamMembers(
 type BusyAssignment = {
   uid: string;
   date: string;
-  timeRange: InspectionTimeRange;
+  startMin: number;
+  endMin: number;
 };
+
+function intervalForVisit(
+  startTime: string | null | undefined,
+  endTime: string | null | undefined,
+  timeRange: InspectionTimeRange,
+): { startMin: number; endMin: number } {
+  const fallback = timeRangeWindow(timeRange);
+  const startMin = parseClockMinutes(startTime) ?? parseClockMinutes(fallback.startTime)!;
+  const endMin = parseClockMinutes(endTime) ?? parseClockMinutes(fallback.endTime)!;
+  if (endMin <= startMin) {
+    return {
+      startMin: parseClockMinutes(fallback.startTime)!,
+      endMin: parseClockMinutes(fallback.endTime)!,
+    };
+  }
+  return { startMin, endMin };
+}
+
+function scheduleDaysForBusyBooking(booking: ReturnType<typeof mapBookingDoc>) {
+  const expanded = bookingScheduleDays(booking);
+  if (expanded.length > 0) return expanded;
+
+  // Series members are deliberately omitted by bookingScheduleDays because
+  // their anchor expands the recurrence. Keep each member's own occurrence
+  // as a fallback so future visits still count if the anchor is completed.
+  return [
+    ...(booking.scheduledSlot
+      ? [{
+          date: booking.scheduledSlot.date,
+          slot: booking.scheduledSlot,
+          startTime: booking.scheduledStartTime,
+          endTime: booking.scheduledEndTime,
+        }]
+      : []),
+    ...booking.additionalJobDays.map((slot) => ({
+      date: slot.date,
+      slot,
+      startTime: slot.startTime ?? null,
+      endTime: slot.endTime ?? null,
+    })),
+  ];
+}
 
 async function loadBusyAssignments(
   businessId: string,
@@ -126,9 +169,12 @@ async function loadBusyAssignments(
       continue;
     }
     const uid = booking.assignedTo?.uid;
-    const slot = booking.scheduledSlot;
-    if (!uid || !slot?.date || !slot.timeRange) continue;
-    busy.push({ uid, date: slot.date, timeRange: slot.timeRange });
+    if (!uid) continue;
+    for (const day of scheduleDaysForBusyBooking(booking)) {
+      if (!day.date || !day.slot.timeRange) continue;
+      const interval = intervalForVisit(day.startTime, day.endTime, day.slot.timeRange);
+      busy.push({ uid, date: day.date, ...interval });
+    }
   }
 
   for (const doc of requestsSnap.docs) {
@@ -137,7 +183,12 @@ async function loadBusyAssignments(
     const uid = request.assignedTo?.uid;
     const slot = request.scheduledSlot;
     if (!uid || !slot?.date || !slot.timeRange) continue;
-    busy.push({ uid, date: slot.date, timeRange: slot.timeRange });
+    const interval = intervalForVisit(
+      request.scheduledStartTime,
+      request.scheduledEndTime,
+      slot.timeRange,
+    );
+    busy.push({ uid, date: slot.date, ...interval });
   }
 
   return busy;
@@ -174,7 +225,13 @@ function memberAvailableForSlot(
 
   for (const assignment of busyAssignments) {
     if (assignment.uid !== member.uid) continue;
-    if (assignment.date === date && assignment.timeRange === timeRange) {
+    if (
+      assignment.date === date &&
+      startMin != null &&
+      endMin != null &&
+      assignment.startMin < endMin &&
+      startMin < assignment.endMin
+    ) {
       return false;
     }
   }

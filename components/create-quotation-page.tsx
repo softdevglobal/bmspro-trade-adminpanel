@@ -62,6 +62,7 @@ type Tab = "create" | "preview" | "send";
 
 type CatalogItem = {
   id: string;
+  documentVersionId: string | null;
   name: string;
   code: string | null;
   description: string | null;
@@ -70,6 +71,8 @@ type CatalogItem = {
 
 type SavedLineItem = {
   id: string;
+  catalogItemId: string | null;
+  catalogDocumentVersionId: string | null;
   code: string;
   name: string;
   description: string;
@@ -81,6 +84,8 @@ type SavedLineItem = {
 };
 
 type DraftLineItem = {
+  catalogItemId: string | null;
+  catalogDocumentVersionId: string | null;
   code: string;
   name: string;
   description: string;
@@ -247,6 +252,8 @@ function savedLineItemFromQuotation(
 
   return {
     id: `${index}-${item.name}-${crypto.randomUUID()}`,
+    catalogItemId: item.catalogItemId ?? null,
+    catalogDocumentVersionId: item.catalogDocumentVersionId ?? null,
     code: item.code ?? "",
     name: item.name,
     description: item.description ?? "",
@@ -850,6 +857,8 @@ export function CreateQuotationPage() {
   function startAddItem() {
     setCatalogSuggestField(null);
     setItemDraft({
+      catalogItemId: null,
+      catalogDocumentVersionId: null,
       code: "",
       name: "",
       description: "",
@@ -864,6 +873,8 @@ export function CreateQuotationPage() {
   function startEditItem(item: SavedLineItem) {
     setCatalogSuggestField(null);
     setItemDraft({
+      catalogItemId: item.catalogItemId,
+      catalogDocumentVersionId: item.catalogDocumentVersionId,
       code: item.code ?? "",
       name: item.name ?? "",
       description: item.description ?? "",
@@ -900,6 +911,8 @@ export function CreateQuotationPage() {
     );
     const saved: SavedLineItem = {
       id: editingItemId ?? crypto.randomUUID(),
+      catalogItemId: itemDraft.catalogItemId,
+      catalogDocumentVersionId: itemDraft.catalogDocumentVersionId,
       code,
       name,
       description,
@@ -924,7 +937,7 @@ export function CreateQuotationPage() {
     if (user) {
       try {
         const token = await user.getIdToken();
-        await fetch("/api/items", {
+        const response = await fetch("/api/items", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -937,6 +950,25 @@ export function CreateQuotationPage() {
             description: description || null,
           }),
         });
+        const result = (await response.json()) as {
+          item?: CatalogItem;
+        };
+        if (response.ok && result.item?.id) {
+          setLineItems((prev) =>
+            prev.map((line) =>
+              line.id === saved.id
+                ? {
+                    ...line,
+                    catalogItemId: line.catalogItemId ?? result.item!.id,
+                    catalogDocumentVersionId:
+                      line.catalogDocumentVersionId ??
+                      result.item!.documentVersionId ??
+                      null,
+                  }
+                : line,
+            ),
+          );
+        }
         await refreshCatalog(token);
       } catch {
         /* catalog save is best-effort */
@@ -950,6 +982,8 @@ export function CreateQuotationPage() {
         ? {
             ...prev,
             code: item.code ?? "",
+            catalogItemId: item.id,
+            catalogDocumentVersionId: item.documentVersionId ?? null,
             name: item.name,
             description: item.description ?? "",
             rate: String(item.priceAud),
@@ -1115,6 +1149,8 @@ export function CreateQuotationPage() {
             gstPricing,
           });
           return {
+            catalogItemId: item.catalogItemId,
+            catalogDocumentVersionId: item.catalogDocumentVersionId,
             code: (item.code ?? "").trim() || null,
             name: item.name,
             description: item.description || null,
@@ -1864,7 +1900,14 @@ export function CreateQuotationPage() {
                           value={itemDraft.name ?? ""}
                           onChange={(e) =>
                             setItemDraft((prev) =>
-                              prev ? { ...prev, name: e.target.value } : prev,
+                              prev
+                                ? {
+                                    ...prev,
+                                    name: e.target.value,
+                                    catalogItemId: null,
+                                    catalogDocumentVersionId: null,
+                                  }
+                                : prev,
                             )
                           }
                           onFocus={() => setCatalogSuggestField("name")}

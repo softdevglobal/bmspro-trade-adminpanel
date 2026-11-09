@@ -273,30 +273,14 @@ export async function GET(request: Request) {
   const byCustomerId = await adminDb
     .collection(REQUESTS_COLLECTION)
     .where("customerId", "==", auth.customer.uid)
+    .where("businessId", "==", businessId)
     .limit(100)
     .get();
-
-  const byEmail = await adminDb
-    .collection(REQUESTS_COLLECTION)
-    .where("customer.email", "==", auth.customer.email)
-    .limit(100)
-    .get();
-
-  const docs = new Map<string, FirebaseFirestore.DocumentData>();
-  for (const doc of byCustomerId.docs) {
-    docs.set(doc.id, doc.data());
-  }
-  for (const doc of byEmail.docs) {
-    if (docs.has(doc.id)) continue;
-    const data = doc.data();
-    if (businessId && data.businessId !== businessId) continue;
-    docs.set(doc.id, data);
-  }
 
   const requests = await enrichAssignmentsWithPhotos(
     await enrichRequestsWithJobAssignees(
       await enrichRequestsWithInvoices(
-        Array.from(docs.entries()).map(([id, data]) => mapBookingDoc(id, data)),
+        byCustomerId.docs.map((doc) => mapBookingDoc(doc.id, doc.data())),
       ),
     ),
   );
@@ -306,7 +290,6 @@ export async function GET(request: Request) {
   );
 
   const enriched: CustomerBooking[] = requests
-    .filter((req) => !businessId || req.businessId === businessId)
     .map((req) => {
       const summary = businessLookup.get(req.businessId);
       return {

@@ -1464,41 +1464,18 @@ export async function listBusinessNotifications(
 
 export async function listCustomerNotifications(
   customerId: string,
-  customerEmail: string,
-  businessId?: string | null,
+  businessId: string,
 ): Promise<NotificationRecord[]> {
-  const normalizedEmail = customerEmail ? normalizeEmail(customerEmail) : "";
-  const [byId, byEmail] = await Promise.all([
-    adminDb
-      .collection(CUSTOMER_NOTIFICATION_COLLECTION)
-      .where("customerId", "==", customerId)
-      .limit(NOTIFICATION_LIST_LIMIT)
-      .get(),
-    normalizedEmail
-      ? adminDb
-          .collection(CUSTOMER_NOTIFICATION_COLLECTION)
-          .where("customerEmail", "==", normalizedEmail)
-          .limit(NOTIFICATION_LIST_LIMIT)
-          .get()
-      : Promise.resolve(null),
-  ]);
+  const snap = await adminDb
+    .collection(CUSTOMER_NOTIFICATION_COLLECTION)
+    .where("customerId", "==", customerId)
+    .where("businessId", "==", businessId)
+    .limit(NOTIFICATION_LIST_LIMIT)
+    .get();
 
-  const docs = new Map<string, Record<string, unknown>>();
-  for (const doc of byId.docs) docs.set(doc.id, doc.data() ?? {});
-  if (byEmail) {
-    for (const doc of byEmail.docs) {
-      if (!docs.has(doc.id)) docs.set(doc.id, doc.data() ?? {});
-    }
-  }
-
-  const records = sortNewestFirst(
-    Array.from(docs.entries()).map(([id, data]) =>
-      mapNotificationRecord(id, "customer", data),
-    ),
+  return sortNewestFirst(
+    snap.docs.map((doc) => mapNotificationRecord(doc.id, "customer", doc.data())),
   );
-
-  if (!businessId) return records;
-  return records.filter((record) => record.businessId === businessId);
 }
 
 type OwnerGuard =
@@ -1506,8 +1483,7 @@ type OwnerGuard =
   | {
       audience: "customer";
       customerId: string;
-      customerEmail: string;
-      businessId?: string | null;
+      businessId: string;
     };
 
 function ownsNotification(
@@ -1517,11 +1493,7 @@ function ownsNotification(
   if (guard.audience === "business") {
     return data.businessId === guard.businessId;
   }
-  return customerOwnsNotificationRecord(data, {
-    customerId: guard.customerId,
-    customerEmail: guard.customerEmail,
-    businessId: guard.businessId,
-  });
+  return customerOwnsNotificationRecord(data, guard);
 }
 
 /** Marks notifications as read for an audience. Returns false if not owned. */
@@ -1558,55 +1530,13 @@ async function collectUnreadNotificationIds(
     return unreadIds;
   }
 
-  const normalizedEmail = normalizeEmail(guard.customerEmail);
-  const businessId = guard.businessId?.trim() || null;
-  const [byId, byEmail] = await Promise.all([
-    adminDb
-      .collection(collection)
-      .where("customerId", "==", guard.customerId)
-      .where("read", "==", false)
-      .get(),
-    normalizedEmail
-      ? adminDb
-          .collection(collection)
-          .where("customerEmail", "==", normalizedEmail)
-          .where("read", "==", false)
-          .get()
-      : Promise.resolve(null),
-  ]);
-
-  const seen = new Set<string>();
-  for (const doc of byId.docs) {
-    const data = doc.data() ?? {};
-    if (
-      businessId &&
-      typeof data.businessId === "string" &&
-      data.businessId !== businessId
-    ) {
-      continue;
-    }
-    if (!seen.has(doc.id)) {
-      seen.add(doc.id);
-      unreadIds.push(doc.id);
-    }
-  }
-  if (byEmail) {
-    for (const doc of byEmail.docs) {
-      const data = doc.data() ?? {};
-      if (
-        businessId &&
-        typeof data.businessId === "string" &&
-        data.businessId !== businessId
-      ) {
-        continue;
-      }
-      if (!seen.has(doc.id)) {
-        seen.add(doc.id);
-        unreadIds.push(doc.id);
-      }
-    }
-  }
-  return unreadIds;
+  const snap = await adminDb
+    .collection(collection)
+    .where("customerId", "==", guard.customerId)
+    .where("businessId", "==", guard.businessId)
+    .where("read", "==", false)
+    .get();
+  return snap.docs.map((doc) => doc.id);
 }
 
 export async function markAllNotificationsRead(
@@ -1652,11 +1582,7 @@ async function collectOwnedNotificationIds(
   const records =
     guard.audience === "business"
       ? await listBusinessNotifications(guard.businessId)
-      : await listCustomerNotifications(
-          guard.customerId,
-          guard.customerEmail,
-          guard.businessId,
-        );
+      : await listCustomerNotifications(guard.customerId, guard.businessId);
   return records.map((record) => record.id);
 }
 

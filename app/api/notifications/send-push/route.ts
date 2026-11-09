@@ -1,8 +1,6 @@
 import { verifyAccountIdToken } from "@/lib/auth/account-access";
 import { NextResponse } from "next/server";
 
-import { sendStaffMobilePush } from "@/lib/notifications/push";
-
 export const runtime = "nodejs";
 
 async function requireAuthenticatedUser(request: Request) {
@@ -19,21 +17,10 @@ async function requireAuthenticatedUser(request: Request) {
   }
 }
 
-/** Stringifies a data payload for FCM, which requires Record<string, string>. */
-function toStringData(data: unknown): Record<string, string> {
-  if (!data || typeof data !== "object") return {};
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    if (value === undefined || value === null) continue;
-    out[key] = typeof value === "string" ? value : JSON.stringify(value);
-  }
-  return out;
-}
-
 /**
- * Client-triggered FCM push endpoint used by the mobile app for flows that
- * originate on-device (booking status changes, staff assignment, walk-in
- * bookings, auto clock-out) rather than from server-side business logic.
+ * Retired client-controlled sender. Notifications must originate from an
+ * authorized domain operation that resolves recipients and content server-side.
+ * Keep an explicit response for older mobile clients using this URL.
  */
 export async function POST(request: Request) {
   const auth = await requireAuthenticatedUser(request);
@@ -41,36 +28,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ success: false, error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const targetUid =
-    (typeof body.targetUid === "string" && body.targetUid.trim()) ||
-    (typeof body.staffUid === "string" && body.staffUid.trim()) ||
-    null;
-  const title = typeof body.title === "string" ? body.title.trim() : "";
-  const message =
-    (typeof body.message === "string" && body.message.trim()) ||
-    (typeof body.body === "string" && body.body.trim()) ||
-    "";
-
-  if (!targetUid || !title || !message) {
-    return NextResponse.json(
-      { success: false, error: "targetUid, title, and message are required." },
-      { status: 400 },
-    );
-  }
-
-  await sendStaffMobilePush({
-    uid: targetUid,
-    title,
-    body: message,
-    data: toStringData(body.data),
-  });
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json(
+    {
+      success: false,
+      code: "CLIENT_PUSH_RETIRED",
+      error: "Direct push requests are no longer supported.",
+    },
+    { status: 410 },
+  );
 }

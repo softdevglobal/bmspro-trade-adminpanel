@@ -19,7 +19,7 @@ import {
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import { readFileSync } from "node:fs";
-import { doc, getDoc, setDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where, setDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 
 const PROJECT_ID = "demo-bms-security-test";
 
@@ -90,6 +90,7 @@ await testEnv.withSecurityRulesDisabled(async (context) => {
       customer: { email: "shared@example.com" },
     });
     await setDoc(doc(db, "customer_notifications", `notif-${suffix}`), {
+      businessId,
       customerId: `customer-${suffix}`,
       customerEmail: "shared@example.com",
       read: false,
@@ -465,6 +466,65 @@ for (const [name, db] of [
       assertFails(setDoc(doc(db, collection, id), { businessId: BUSINESS_A, status: "accepted" })));
   }
 }
+
+console.log("\ncached sessions respect current account and business status");
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  const db = context.firestore();
+  await setDoc(doc(db, "users", "owner-a"), { role: "owner", businessId: BUSINESS_A });
+  await setDoc(doc(db, "users", "staff-a"), { role: "staff", businessId: BUSINESS_A });
+  await setDoc(doc(db, "customers", "customer-a"), { registeredBusinessId: BUSINESS_A });
+  await setDoc(doc(db, "jobs", "assigned-a"), {
+    businessId: BUSINESS_A, assignedTo: { uid: "staff-a" }, customerId: "customer-a",
+  });
+  await setDoc(doc(db, "services", "service-a"), { businessId: BUSINESS_A });
+});
+
+const operationalRecords = [
+  ["jobs", "job-a"], ["invoices", "invoice-a"], ["items", "item-a"],
+  ["quotations", "quote-a"], ["requests", "request-a"],
+  ["business_notifications", "bnotif-a"], ["services", "service-a"],
+];
+await expect("active owner can list tenant jobs", assertSucceeds(getDocs(query(collection(asOwnerA, "jobs"), where("businessId", "==", BUSINESS_A)))));
+await expect("active staff can list permitted tenant jobs", assertSucceeds(getDocs(query(collection(asStaffA, "jobs"), where("businessId", "==", BUSINESS_A)))));
+await expect("active customer can list own tenant jobs", assertSucceeds(getDocs(query(collection(asCustomerA, "jobs"), where("businessId", "==", BUSINESS_A), where("customerId", "==", "customer-a")))));
+for (const state of [{ status: "suspended", isActive: true }, { status: "active", isActive: false }]) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), "businesses", BUSINESS_A), state);
+  });
+  for (const [collection, id] of operationalRecords) {
+    await expect(`cached owner blocked from ${collection} after business restriction`,
+      assertFails(getDoc(doc(asOwnerA, collection, id))));
+    await expect(`super admin can inspect restricted ${collection}`,
+      assertSucceeds(getDoc(doc(asSuperAdmin, collection, id))));
+  }
+  await expect("cached staff blocked from assigned job", assertFails(getDoc(doc(asStaffA, "jobs", "assigned-a"))));
+  await expect("cached staff cannot list tenant jobs", assertFails(getDocs(query(collection(asStaffA, "jobs"), where("businessId", "==", BUSINESS_A)))));
+  await expect("cached customer blocked from own job", assertFails(getDoc(doc(asCustomerA, "jobs", "job-a"))));
+  await expect("cached customer cannot mark a notification read", assertFails(updateDoc(doc(asCustomerA, "customer_notifications", "notif-a"), { read: true })));
+  await expect("cached staff cannot submit leave", assertFails(setDoc(doc(asStaffA, "leaveRequests", "restricted-leave"), {
+    businessId: BUSINESS_A, requesterUid: "staff-a", status: "pending",
+  })));
+  await expect("other active business retains access", assertSucceeds(getDoc(doc(asOwnerB, "jobs", "job-b"))));
+}
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  await updateDoc(doc(context.firestore(), "businesses", BUSINESS_A), { status: "active", isActive: true });
+});
+for (const patch of [
+  { status: "suspended" }, { status: "inactive" }, { status: "disabled" },
+  { disabled: true }, { suspended: true }, { isActive: false },
+]) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users", "staff-a"), { role: "staff", businessId: BUSINESS_A, ...patch });
+  });
+  await expect("restricted staff denied despite cached role claim " + JSON.stringify(patch),
+    assertFails(getDoc(doc(asStaffA, "jobs", "assigned-a"))));
+}
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  await setDoc(doc(context.firestore(), "users", "staff-a"), { role: "staff", businessId: BUSINESS_A, isActive: true });
+});
+await expect("reactivated staff retains assignment access", assertSucceeds(getDoc(doc(asStaffA, "jobs", "assigned-a"))));
+await expect("reactivated customer retains own job access", assertSucceeds(getDoc(doc(asCustomerA, "jobs", "job-a"))));
+await expect("reactivated owner retains workspace access", assertSucceeds(getDoc(doc(asOwnerA, "businesses", BUSINESS_A))));
 
 await testEnv.cleanup();
 

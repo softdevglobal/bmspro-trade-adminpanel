@@ -70,6 +70,7 @@ function SaveSpinner({ label }: { label: string }) {
 
 type CatalogItem = {
   id: string;
+  documentVersionId: string | null;
   name: string;
   code: string | null;
   description: string | null;
@@ -78,6 +79,8 @@ type CatalogItem = {
 
 type SavedLineItem = {
   id: string;
+  catalogItemId: string | null;
+  catalogDocumentVersionId: string | null;
   code: string;
   name: string;
   description: string;
@@ -89,6 +92,8 @@ type SavedLineItem = {
 };
 
 type DraftLineItem = {
+  catalogItemId: string | null;
+  catalogDocumentVersionId: string | null;
   code: string;
   name: string;
   description: string;
@@ -135,6 +140,8 @@ function quotationLineToSaved(
 
   return {
     id: `line-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    catalogItemId: item.catalogItemId ?? null,
+    catalogDocumentVersionId: item.catalogDocumentVersionId ?? null,
     code: item.code?.trim() ?? "",
     name: item.name,
     description: item.description?.trim() ?? "",
@@ -185,6 +192,8 @@ function toApiLineItems(
       gstPricing,
     });
     return {
+      catalogItemId: item.catalogItemId,
+      catalogDocumentVersionId: item.catalogDocumentVersionId,
       code: item.code.trim() || null,
       name: item.name.trim(),
       description: item.description.trim() || null,
@@ -952,6 +961,7 @@ export function CreateInvoiceFromQuotation({
               }
             : {
                 quotationId: quotation!.id,
+                expectedUpdatedAt: isEditingInvoice ? draftInvoice?.updatedAt : undefined,
                 ...(isDirectDraftInvoice
                   ? directPayload
                   : isEditingInvoice
@@ -995,10 +1005,17 @@ export function CreateInvoiceFromQuotation({
           termsAndConditions: termsAndConditions.trim() || null,
           invoiceDate,
           dueDate,
+          createOnly: !isEditingInvoice,
           send: andSend,
         }),
       });
-      const body = (await response.json()) as { ok?: boolean; error?: string };
+      const body = (await response.json()) as { ok?: boolean; error?: string; invoice?: InvoiceDetail };
+      if (response.status === 409) {
+        if (body.invoice) setDraftInvoice(body.invoice);
+        await loadQuotation();
+        setError(body.error ?? "This invoice changed. Review the current invoice before saving.");
+        return;
+      }
       if (!response.ok || !body.ok) {
         throw new Error(body.error ?? "Could not save invoice.");
       }
@@ -1040,6 +1057,8 @@ export function CreateInvoiceFromQuotation({
   function startAddItem() {
     setCatalogSuggestField(null);
     setItemDraft({
+      catalogItemId: null,
+      catalogDocumentVersionId: null,
       code: "",
       name: "",
       description: "",
@@ -1054,6 +1073,8 @@ export function CreateInvoiceFromQuotation({
   function startEditItem(item: SavedLineItem) {
     setCatalogSuggestField(null);
     setItemDraft({
+      catalogItemId: item.catalogItemId,
+      catalogDocumentVersionId: item.catalogDocumentVersionId,
       code: item.code ?? "",
       name: item.name ?? "",
       description: item.description ?? "",
@@ -1090,6 +1111,8 @@ export function CreateInvoiceFromQuotation({
     );
     const saved: SavedLineItem = {
       id: editingItemId ?? crypto.randomUUID(),
+      catalogItemId: itemDraft.catalogItemId,
+      catalogDocumentVersionId: itemDraft.catalogDocumentVersionId,
       code,
       name,
       description,
@@ -1115,7 +1138,7 @@ export function CreateInvoiceFromQuotation({
     if (user) {
       try {
         const token = await user.getIdToken();
-        await fetch("/api/items", {
+        const response = await fetch("/api/items", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -1128,6 +1151,25 @@ export function CreateInvoiceFromQuotation({
             description: description || null,
           }),
         });
+        const result = (await response.json()) as {
+          item?: CatalogItem;
+        };
+        if (response.ok && result.item?.id) {
+          setLineItems((prev) =>
+            prev.map((line) =>
+              line.id === saved.id
+                ? {
+                    ...line,
+                    catalogItemId: line.catalogItemId ?? result.item!.id,
+                    catalogDocumentVersionId:
+                      line.catalogDocumentVersionId ??
+                      result.item!.documentVersionId ??
+                      null,
+                  }
+                : line,
+            ),
+          );
+        }
         await refreshCatalog(token);
       } catch {
         /* catalog save is best-effort */
@@ -1141,6 +1183,8 @@ export function CreateInvoiceFromQuotation({
         ? {
             ...prev,
             code: item.code ?? "",
+            catalogItemId: item.id,
+            catalogDocumentVersionId: item.documentVersionId ?? null,
             name: item.name,
             description: item.description ?? "",
             rate: String(item.priceAud),
@@ -1288,7 +1332,7 @@ export function CreateInvoiceFromQuotation({
           <button
             type="button"
             onClick={() => void saveInvoice()}
-            disabled={submitting}
+            disabled={submitting || (draftInvoice !== null && draftInvoice.status !== "draft" && draftInvoice.status !== "sent")}
             className="inline-flex min-w-[6.5rem] items-center justify-center rounded-lg bg-primary px-4 py-2 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-60"
           >
             {submitting
@@ -1334,7 +1378,6 @@ export function CreateInvoiceFromQuotation({
           <span>{error}</span>
         </div>
       ) : null}
-
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
         {tab === "create" ? (
@@ -1641,7 +1684,14 @@ export function CreateInvoiceFromQuotation({
                           value={itemDraft.name ?? ""}
                           onChange={(e) =>
                             setItemDraft((prev) =>
-                              prev ? { ...prev, name: e.target.value } : prev,
+                              prev
+                                ? {
+                                    ...prev,
+                                    name: e.target.value,
+                                    catalogItemId: null,
+                                    catalogDocumentVersionId: null,
+                                  }
+                                : prev,
                             )
                           }
                           onFocus={() => setCatalogSuggestField("name")}
@@ -1906,7 +1956,7 @@ export function CreateInvoiceFromQuotation({
             <button
               type="button"
               onClick={() => void saveInvoice(true)}
-              disabled={submitting || !customerEmail.trim()}
+              disabled={submitting || !customerEmail.trim() || (draftInvoice !== null && draftInvoice.status !== "draft" && draftInvoice.status !== "sent")}
               className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-3 font-body text-[14px] font-semibold text-on-primary transition-colors hover:bg-primary/90 disabled:opacity-50 sm:max-w-xs"
             >
               {submitting ? (

@@ -106,37 +106,28 @@
  *   { "ok": false, "error": "Could not fetch services." }                   500
  */
 
-import { adminDb } from "@/lib/firebase/admin";
-import { requireCallCenterAgent } from "@/lib/callcenter/auth";
+import { requireCallCenterTenant } from "@/lib/callcenter/tenant";
 import { listCatalogItems } from "@/lib/items/server";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-/**
- * Verifies that a business document exists in the `businesses` collection.
- * Returns true if found, false otherwise.
- */
-async function businessExists(businessId: string): Promise<boolean> {
-  const snap = await adminDb.collection("businesses").doc(businessId).get();
-  return snap.exists;
-}
 
 /**
  * GET /api/callcenter/services?businessId=<businessId>
  *
  * Returns all catalog services/items for the given business.
- * Requires a valid call-center agent Bearer token.
+ * Requires an active human agent assigned to the business, or a super admin.
  *
  * Steps:
- *  1. Verify call-center agent Bearer token.
- *  2. Read and validate the required `businessId` query parameter.
- *  3. Confirm the business exists in Firestore.
+ *  1. Authenticate the agent and resolve the requested business.
+ *  2. Require business assignment, with a super admin exception.
+ *  3. Require an available business.
  *  4. Load all catalog items (services) for that business, sorted by name.
  *  5. Return the list with a total count.
  */
 export async function GET(request: Request) {
-  const auth = await requireCallCenterAgent(request);
+  const auth = await requireCallCenterTenant(request, { humanOnly: true });
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
@@ -144,25 +135,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const url = new URL(request.url);
-  const businessId = url.searchParams.get("businessId")?.trim() ?? "";
+  const businessId = auth.businessId;
 
-  if (!businessId) {
-    return NextResponse.json(
-      { ok: false, error: "businessId is required." },
-      { status: 400 },
-    );
-  }
 
   try {
-    const exists = await businessExists(businessId);
-    if (!exists) {
-      return NextResponse.json(
-        { ok: false, error: "Business not found." },
-        { status: 404 },
-      );
-    }
-
     const services = await listCatalogItems(businessId);
 
     return NextResponse.json({

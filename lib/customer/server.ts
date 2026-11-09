@@ -23,7 +23,7 @@ export type AuthedCustomer = {
   uid: string;
   /** Customer-facing email (not the scoped Firebase Auth email). */
   email: string;
-  businessId: string | null;
+  businessId: string;
   bookingSlug: string | null;
 };
 
@@ -52,6 +52,17 @@ export async function authenticateCustomerRequest(
     const decoded = await verifyAccountIdToken(match[1]);
     const uid = decoded.uid;
     const profile = await loadCustomerProfileDoc(uid);
+    if (
+      decoded.onboardingOnly === true ||
+      decoded.email_verified !== true ||
+      !profile?.registeredBusinessId?.trim()
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        error: "A verified customer account for this business is required.",
+      };
+    }
     const tokenEmail =
       typeof decoded.email === "string" && decoded.email
         ? decoded.email
@@ -84,7 +95,7 @@ export async function authenticateCustomerRequest(
       customer: {
         uid,
         email: displayEmail,
-        businessId: profile?.registeredBusinessId ?? null,
+        businessId: profile.registeredBusinessId,
         bookingSlug: profile?.registeredBookingSlug ?? null,
       },
     };
@@ -150,105 +161,9 @@ async function resolveBusinessByBookingSlug(slug: string): Promise<{
   };
 }
 
-/**
- * Writes registeredBusinessId, registeredBookingSlug, registeredBusinessName
- * once per customer (first signup from a /booknow/[slug] page).
- */
-async function attachRegistrationBusinessIfEmpty(
-  uid: string,
-  bookingSlug: string | undefined,
-): Promise<void> {
-  if (!bookingSlug?.trim()) return;
-
-  const ref = adminDb.collection(CUSTOMER_COLLECTION).doc(uid);
-  const snap = await ref.get();
-  const existing = snap.data() ?? {};
-  if (
-    typeof existing.registeredBusinessId === "string" &&
-    existing.registeredBusinessId.length > 0
-  ) {
-    return;
-  }
-
-  const business = await resolveBusinessByBookingSlug(bookingSlug);
-  if (!business) return;
-
-  await ref.set(
-    {
-      registeredBusinessId: business.id,
-      registeredBookingSlug: business.bookingSlug,
-      registeredBusinessName: business.businessName,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+export async function getCustomerProfile(uid: string): Promise<CustomerProfile | null> {
+  return loadCustomerProfileDoc(uid);
 }
-
-/** Reads or creates a baseline customer profile doc for the signed-in user. */
-export async function getOrCreateCustomerProfile(
-  customer: AuthedCustomer,
-  options: { bookingSlug?: string } = {},
-): Promise<CustomerProfile> {
-  const ref = adminDb.collection(CUSTOMER_COLLECTION).doc(customer.uid);
-  const snap = await ref.get();
-  if (snap.exists) {
-    const data = snap.data() ?? {};
-    if (
-      customer.email &&
-      (typeof data.email !== "string" || data.email !== customer.email)
-    ) {
-      await ref.update({
-        email: customer.email,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
-    await attachRegistrationBusinessIfEmpty(customer.uid, options.bookingSlug);
-    const refreshed = await ref.get();
-    return mapCustomerDoc(refreshed.id, refreshed.data() ?? {});
-  }
-
-  const now = FieldValue.serverTimestamp();
-  await ref.set({
-    uid: customer.uid,
-    email: customer.email,
-    fullName: "",
-    phone: "",
-    createdAt: now,
-    updatedAt: now,
-  });
-  await attachRegistrationBusinessIfEmpty(customer.uid, options.bookingSlug);
-  const created = await ref.get();
-  const createdData = created.data() ?? {};
-
-  await logAuditEvent({
-    businessId:
-      typeof createdData.registeredBusinessId === "string"
-        ? createdData.registeredBusinessId
-        : null,
-    category: "customer",
-    action: "customer.created",
-    actor: {
-      uid: customer.uid,
-      role: "customer",
-      name:
-        typeof createdData.fullName === "string" && createdData.fullName
-          ? createdData.fullName
-          : null,
-      email: customer.email,
-    },
-    source: "customer_portal",
-    summary: `New customer ${customer.email} self-registered through the portal`,
-    targetId: customer.uid,
-    targetLabel:
-      typeof createdData.fullName === "string" && createdData.fullName
-        ? createdData.fullName
-        : customer.email,
-    metadata: { via: "self_signup" },
-  });
-
-  return mapCustomerDoc(created.id, createdData);
-}
-
 
 export type EnsuredCustomerAccount = {
   uid: string;
@@ -398,47 +313,23 @@ export async function updateCustomerProfile(
   const shouldSendWelcome =
     existing.welcomeEmailSent !== true && input.fullName.trim().length >= 2;
 
-  const profileEmail =
-    input.email?.trim() ||
-    (customer.email ? customer.email : "") ||
-    (typeof existing.email === "string" ? existing.email : "");
-
-  const now = FieldValue.serverTimestamp();
-  if (!snap.exists) {
-    await ref.set({
-      uid: customer.uid,
-      email: profileEmail ? normalizeEmail(profileEmail) : "",
-      fullName: input.fullName,
-      phone: input.phone,
-      createdAt: now,
-      updatedAt: now,
-    });
-  } else {
-    const update: Record<string, unknown> = {
-      fullName: input.fullName,
-      phone: input.phone,
-      updatedAt: now,
-    };
-    if (profileEmail) {
-      update.email = normalizeEmail(profileEmail);
-    }
-    await ref.update(update);
-  }
-
-  await attachRegistrationBusinessIfEmpty(customer.uid, input.bookingSlug);
+  await ref.update({
+    fullName: input.fullName,
+    phone: input.phone,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
 
   const refreshed = await ref.get();
   const profile = mapCustomerDoc(refreshed.id, refreshed.data() ?? {});
 
   if (shouldSendWelcome) {
     try {
-      const welcomeSlug =
-        profile.registeredBookingSlug ?? input.bookingSlug ?? null;
+      const welcomeSlug = profile.registeredBookingSlug;
       const welcomeBusiness = welcomeSlug
         ? await resolveBusinessByBookingSlug(welcomeSlug)
         : null;
       await sendCustomerWelcomeEmail({
-        email: profileEmail ? normalizeEmail(profileEmail) : customer.email,
+        email: customer.email,
         phone: profile.phone ?? input.phone ?? null,
         fullName: profile.fullName,
         businessName: profile.registeredBusinessName,

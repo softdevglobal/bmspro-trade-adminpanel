@@ -126,7 +126,9 @@
 
 import { adminDb } from "@/lib/firebase/admin";
 import { requireCallCenterAgent } from "@/lib/callcenter/auth";
-import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { FieldPath, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { agentBusinessIds, chunk } from "@/lib/callcenter/tenant";
+import { isTenantAccessAllowed } from "@/lib/onboarding/business-status";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -255,7 +257,7 @@ function mapTenantDoc(doc: QueryDocumentSnapshot): TenantSummary {
 /**
  * GET /api/callcenter/tenants
  *
- * Returns a list of all businesses (tenants) on the platform.
+ * Returns assigned businesses for human agents and all businesses for super admins.
  * Requires a valid call-center agent Bearer token.
  *
  * Optional query params:
@@ -292,8 +294,23 @@ export async function GET(request: Request) {
       query = query.where("status", "==", statusFilter);
     }
 
-    const snapshot = await query.limit(limit).get();
-    let tenants = snapshot.docs.map(mapTenantDoc);
+    let docs: QueryDocumentSnapshot[];
+    if (auth.isSuperAdmin) {
+      docs = (await query.limit(limit).get()).docs;
+    } else {
+      const businessIds = await agentBusinessIds(auth.uid);
+      const snapshots = await Promise.all(
+        chunk(businessIds).map((ids) =>
+          query.where(FieldPath.documentId(), "in", ids).limit(limit).get(),
+        ),
+      );
+      docs = snapshots.flatMap((snapshot) => snapshot.docs).filter((doc) =>
+        isTenantAccessAllowed(doc.data().status, doc.data().isActive),
+      );
+    }
+    let tenants = docs.map(mapTenantDoc)
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+      .slice(0, limit);
 
     // Apply client-side search filter on businessName (Firestore has no
     // native case-insensitive prefix query without extra indexing).

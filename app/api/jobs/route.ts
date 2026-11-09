@@ -3,9 +3,13 @@ import { logAuditEvent } from "@/lib/audit/server";
 import { actorRoleFromClaim } from "@/lib/audit/types";
 import { createDirectJob, createDirectJobSeries, listBusinessBookings } from "@/lib/bookings/server";
 import {
+  expandRecurrenceVisits,
   parseJobRecurrenceRule,
 } from "@/lib/bookings/recurrence";
-import { resolveJobAssignmentFromPayload } from "@/lib/bookings/resolve-job-assignment";
+import {
+  resolveJobAssignmentFromPayload,
+  validateStaffAssignmentForSchedule,
+} from "@/lib/bookings/resolve-job-assignment";
 import { estimateMinutesFromTimeRange } from "@/lib/bookings/job-estimate";
 import { parseCalendarScheduleInput } from "@/lib/calendar/schedule-input";
 import { parseWorkingHoursFromBusiness } from "@/lib/calendar/working-hours";
@@ -255,6 +259,27 @@ export async function POST(request: Request) {
       { ok: false, error: "Check the repeat rule — interval, days, and end condition are required." },
       { status: 400 },
     );
+  }
+
+  if (wantsRecurrence && recurrence && assignmentResult.assignment?.type === "staff") {
+    for (const visit of expandRecurrenceVisits(recurrence)) {
+      const availability = await validateStaffAssignmentForSchedule(
+        auth.businessId,
+        assignmentResult.assignment,
+        visit.date,
+        visit.startTime,
+        visit.endTime,
+      );
+      if (!availability.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `${availability.error} No visits in the series were created.`,
+          },
+          { status: availability.status },
+        );
+      }
+    }
   }
 
   const jobInput = {
