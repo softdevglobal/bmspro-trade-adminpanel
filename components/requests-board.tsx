@@ -254,8 +254,11 @@ export function RequestsBoard() {
   const isLoading = requestsLoading;
   const loadError = requestsError;
   const boardRequests = useMemo(
-    () => uniqueRequestsForBoard(requestsLocal, bookingById),
-    [requestsLocal, bookingById],
+    () => uniqueRequestsForBoard(
+      requestsLocal.filter((request) => !jobsModuleEnabled || !request.sophieJobRequest),
+      bookingById,
+    ),
+    [requestsLocal, bookingById, jobsModuleEnabled],
   );
 
   const filtered = useMemo(() => {
@@ -3218,7 +3221,9 @@ function SlotsOverview({
             <ScheduleSubsection
               category="job"
               label="Customer preferred job days"
-              hint="Chosen when they accepted your quotation."
+              hint={request.createdSource === "job_direct" || request.sophieJobRequest
+                ? "Date and rough times requested by the customer."
+                : "Chosen when they accepted your quotation."}
             >
               <ScheduleSlotsList
                 slots={request.jobPreferredSlots}

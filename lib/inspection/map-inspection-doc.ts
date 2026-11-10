@@ -60,13 +60,18 @@ function parseCustomer(raw: unknown): InspectionCustomer {
 function parseSlots(raw: unknown): InspectionSlot[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((entry) => {
+    .map<InspectionSlot | null>((entry) => {
       if (!entry || typeof entry !== "object") return null;
       const item = entry as Record<string, unknown>;
       const date = typeof item.date === "string" ? item.date : null;
       const timeRange = item.timeRange;
       if (!date || !isTimeRange(timeRange)) return null;
-      return { date, timeRange } satisfies InspectionSlot;
+      return {
+        date,
+        timeRange,
+        ...(isClockTime(item.startTime) ? { startTime: item.startTime } : {}),
+        ...(isClockTime(item.endTime) ? { endTime: item.endTime } : {}),
+      };
     })
     .filter((slot): slot is InspectionSlot => slot !== null);
 }
@@ -131,6 +136,7 @@ export function mapInspectionDoc(
     customer: parseCustomer(data.customer),
     customerId: typeof data.customerId === "string" ? data.customerId : null,
     createdSource: parseCreatedSource(data.createdSource),
+    ...(data.sophieJobRequest === true ? { sophieJobRequest: true } : {}),
     requestCode:
       typeof data.requestCode === "string" && data.requestCode.trim()
         ? data.requestCode.trim()

@@ -35,26 +35,28 @@ function fixture() {
     async complete(key, result) { records.get(key)!.result = result; },
   };
   const state = { authority: true, writes: true, stored: job(), free: new Set(["2099-01-12:morning"]), full: false, creates: 0, moves: 0, cancels: 0,
-    events: [] as string[], planned: [] as Array<{ slot: unknown; staffUids?: string[] }>, raceOnce: false, auto: true, pending: [] as Array<{ reason: string; preferredSlots: unknown[] }> };
+    events: [] as string[], planned: [] as Array<{ slot: unknown; staffUids?: string[] }>, raceOnce: false, auto: true,
+    createdPreferences: [] as unknown[][], pending: [] as Array<{ reason: string; preferredSlots: unknown[] }> };
   const deps: VoiceJobDependencies = {
     business: async () => ({ timezone: "Australia/Melbourne", sophieJobAuthority: state.authority }),
     service: async id => id === "service-a" ? { name: "Switchboard upgrade", durationMinutes: 120 } : null,
     customer: async () => undefined,
     findJob: async code => code === jobCode ? state.stored : null,
-    plan: async ({ slot, staffUids }) => {
+    plan: async ({ slot, staffUids, durationMinutes }) => {
       state.planned.push({ slot, staffUids });
       const key = `${slot.date}:${slot.timeRange}`;
       if (!state.free.has(key) || (staffUids && !staffUids.includes("staff-a"))) return { ok: false, reason: "busy" };
       const startTime = slot.startTime ?? (slot.timeRange === "morning" ? "08:00" : "12:00");
-      const end = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3)) + 120;
+      const end = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3)) + durationMinutes;
       return { ok: true, assignedTo: { type: "staff", uid: "staff-a", name: "Alex", email: null }, slot: { date: slot.date, timeRange: slot.timeRange },
         startTime, endTime: `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}` };
     },
     capacityFull: async () => state.full,
-    create: async (_input, plan) => {
+    create: async (input, plan) => {
       if (state.raceOnce) { state.raceOnce = false; return { ok: false, error: "taken", planChanged: true }; }
       state.creates++;
-      return { ok: true, booking: job({ id: "job-new", bookingCode: "BK 22222222Z", scheduledSlot: plan.slot, scheduledStartTime: plan.startTime, scheduledEndTime: plan.endTime }) };
+      state.createdPreferences.push(input.preferredSlots);
+      return { ok: true, booking: job({ id: "job-new", bookingCode: "BK 22222222Z", scheduledSlot: plan.slot, scheduledStartTime: plan.startTime, scheduledEndTime: plan.endTime, estimatedDurationMinutes: input.durationMinutes }) };
     },
     move: async (current, plan) => { state.moves++; state.stored = { ...current, scheduledSlot: plan.slot, scheduledStartTime: plan.startTime, scheduledEndTime: plan.endTime }; return { ok: true, booking: state.stored }; },
     cancel: async current => { state.cancels++; state.stored = { ...current, status: "cancelled" }; return { ok: true, booking: state.stored }; },
@@ -109,6 +111,32 @@ test("job booking falls through busy or full sessions and retries once a concurr
   assert.equal(waiting.status, "PENDING_REVIEW"); assert.equal(waiting.code, "STAFF_ASSIGNMENT_REVIEW_REQUIRED");
   assert.equal((await actions.create(booking({ requestKey: "job-booking-key-0005", serviceId: "service-z" }))).status, "REJECTED");
   assert.equal((await actions.create(booking({ requestKey: "job-booking-key-0006", customerConfirmed: false }))).status, "REJECTED");
+});
+
+test("rough job times constrain staff availability and owner deferral saves the preferences", async () => {
+  const { state, actions } = fixture();
+  const slot = { date: "2099-01-12", timeRange: "morning", startTime: "09:30", endTime: "12:00" };
+  const result = await actions.create(booking({ preferredSlots: [slot] }));
+  assert.equal(result.status, "CONFIRMED");
+  assert.equal(result.appointment?.startTime, "09:30");
+  assert.equal(result.appointment?.endTime, "12:00");
+  assert.equal(result.appointment?.inspectorName, "Alex");
+  assert.deepEqual(state.createdPreferences[0], [slot]);
+
+  const finishOnly = await actions.create(booking({
+    requestKey: "job-finish-only-0001", preferredSlots: [{ ...slot, startTime: null }],
+  }));
+  assert.equal(finishOnly.appointment?.startTime, "10:00");
+  assert.equal(finishOnly.appointment?.endTime, "12:00");
+  assert.deepEqual(state.createdPreferences[1], [{ ...slot, startTime: null }]);
+  const previousPlans = state.planned.length;
+  const deferred = await actions.create(booking({
+    requestKey: "job-defer-times-0001", preferredSlots: [slot], deferScheduling: true,
+  }));
+  assert.equal(deferred.status, "PENDING_REVIEW");
+  assert.equal(state.planned.length, previousPlans);
+  assert.deepEqual(state.pending[0]?.preferredSlots, [slot]);
+  assert.equal(state.creates, 2);
 });
 
 test("lookup needs the reference plus both contacts and reveals only a summary", async () => {
