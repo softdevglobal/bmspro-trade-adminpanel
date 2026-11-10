@@ -159,6 +159,7 @@ export type InspectionRequestDetail = {
   customerId: string | null;
   /** Set on create; null on older documents. */
   createdSource: InspectionRequestCreatedSource | null;
+  sophieJobRequest?: boolean;
   /** Human-readable code, e.g. `INS-REQ 4K7H2M9P`. Null on older documents. */
   requestCode: string | null;
   address: InspectionAddress;

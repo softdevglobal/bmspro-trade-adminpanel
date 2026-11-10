@@ -1,6 +1,7 @@
 "use client";
 
 import { CareplusCaptureShortcut } from "@/components/careplus-capture-shortcut";
+import { bookingMinDateFromInspection, ConvertToBookingPanel } from "@/components/convert-to-booking-panel";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
@@ -25,6 +26,8 @@ import {
 } from "@/lib/bookings/series-progress";
 import { bookingForCalendar } from "@/lib/calendar/events";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
+import { subscribePendingCallJobs } from "@/lib/inspection/firestore-client";
+import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import {
   formatAddressForDisplay,
   formatSlotDate,
@@ -43,6 +46,7 @@ import { ADMIN_COPY } from "@/lib/copy/product-language";
 import { AddInspectionModal } from "@/components/add-inspection-modal";
 import { JobInstructionsDisplay, JobInstructionsGlance } from "@/components/job-instructions-display";
 import { StaffMemberPicker } from "@/components/staff-member-picker";
+import { ScheduleSlotsList } from "@/components/schedule-dates-display";
 import { copyTextToClipboard } from "@/lib/copy-data/clipboard";
 import {
   formatJobCopyText,
@@ -840,6 +844,7 @@ function BookingPreviewContent({
     () => bookingScheduleDays(displayBooking),
     [displayBooking],
   );
+  const requestedTimes = requestsById.get(booking.inspectionRequestId)?.jobPreferredSlots ?? [];
   const { user } = useAuth();
   const [mode, setMode] = useState<PreviewMode>("review");
   const [assignTo, setAssignTo] = useState<"owner" | "staff" | null>(null);
@@ -1046,6 +1051,12 @@ function BookingPreviewContent({
           </section>
         )}
 
+        {requestedTimes.some((slot) => slot.startTime || slot.endTime) ? (
+          <section className="space-y-2 rounded-xl border border-outline-variant/60 p-3">
+            <h3 className="text-sm font-semibold">Customer preferred times</h3>
+            <ScheduleSlotsList slots={requestedTimes} category="job" timeZone={timeZone} />
+          </section>
+        ) : null}
         {scheduleDays.length > 0 ? (
           <section className="rounded-xl border border-primary/25 bg-primary/5 p-3">
             <p className="font-body text-[11px] font-bold uppercase tracking-wider text-primary">
@@ -1447,7 +1458,7 @@ export function JobsBoard({
 }: {
   initialJobId?: string | null;
 }) {
-  const { status: authStatus, user } = useAuth();
+  const { status: authStatus, user, role, businessId } = useAuth();
   const profile = useBusinessProfile();
   const { bookings, loading, error } = useBookings();
   const { requests } = useInspectionRequests();
@@ -1458,9 +1469,26 @@ export function JobsBoard({
     [requests],
   );
   const [selectedId, setSelectedId] = useState<string | null>(initialJobId);
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
+  const [callJobsFeed, setCallJobsFeed] = useState<{
+    businessId: string;
+    requests: InspectionRequestDetail[];
+    error?: boolean;
+  } | null>(null);
+  const pageVisible = usePageVisible();
+  useEffect(() => {
+    if (!user || role !== "business_owner" || !businessId || !pageVisible) return;
+    return subscribePendingCallJobs(
+      businessId,
+      (requests) => setCallJobsFeed({ businessId, requests }),
+      () => setCallJobsFeed({ businessId, requests: [], error: true }),
+    );
+  }, [user, role, businessId, pageVisible]);
+  const [resolvedCallJobIds, setResolvedCallJobIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<JobsFilter>("active");
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BookingDetail | null>(null);
+  const [deleteCallJobTarget, setDeleteCallJobTarget] = useState<InspectionRequestDetail | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<BookingDetail | null>(null);
@@ -1482,6 +1510,14 @@ export function JobsBoard({
     localBookingState?.source === bookings
       ? localBookingState.bookings
       : bookings;
+  const callJobs = callJobsFeed?.businessId === businessId ? callJobsFeed : null;
+  const pendingCallJobs = (callJobs?.requests ?? []).filter((request) =>
+    request.status === "completed" &&
+    request.bookingStatus === "awaiting" &&
+    !request.bookingId &&
+    !resolvedCallJobIds.includes(request.id) &&
+    !displayBookings.some((booking) => booking.inspectionRequestId === request.id),
+  );
   const groupedBookings = useMemo(() => {
     const groups = displayBookings.reduce(
       (groups, booking) => {
@@ -1554,13 +1590,15 @@ export function JobsBoard({
   }
 
   async function confirmDeleteJob() {
-    if (!user || !deleteTarget) return;
+    const target = deleteCallJobTarget ?? deleteTarget;
+    if (!user || !target || deleting) return;
     setDeleting(true);
     setDeleteError(null);
     try {
       const token = await user.getIdToken();
+      const id = encodeURIComponent(target.id);
       const response = await fetch(
-        `/api/jobs/${encodeURIComponent(deleteTarget.id)}`,
+        deleteCallJobTarget ? `/api/requests/${id}?kind=pending-call-job` : `/api/jobs/${id}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
@@ -1570,19 +1608,26 @@ export function JobsBoard({
       if (!response.ok || !data.ok) {
         throw new Error(data.error ?? "Could not delete job.");
       }
+      if (deleteCallJobTarget) {
+        setResolvedCallJobIds((ids) => [...ids, target.id]);
+        if (pendingJobId === target.id) setPendingJobId(null);
+        setDeleteCallJobTarget(null);
+        return;
+      }
       setLocalBookingState((current) => {
         const base =
           current?.source === bookings ? current.bookings : bookings;
         return {
           source: bookings,
-          bookings: base.filter((entry) => entry.id !== deleteTarget.id),
+          bookings: base.filter((entry) => entry.id !== target.id),
         };
       });
-      if (selectedId === deleteTarget.id) {
+      if (selectedId === target.id) {
         setSelectedId(null);
       }
       setDeleteTarget(null);
     } catch (deleteErr) {
+      if (deleteCallJobTarget) setDeleteCallJobTarget(null);
       setDeleteError(
         deleteErr instanceof Error ? deleteErr.message : "Could not delete job.",
       );
@@ -1713,7 +1758,8 @@ export function JobsBoard({
     />
   );
 
-  if (authStatus === "loading" || loading) {
+  if (authStatus === "loading" || loading ||
+      (pageVisible && user && role === "business_owner" && businessId && !callJobs)) {
     return (
       <>
         <div className="space-y-3">
@@ -1743,7 +1789,7 @@ export function JobsBoard({
     );
   }
 
-  if (displayBookings.length === 0) {
+  if (displayBookings.length === 0 && pendingCallJobs.length === 0 && !callJobs?.error) {
     return (
       <>
         <div className="mb-4 flex justify-end">
@@ -1793,6 +1839,7 @@ export function JobsBoard({
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-body text-[12px] text-on-surface-variant sm:flex-1">
           {groupedBookings.active.length} active ·{" "}
+          {pendingCallJobs.length > 0 ? `${pendingCallJobs.length} awaiting scheduling · ` : ""}
           {groupedBookings.completed.length} completed ·{" "}
           {groupedBookings.cancelled.length} cancelled · tap a card to open the
           side preview
@@ -1874,6 +1921,48 @@ export function JobsBoard({
         </div>
       ) : null}
 
+      {callJobs?.error ? <p role="alert" className="mb-4">Could not load call jobs awaiting scheduling.</p> : null}
+      {activeFilter === "active" && pendingCallJobs.length > 0 ? (
+        <section className="mb-4 space-y-3" aria-label="Call jobs awaiting scheduling">
+          <h2 className="font-semibold text-on-surface">Call jobs awaiting scheduling</h2>
+          {pendingCallJobs.map((request) => (
+            <div key={request.id} className="space-y-2 rounded-xl border border-outline-variant/60 p-4">
+              <p className="font-semibold">{request.serviceName} · {request.customer.fullName}</p>
+              <p className="text-sm text-on-surface-variant">{formatAddressForDisplay(request.address)}</p>
+              <ul className="text-sm text-on-surface-variant" aria-label="Customer preferred times">
+                {request.jobPreferredSlots.map((slot) => (
+                  <li key={`${slot.date}-${slot.timeRange}-${slot.startTime ?? ""}`}>
+                    {formatSlotDate(slot.date, timeZone)} · {formatVisitWindow(slot.startTime, slot.endTime) ?? TIME_RANGE_LABELS[slot.timeRange]}
+                  </li>
+                ))}
+              </ul>
+              {pendingJobId === request.id ? (
+                <ConvertToBookingPanel
+                  inspectionRequestId={request.id}
+                  minBookingDate={bookingMinDateFromInspection(request, timeZone)}
+                  customerJobPreferredSlots={request.jobPreferredSlots}
+                  onSuccess={(updated) => {
+                    setResolvedCallJobIds((ids) => [...ids, request.id]);
+                    setPendingJobId(null);
+                    setSelectedId(updated.bookingId);
+                  }}
+                  onCancel={() => setPendingJobId(null)}
+                />
+              ) : (
+                <div className="flex items-center gap-4">
+                  <button type="button" className="font-semibold text-primary" onClick={() => setPendingJobId(request.id)}>
+                    Schedule job
+                  </button>
+                  <button type="button" className="font-semibold text-error" onClick={() => setDeleteCallJobTarget(request)}>
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
+      ) : null}
+
       {visibleBookings.length > 0 ? (
         <ul className="space-y-3">
           {visibleBookings.map((booking) => (
@@ -1901,7 +1990,7 @@ export function JobsBoard({
             </li>
           ))}
         </ul>
-      ) : (
+      ) : activeFilter === "active" && pendingCallJobs.length > 0 ? null : (
         <section className="rounded-xl border border-dashed border-outline-variant/60 bg-surface-container-lowest px-5 py-8 text-center">
           <p className="font-display text-[17px] font-semibold text-on-surface">
             No {activeFilter} jobs
@@ -1945,19 +2034,24 @@ export function JobsBoard({
       />
 
       <DeleteConfirmModal
-        open={deleteTarget !== null}
-        title="Delete this job?"
+        open={deleteTarget !== null || deleteCallJobTarget !== null}
+        title={deleteCallJobTarget ? "Delete this call job request?" : "Delete this job?"}
         description={
-          deleteTarget
+          deleteCallJobTarget
+            ? `The call job request for ${deleteCallJobTarget.customer.fullName || "this customer"} and its generated quotation will be permanently removed.`
+            : deleteTarget
             ? `Only ${displayBookingCode(deleteTarget)} for ${
                 deleteTarget.customer.fullName || "this customer"
               } will be permanently removed. Any linked request and quotation will be kept. This cannot be undone.`
             : ""
         }
-        confirmLabel="Yes, delete job"
+        confirmLabel={deleteCallJobTarget ? "Yes, delete request" : "Yes, delete job"}
         cancelLabel="Keep job"
         onCancel={() => {
-          if (!deleting) setDeleteTarget(null);
+          if (!deleting) {
+            setDeleteTarget(null);
+            setDeleteCallJobTarget(null);
+          }
         }}
         onConfirm={() => void confirmDeleteJob()}
         isLoading={deleting}

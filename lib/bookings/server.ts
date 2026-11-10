@@ -1174,6 +1174,7 @@ export type CreateDirectJobInput = {
   endTime: string;
   estimatedDurationMinutes: number;
   additionalJobDays?: InspectionSlot[];
+  jobPreferredSlots?: InspectionSlot[];
   note?: string | null;
   instructionDescription?: string | null;
   instructionTasks?: string[];
@@ -1382,6 +1383,7 @@ export async function createDirectJob(
     address: input.address,
     preferredSlots: [],
     ownerProposedSlots: [],
+    ...(input.jobPreferredSlots ? { jobPreferredSlots: input.jobPreferredSlots } : {}),
     adminJobPreferredSlots: input.additionalJobDays ?? [],
     jobProposedSlots: input.additionalJobDays ?? [],
     scheduledSlot: input.slot,

@@ -4,6 +4,7 @@ import {
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
   formatSlotDate,
+  formatVisitWindow,
   sortInspectionSlots,
   type InspectionSlot,
   type InspectionTimeRange,
@@ -210,7 +211,9 @@ export function ScheduleSlotsList({
               <span className="material-symbols-outlined text-[16px] opacity-85">
                 {slotTimeIcon(slot.timeRange)}
               </span>
-              {TIME_RANGE_LABELS[slot.timeRange]}
+              {category === "job" && variant !== "scheduled"
+                ? formatVisitWindow(slot.startTime, slot.endTime) ?? TIME_RANGE_LABELS[slot.timeRange]
+                : TIME_RANGE_LABELS[slot.timeRange]}
             </p>
             {variant === "scheduled" && timeWindow ? (
               <p className="mt-1 flex items-center gap-1.5 font-body text-[12px] font-semibold leading-snug text-emerald-900">

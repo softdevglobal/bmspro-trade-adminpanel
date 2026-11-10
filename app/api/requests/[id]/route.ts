@@ -738,7 +738,12 @@ export async function DELETE(
   }
 
   const { id } = await context.params;
-  const result = await deleteBusinessInspectionRequest(auth.businessId, id);
+  const pendingCallJobOnly = new URL(request.url).searchParams.get("kind") === "pending-call-job";
+  const result = await deleteBusinessInspectionRequest(
+    auth.businessId,
+    id,
+    pendingCallJobOnly ? { pendingCallJobOnly: true } : undefined,
+  );
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error },
@@ -758,7 +763,7 @@ export async function DELETE(
       email: auth.email,
     },
     source: "admin_panel",
-    summary: `Request ${result.request.requestCode ?? id} deleted`,
+    summary: `${pendingCallJobOnly ? "Pending call job" : "Request"} ${result.request.requestCode ?? id} deleted`,
     targetId: result.request.id,
     targetLabel: result.request.customer.fullName || null,
     metadata: {

@@ -1,7 +1,9 @@
 import { jobBookingArguments, jobCancelArguments, jobLookupArguments, jobRescheduleArguments, voiceCustomerMatches,
   type VoiceActionResult, type VoiceJobSlot, type ScheduleVoiceTask } from "./action-schemas";
-import { parseInspectionRequestInput, parseSlotsArray, type InspectionCustomer, type InspectionAddress, type InspectionRequestDetail } from "@/lib/inspection/types";
+import { parseInspectionRequestInput, parseSlotsArray, type InspectionCustomer, type InspectionAddress, type InspectionRequestDetail, type InspectionSlot } from "@/lib/inspection/types";
 import type { BookingDetail } from "@/lib/bookings/types";
+import { minutesBetweenClockTimes } from "@/lib/bookings/job-estimate";
+import { parseClockMinutes } from "@/lib/leave/clock";
 import type { AiJobVisitPlan } from "@/lib/team/ai-assignment-server";
 import { runVoiceOperation, voiceOperationStore } from "./operation";
 import type { VoiceBusiness } from "../../config";
@@ -19,7 +21,7 @@ export interface VoiceJobDependencies {
   findJob(jobCode: string): Promise<BookingDetail | null>;
   plan(input: { serviceId: string; slot: VoiceJobSlot; durationMinutes: number; excludeJobId?: string; staffUids?: string[] }): Promise<AiJobVisitPlan>;
   capacityFull(date: string, startTime: string, endTime: string, excludeJobId?: string): Promise<boolean>;
-  create(input: JobInput, plan: PlannedVisit): Promise<JobWrite>;
+  create(input: JobInput & { preferredSlots: VoiceJobSlot[] }, plan: PlannedVisit): Promise<JobWrite>;
   /** Saves the job for the owner to schedule (accepted quote awaiting a job) when Sophie cannot confirm it. */
   createPending(input: JobInput & { preferredSlots: VoiceJobSlot[]; reason: string }): Promise<{ ok: true; request: InspectionRequestDetail } | { ok: false; error: string }>;
   requested(request: InspectionRequestDetail, reason: string): void;
@@ -74,12 +76,27 @@ function appointment(job: BookingDetail, timezone: string): VoiceActionResult["a
 
 /** Try each preferred session in the caller's order: plan staff and an exact time, then respect hourly job capacity. */
 async function planFirstFree(deps: VoiceJobDependencies, serviceId: string, slots: VoiceJobSlot[], durationMinutes: number,
-  write: (plan: PlannedVisit) => Promise<JobWrite>, options: { excludeJobId?: string; staffOrder?: Array<string[] | undefined> } = {}) {
-  for (const slot of slots) {
+  write: (plan: PlannedVisit, duration: number) => Promise<JobWrite>, options: { excludeJobId?: string; staffOrder?: Array<string[] | undefined> } = {}) {
+  for (const preference of slots) {
+    let slot = preference;
+    let duration = durationMinutes;
+    if (preference.endTime) {
+      if (preference.startTime) {
+        duration = minutesBetweenClockTimes(preference.startTime, preference.endTime) ?? 0;
+        if (duration <= 0 || duration > 540) continue;
+      } else {
+        const finish = parseClockMinutes(preference.endTime);
+        if (finish === null || finish < duration) continue;
+        const start = finish - duration;
+        const startTime = `${String(Math.floor(start / 60)).padStart(2, "0")}:${String(start % 60).padStart(2, "0")}`;
+        slot = { ...preference, startTime };
+      }
+    }
     for (const staffUids of options.staffOrder ?? [undefined]) {
-      const plan = await deps.plan({ serviceId, slot, durationMinutes, excludeJobId: options.excludeJobId, staffUids });
-      if (!plan.ok || await deps.capacityFull(plan.slot.date, plan.startTime, plan.endTime, options.excludeJobId)) continue;
-      const result = await write(plan);
+      const plan = await deps.plan({ serviceId, slot, durationMinutes: duration, excludeJobId: options.excludeJobId, staffUids });
+      if (!plan.ok || (preference.endTime && plan.endTime !== preference.endTime) ||
+          await deps.capacityFull(plan.slot.date, plan.startTime, plan.endTime, options.excludeJobId)) continue;
+      const result = await write(plan, duration);
       if (result.ok || !result.planChanged) return result;
     }
   }
@@ -92,7 +109,8 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
   const futureSlots = (raw: VoiceJobSlot[], timezone: string) => {
     const parsed = parseSlotsArray(raw, 3, timezone);
     if (parsed.length !== raw.length) return null;
-    return parsed.map(slot => ({ date: slot.date, timeRange: slot.timeRange, startTime: slot.startTime ?? null }));
+    return parsed.map(slot => ({ date: slot.date, timeRange: slot.timeRange, startTime: slot.startTime ?? null,
+      ...(slot.endTime ? { endTime: slot.endTime } : {}) }));
   };
   /** Shared verification for lookup, move and cancel: reference + both contacts within this business only. */
   const locate = async (jobCode: string, contact: { email: string; phone: string }) => {
@@ -114,12 +132,12 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
     create: async (raw: unknown): Promise<VoiceActionResult> => {
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Job booking is disabled." };
       const args = jobBookingArguments.safeParse(raw);
-      if (!args.success) return { status: "REJECTED", message: "Check the service, site address, preferred times and contacts, then obtain explicit confirmation after reading them back." };
+      if (!args.success) return { status: "REJECTED", message: "Check the service, site address, preferred times and contacts. If a start and finish are given, finish must be after start. Read back the details and obtain explicit confirmation." };
       const business = await deps.business();
       const autoConfirm = deps.autoConfirmEnabled() && authorised(business);
       const timezone = timezoneOf(business);
-      const { requestKey, serviceId, customerId, customer, address, preferredSlots, customerNotes } = args.data;
-      const details = { serviceId, customerId, customer, address, preferredSlots, customerNotes };
+      const { requestKey, serviceId, customerId, customer, address, preferredSlots, customerNotes, deferScheduling } = args.data;
+      const details = { serviceId, customerId, customer, address, preferredSlots, customerNotes, ...(deferScheduling ? { deferScheduling } : {}) };
       return deps.once("create_job_booking", requestKey, details, async () => {
         const parsed = parseInspectionRequestInput({ requestType: "existing_service", serviceId, customer, address, preferredSlots, customerNotes }, timezone);
         if (!parsed.ok) return { status: "REJECTED", message: parsed.error };
@@ -132,22 +150,26 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
         }
         const input = { serviceId, durationMinutes: service.durationMinutes, customer: parsed.value.customer, customerId,
           address: parsed.value.address, customerNotes: parsed.value.customerNotes ?? "" };
-        const result = autoConfirm ? await planFirstFree(deps, serviceId, slots, service.durationMinutes, plan => deps.create(input, plan)) : null;
+        const result = autoConfirm && !deferScheduling
+          ? await planFirstFree(deps, serviceId, slots, service.durationMinutes,
+              (plan, durationMinutes) => deps.create({ ...input, durationMinutes, preferredSlots: slots }, plan))
+          : null;
         if (result && !result.ok) return { status: "REJECTED", message: result.error };
         if (!result) {
           // Same as inspections: anything Sophie cannot confirm waits for the owner instead of being turned away.
-          const reason = autoConfirm ? "No qualified staff member was free for the full job at the caller's preferred times."
+          const reason = deferScheduling ? "The caller asked the owner to decide the job times."
+            : autoConfirm ? "No qualified staff member was free for the full job at the caller's preferred times."
             : "Sophie is not authorised to confirm jobs for this business.";
           const pending = await deps.createPending({ ...input, preferredSlots: slots, reason });
           if (!pending.ok) return { status: "REJECTED", message: pending.error };
           deps.requested(pending.request, reason);
-          return { status: "PENDING_REVIEW", requestId: pending.request.id, code: autoConfirm ? "STAFF_ASSIGNMENT_REVIEW_REQUIRED" : "JOB_REVIEW_REQUIRED",
-            message: autoConfirm ? "The job request was saved, but no qualified staff member is free for the whole job at those times. The team will confirm the time; do not say it is booked."
+          return { status: "PENDING_REVIEW", requestId: pending.request.id, code: autoConfirm && !deferScheduling ? "STAFF_ASSIGNMENT_REVIEW_REQUIRED" : "JOB_REVIEW_REQUIRED",
+            message: autoConfirm && !deferScheduling ? "The job request was saved, but no qualified staff member is free for the whole job at those times. The team will confirm the time; do not say it is booked."
               : "The job request was received with the caller's preferred times. The team will confirm the time and staff member; do not say it is booked." };
         }
         deps.done({ kind: "booked", booking: result.booking });
         return { status: "CONFIRMED", jobCode: result.booking.bookingCode ?? undefined, appointment: appointment(result.booking, timezone),
-          message: "The job is booked. Tell the caller the returned date, start time and staff name, and the job reference for future changes. Other preferred times were alternatives, not extra visits. Do not quote a price." };
+          message: "The job is booked. Tell the caller the returned date, start and finish times, assigned staff name, and job reference. Other preferred times were alternatives, not extra visits. Do not quote a price." };
       });
     },
     reschedule: async (raw: unknown): Promise<VoiceActionResult> => {
@@ -208,6 +230,11 @@ export async function createVoiceJobTools(binding: VoiceBusiness, business: Voic
     import("@/lib/calendar/slot-occupancy"), import("@/lib/bookings/map-booking-doc"),
   ]);
   const sophie = { uid: null, role: "call_center" as const, name: "Sophie (voice)", email: null };
+  const storedPreferences = (slots: VoiceJobSlot[]): InspectionSlot[] => slots.map((slot) => ({
+    date: slot.date, timeRange: slot.timeRange,
+    ...(slot.startTime ? { startTime: slot.startTime } : {}),
+    ...(slot.endTime ? { endTime: slot.endTime } : {}),
+  }));
   /** Re-plan for exactly the chosen staff member and start time; anything else means another booking got there first. */
   const recheck = async (tx: Transaction, serviceId: string, plan: PlannedVisit, excludeJobId?: string) => {
     const minutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
@@ -246,6 +273,7 @@ export async function createVoiceJobTools(binding: VoiceBusiness, business: Voic
           requestType: "existing_service", serviceId: input.serviceId, customRequest: null, customer: input.customer, address: input.address,
           customerNotes: input.customerNotes || null, budgetAud: null, slot: { ...plan.slot, startTime: plan.startTime, endTime: plan.endTime },
           startTime: plan.startTime, endTime: plan.endTime, estimatedDurationMinutes: input.durationMinutes, assignedTo: plan.assignedTo,
+          jobPreferredSlots: storedPreferences(input.preferredSlots),
           skipCustomerAccount: true, customerId: input.customerId,
           verifyInTransaction: tx => recheck(tx, input.serviceId, plan),
         }, { actor: sophie, source: "system" });
@@ -277,7 +305,7 @@ export async function createVoiceJobTools(binding: VoiceBusiness, business: Voic
     },
     createPending: async ({ serviceId, customer, customerId, address, customerNotes, preferredSlots, reason }) => bookings.createPendingJobRequest(binding.businessId, {
       serviceId, customer, customerId, address, customerNotes: customerNotes || null, reason,
-      preferredSlots: preferredSlots.map(slot => ({ date: slot.date, timeRange: slot.timeRange, ...(slot.startTime ? { startTime: slot.startTime } : {}) })),
+      preferredSlots: storedPreferences(preferredSlots),
     }),
     requested: (request, reason) => {
       schedule("job-request-audit", async () => {
@@ -290,7 +318,7 @@ export async function createVoiceJobTools(binding: VoiceBusiness, business: Voic
         const first = request.jobPreferredSlots[0];
         await sendSophieInspectionOwnerAlert({ businessId: binding.businessId, requestCode: request.requestCode || request.id, customerName: request.customer.fullName,
           serviceName: request.serviceName || "Job", status: "pending", title: "Sophie created a job request",
-          reviewNote: "Open it in Site inspections and choose Create job to schedule it.", date: first?.date, timeRange: first?.timeRange, startTime: first?.startTime ?? null });
+          reviewNote: "Open Jobs and choose Schedule job under Call jobs awaiting scheduling.", date: first?.date, timeRange: first?.timeRange, startTime: first?.startTime ?? null });
       });
     },
     cancel: async job => {

@@ -35,15 +35,20 @@ export const voiceJobCode = z.string().trim().max(40).transform(value => {
 const voiceClock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour HH:MM time.");
 /** A preferred session, optionally with the exact start the caller asked for. */
 export const voiceJobSlot = z.object({ date: voiceDate, timeRange: z.enum(["morning", "afternoon"]), startTime: voiceClock.nullable().default(null) }).strict();
+const voiceJobBookingSlot = voiceJobSlot.extend({ endTime: voiceClock.nullish() }).refine(
+  (slot) => !slot.startTime || !slot.endTime || slot.startTime < slot.endTime,
+  "The finish time must be after the start time.",
+);
 const requestKey = z.string().trim().min(16).max(128);
 export const jobBookingArguments = z.object({
   requestKey, customerConfirmed: z.literal(true), serviceId: voiceId, customerId: voiceId.nullable().default(null), customer: voiceCustomer,
-  address: voiceAddress, preferredSlots: z.array(voiceJobSlot).min(1).max(3), customerNotes: z.string().trim().max(2000).default(""),
+  address: voiceAddress, preferredSlots: z.array(voiceJobBookingSlot).min(1).max(3), deferScheduling: z.boolean().optional(),
+  customerNotes: z.string().trim().max(2000).default(""),
 }).strict();
 export const jobLookupArguments = voiceContact.extend({ jobCode: voiceJobCode }).strict();
 export const jobRescheduleArguments = jobLookupArguments.extend({ requestKey, customerConfirmed: z.literal(true), preferredSlots: z.array(voiceJobSlot).min(1).max(3) }).strict();
 export const jobCancelArguments = jobLookupArguments.extend({ requestKey, customerConfirmed: z.literal(true), reason: z.string().trim().max(500).default("") }).strict();
-export type VoiceJobSlot = z.infer<typeof voiceJobSlot>;
+export type VoiceJobSlot = z.infer<typeof voiceJobBookingSlot>;
 export type VoiceCustomerInput = z.infer<typeof voiceCustomer>;
 export type VoiceInspectionInput = z.infer<typeof inspectionArguments>;
 export type VoiceActionResult = {

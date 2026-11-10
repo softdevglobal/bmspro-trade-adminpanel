@@ -1106,6 +1106,7 @@ export async function customerRejectJobProposedSlots(
 export async function deleteBusinessInspectionRequest(
   businessId: string,
   requestId: string,
+  options?: { pendingCallJobOnly: true },
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
@@ -1118,6 +1119,41 @@ export async function deleteBusinessInspectionRequest(
   const snap = await getRequestDocument(id);
   if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (options?.pendingCallJobOnly) {
+    return adminDb.runTransaction(async (transaction) => {
+      const current = await transaction.get(snap.ref);
+      const data = current.data();
+      if (!data || data.businessId !== businessId) {
+        return { ok: false, status: 404, error: "Request not found." };
+      }
+      const request = mapInspectionDoc(current.id, data);
+      if (!request.sophieJobRequest || request.status !== "completed" ||
+          request.bookingStatus !== "awaiting" || request.bookingId) {
+        return { ok: false, status: 409, error: "This request is no longer a call job awaiting scheduling." };
+      }
+      const linkedInvoiceError = { ok: false as const, status: 409, error: "This request has a linked invoice. Review it before deleting the request." };
+      if (request.invoice) return linkedInvoiceError;
+
+      const quotationId = request.quotation?.id;
+      if (quotationId) {
+        const quotationRef = adminDb.collection("quotations").doc(quotationId);
+        const invoiceRef = adminDb.collection("invoices").doc(quotationId);
+        const [quotation, invoice] = await transaction.getAll(quotationRef, invoiceRef);
+        if (invoice.exists) return linkedInvoiceError;
+        if (quotation.exists) {
+          const quote = quotation.data();
+          if (quote?.businessId !== businessId || quote.inspectionRequestId !== request.id ||
+              quote.createdBy !== "sophie" || quote.bookingId) {
+            return { ok: false, status: 409, error: "This request has a linked quotation that needs review before deletion." };
+          }
+          transaction.delete(quotationRef);
+        }
+      }
+      transaction.delete(current.ref);
+      return { ok: true, request };
+    });
   }
 
   const data = snap.data();
