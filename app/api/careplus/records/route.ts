@@ -331,7 +331,6 @@ export async function POST(request: Request) {
 
   const customerId = asString(body.customerId);
   const anonymous = body.anonymous === true;
-  const severity = asString(body.severity) || "medium";
   if (
     eventType !== "action.captured" &&
     eventType !== "evidence.attached" &&

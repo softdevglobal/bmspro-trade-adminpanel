@@ -21,7 +21,6 @@ import {
 import type { SubscriptionPlanDisplay } from "@/lib/subscription-plans/display";
 import {
   formatBundledSmsInclusionLabel,
-  formatMessageQuotaLabel,
   SMS_BUNDLE_RENEWS_NOTE,
 } from "@/lib/sms-packages/helpers";
 import type { SubscriptionPlan } from "@/lib/subscription-plans/types";

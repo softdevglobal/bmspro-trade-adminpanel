@@ -8,7 +8,7 @@ function fixture() {
   return {
     service: { id: "service", isActive: true, requiredSkill: "plumbing" },
     staff: [{ id: "plumber", role: "staff", status: "active", staffType: "plumbing", fullName: "Plumber", availability: ["Weekdays", "Saturdays", "Sundays"] }],
-    slots: [{ date: "2099-01-05", timeRange: "morning" }], leave: [] as Record<string, any>[], work: [] as Record<string, any>[], closures: [] as string[],
+    slots: [{ date: "2099-01-05", timeRange: "morning" }], leave: [] as Record<string, unknown>[], work: [] as Record<string, unknown>[], closures: [] as string[],
     timezone: "Australia/Melbourne", workingHours: { startTime: "08:00", endTime: "17:00" }, now: new Date("2026-10-26T00:00:00Z"), durationMinutes: 60, travelBufferMinutes: 30,
   };
 }

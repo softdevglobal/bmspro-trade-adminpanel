@@ -29,7 +29,8 @@ function sanitizeStringArray(value: unknown): string[] {
 /** Normalize stored or submitted availability to all seven weekdays. */
 export function normalizeStaffDayAvailability(
   value: unknown,
-  allowedServiceAreas: string[] = [],
+  // Accepted from callers but not used for normalization yet.
+  _allowedServiceAreas: string[] = [],
 ): StaffDayAvailability[] {
   const parsed = new Map<WeekDayId, StaffDayAvailability>();
 

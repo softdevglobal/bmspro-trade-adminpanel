@@ -1286,6 +1286,7 @@ function BookingPreviewContent({
                         rel="noopener noreferrer"
                         className="block overflow-hidden rounded-lg border border-outline-variant/60"
                       >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={url}
                           alt="Before work"
@@ -1311,6 +1312,7 @@ function BookingPreviewContent({
                         rel="noopener noreferrer"
                         className="block overflow-hidden rounded-lg border border-outline-variant/60"
                       >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={url}
                           alt="After work"

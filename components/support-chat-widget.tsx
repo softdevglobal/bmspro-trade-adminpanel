@@ -136,7 +136,7 @@ export function SupportChatWidget() {
       subscription.cleanup();
       subscriptionRef.current = null;
     };
-  }, [eligible, user?.uid]);
+  }, [eligible, user]);
 
   useEffect(() => {
     subscriptionRef.current?.setPanelOpen(open);
@@ -190,7 +190,7 @@ export function SupportChatWidget() {
     snapshot.closedNotice !== null && !snapshot.supportConversationId;
 
   useEffect(() => {
-    if (!chatClosedByAgent || !snapshot.closedNotice) return;
+    if (!chatClosedByAgent) return;
     setPendingMessages([]);
     setDraft("");
     setPanelKey((current) => current + 1);

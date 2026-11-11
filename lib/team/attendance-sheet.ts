@@ -71,7 +71,7 @@ function startOfDay(date: Date) {
 
 export function enumerateDaysInRange(start: Date, end: Date) {
   const days: Date[] = [];
-  let cursor = startOfDay(start);
+  const cursor = startOfDay(start);
   const last = startOfDay(end);
   while (cursor <= last) {
     days.push(cloneDate(cursor));

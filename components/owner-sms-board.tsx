@@ -254,15 +254,14 @@ export function OwnerSmsBoard() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
   const loadSeqRef = useRef(0);
-  const pendingCheckoutRef = useRef(
-    typeof window !== "undefined" &&
+  const [confirmingCheckout, setConfirmingCheckout] = useState(
+    () =>
+      typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("checkout") ===
         "success" &&
       Boolean(new URLSearchParams(window.location.search).get("session_id")),
   );
-  const [confirmingCheckout, setConfirmingCheckout] = useState(
-    () => pendingCheckoutRef.current,
-  );
+  const pendingCheckoutRef = useRef(confirmingCheckout);
 
   const load = useCallback(async () => {
     if (!user) return null;

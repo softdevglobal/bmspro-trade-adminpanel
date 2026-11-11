@@ -21,7 +21,6 @@ import {
   type PlanId,
 } from "@/lib/onboarding/types";
 import { ServiceAreasField } from "@/components/service-areas-field";
-import { formatBillingNote } from "@/lib/subscription-plans/helpers";
 import {
   formatLimitLabel,
   formatRenewalLabel,

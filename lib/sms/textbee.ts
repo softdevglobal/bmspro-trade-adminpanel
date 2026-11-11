@@ -54,7 +54,7 @@ export function toE164(
   defaultCountryCode = "+61",
 ): string | null {
   if (!raw) return null;
-  let value = raw.trim();
+  const value = raw.trim();
   if (!value) return null;
 
   // Already E.164.

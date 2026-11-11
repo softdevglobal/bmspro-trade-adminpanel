@@ -20,7 +20,7 @@ function useIsMobileViewport(breakpoint = 640): boolean {
     typeof window !== "undefined" && window.innerWidth < breakpoint;
   const [mobile, setMobile] = useState(read);
   useEffect(() => {
-    const onResize = () => setMobile(read());
+    const onResize = () => setMobile(window.innerWidth < breakpoint);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [breakpoint]);

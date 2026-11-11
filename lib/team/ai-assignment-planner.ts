@@ -1,5 +1,8 @@
 import { normalizeStaffDayAvailability, weekDayIdFromYmd } from "./staff-availability";
 
+// Firestore rows (staff, services, leave, work) arrive loosely typed; the planner
+// checks each field it reads at runtime.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 export type AiStaffAssignment = {
   status: "assigned" | "needs_review";

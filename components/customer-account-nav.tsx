@@ -44,9 +44,6 @@ const NAV_PILL_INNER = `flex w-full min-w-0 items-stretch rounded-full bg-stone-
 const NAV_TAB_ACTIVE_PILL =
   "pointer-events-none absolute inset-0 rounded-full bg-white shadow-[0_2px_14px_-4px_rgba(0,74,198,0.35)] ring-1 ring-primary/20";
 
-const PRIMARY_NAV_BTN =
-  "relative z-10 flex h-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-gradient-to-br from-primary via-primary to-primary-container px-4 font-body font-bold text-on-primary shadow-md shadow-primary/25 ring-2 ring-primary/20 transition-all active:scale-[0.98] sm:min-w-[11.5rem] sm:gap-2.5 sm:px-10 sm:shadow-lg sm:shadow-primary/30 md:min-w-[13rem] md:px-12";
-
 const GUEST_BTN_BASE =
   "relative z-10 flex h-full shrink-0 items-center justify-center overflow-hidden rounded-full font-body font-bold transition-all active:scale-95 max-sm:aspect-square max-sm:w-11 max-sm:px-0 sm:min-h-0 sm:gap-2 sm:px-6";
 

@@ -224,7 +224,7 @@ export function CreateInvoiceFromQuotation({
 
   const [requestType, setRequestType] =
     useState<InspectionRequestType>("custom_quote");
-  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(
+  const [selectedServiceId] = useState<string | null>(
     null,
   );
   const [customServiceTitle, setCustomServiceTitle] = useState("");
@@ -1181,7 +1181,7 @@ export function CreateInvoiceFromQuotation({
           </li>
         ) : null}
         {catalogSuggestions.map((item) => (
-          <li key={item.id} role="option">
+          <li key={item.id} role="option" aria-selected={false}>
             <button
               type="button"
               onMouseDown={(event) => event.preventDefault()}

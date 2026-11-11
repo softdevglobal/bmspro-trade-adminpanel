@@ -34,7 +34,7 @@ const state = {
   background: [] as (() => Promise<void>)[], ownerAlerts: 0, notifications: 0, failAudit: false,
   ownerGate: null as Promise<void> | null,
 };
-(globalThis as any).__bookingSecurityTest = state;
+(globalThis as typeof globalThis & { __bookingSecurityTest: typeof state }).__bookingSecurityTest = state;
 const mocks: Record<string, string> = {
   "next/server": `export const NextResponse={json(value,init){return Response.json(value,init);}}; export const after=task=>globalThis.__bookingSecurityTest.background.push(task);`,
   "lib/auth/account-access": `export async function verifyAccountIdToken(token) { if(token === 'invalid') throw Error('invalid'); return {...globalThis.__bookingSecurityTest.claims}; }`,
