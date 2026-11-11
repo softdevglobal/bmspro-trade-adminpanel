@@ -1,6 +1,6 @@
 import { ownerBriefingTools } from "@/lib/ai/mcp/tools/owner-briefing.tools";
 import { requireOwnerBriefing } from "@/lib/ai/owner-call/auth";
-import { ownerVoiceTools } from "@/lib/ai/owner-call/tools";
+import { ownerVoiceTools, type OwnerToolArgs } from "@/lib/ai/owner-call/tools";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -19,9 +19,9 @@ export async function POST(request: Request) {
   const output = (value: object) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
   const briefing = ownerBriefingTools(auth.businessId, auth.timezone);
   for (const tool of ownerVoiceTools) {
-    server.tool(tool.name, tool.description, tool.args, async ({ offset = 0 }) => {
+    server.tool(tool.name, tool.description, tool.args, async (args) => {
       try {
-        return output(await tool.run(briefing, offset));
+        return output((await tool.run(briefing, args as OwnerToolArgs)) as object);
       } catch {
         return { isError: true, ...output({ status: "UNAVAILABLE" }) };
       }

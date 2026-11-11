@@ -15,6 +15,7 @@
     "test:api": "firebase emulators:exec --only auth,firestore --project bms-api-test \"node scripts/test-api-access.mjs\"",
     "test:careplus-records": "tsx --test scripts/test-careplus-capture-records.ts",
     "test:invoice-customer": "tsx --test scripts/test-invoice-customer.ts",
+    "test:owner-day-activity": "tsx --test scripts/test-owner-day-activity.ts",
     "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts",
     "test:ai-staff-assignment": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-staff-assignment.ts scripts/test-ai-assignment-transaction.ts",
     "test:ai-voice-bridge": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-voice-bridge.ts scripts/test-ai-did-mappings.ts scripts/test-ai-voice-actions.ts scripts/test-ai-voice-customer-account.ts scripts/test-ai-voice-jobs.ts",

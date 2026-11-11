@@ -132,7 +132,7 @@ function depositPaymentNote(deposit: QuotationDepositRequest): string {
   return `${basis}: $${amount} due by ${due}.`;
 }
 
-function mapQuotationDoc(
+export function mapQuotationDoc(
   id: string,
   data: Record<string, unknown>,
 ): QuotationDetail {

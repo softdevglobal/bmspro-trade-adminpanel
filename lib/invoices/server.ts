@@ -131,7 +131,7 @@ function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
   };
 }
 
-function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail {
+export function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail {
   const lineItemsRaw = Array.isArray(data.lineItems) ? data.lineItems : [];
   const lineItems = lineItemsRaw
     .map((entry) => {
@@ -568,6 +568,8 @@ export async function markBusinessInvoicePaid(
   await docRef.update({
     status: "paid",
     balanceDueAud: 0,
+    // When the money was recorded, for daily activity reports.
+    markedPaidAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
 
