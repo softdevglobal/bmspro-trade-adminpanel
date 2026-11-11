@@ -87,6 +87,11 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
     subtitle: "Reusable line items and prices for your quotations.",
     icon: "inventory_2",
   },
+  "/dashboard/call-recordings": {
+    title: "Call recordings",
+    subtitle: "Recorded inbound calls to your business numbers from the last 30 days.",
+    icon: "record_voice_over",
+  },
   "/dashboard/sms": {
     title: "SMS Credits",
     subtitle:

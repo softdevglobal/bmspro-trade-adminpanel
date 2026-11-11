@@ -17,6 +17,8 @@ import { BusinessTimezoneSettings } from "@/components/business-timezone-setting
 import { SettingsIdentityHero } from "@/components/settings-identity-hero";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { SophieVoicePermissions } from "@/components/sophie-voice-permissions";
+import { SettingsSection } from "@/components/settings-section";
 import type { BusinessProfilePlan } from "@/lib/onboarding/server";
 import type { BusinessWorkingHours } from "@/lib/calendar/working-hours";
 import { writeBusinessWorkingHoursCache } from "@/lib/calendar/use-business-working-hours";
@@ -262,13 +264,19 @@ export function BusinessSettingsPanel() {
         onSaved={handleSlotCapacitySaved}
       />
 
-      <BusinessAiBookingSettings
-        enabled={meta.sophieBookingAuthority}
-        jobsEnabled={meta.sophieJobAuthority}
-        loading={metaLoading}
-        onSaved={handleSophieBookingAuthoritySaved}
-      />
-
+      <SettingsSection title="Sophie settings" icon="smart_toy">
+        <div className="space-y-5">
+          <BusinessAiBookingSettings
+            enabled={meta.sophieBookingAuthority}
+            jobsEnabled={meta.sophieJobAuthority}
+            loading={metaLoading}
+            onSaved={handleSophieBookingAuthoritySaved}
+          />
+          <div className="border-t border-outline-variant/50 pt-5">
+            <SophieVoicePermissions />
+          </div>
+        </div>
+      </SettingsSection>
       <BusinessGstSettings />
       <BusinessPaymentsSettings />
       <EmailConnectionSettings />
