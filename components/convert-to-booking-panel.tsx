@@ -29,6 +29,7 @@ import type { BookingStatus } from "@/lib/bookings/types";
 import {
   TIME_RANGE_LABELS,
   formatSlotDate,
+  formatVisitWindow,
   sortInspectionSlots,
   timeRangeFromStartTime,
   type InspectionRequestDetail,
@@ -365,6 +366,11 @@ export function ConvertToBookingPanel({
                           onClick={() => {
                             setUseCustomDate(false);
                             setSlot(preferred);
+                            if (preferred.startTime && preferred.endTime &&
+                                preferred.startTime < preferred.endTime) {
+                              setStartTime(preferred.startTime);
+                              setEndTime(preferred.endTime);
+                            }
                           }}
                           className={`rounded-lg border px-3 py-2 font-body text-[12px] font-semibold transition-colors disabled:opacity-60 ${
                             active
@@ -373,7 +379,7 @@ export function ConvertToBookingPanel({
                           }`}
                         >
                           {formatSlotDate(preferred.date, timeZone)} ·{" "}
-                          {TIME_RANGE_LABELS[preferred.timeRange]}
+                          {formatVisitWindow(preferred.startTime, preferred.endTime) ?? TIME_RANGE_LABELS[preferred.timeRange]}
                         </button>
                       </li>
                     );

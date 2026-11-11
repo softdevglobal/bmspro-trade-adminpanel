@@ -343,7 +343,11 @@ export async function DELETE(
     );
   }
 
-  const result = await deleteBusinessQuotation(auth.businessId, id);
+  const deleteSeries = new URL(request.url).searchParams.get("scope") === "series";
+  if (deleteSeries && auth.role === "staff") {
+    return NextResponse.json({ ok: false, error: "Business owner access required to delete series quotations." }, { status: 403 });
+  }
+  const result = await deleteBusinessQuotation(auth.businessId, id, deleteSeries);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error },
@@ -369,8 +373,9 @@ export async function DELETE(
     metadata: {
       quotationCode: result.quotation.quotationCode,
       status: result.quotation.status,
+      ...(result.deletedIds ? { deletedQuotationIds: result.deletedIds } : {}),
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, deletedIds: result.deletedIds });
 }

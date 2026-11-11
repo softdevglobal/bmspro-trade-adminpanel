@@ -3,6 +3,7 @@ import "server-only";
 import { logQuotationAuditForActor } from "@/lib/audit/action-logs";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseBookingStatus } from "@/lib/bookings/types";
+import { readSeriesRequestLinks } from "@/lib/bookings/series-records";
 import type {
   CreateQuotationInput,
   QuotationDepositRequest,
@@ -131,7 +132,7 @@ function depositPaymentNote(deposit: QuotationDepositRequest): string {
   return `${basis}: $${amount} due by ${due}.`;
 }
 
-function mapQuotationDoc(
+export function mapQuotationDoc(
   id: string,
   data: Record<string, unknown>,
 ): QuotationDetail {
@@ -2503,7 +2504,20 @@ async function applyQuotationCustomerDecision(
       error: "This quotation has already been converted into a job.",
     };
   }
+  const draftInvoiceIfAccepted = async () => {
+    if (decision !== "accepted") return;
+    try {
+      const { draftAcceptedQuotationInvoice } = await import("@/lib/ai/mcp/tools/invoice.tools");
+      const result = await draftAcceptedQuotationInvoice(request.businessId, quotationId);
+      if (result.status === "REJECTED") {
+        console.error("[quotations] Automatic invoice draft rejected", { quotationId, message: result.message });
+      }
+    } catch {
+      console.error("[quotations] Automatic invoice draft failed", { quotationId });
+    }
+  };
   if (summary.customerDecision === decision) {
+    await draftInvoiceIfAccepted();
     return { ok: true, request };
   }
 
@@ -2551,6 +2565,7 @@ async function applyQuotationCustomerDecision(
       : null,
   };
   request = updatedRequest;
+  await draftInvoiceIfAccepted();
 
   if (options.notifyBusiness) {
     try {
@@ -2731,8 +2746,9 @@ async function sendQuotationCreatedEmail(
 export async function deleteBusinessQuotation(
   businessId: string,
   quotationId: string,
+  deleteSeries = false,
 ): Promise<
-  | { ok: true; quotation: QuotationDetail }
+  | { ok: true; quotation: QuotationDetail; deletedIds?: string[] }
   | { ok: false; status: number; error: string }
 > {
   const id = quotationId.trim();
@@ -2741,6 +2757,41 @@ export async function deleteBusinessQuotation(
   }
 
   const quotationRef = adminDb.collection(QUOTATION_COLLECTION).doc(id);
+  if (deleteSeries) {
+    return adminDb.runTransaction(async (transaction) => {
+      const current = await transaction.get(quotationRef);
+      const data = current.data();
+      if (!data || data.businessId !== businessId) return { ok: false, status: 404, error: "Quotation not found." };
+      const quotation = mapQuotationDoc(current.id, data);
+      if (!quotation.inspectionRequestId) return { ok: false, status: 409, error: "Quotation has no linked request." };
+      const requests = adminDb.collection(REQUESTS_COLLECTION);
+      const linkedRequest = await transaction.get(requests.doc(quotation.inspectionRequestId));
+      const linkedBooking = linkedRequest.get("businessId") === businessId ? linkedRequest.get("bookingId") : null;
+      const links = await readSeriesRequestLinks(
+        transaction, businessId, quotation.bookingId ?? linkedBooking, quotation.inspectionRequestId,
+      );
+      if (!links) return { ok: false, status: 409, error: "This quotation is no longer linked to a recurring series." };
+      const ids = [...links.keys()];
+      const quotations = adminDb.collection(QUOTATION_COLLECTION).where("businessId", "==", businessId);
+      const [groups, mirrors] = await Promise.all([
+        Promise.all(ids.map((requestId) => transaction.get(quotations.where("inspectionRequestId", "==", requestId)))),
+        transaction.getAll(...ids.map((requestId) => requests.doc(requestId))),
+      ]);
+      const records = groups.flatMap((group, index) => {
+        const mirror = mirrors[index];
+        const requestBooking = mirror.get("businessId") === businessId ? mirror.get("bookingId") : null;
+        return group.docs.filter((record) => links.get(ids[index])?.has(record.get("bookingId") || requestBooking));
+      });
+      const deleted = new Set(records.map((record) => record.id));
+      for (const record of records) transaction.delete(record.ref);
+      for (const mirror of mirrors) {
+        if (mirror.get("businessId") === businessId && deleted.has(mirror.get("quotation.id"))) {
+          transaction.update(mirror.ref, { quotation: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
+        }
+      }
+      return { ok: true, quotation, deletedIds: [...deleted] };
+    });
+  }
   const quotationSnap = await quotationRef.get();
   if (!quotationSnap.exists) {
     return { ok: false, status: 404, error: "Quotation not found." };

@@ -11,6 +11,24 @@ const key = (value: unknown) => typeof value === "string" ? value.trim().toLower
 export const clockMinutes = (value: unknown): number | null => typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3)) : null;
 const clock = (n: number) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
 
+/** Every visit day of an active work item, including the extra on-site days of multi-day jobs. */
+function busyIntervals(item: Row): Array<{ date: string; start: number; end: number }> {
+  const proposal = item.status === "pending" ? item.aiAssignment?.proposedSlot : null;
+  const scheduled = proposal || item.scheduledSlot;
+  const days: Array<{ date: string; start: number; end: number }> = [];
+  const add = (date: unknown, range: unknown, startTime: unknown, endTime: unknown) => {
+    if (typeof date !== "string") return;
+    const start = clockMinutes(startTime) ?? (range === "afternoon" ? 720 : 480);
+    const end = clockMinutes(endTime) ?? (range === "morning" ? 720 : 1020);
+    days.push({ date, start, end: end > start ? end : start + 60 });
+  };
+  if (scheduled) add(scheduled.date, scheduled.timeRange, proposal?.startTime ?? item.scheduledStartTime, proposal?.endTime ?? item.scheduledEndTime);
+  if (!proposal && Array.isArray(item.additionalJobDays)) {
+    for (const day of item.additionalJobDays) if (day && typeof day === "object") add(day.date, day.timeRange, day.startTime, day.endTime);
+  }
+  return days;
+}
+
 /** Exact configured skills/IDs only: free-text roles are never inferred by the model. */
 export function staffCanPerformService(member: Row, service: Row): boolean {
   if (Array.isArray(service.staffIds) && service.staffIds.length) return service.staffIds.includes(member.id);
@@ -20,13 +38,24 @@ export function staffCanPerformService(member: Row, service: Row): boolean {
 }
 
 export function planTradeStaffAssignment(input: {
-  service: Row; staff: Row[]; slots: Row[]; leave: Row[]; work: Row[];
+  service: Row | null; requestType?: "existing_service" | "custom_quote"; staff: Row[]; slots: Row[]; leave: Row[]; work: Row[];
   closures: string[]; timezone: string; workingHours: { startTime: string; endTime: string };
   now: Date; durationMinutes: number; travelBufferMinutes: number; assignedBy?: AiStaffAssignment["assignedBy"];
+  /** Jobs may start in the chosen session and continue until closing; inspections stay inside the session. */
+  allowRunPastSession?: boolean;
 }): { assignedTo: Row | null; aiAssignment: AiStaffAssignment } {
   const assignedBy = input.assignedBy ?? "sophie";
   const fail = (reason: string) => ({ assignedTo: null, aiAssignment: { status: "needs_review" as const, reason, assignedBy } });
-  if (input.service.isActive !== true) return fail("Service is inactive.");
+  const advice = input.requestType === "custom_quote";
+  if (!advice && input.service?.isActive !== true) return fail("Service is inactive.");
+  if (advice && input.service !== null) return fail("An advice inspection must not use an inferred service.");
+  const activeStaff = input.staff.filter(member => member.role === "staff" && member.status === "active" && member.suspended !== true && member.isActive !== false);
+  if (!activeStaff.length) return fail("No active staff member is available for automatic assignment. Review the staff member's active status in Team.");
+  const service = input.service;
+  const eligibleStaff = activeStaff.filter(member => advice ? member.canget_qutaion === true : !!service && staffCanPerformService(member, service));
+  if (!eligibleStaff.length) return fail(advice
+    ? 'No active staff member is permitted to handle advice inspections. In Team, enable "receive and handle quotation requests" for an appropriate inspector.'
+    : 'No staff member is configured to perform this service automatically. In Team, edit an eligible staff member and select the service under "Services this staff member can perform". Manual assignment does not configure automatic service eligibility.');
   const open = clockMinutes(input.workingHours.startTime), close = clockMinutes(input.workingHours.endTime);
   if (open == null || close == null || close <= open || !Number.isInteger(input.durationMinutes) || input.durationMinutes <= 0 || input.durationMinutes > 540 || !Number.isInteger(input.travelBufferMinutes) || input.travelBufferMinutes < 0 || input.travelBufferMinutes > 180) return fail("Inspection duration or scheduling settings need review.");
   let localParts: Intl.DateTimeFormatPart[];
@@ -41,25 +70,28 @@ export function planTradeStaffAssignment(input: {
     const weekday = weekDayIdFromYmd(slot.date, input.timezone);
     const sessionOpen = slot.timeRange === "morning" ? 480 : 720, sessionClose = slot.timeRange === "morning" ? 720 : 1020;
     const earliest = Math.max(open, sessionOpen, slot.date === today ? Math.ceil((currentMinutes + 1) / 15) * 15 : 0);
-    const latest = Math.min(close, sessionClose);
+    const latest = input.allowRunPastSession ? close : Math.min(close, sessionClose);
+    // A caller-requested exact start is honoured only when it falls in the chosen session; otherwise skip the slot.
+    const exact = slot.startTime == null ? null : clockMinutes(slot.startTime);
+    if (slot.startTime != null && (exact == null || exact < earliest || exact >= sessionClose)) continue;
     const candidates: Array<{ member: Row; start: number; load: number }> = [];
-    for (const member of input.staff) {
-      if (member.role !== "staff" || member.status !== "active" || member.suspended === true || !Array.isArray(member.availability) || !member.availability.length || !staffCanPerformService(member, input.service)) continue;
+    for (const member of eligibleStaff) {
+      if (!Array.isArray(member.availability) || !member.availability.length) continue;
       if (member.availability.some((entry: unknown) => entry && typeof entry === "object") && !member.availability.some((entry: Row) => entry?.day === weekday && entry.isOff === false)) continue;
       if (normalizeStaffDayAvailability(member.availability).find(day => day.day === weekday)?.isOff !== false) continue;
       const memberWork = input.work.filter(item => item.assignedTo?.uid === member.id && !["cancelled", "completed", "missed"].includes(item.status));
-      const load = memberWork.filter(item => (item.status === "pending" ? item.aiAssignment?.proposedSlot?.date : item.scheduledSlot?.date) === slot.date).reduce((sum, item) => { const a = clockMinutes(item.scheduledStartTime), b = clockMinutes(item.scheduledEndTime); return sum + (a != null && b != null && b > a ? b - a : 60); }, 0);
-      for (let start = earliest; start + input.durationMinutes <= latest; start += 15) {
+      const memberDays = memberWork.flatMap(busyIntervals).filter(day => day.date === slot.date);
+      const load = memberDays.reduce((sum, day) => sum + (day.end - day.start), 0);
+      for (let start = exact ?? earliest; start + input.durationMinutes <= latest; start += 15) {
         const end = start + input.durationMinutes;
-        if (input.leave.some(item => item.requesterUid === member.id && ["approved", "pending"].includes(item.status) && (!item.fromDate || slot.date >= item.fromDate && slot.date <= (item.toDate || item.fromDate) && (item.isFullDay !== false || clockMinutes(item.startTime) == null || clockMinutes(item.endTime) == null || clockMinutes(item.endTime)! <= clockMinutes(item.startTime)! || start < clockMinutes(item.endTime)! && clockMinutes(item.startTime)! < end)))) continue;
-        if (memberWork.some(item => {
-          const proposal = item.status === "pending" ? item.aiAssignment?.proposedSlot : null;
-          const scheduled = proposal || item.scheduledSlot;
-          if (scheduled?.date !== slot.date) return false;
-          const a = clockMinutes(proposal?.startTime ?? item.scheduledStartTime) ?? (scheduled.timeRange === "afternoon" ? 720 : 480);
-          const b = clockMinutes(proposal?.endTime ?? item.scheduledEndTime) ?? (scheduled.timeRange === "morning" ? 720 : 1020);
-          return start < b + input.travelBufferMinutes && a - input.travelBufferMinutes < end;
-        })) continue;
+        if (input.leave.some(item => item.requesterUid === member.id && ["approved", "pending"].includes(item.status) && (!item.fromDate || slot.date >= item.fromDate && slot.date <= (item.toDate || item.fromDate) && (item.isFullDay !== false || clockMinutes(item.startTime) == null || clockMinutes(item.endTime) == null || clockMinutes(item.endTime)! <= clockMinutes(item.startTime)! || start < clockMinutes(item.endTime)! && clockMinutes(item.startTime)! < end)))) {
+          if (exact != null) break;
+          continue;
+        }
+        if (memberDays.some(day => start < day.end + input.travelBufferMinutes && day.start - input.travelBufferMinutes < end)) {
+          if (exact != null) break;
+          continue;
+        }
         candidates.push({ member, start, load });
         break;
       }
@@ -68,7 +100,7 @@ export function planTradeStaffAssignment(input: {
     const chosen = candidates[0];
     if (chosen) return {
       assignedTo: { type: "staff", uid: chosen.member.id, name: chosen.member.fullName || "Staff member", email: chosen.member.email || null },
-      aiAssignment: { status: "assigned", assignedBy, reason: "Qualified staff member and available visit time selected.", proposedSlot: { date: slot.date, timeRange: slot.timeRange, startTime: clock(chosen.start), endTime: clock(chosen.start + input.durationMinutes) } },
+      aiAssignment: { status: "assigned", assignedBy, reason: advice ? "An inspector permitted to handle advice requests and an available visit time were selected." : "Qualified staff member and available visit time selected.", proposedSlot: { date: slot.date, timeRange: slot.timeRange, startTime: clock(chosen.start), endTime: clock(chosen.start + input.durationMinutes) } },
     };
   }
   return fail("No qualified staff member is available for the customer's preferred sessions.");

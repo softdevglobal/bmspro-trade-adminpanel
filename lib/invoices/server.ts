@@ -10,6 +10,7 @@ import { actorRoleFromClaim, type AuditActor } from "@/lib/audit/types";
 import { parseBookingStatus } from "@/lib/bookings/types";
 import {
   getBusinessQuotationById,
+  QUOTATION_COLLECTION,
   parseLineItems,
   serializeLineItemsForFirestore,
 } from "@/lib/quotations/server";
@@ -26,7 +27,8 @@ import { getBusinessProfile } from "@/lib/onboarding/server";
 import { allocateInvoiceCode } from "@/lib/reference-codes.server";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import { resolveInvoiceCustomer } from "@/lib/invoices/customer";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldPath, FieldValue } from "firebase-admin/firestore";
+import { resolveInvoicePaymentDue } from "@/lib/invoices/payment-due";
 import type {
   CreateDirectInvoiceInput,
   CreateInvoiceInput,
@@ -129,7 +131,7 @@ function parseDepositRequest(raw: unknown): QuotationDepositRequest | null {
   };
 }
 
-function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail {
+export function mapInvoiceDoc(id: string, data: Record<string, unknown>): InvoiceDetail {
   const lineItemsRaw = Array.isArray(data.lineItems) ? data.lineItems : [];
   const lineItems = lineItemsRaw
     .map((entry) => {
@@ -336,6 +338,65 @@ export async function getBusinessInvoiceByQuotationId(
   return mapInvoiceDoc(snap.id, data);
 }
 
+export async function listOverdueInvoicePage(businessId: string, timeZone?: string | null, cursor?: string) {
+  const pageSize = 100;
+  const query = adminDb.collection(INVOICE_COLLECTION)
+    .where("businessId", "==", businessId)
+    .orderBy(FieldPath.documentId());
+  const page = await (cursor ? query.startAfter(cursor) : query).limit(pageSize + 1).get();
+  const docs = page.docs.slice(0, pageSize);
+  const now = new Date();
+  return {
+    invoices: docs.flatMap((doc) => {
+      const invoice = mapInvoiceDoc(doc.id, doc.data());
+      const due = resolveInvoicePaymentDue(invoice, timeZone, now);
+      return due.isOverdue ? [{
+        invoiceId: invoice.id,
+        invoiceCode: invoice.invoiceCode,
+        dueDate: invoice.dueDate,
+        outstandingAud: due.outstandingAud,
+      }] : [];
+    }),
+    nextCursor: page.size > pageSize ? docs.at(-1)?.id ?? null : null,
+  };
+}
+
+export async function claimOverdueInvoiceReminder(input: {
+  businessId: string;
+  invoiceId: string;
+  date: string;
+  now: Date;
+  timeZone?: string | null;
+  ownerEmail?: string;
+}) {
+  const ref = adminDb.collection(INVOICE_COLLECTION).doc(input.invoiceId);
+  return adminDb.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const data = snapshot.data();
+    if (!data || data.businessId !== input.businessId) return null;
+    const invoice = mapInvoiceDoc(snapshot.id, data);
+    const due = resolveInvoicePaymentDue(invoice, input.timeZone, input.now);
+    if (!due.isOverdue) return null;
+    const customerEmail = invoice.customer.email?.trim();
+    const recipients = {
+      customer: customerEmail && data.overdueReminderCustomerDate !== input.date ? customerEmail : null,
+      owner: input.ownerEmail && data.overdueReminderOwnerDate !== input.date ? input.ownerEmail : null,
+    };
+    const claims = {
+      ...(recipients.customer ? { overdueReminderCustomerDate: input.date } : {}),
+      ...(recipients.owner ? { overdueReminderOwnerDate: input.date } : {}),
+    };
+    if (Object.keys(claims).length) transaction.update(ref, claims);
+    return {
+      invoice,
+      outstandingAud: due.outstandingAud,
+      recipients,
+      customerStatus: customerEmail ? "ALREADY_ATTEMPTED_TODAY" : "NO_EMAIL",
+      ownerStatus: input.ownerEmail ? "ALREADY_ATTEMPTED_TODAY" : "NO_EMAIL",
+    };
+  });
+}
+
 async function generateInvoicePdfBytes(
   invoice: InvoiceDetail,
   businessId: string,
@@ -507,6 +568,8 @@ export async function markBusinessInvoicePaid(
   await docRef.update({
     status: "paid",
     balanceDueAud: 0,
+    // When the money was recorded, for daily activity reports.
+    markedPaidAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
 
@@ -756,6 +819,7 @@ export async function createInvoiceFromQuotation(
   businessId: string,
   author: InvoiceAuthor,
   input: CreateInvoiceInput,
+  options?: { acceptedQuotationUpdatedAt: number | null },
 ): Promise<
   | { ok: true; invoice: InvoiceDetail }
   | { ok: false; status: number; error: string }
@@ -767,6 +831,10 @@ export async function createInvoiceFromQuotation(
   if (!quotation) {
     return { ok: false, status: 404, error: "Quotation not found." };
   }
+  if (options && (quotation.status !== "sent" || quotation.customerDecision !== "accepted" ||
+      quotation.updatedAt !== options.acceptedQuotationUpdatedAt)) {
+    return { ok: false, status: 409, error: "A current, accepted quotation is required." };
+  }
 
   const values = buildInvoiceValues(input);
   if (!values.ok) return values;
@@ -775,6 +843,9 @@ export async function createInvoiceFromQuotation(
 
   const docRef = adminDb.collection(INVOICE_COLLECTION).doc(quotation.id);
   const existing = await docRef.get();
+  if (options && existing.exists) {
+    return { ok: false, status: 409, error: "An invoice already exists. Check it in Trade before issuing or resending." };
+  }
   if (existing.exists && existing.data()?.businessId === businessId) {
     const existingInvoice = mapInvoiceDoc(
       existing.id,
@@ -794,7 +865,7 @@ export async function createInvoiceFromQuotation(
         canUpdateDirectDetails && input.serviceTitle?.trim()
           ? input.serviceTitle.trim()
           : quotation.serviceTitle;
-      const booking = await completeBookingForInvoicedQuotation({
+      const booking = input.send ? await completeBookingForInvoicedQuotation({
         businessId,
         inspectionRequestId: quotation.inspectionRequestId,
         quotation: {
@@ -808,7 +879,7 @@ export async function createInvoiceFromQuotation(
           balanceDueAud: values.balanceDueAud,
           status: quotation.status,
         },
-      });
+      }) : null;
 
       const now = FieldValue.serverTimestamp();
       const nextStatus = input.send
@@ -833,10 +904,10 @@ export async function createInvoiceFromQuotation(
         invoiceDate: input.invoiceDate.trim(),
         dueDate: input.dueDate.trim(),
         status: nextStatus,
-        bookingId: booking?.bookingId ?? existingInvoice.bookingId,
-        bookingCode: booking?.bookingCode ?? existingInvoice.bookingCode,
-        bookingStatus: booking?.bookingStatus ?? existingInvoice.bookingStatus,
-        bookingStatusAt: booking ? now : existingInvoice.bookingStatusAt,
+        bookingId: booking?.bookingId ?? quotation.bookingId ?? existingInvoice.bookingId,
+        bookingCode: booking?.bookingCode ?? quotation.bookingCode ?? existingInvoice.bookingCode,
+        bookingStatus: booking?.bookingStatus ?? quotation.bookingStatus ?? existingInvoice.bookingStatus,
+        bookingStatusAt: booking ? now : quotation.bookingStatusAt ?? existingInvoice.bookingStatusAt,
         pdfUrl: null,
         updatedAt: now,
       });
@@ -954,8 +1025,8 @@ export async function createInvoiceFromQuotation(
   const invoiceCode = await allocateInvoiceCode(businessId);
   const now = FieldValue.serverTimestamp();
 
-  // Mark (or create) the linked booking as completed.
-  const booking = await completeBookingForInvoicedQuotation({
+  // Completing the linked booking is part of issuing an invoice.
+  const booking = input.send && !options ? await completeBookingForInvoicedQuotation({
     businessId,
     inspectionRequestId: quotation.inspectionRequestId,
     quotation: {
@@ -974,9 +1045,9 @@ export async function createInvoiceFromQuotation(
       invoiceCode,
       quotation.quotationCode,
     ),
-  });
+  }) : null;
 
-  await docRef.set({
+  const invoiceData = {
     invoiceCode,
     businessId,
     quotationId: quotation.id,
@@ -997,15 +1068,27 @@ export async function createInvoiceFromQuotation(
     termsAndConditions: values.termsAndConditions,
     invoiceDate: input.invoiceDate.trim(),
     dueDate: input.dueDate.trim(),
-    status: input.send ? "sent" : "draft",
-    bookingId: booking?.bookingId ?? null,
-    bookingCode: booking?.bookingCode ?? null,
-    bookingStatus: booking?.bookingStatus ?? null,
-    bookingStatusAt: booking ? now : null,
+    status: input.send && !options ? "sent" : "draft",
+    bookingId: booking?.bookingId ?? quotation.bookingId,
+    bookingCode: booking?.bookingCode ?? quotation.bookingCode,
+    bookingStatus: booking?.bookingStatus ?? quotation.bookingStatus,
+    bookingStatusAt: booking ? now : quotation.bookingStatusAt,
     createdBy: author.uid,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  if (options) {
+    const created = await adminDb.runTransaction(async (transaction) => {
+      const current = await transaction.get(adminDb.collection(QUOTATION_COLLECTION).doc(quotation.id));
+      const data = current.data();
+      const invoice = await transaction.get(docRef);
+      if (invoice.exists || data?.businessId !== businessId || data.status !== "sent" ||
+          data.customerDecision !== "accepted" || (data.updatedAt?.toMillis() ?? null) !== quotation.updatedAt) return false;
+      transaction.create(docRef, invoiceData);
+      return true;
+    });
+    if (!created) return { ok: false, status: 409, error: "The quotation changed or an invoice already exists. Check it in Trade." };
+  } else await docRef.set(invoiceData);
 
   const saved = await docRef.get();
   let invoice = mapInvoiceDoc(saved.id, saved.data() ?? {});
@@ -1014,7 +1097,7 @@ export async function createInvoiceFromQuotation(
 
   await logInvoiceAuditEvent(businessId, author, invoice, "invoice.created");
 
-  if (input.send) {
+  if (input.send && !options) {
     await sendInvoiceEmailForDetail(
       invoice,
       businessId,
@@ -1048,7 +1131,7 @@ export async function createDirectInvoice(
   const serviceTitle = (input.serviceTitle ?? "").trim();
   const description =
     input.description?.trim() ||
-    `Direct invoice issued for completed work: ${serviceTitle || "job"}.`;
+    `Direct invoice for ${serviceTitle || "job"}.`;
 
   const { createStandaloneQuotation } = await import(
     "@/lib/quotations/server"

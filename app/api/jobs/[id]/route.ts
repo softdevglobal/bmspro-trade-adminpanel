@@ -1198,7 +1198,8 @@ export async function DELETE(
   }
 
   const { id } = await context.params;
-  const result = await deleteBusinessBooking(auth.businessId, id);
+  const deleteSeries = new URL(request.url).searchParams.get("scope") === "series";
+  const result = await deleteBusinessBooking(auth.businessId, id, deleteSeries);
   if (!result.ok) {
     return NextResponse.json(
       { ok: false, error: result.error },
@@ -1229,14 +1230,17 @@ export async function DELETE(
       email: actorEmail ?? null,
     },
     source: "admin_panel",
-    summary: `Job ${result.booking.bookingCode ?? id} deleted`,
+    summary: deleteSeries
+      ? `Recurring job ${result.booking.bookingCode ?? id} deleted with ${result.deletedIds.length} stored visits`
+      : `Job ${result.booking.bookingCode ?? id} deleted`,
     targetId: result.booking.id,
     targetLabel: result.booking.bookingCode || null,
     metadata: {
       bookingCode: result.booking.bookingCode,
       inspectionRequestId: result.booking.inspectionRequestId,
+      ...(deleteSeries ? { deletedJobIds: result.deletedIds } : {}),
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, deletedIds: result.deletedIds });
 }

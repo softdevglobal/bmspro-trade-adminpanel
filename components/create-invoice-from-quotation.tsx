@@ -1281,7 +1281,7 @@ export function CreateInvoiceFromQuotation({
               <p className="truncate font-body text-[12px] text-on-surface-variant">
                 {quotation
                   ? `From ${quotationCode} · ${quotation.serviceTitle}`
-                  : "Direct invoice · saved as a completed job"}
+                  : "Direct invoice"}
               </p>
             </div>
           </div>
@@ -1901,7 +1901,7 @@ export function CreateInvoiceFromQuotation({
               invoice PDF is emailed to the client only when you click{" "}
               <strong>Save &amp; send invoice</strong> below. Use the Preview tab
               to check the document before sending. The linked job is marked
-              completed when the invoice is saved.
+              completed when the invoice is sent.
             </p>
             <button
               type="button"

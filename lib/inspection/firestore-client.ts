@@ -19,6 +19,24 @@ import {
 /** Caps initial/historical reads for the requests board. */
 export const INSPECTION_LIST_LIMIT = 80;
 
+export function subscribePendingCallJobs(
+  businessId: string,
+  onData: (requests: InspectionRequestDetail[]) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  const pending = query(
+    collection(db, REQUESTS_COLLECTION),
+    where("businessId", "==", businessId),
+    where("sophieJobRequest", "==", true),
+    where("bookingStatus", "==", "awaiting"),
+  );
+  return onSnapshot(pending, (snapshot) => {
+    onData(sortInspectionRequestsNewestFirst(snapshot.docs.map((doc) =>
+      mapInspectionDoc(doc.id, doc.data()),
+    )));
+  }, onError);
+}
+
 export function subscribeBusinessInspectionRequests(
   businessId: string,
   onData: (requests: InspectionRequestDetail[]) => void,

@@ -64,7 +64,7 @@ test("customer tools require consent, preserve existing profiles and disclose re
   writes = false; assert.equal((await actions.register({ ...args, requestKey: "registration-key-0005" })).status, "REJECTED");
 });
 test("inspection tools validate scoped references/live availability and return actual booking status", async () => {
-  let writes = 0, notifications = 0, activeService = true, slots = true, linked = profile, authority = false, scheduled = false;
+  let writes = 0, notifications = 0, activeService = true, slots = true, linked = profile, authority = false, scheduled = false, missingInspector = false;
   const auto: boolean[] = [];
   const deps: VoiceBookingDependencies = {
     business: async () => ({ timezone: "Australia/Melbourne", sophieBookingAuthority: authority }),
@@ -72,7 +72,8 @@ test("inspection tools validate scoped references/live availability and return a
     validateSlots: async () => slots ? { ok: true } : { ok: false, error: "Session unavailable" },
     writesEnabled: () => true, once: ledger().once, created: () => { notifications++; },
     create: async (_input, _customerId, confirm) => { writes++; auto.push(confirm); return { ok: true, request: { id: "request-a", status: scheduled ? "scheduled" : "pending",
-      scheduledSlot: scheduled ? { date: "2099-11-05", timeRange: "morning" } : null, scheduledStartTime: "09:00", scheduledEndTime: "10:00" } as InspectionRequestDetail }; },
+      scheduledSlot: scheduled ? { date: "2099-11-05", timeRange: "morning" } : null, scheduledStartTime: "09:00", scheduledEndTime: "10:00",
+      assignedTo: scheduled && !missingInspector ? { type: "staff", uid: "staff-a", name: "Test Inspector", email: "private-staff@example.test" } : null } as InspectionRequestDetail }; },
   };
   const actions = bookingActions(binding, deps);
   const args = { requestKey: "inspection-key-00001", customerConfirmed: true, serviceId: "service-a", customerId: "customer-a", customer,
@@ -94,7 +95,19 @@ test("inspection tools validate scoped references/live availability and return a
     authority = true; scheduled = true;
     const confirmed = await attempt({ customerId: null });
     assert.equal(confirmed.status, "CONFIRMED"); assert.equal(auto.at(-1), true);
-    assert.deepEqual(confirmed.appointment, { date: "2099-11-05", session: "morning", startTime: "09:00", endTime: "10:00", timezone: "Australia/Melbourne" });
+    assert.deepEqual(confirmed.appointment, { date: "2099-11-05", session: "morning", startTime: "09:00", endTime: "10:00", timezone: "Australia/Melbourne", inspectorName: "Test Inspector" });
+    assert.equal(JSON.stringify(confirmed).includes("private-staff@example.test"), false);
+    assert.equal(JSON.stringify(confirmed).includes("staff-a"), false);
+    scheduled = false;
+    const pending = await attempt({ customerId: null });
+    assert.equal(pending.status, "PENDING_REVIEW");
+    assert.equal(pending.code, "STAFF_ASSIGNMENT_REVIEW_REQUIRED");
+    assert.equal(pending.appointment, undefined);
+    scheduled = true; missingInspector = true;
+    const unverified = await attempt({ customerId: null });
+    assert.equal(unverified.status, "UNKNOWN"); assert.equal(unverified.code, "ASSIGNMENT_UNVERIFIED");
+    assert.equal(unverified.appointment, undefined);
+    missingInspector = false;
     process.env.AI_AUTO_ASSIGN_STAFF_ENABLED = "false";
     await attempt({ customerId: null }); assert.equal(auto.at(-1), false);
     await assert.rejects(actions.availability({ from: "2099-01-01", to: "2099-12-31" }));
@@ -116,5 +129,79 @@ test("real MCP advertises six tools and validates consent before dispatching wri
     const result = await client.callTool({ name: "register_customer", arguments: { customer, requestKey: "mcp-registration-001", customerConfirmed: true } });
     assert.notEqual(result.isError, true); assert.equal(writes, 1);
     assert.equal((await client.callTool({ name: "cancel_booking", arguments: {} })).isError, true);
+  } finally { await client.close(); }
+});
+
+test("advice requests preserve scope and allow scheduling only under business authority", async () => {
+  const received: { input: unknown; autoConfirm: boolean }[] = [];
+  let available = true, authority = true, scheduled = false;
+  const actions = bookingActions(binding, {
+    business: async () => ({ timezone: "Australia/Melbourne", sophieBookingAuthority: authority }),
+    activeService: async () => { throw Error("Advice must not choose or look up a service."); },
+    customer: async () => undefined, unavailable: async () => [], writesEnabled: () => true,
+    validateSlots: async () => available ? { ok: true } : { ok: false, error: "Session unavailable" },
+    once: ledger().once, created: () => {},
+    create: async (input, _customerId, autoConfirm) => {
+      received.push({ input, autoConfirm });
+      return { ok: true, request: { id: "advice-request", status: scheduled && autoConfirm ? "scheduled" : "pending",
+        ...(scheduled && autoConfirm ? { assignedTo: { type: "staff", uid: "inspector-a", name: "Advice Inspector" },
+          scheduledSlot: input.preferredSlots[0], scheduledStartTime: "08:00", scheduledEndTime: "09:00" } : {}) } as InspectionRequestDetail };
+    },
+  });
+  const args = { requestKey: "advice-request-key-001", customerConfirmed: true, requestType: "custom_quote", serviceId: null,
+    customRequest: { title: "Check a recurring power issue" }, customer,
+    address: { street: "1 Test Street", suburb: "Lynbrook", state: "VIC", postcode: "3975" },
+    preferredSlots: [{ date: "2099-11-05", timeRange: "morning" }, { date: "2099-11-06", timeRange: "afternoon" }] };
+  const before = process.env.AI_AUTO_ASSIGN_STAFF_ENABLED;
+  try {
+    process.env.AI_AUTO_ASSIGN_STAFF_ENABLED = "true";
+    assert.equal((await actions.create({ ...args, serviceId: "invented" })).status, "REJECTED");
+    assert.equal((await actions.create({ ...args, customRequest: { title: "ab" } })).status, "REJECTED");
+    assert.equal((await actions.create({ ...args, requestType: "existing_service", serviceId: "service-a" })).status, "REJECTED");
+    assert.equal((await actions.create({ ...args, customRequest: { title: "Valid scope", description: "x".repeat(1501) } })).status, "REJECTED");
+    assert.equal((await actions.create({ ...args, customerConfirmed: false })).status, "REJECTED");
+    available = false;
+    assert.equal((await actions.create({ ...args, requestKey: "advice-request-key-002" })).status, "REJECTED");
+    assert.equal(received.length, 0); available = true;
+    const result = await actions.create(args);
+    assert.equal(result.status, "PENDING_REVIEW"); assert.equal(result.code, "STAFF_ASSIGNMENT_REVIEW_REQUIRED");
+    assert.equal(result.appointment, undefined);
+    await actions.create(args); assert.equal(received.length, 1);
+    const input = received[0].input as Record<string, unknown>;
+    assert.equal(input.requestType, "custom_quote"); assert.equal(input.serviceId, null);
+    assert.deepEqual(input.customRequest, { title: args.customRequest.title, description: "" });
+    assert.deepEqual(input.preferredSlots, args.preferredSlots); assert.equal(received[0].autoConfirm, true);
+    assert.equal((await actions.create({ ...args, customRequest: { title: "Changed scope" } })).code, "REQUEST_KEY_CONFLICT");
+    scheduled = true;
+    const confirmed = await actions.create({ ...args, requestKey: "advice-request-key-003" });
+    assert.equal(confirmed.status, "CONFIRMED"); assert.equal(confirmed.appointment?.inspectorName, "Advice Inspector");
+    authority = false;
+    const unauthorized = await actions.create({ ...args, requestKey: "advice-request-key-004" });
+    assert.equal(unauthorized.status, "PENDING_REVIEW"); assert.equal(received.at(-1)?.autoConfirm, false);
+    assert.equal(unauthorized.code, "CUSTOM_REQUEST_REVIEW_REQUIRED");
+    authority = true; process.env.AI_AUTO_ASSIGN_STAFF_ENABLED = "false";
+    assert.equal((await actions.create({ ...args, requestKey: "advice-request-key-005" })).status, "PENDING_REVIEW");
+    assert.equal(received.at(-1)?.autoConfirm, false);
+  } finally { if (before === undefined) delete process.env.AI_AUTO_ASSIGN_STAFF_ENABLED; else process.env.AI_AUTO_ASSIGN_STAFF_ENABLED = before; }
+});
+
+test("real MCP accepts advice schema without a service ID and rejects oversized scope before dispatch", async () => {
+  const client = new Client({ name: "advice-schema-test", version: "1" });
+  let received: Record<string, unknown> | undefined;
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL("http://localhost/mcp"), { fetch: async (url, init) => handleTradeVoiceMcp(new Request(url, init), {
+      profile: async () => ({}), services: async () => [],
+      createInspection: async input => { received = input as Record<string, unknown>; return { status: "PENDING_REVIEW", requestId: "advice-a", message: "Saved" }; },
+    }) }));
+    const args = { requestKey: "advice-mcp-test-001", customerConfirmed: true, requestType: "custom_quote",
+      customRequest: { title: "Need advice on a fault" }, customer,
+      address: { street: "1 Test Street", suburb: "Lynbrook", state: "VIC", postcode: "3975" }, preferredSlots: [{ date: "2099-11-05", timeRange: "morning" }] };
+    const result = await client.callTool({ name: "create_inspection_request", arguments: args });
+    assert.notEqual(result.isError, true); assert.equal(received?.serviceId, null);
+    assert.equal(received?.requestType, "custom_quote");
+    assert.deepEqual(received?.customRequest, { title: args.customRequest.title, description: "" });
+    received = undefined;
+    assert.equal((await client.callTool({ name: "create_inspection_request", arguments: { ...args, customRequest: { title: "x".repeat(121) } } })).isError, true);
+    assert.equal(received, undefined);
   } finally { await client.close(); }
 });

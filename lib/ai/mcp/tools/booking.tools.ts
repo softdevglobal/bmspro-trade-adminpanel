@@ -30,15 +30,18 @@ export function bookingActions(binding: VoiceBusiness, deps: VoiceBookingDepende
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Inspection submission is disabled." };
       const args = inspectionArguments.safeParse(raw);
       if (!args.success) return { status: "REJECTED", message: "Check the required details and obtain explicit confirmation after reading them back." };
-      const { requestKey, serviceId, customerId, customer, address, preferredSlots, budgetAud, customerNotes } = args.data;
+      const { requestKey, requestType, serviceId, customRequest, customerId, customer, address, preferredSlots, budgetAud, customerNotes } = args.data;
+      if (requestType === "existing_service" ? !serviceId || customRequest !== null : serviceId !== null || !customRequest) {
+        return { status: "REJECTED", code: "INVALID_REQUEST_TYPE", message: "Choose either an existing service with its service reference, or advice with a scope of work and no service reference." };
+      }
       const business = await deps.business();
       const timezone = typeof business.timezone === "string" ? business.timezone : "Australia/Melbourne";
-      const details = { serviceId, customerId, customer, address, preferredSlots, budgetAud, customerNotes };
+      const details = { requestType, serviceId, customRequest, customerId, customer, address, preferredSlots, budgetAud, customerNotes };
       return deps.once(requestKey, details, async () => {
-        const parsed = parseInspectionRequestInput({ ...details, requestType: "existing_service" }, timezone);
+        const parsed = parseInspectionRequestInput(details, timezone);
         if (!parsed.ok) return { status: "REJECTED", message: parsed.error };
         if (parsed.value.preferredSlots.length !== preferredSlots.length) return { status: "REJECTED", message: "Choose valid future preferred sessions in the business timezone." };
-        if (!await deps.activeService(serviceId)) return { status: "REJECTED", message: "Choose an active service for this business." };
+        if (requestType === "existing_service" && (!serviceId || !await deps.activeService(serviceId))) return { status: "REJECTED", message: "Choose an active service for this business." };
         if (customerId && !voiceCustomerMatches(await deps.customer(customerId), binding.businessId, customer)) {
           return { status: "REJECTED", code: "CUSTOMER_VERIFICATION_REQUIRED", message: "The customer reference does not match this business and the supplied contacts. Staff must verify it." };
         }
@@ -49,11 +52,22 @@ export function bookingActions(binding: VoiceBusiness, deps: VoiceBookingDepende
         if (!result.ok) return { status: "REJECTED", message: result.error };
         deps.created(result.request);
         const confirmed = result.request.status === "scheduled";
+        const inspector = result.request.assignedTo;
+        if (confirmed && (!result.request.scheduledSlot || !result.request.scheduledStartTime || !result.request.scheduledEndTime || inspector?.type !== "staff")) {
+          return { status: "UNKNOWN", requestId: result.request.id, code: "ASSIGNMENT_UNVERIFIED",
+            message: "The request was saved, but its inspection time and staff assignment could not both be verified. Ask staff to check it; do not resubmit or claim an assigned inspector." };
+        }
         return { status: confirmed ? "CONFIRMED" : "PENDING_REVIEW", requestId: result.request.id,
           ...(confirmed && result.request.scheduledSlot ? { appointment: { date: result.request.scheduledSlot.date,
             session: result.request.scheduledSlot.timeRange, startTime: result.request.scheduledStartTime ?? null,
-            endTime: result.request.scheduledEndTime ?? null, timezone } } : {}),
-          message: confirmed ? "The inspection is confirmed and staff have been assigned." : "The inspection request was received for business review. It is not a confirmed appointment." };
+            endTime: result.request.scheduledEndTime ?? null, timezone,
+            ...(inspector?.type === "staff" && inspector.name ? { inspectorName: inspector.name } : {}) } } : {}),
+          ...(!confirmed && autoConfirm ? { code: "STAFF_ASSIGNMENT_REVIEW_REQUIRED" } : {}),
+          ...(!confirmed && requestType === "custom_quote" && !autoConfirm ? { code: "CUSTOM_REQUEST_REVIEW_REQUIRED" } : {}),
+          message: confirmed ? "The inspection is confirmed. Tell the caller the returned appointment date, time and inspector name; the other preferred dates were alternatives, not additional visits."
+            : autoConfirm ? "The request was saved, but an available inspection time and eligible staff member could not both be assigned automatically. It remains pending for staff review; do not say it is booked."
+            : requestType === "custom_quote" ? "The advice / custom inspection request was received with the caller's scope of work. Automatic confirmation is not authorized for this business; the team must arrange the visit. Preferred dates are not confirmed appointments."
+            : "The inspection request was received for business review. It is not a confirmed appointment." };
       });
     },
   };
@@ -84,12 +98,12 @@ export async function createVoiceBookingTools(binding: VoiceBusiness, business: 
         const { logAuditEvent } = await import("@/lib/audit/server");
         await logAuditEvent({ businessId: binding.businessId, category: "inspection", action: "inspection.created",
           actor: { uid: null, role: "call_center", name: "Sophie (voice)", email: null }, source: "system",
-          summary: `Inspection ${request.requestCode || request.id} submitted by Sophie.`, targetId: request.id, targetLabel: request.serviceName || null });
+          summary: `Inspection ${request.requestCode || request.id} submitted by Sophie.`, targetId: request.id, targetLabel: request.serviceName || request.customRequest?.title || null });
       });
       schedule("sophie-owner-alert", async () => {
         const { sendSophieInspectionOwnerAlert } = await import("@/lib/notifications/sophie-owner-alert");
         await sendSophieInspectionOwnerAlert({ businessId: binding.businessId, requestCode: request.requestCode || request.id,
-          customerName: request.customer.fullName, serviceName: request.serviceName || "Inspection request", status: request.status === "scheduled" ? "scheduled" : "pending",
+          customerName: request.customer.fullName, serviceName: request.serviceName || request.customRequest?.title || "Inspection request", status: request.status === "scheduled" ? "scheduled" : "pending",
           date: request.scheduledSlot?.date || request.aiAssignment?.proposedSlot?.date || null,
           timeRange: request.scheduledSlot?.timeRange || request.aiAssignment?.proposedSlot?.timeRange || null,
           startTime: request.scheduledStartTime || request.aiAssignment?.proposedSlot?.startTime || null,

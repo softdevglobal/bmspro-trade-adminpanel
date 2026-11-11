@@ -1,6 +1,8 @@
 "use client";
 
-import { Phone, PhoneIncoming, Delete, Minus, Power } from "lucide-react";
+import { Phone, PhoneIncoming, Delete, Minus, Power, X } from "lucide-react";
+import Image from "next/image";
+import { OwnerVoiceSession } from "@/components/owner-voice-session";
 import { useRightDrawerInset } from "@/lib/ui/right-drawer-slot";
 import { CallerCustomerDrawer } from "@/components/caller-customer-drawer";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -42,6 +44,8 @@ export function YeastarSoftphone() {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerMatch | null>(null);
   const closeCustomer = useCallback(() => setSelectedCustomer(null), []);
   const [open, setOpen] = useState(false);
+  const [sophieOpen, setSophieOpen] = useState(false);
+  const sophieButton = useRef<HTMLButtonElement>(null);
   const [phoneState, setPhoneState] = useState<PhoneState>("disconnected");
   const [error, setError] = useState("");
   const [dialNumber, setDialNumber] = useState("");
@@ -358,6 +362,16 @@ export function YeastarSoftphone() {
 
   if (authStatus !== "authenticated" || (role !== "business_owner" && role !== "staff")) return null;
 
+  function openPhone() {
+    setSophieOpen(false);
+    setOpen(true);
+  }
+
+  function closeSophie() {
+    setSophieOpen(false);
+    sophieButton.current?.focus();
+  }
+
   return (
     <div className={`fixed ${drawerInset ? (calls.length === 0 ? "z-[30]" : "z-[90]") : "z-[60]"} w-[min(360px,calc(100vw-2rem))] ${role === "business_owner" ? "bottom-[84px] right-4 sm:bottom-[92px] sm:right-6" : "bottom-4 right-4 sm:bottom-6 sm:right-6"}`}>
       {selectedCustomer ? <CallerCustomerDrawer key={selectedCustomer.uid} customer={selectedCustomer} onClose={closeCustomer} /> : null}
@@ -417,13 +431,54 @@ export function YeastarSoftphone() {
           </div>
         </section>
       ) : (
-        <div className="flex items-center justify-end gap-3">
-          {ringing ? <button type="button" onClick={() => setOpen(true)} role="status" aria-live="polite" className="max-w-[240px] rounded-2xl border border-emerald-200 bg-surface px-4 py-3 text-left shadow-lg"><span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-600">Incoming call</span><span className="block truncate text-sm font-semibold">{ringingCall?.number || "Unknown number"}</span>{ringingCall?.name ? <span className="block truncate text-xs text-on-surface-variant">{ringingCall.name}</span> : null}</button> : null}
-          <button type="button" onClick={() => setOpen(true)} aria-label={ringing ? `Answer incoming call from ${ringingCall?.number || "unknown number"}` : "Open phone dial pad"} aria-expanded={open} className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white shadow-lg transition-colors ${ringing ? "bg-emerald-600 yeastar-phone-ringing" : "bg-primary hover:bg-primary/90"}`}>
-            {ringing ? <span aria-hidden className="absolute inset-0 rounded-full bg-emerald-400/40 motion-safe:animate-ping" /> : null}
-            {ringing ? <PhoneIncoming className="relative h-6 w-6" /> : <Phone className="h-6 w-6" />}
-            <span className={`absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-surface ${phoneState === "registered" ? "bg-emerald-400" : phoneState === "error" ? "bg-rose-400" : "bg-slate-400"}`} />
-          </button>
+        <div className="flex flex-col items-end gap-3">
+          {role === "business_owner" ? (
+            <div
+              className="relative"
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && sophieOpen) {
+                  event.stopPropagation();
+                  closeSophie();
+                }
+              }}
+            >
+              <button
+                ref={sophieButton}
+                type="button"
+                onClick={() => setSophieOpen((visible) => !visible)}
+                aria-label="Talk to Sophie"
+                aria-expanded={sophieOpen}
+                aria-controls={sophieOpen ? "sophie-voice-panel" : undefined}
+                title="Talk to Sophie"
+                className="block h-14 w-14 overflow-hidden rounded-full border-2 border-surface shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <Image src="/sophie-avatar.webp" alt="" width={56} height={56} className="h-full w-full object-cover" />
+              </button>
+              {sophieOpen ? (
+                <section
+                  id="sophie-voice-panel"
+                  aria-labelledby="sophie-voice-title"
+                  className="absolute bottom-full right-0 mb-3 max-h-[calc(100dvh-14rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-outline-variant bg-surface shadow-xl sm:bottom-0 sm:right-full sm:mb-0 sm:mr-3"
+                >
+                  <header className="flex items-center justify-between bg-primary px-4 py-3 text-white">
+                    <h2 id="sophie-voice-title" className="text-sm font-semibold">Talk to Sophie</h2>
+                    <button type="button" onClick={closeSophie} aria-label="Close Sophie" className="rounded-lg p-1 hover:bg-white/15">
+                      <X className="h-5 w-5" />
+                    </button>
+                  </header>
+                  <OwnerVoiceSession />
+                </section>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="flex items-center justify-end gap-3">
+            {ringing ? <button type="button" onClick={openPhone} role="status" aria-live="polite" className="max-w-[240px] rounded-2xl border border-emerald-200 bg-surface px-4 py-3 text-left shadow-lg"><span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-600">Incoming call</span><span className="block truncate text-sm font-semibold">{ringingCall?.number || "Unknown number"}</span>{ringingCall?.name ? <span className="block truncate text-xs text-on-surface-variant">{ringingCall.name}</span> : null}</button> : null}
+            <button type="button" onClick={openPhone} aria-label={ringing ? `Answer incoming call from ${ringingCall?.number || "unknown number"}` : "Open phone dial pad"} aria-expanded={open} className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white shadow-lg transition-colors ${ringing ? "bg-emerald-600 yeastar-phone-ringing" : "bg-primary hover:bg-primary/90"}`}>
+              {ringing ? <span aria-hidden className="absolute inset-0 rounded-full bg-emerald-400/40 motion-safe:animate-ping" /> : null}
+              {ringing ? <PhoneIncoming className="relative h-6 w-6" /> : <Phone className="h-6 w-6" />}
+              <span className={`absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-surface ${phoneState === "registered" ? "bg-emerald-400" : phoneState === "error" ? "bg-rose-400" : "bg-slate-400"}`} />
+            </button>
+          </div>
         </div>
       )}
     </div>

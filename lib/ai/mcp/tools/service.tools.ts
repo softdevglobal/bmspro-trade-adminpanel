@@ -17,7 +17,10 @@ export async function createTradeServiceTools(binding: VoiceBusiness) {
   const [{ adminDb }, { isTenantAccessAllowed }] = await Promise.all([
     import("@/lib/firebase/admin"), import("@/lib/onboarding/business-status"),
   ]);
-  const business = async () => {
+  // A fresh service instance is created per MCP request. Share its business
+  // read between tool registration and execution; across requests the short
+  // per-process cache above applies.
+  const loadBusiness = async () => {
     const cached = businessCache.get(binding.businessId);
     if (cached && cached.expiresAt > Date.now()) return cached.data;
     const data = (await adminDb.collection("businesses").doc(binding.businessId).get()).data();
@@ -29,6 +32,8 @@ export async function createTradeServiceTools(binding: VoiceBusiness) {
     businessCache.set(binding.businessId, { data, expiresAt: Date.now() + BUSINESS_CACHE_TTL_MS });
     return data;
   };
+  let snapshot: ReturnType<typeof loadBusiness> | undefined;
+  const business = () => snapshot ??= loadBusiness();
   return {
     business,
     profile: async () => {

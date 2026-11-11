@@ -62,9 +62,47 @@ test("explicit staff service configuration overrides free-text role matching", (
   assert.equal(staffCanPerformService({ ...input.staff[0], staffType: "Supervisor", serviceIds: ["service"] }, input.service), true);
   assert.equal(staffCanPerformService({ ...input.staff[0], serviceIds: ["other"] }, input.service), false);
 });
+
+test("unconfigured service eligibility is distinguished from scheduling conflicts", () => {
+  const input = fixture();
+  input.staff[0].staffType = "Electrician";
+  const unmatched = planTradeStaffAssignment(input);
+  assert.equal(unmatched.assignedTo, null);
+  assert.match(unmatched.aiAssignment.reason, /No staff member is configured/);
+  assert.match(unmatched.aiAssignment.reason, /Services this staff member can perform/);
+  const configured = { ...input, staff: [{ ...input.staff[0], serviceIds: [input.service.id] }] };
+  assert.equal(planTradeStaffAssignment(configured).assignedTo?.uid, input.staff[0].id);
+  configured.leave = [{ requesterUid: input.staff[0].id, status: "approved", fromDate: input.slots[0].date, toDate: input.slots[0].date, isFullDay: true }];
+  assert.equal(planTradeStaffAssignment(configured).assignedTo, null);
+  assert.match(planTradeStaffAssignment(configured).aiAssignment.reason, /preferred sessions/);
+});
+
+test("an explicitly inactive staff account is never selected despite an active status label", () => {
+  const input = fixture();
+  const result = planTradeStaffAssignment({ ...input, staff: [{ ...input.staff[0], isActive: false }] });
+  assert.equal(result.assignedTo, null);
+  assert.match(result.aiAssignment.reason, /No active staff member/);
+});
 test("customer portal requests can use the same proposal planner with clear attribution", () => {
   const input = fixture();
   const result = planTradeStaffAssignment({ ...input, assignedBy: "customer_portal" });
   assert.equal(result.aiAssignment.status, "assigned");
   assert.equal(result.aiAssignment.assignedBy, "customer_portal");
+});
+
+test("advice inspections use quotation permission without guessing a service or skill", () => {
+  const input = fixture();
+  const advice = { ...input, service: null, requestType: "custom_quote" as const };
+  assert.equal(planTradeStaffAssignment(advice).assignedTo, null);
+  assert.match(planTradeStaffAssignment(advice).aiAssignment.reason, /permitted to handle advice/);
+  const permitted = { ...advice, staff: [{ ...input.staff[0], serviceIds: [], staffType: "Inspector", canget_qutaion: true }] };
+  const result = planTradeStaffAssignment(permitted);
+  assert.equal(result.assignedTo?.uid, input.staff[0].id);
+  assert.equal(result.aiAssignment.proposedSlot?.date, input.slots[0].date);
+  assert.equal(planTradeStaffAssignment({ ...permitted, staff: [{ ...permitted.staff[0], suspended: true }] }).assignedTo, null);
+  permitted.closures = [input.slots[0].date];
+  permitted.slots.push({ date: "2099-01-06", timeRange: "afternoon" });
+  assert.equal(planTradeStaffAssignment(permitted).aiAssignment.proposedSlot?.date, "2099-01-06");
+  permitted.leave = [{ requesterUid: input.staff[0].id, status: "approved", fromDate: "2099-01-06", toDate: "2099-01-06", isFullDay: true }];
+  assert.equal(planTradeStaffAssignment(permitted).assignedTo, null);
 });
