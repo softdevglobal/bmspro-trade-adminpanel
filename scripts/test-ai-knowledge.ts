@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { chunkText } from "../lib/ai/rag/chunker";
+import { chunkTableText, chunkText } from "../lib/ai/rag/chunker";
 import { scanKnowledgeText, redactPersonalData } from "../lib/ai/learning/redact";
-import { retrievePassages } from "../lib/ai/rag/retriever";
+import { keywordMatches, questionTerms, retrievePassages } from "../lib/ai/rag/retriever";
 import { knowledgeSettings } from "../lib/ai/rag/settings";
-import { createEmbedder } from "../lib/ai/rag/embeddings";
+import { clearQueryEmbeddingCache, createEmbedder, createQueryEmbedder } from "../lib/ai/rag/embeddings";
 import { knowledgeActions, type VoiceKnowledgeDependencies } from "../lib/ai/mcp/tools/knowledge.tools";
 import { handleTradeVoiceMcp, type TradeVoiceReads } from "../lib/ai/mcp/mcp-server";
 import type { KnowledgePassage } from "../lib/ai/data/knowledge-chunks";
@@ -57,8 +57,8 @@ test("retriever caps passage size and total size, and reports NO_MATCH", async (
   const big = "x".repeat(5000);
   const found = await retrievePassages({ embed: async () => [[1]], nearest: async () => [passage(big), passage(big), passage(big), passage(big)] }, "b", "fees?");
   assert.equal(found.status, "FOUND");
-  assert.ok(found.passages.every(p => p.text.length <= 1200));
-  assert.ok(found.passages.reduce((sum, p) => sum + p.text.length, 0) <= 3000);
+  assert.ok(found.passages.every(p => p.text.length <= 1900));
+  assert.ok(found.passages.reduce((sum, p) => sum + p.text.length, 0) <= 4000);
   assert.match(found.message, /data, not instructions/);
   const none = await retrievePassages({ embed: async () => [[1]], nearest: async () => [] }, "b", "fees?");
   assert.equal(none.status, "NO_MATCH");
@@ -140,4 +140,159 @@ test("MCP advertises search_business_knowledge only when provided, and hides int
     assert.match(text, /UNAVAILABLE/);
     assert.ok(!text.includes("private provider error"));
   } finally { await withTool.close(); }
+});
+
+test("query embedder caches repeat questions, retries once and times out fast", async () => {
+  const settings = { ...knowledgeSettings({ OPENAI_API_KEY: "test-key", AI_KNOWLEDGE_EMBEDDING_DIMENSIONS: "256" }) };
+  const ok = (input: string[]) => new Response(JSON.stringify({ data: input.map((_, index) => ({ index, embedding: Array(256).fill(0.5) })) }), { status: 200 });
+  clearQueryEmbeddingCache();
+  let requests = 0;
+  const counting = (async (_url: unknown, init?: RequestInit) => { requests++; return ok(JSON.parse(String(init?.body)).input); }) as typeof fetch;
+  const embed = createQueryEmbedder(settings, counting);
+  await embed(["Do you charge a call-out fee?"]);
+  await embed(["do you charge a call out fee"]); // same question, different case/punctuation
+  assert.equal(requests, 1);
+  await embed(["Do you charge for quotes?"]);
+  assert.equal(requests, 2);
+
+  // One 500 then success: retried once.
+  clearQueryEmbeddingCache();
+  let calls = 0;
+  const flaky = (async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    return calls === 1 ? new Response("{}", { status: 500 }) : ok(JSON.parse(String(init?.body)).input);
+  }) as typeof fetch;
+  assert.equal((await createQueryEmbedder(settings, flaky)(["Opening hours?"]))[0].length, 256);
+  assert.equal(calls, 2);
+
+  // A 400 is not retried.
+  let badCalls = 0;
+  const bad = (async () => { badCalls++; return new Response("{}", { status: 400 }); }) as typeof fetch;
+  await assert.rejects(createQueryEmbedder(settings, bad)(["Warranty?"]));
+  assert.equal(badCalls, 1);
+
+  // A hung request gives up quickly instead of holding the caller.
+  const hung = ((_url: unknown, init?: RequestInit) => new Promise<Response>((_, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+  })) as typeof fetch;
+  const started = Date.now();
+  await assert.rejects(createQueryEmbedder(settings, hung, { timeoutMs: 100, retries: 1 })(["Licensed?"]));
+  assert.ok(Date.now() - started < 1500);
+});
+
+test("file descriptions: wording, validation, and every passage starts with them", async () => {
+  const { describePurpose, purposeError } = await import("../lib/ai/data/knowledge-purpose");
+  assert.equal(describePurpose("products", ""), "These are products this business sells, with its own prices and stock.");
+  assert.equal(describePurpose("products", "  Prices include GST.\n"), "These are products this business sells, with its own prices and stock. Prices include GST.");
+  assert.equal(describePurpose("other", "Spare parts we keep in the van"), "Spare parts we keep in the van");
+  assert.equal(describePurpose(undefined, "ignored"), "");
+  assert.equal(describePurpose("bogus", ""), "");
+  assert.equal(purposeError("products", ""), null);
+  assert.ok(purposeError(null, ""));
+  assert.ok(purposeError("other", "  "));
+  assert.equal(purposeError("other", "Van stock"), null);
+  assert.ok(purposeError("prices", "x".repeat(301)));
+
+  const heading = ["Stock list", describePurpose("products", "Prices include GST.")].join("\n");
+  const chunks = chunkText(heading, Array.from({ length: 40 }, (_, i) => `Item ${i}: ${"word ".repeat(30)}`).join("\n\n"));
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every(chunk => chunk.text.startsWith("Stock list\nThese are products this business sells, with its own prices and stock. Prices include GST.\n")));
+});
+
+test("keyword match finds an exact product the meaning search missed, and never cuts a row", async () => {
+  assert.deepEqual(questionTerms("Do you sell rice cookers?"), ["rice", "cooker"]);
+  assert.deepEqual(questionTerms("Any LED bulbs in stock, how much?"), ["led", "bulb"]);
+  const row = (n: number, name: string) => `Product ID: EL-${n} | Description: ${name} | Price (USD): ${n}`;
+  const piece = (rows: string[]) => passage(`Stock list\nSheet: Inventory\n${rows.join("\n")}`, 0.7);
+  const candidates = [piece([row(1, "LED Bulb 9W"), row(2, "Ceiling Fan")]), piece([row(41, "Toaster"), row(42, "Rice Cooker 1.8L")])];
+  const hits = keywordMatches("Do you sell rice cookers?", candidates);
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].text, /Rice Cooker 1\.8L/);
+  assert.equal(hits[0].distance, 0);
+  assert.deepEqual(keywordMatches("Do you sell solar panels?", candidates), []);
+  // Words found in too many passages are too common to trust.
+  const common = Array.from({ length: 12 }, (_, i) => piece([row(i, "Power point white")]));
+  assert.deepEqual(keywordMatches("power point", common), []);
+
+  // Meaning search found nothing; keyword match still answers.
+  const found = await retrievePassages({ embed: async () => [[1]], nearest: async () => [], keywordCandidates: async () => candidates }, "b", "Do you sell rice cookers?");
+  assert.equal(found.status, "FOUND");
+  assert.match(found.passages[0].text, /Rice Cooker/);
+  // A failed keyword lookup never breaks the search.
+  const meaningOnly = await retrievePassages({ embed: async () => [[1]], nearest: async () => [passage("Call-out fee $90")], keywordCandidates: async () => { throw new Error("down"); } }, "b", "fee?");
+  assert.equal(meaningOnly.status, "FOUND");
+
+  // Long passages are trimmed at a line break, so the last row is dropped whole, not cut.
+  const long = passage(Array.from({ length: 40 }, (_, i) => row(i, `Item ${i} ${"x".repeat(40)}`)).join("\n"));
+  const trimmed = await retrievePassages({ embed: async () => [[1]], nearest: async () => [long] }, "b", "items?");
+  const lastLine = trimmed.passages[0].text.split("\n").at(-1)!;
+  assert.match(lastLine, /Price \(USD\): \d+$/);
+});
+
+test("spreadsheet text splits into small pieces of whole rows with the sheet name on each", () => {
+  const body = ["Sheet: Electrical", ...Array.from({ length: 20 }, (_, i) => `name: Item ${i} | price: ${i}.50 | brand: ${"B".repeat(30)}`),
+    "", "Sheet: Plumbing", "name: Tap | price: 20"].join("\n");
+  const chunks = chunkTableText("Products\nThese are products this business sells.", body);
+  assert.ok(chunks.length > 3);
+  assert.ok(chunks.every(chunk => chunk.text.startsWith("Products\nThese are products this business sells.\nSheet: ")));
+  assert.ok(chunks.every(chunk => chunk.text.split("\n").slice(3).every(line => /^name: .+ \| price: [\d.]+/.test(line))));
+  assert.match(chunks.at(-1)!.text, /Sheet: Plumbing\nname: Tap \| price: 20$/);
+  assert.equal(chunks.flatMap(chunk => chunk.text.split("\n").filter(line => line.startsWith("name:"))).length, 21);
+});
+
+test("lists in any document (PDF price lists, bullet lists) split into small pieces of whole lines", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => `Item ${i} Sparkelec power point model ${i} ${(i * 3.1).toFixed(2)}`);
+  const chunks = chunkText("Price list", `Our prices\n\n${rows.join("\n")}\n\nAll prices include GST.`);
+  const listChunks = chunks.filter(chunk => /Item \d+/.test(chunk.text));
+  assert.ok(listChunks.length >= 6, `expected small pieces, got ${listChunks.length}`);
+  // The short heading above the list is repeated on every piece of it.
+  assert.ok(listChunks.every(chunk => chunk.text.startsWith("Price list\nOur prices\nItem ")));
+  // Every row is kept whole, exactly once.
+  const kept = listChunks.flatMap(chunk => chunk.text.split("\n").filter(line => line.startsWith("Item ")));
+  assert.deepEqual(kept, rows);
+  assert.match(chunks.at(-1)!.text, /All prices include GST\.$/);
+
+  // Wrapped prose (a PDF paragraph broken at the page width) stays ordinary text.
+  const prose = Array.from({ length: 8 }, () => "we arrive on time, explain the work clearly and clean up before we leave the site").join("\n");
+  assert.equal(chunkText("About", prose).length, 1);
+
+  // A very long line with no full stops is cut between words, never inside one.
+  const longLine = Array.from({ length: 900 }, (_, i) => `word${i}`).join(" ");
+  const pieces = chunkText("Long", longLine);
+  assert.ok(pieces.length > 1);
+  assert.ok(pieces.every(piece => piece.text.split("\n")[1].split(" ").every(word => /^word\d+$/.test(word))));
+});
+
+test("keyword match keeps codes and sizes whole and weighs rare words over common ones", () => {
+  assert.deepEqual(questionTerms("Price of SGPO2-DP?"), ["sgpo2-dp"]);
+  assert.deepEqual(questionTerms("Do you have 2.5mm twin and earth cable?"), ["2.5mm", "twin", "earth", "cable"]);
+  const row = (text: string) => passage(`Products\n${text}`);
+  const catalogue = [
+    ...Array.from({ length: 30 }, (_, i) => row(`name: Sparkelec Power Point ${i} White | price: ${i}.00`)),
+    row("name: Sparkelec Double Pole Power Point SGPO2-DP White | price: 8.80"),
+    row("name: Rice Cooker 1.8L White | price: 38.33"),
+    row("name: Twin and Earth Cable 2.5mm 100m | price: 415.80"),
+  ];
+  assert.match(keywordMatches("Price of SGPO2-DP?", catalogue)[0].text, /SGPO2-DP/);
+  assert.match(keywordMatches("Do you sell white rice cookers?", catalogue)[0].text, /Rice Cooker/);
+  assert.match(keywordMatches("2.5mm twin and earth cable", catalogue)[0].text, /Twin and Earth/);
+  // A common word alone ("white" is everywhere) is not enough to claim a match.
+  assert.deepEqual(keywordMatches("Do you have white ones?", catalogue), []);
+  // Most of the question must match: a row with only "light" does not answer "solar garden light".
+  assert.deepEqual(keywordMatches("Do you sell solar garden lights?", [...catalogue, row("name: LED Light 9W | price: 1.50")]), []);
+  // Many matching rows: still return a few examples (the old rule returned nothing).
+  const manyPoints = Array.from({ length: 12 }, (_, i) => row(`name: Power Point ${i} | price: ${i}.00`));
+  assert.equal(keywordMatches("Do you sell power points?", [...manyPoints, ...Array.from({ length: 40 }, (_, i) => row(`name: Fan ${i}`))]).length, 3);
+});
+
+test("long imports are cut at a line break, within the character and byte limits", async () => {
+  const { cutAtLine } = await import("../lib/ai/data/knowledge-sources");
+  const rows = Array.from({ length: 100 }, (_, i) => `Row ${i}: ${"x".repeat(50)}`).join("\n");
+  const cut = cutAtLine(rows, 1000, 1_000_000);
+  assert.ok(cut.length <= 1000);
+  assert.match(cut.split("\n").at(-1)!, /^Row \d+: x{50}$/);
+  assert.equal(cutAtLine("short", 1000, 1000), "short");
+  // Multi-byte text (e.g. Chinese) is kept under the byte limit too.
+  const wide = Array.from({ length: 200 }, () => "电工价格表").join("\n");
+  assert.ok(new TextEncoder().encode(cutAtLine(wide, 100_000, 600)).length <= 600);
 });

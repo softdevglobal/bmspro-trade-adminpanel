@@ -472,7 +472,7 @@ service cloud.firestore {
     function isAdminSdkOnlyCollection() {
       return isCareplusCollection()
         || isEmailIntegrationCollection()
-        || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions', 'aiAssignmentGuards', 'ai_voice_submissions', 'ai_did_mappings', 'ai_knowledge_sources', 'ai_knowledge_chunks', 'ai_unanswered_questions', 'ai_call_logs'];
+        || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions', 'aiAssignmentGuards', 'ai_voice_submissions', 'ai_did_mappings', 'ai_knowledge_sources', 'ai_knowledge_chunks', 'ai_knowledge_uploads', 'ai_unanswered_questions', 'ai_call_logs'];
     }
 
     // Super admins can access remaining collections in the admin portal.

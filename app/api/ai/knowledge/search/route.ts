@@ -25,13 +25,19 @@ export async function POST(request: Request) {
     if (!await consumeRateLimits([{ key: `ai-knowledge-test:${auth.businessId}`, limit: 30, windowMs: 60_000 }])) {
       return json({ ok: false, error: "Too many test questions. Wait a minute and try again." }, 429);
     }
-    const [{ adminDb }, { createEmbedder }, { createVectorStore }, { knowledgeSettings }] = await Promise.all([
+    const [{ adminDb }, { createQueryEmbedder }, { createVectorStore }, { knowledgeSettings }, { findPassages }] = await Promise.all([
       import("@/lib/firebase/admin"), import("@/lib/ai/rag/embeddings"), import("@/lib/ai/rag/vector-store"), import("@/lib/ai/rag/settings"),
+      import("@/lib/ai/rag/retriever"),
     ]);
     const settings = knowledgeSettings();
     const started = performance.now();
-    const [vector] = await createEmbedder(settings)([parsed.data.question]);
-    const hits = await createVectorStore(adminDb).nearest(auth.businessId, vector, settings.topK, settings.maxDistance);
+    const store = createVectorStore(adminDb);
+    // Same search as Sophie: keyword matches first, then matches by meaning.
+    const hits = await findPassages({
+      embed: createQueryEmbedder(settings),
+      nearest: (businessId, vector) => store.nearest(businessId, vector, settings.topK, settings.maxDistance),
+      keywordCandidates: businessId => store.publishedPassages(businessId),
+    }, auth.businessId, parsed.data.question);
     return json({
       ok: true,
       status: hits.length ? "FOUND" : "NO_MATCH",

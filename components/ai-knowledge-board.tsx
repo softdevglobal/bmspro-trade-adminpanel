@@ -1,7 +1,9 @@
 "use client";
 
 import { auth } from "@/lib/firebase/client";
-import type { KnowledgeKind, KnowledgeSource, KnowledgeStatus } from "@/lib/ai/data/knowledge-sources";
+import type { KnowledgeKind, KnowledgeOrigin, KnowledgeSource, KnowledgeStatus } from "@/lib/ai/data/knowledge-sources";
+import { KNOWLEDGE_PURPOSES, PURPOSE_LABEL, PURPOSE_NOTE_MAX, describePurpose, purposeError,
+  type KnowledgePurpose } from "@/lib/ai/data/knowledge-purpose";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const INPUT_CLASS =
@@ -27,8 +29,30 @@ const TOPIC_SUGGESTIONS: Array<{ title: string; kind: "faq" | "policy"; hint: st
 ];
 
 const KIND_LABEL: Record<KnowledgeKind, string> = {
-  faq: "FAQ", policy: "Policy", note: "Note", business_facts: "Business facts", service_descriptions: "Services",
+  faq: "FAQ", policy: "Policy", note: "Note", document: "Document", website: "Website",
+  business_facts: "Business facts", service_descriptions: "Services",
 };
+
+// Mirrors lib/ai/data/knowledge-sources.ts and lib/ai/rag/loaders/file-loaders.ts (kept local so the client bundle stays small).
+const OWNER_BODY_MAX = 20_000;
+const IMPORTED_BODY_MAX = 300_000;
+const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
+const IMPORT_ACCEPT = ".pdf,.pptx,.docx,.xlsx,.csv,.txt,.md";
+const isImported = (kind: KnowledgeKind) => kind === "document" || kind === "website";
+
+function formatBytes(bytes: number) {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function originLabel(origin: KnowledgeOrigin | null): string | null {
+  if (!origin) return null;
+  if (origin.type === "url") {
+    try { const url = new URL(origin.url); return `From ${url.hostname}${url.pathname === "/" ? "" : url.pathname}`; }
+    catch { return `From ${origin.url}`; }
+  }
+  const unit = origin.type === "pdf" ? "page" : origin.type === "xlsx" ? "sheet" : origin.type === "csv" ? "row" : null;
+  return `From ${origin.fileName}${unit ? `, ${origin.parts} ${unit}${origin.parts === 1 ? "" : "s"}` : ""}`;
+}
 const STATUS_STYLE: Record<KnowledgeStatus, { label: string; className: string }> = {
   published: { label: "Published", className: "bg-primary/10 text-primary" },
   draft: { label: "Draft", className: "bg-surface-container-high text-on-surface-variant" },
@@ -44,10 +68,65 @@ type Filter = "all" | "published" | "draft" | "needs_review";
 type Unanswered = { id: string; question: string; count: number };
 type TestMatch = { sourceId: string; title: string; text: string; distance: number };
 type TestResult = { status: "FOUND" | "NO_MATCH"; durationMs: number; matches: TestMatch[] };
-type Editor = { id: string | null; version: number; kind: "faq" | "policy" | "note"; title: string; body: string };
+type Editor = {
+  id: string | null; version: number; kind: "faq" | "policy" | "note" | "document" | "website"; title: string; body: string;
+  /** Imported entries only. Null on entries imported before descriptions existed. */
+  purpose: KnowledgePurpose | null; purposeNote: string;
+};
+type PurposeValue = { purpose: KnowledgePurpose | null; note: string };
+const EMPTY_PURPOSE: PurposeValue = { purpose: null, note: "" };
+type ImportKind = "file" | "website";
 type ApiResult = { ok?: boolean; error?: string } & Record<string, unknown>;
+/** The list sends a preview of `body`; `bodyLength` is the full length. */
+type ListedSource = KnowledgeSource & { bodyLength?: number };
+type IndexState = { label: string; pending: boolean; error: boolean; stalled: boolean };
 
-const EMPTY_EDITOR: Editor = { id: null, version: 0, kind: "faq", title: "", body: "" };
+/** Background indexing normally takes seconds; after this long it has almost certainly stopped. */
+const STALL_MS = 3 * 60_000;
+
+const EMPTY_EDITOR: Editor = { id: null, version: 0, kind: "faq", title: "", body: "", purpose: null, purposeNote: "" };
+
+/** "What is this file?" Its description is added to the top of every passage Sophie reads from the entry. */
+function PurposePicker({ id, value, onChange, disabled, label = "What is this file?" }: {
+  id: string; value: PurposeValue; onChange: (value: PurposeValue) => void; disabled?: boolean; label?: string;
+}) {
+  const noteRequired = value.purpose === "other";
+  const preview = describePurpose(value.purpose, value.note);
+  return (
+    <fieldset disabled={disabled}>
+      <legend className="mb-1 block font-body text-[13px] font-semibold text-on-surface">
+        {label} <span className="font-normal text-error">*</span>
+      </legend>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {KNOWLEDGE_PURPOSES.map(purpose => {
+          const checked = value.purpose === purpose;
+          return (
+            <label key={purpose}
+              className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 transition-colors ${checked ? "border-primary bg-primary/5" : "border-outline-variant hover:bg-surface-container-low"}`}>
+              <input type="radio" name={`${id}-purpose`} value={purpose} checked={checked} className="mt-0.5 accent-primary"
+                onChange={() => onChange({ ...value, purpose })} />
+              <span className="min-w-0">
+                <span className="block font-body text-[13px] font-semibold text-on-surface">{PURPOSE_LABEL[purpose].title}</span>
+                <span className="block font-body text-[11px] text-on-surface-variant">{PURPOSE_LABEL[purpose].hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <label htmlFor={`${id}-note`} className="mb-1 mt-3 block font-body text-[13px] font-semibold text-on-surface">
+        {noteRequired ? "Describe this file" : "Note for Sophie"}{" "}
+        <span className={`font-normal ${noteRequired ? "text-error" : "text-on-surface-variant"}`}>{noteRequired ? "*" : "(optional)"}</span>
+      </label>
+      <input id={`${id}-note`} value={value.note} onChange={event => onChange({ ...value, note: event.target.value })} maxLength={PURPOSE_NOTE_MAX}
+        placeholder={noteRequired ? "e.g. Our spare parts we keep in the van" : "e.g. Prices include GST. Stock changes daily."} className={INPUT_CLASS} />
+      {preview && (
+        <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+          Sophie reads this at the top of every passage: <span className="italic text-on-surface">&ldquo;{preview}&rdquo;</span>
+        </p>
+      )}
+    </fieldset>
+  );
+}
 
 async function authFetch(path: string, options: RequestInit = {}): Promise<ApiResult> {
   const user = auth.currentUser;
@@ -63,34 +142,45 @@ async function authFetch(path: string, options: RequestInit = {}): Promise<ApiRe
   return body;
 }
 
-async function fetchBoard(): Promise<
-  | { ok: true; sources: KnowledgeSource[]; voiceEnabled: boolean; unanswered: Unanswered[] }
-  | { ok: false; error: string }
-> {
+type BoardResult =
+  | { ok: true; sources: ListedSource[]; voiceEnabled: boolean; unanswered?: Unanswered[]; at: number }
+  | { ok: false; error: string };
+
+/** `withUnanswered: false` is the light refresh used while entries are being prepared. */
+async function fetchBoard(withUnanswered = true): Promise<BoardResult> {
   try {
     const [knowledge, open] = await Promise.all([
       authFetch("/api/ai/knowledge"),
-      authFetch("/api/ai/unanswered").catch(() => ({ questions: [] }) as ApiResult),
+      withUnanswered ? authFetch("/api/ai/unanswered").catch(() => ({ questions: [] }) as ApiResult) : Promise.resolve(null),
     ]);
     return {
       ok: true,
-      sources: (knowledge.sources as KnowledgeSource[]) ?? [],
+      sources: (knowledge.sources as ListedSource[]) ?? [],
       voiceEnabled: knowledge.voiceEnabled === true,
-      unanswered: (open.questions as Unanswered[]) ?? [],
+      unanswered: open ? (open.questions as Unanswered[]) ?? [] : undefined,
+      at: Date.now(),
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not load AI knowledge." };
   }
 }
 
-function indexState(source: KnowledgeSource): { label: string; pending: boolean; error: boolean } {
-  if (source.indexError) return { label: source.indexError, pending: false, error: true };
-  if (source.indexedVersion < source.version) return { label: "Preparing for Sophie…", pending: true, error: false };
-  return { label: `Ready · ${source.chunkCount} passage${source.chunkCount === 1 ? "" : "s"}`, pending: false, error: false };
+function indexState(source: KnowledgeSource, now: number): IndexState {
+  if (source.indexError) return { label: source.indexError, pending: false, error: true, stalled: false };
+  if (source.indexedVersion < source.version) {
+    const since = Math.max(source.updatedAt ?? 0, source.indexRequestedAt ?? 0);
+    if (since && now - since > STALL_MS) {
+      return { label: "Preparing didn\u2019t finish. Press Retry.", pending: false, error: true, stalled: true };
+    }
+    return { label: "Preparing for Sophie…", pending: true, error: false, stalled: false };
+  }
+  return { label: `Ready · ${source.chunkCount} passage${source.chunkCount === 1 ? "" : "s"}`, pending: false, error: false, stalled: false };
 }
 
 export function AiKnowledgeBoard() {
-  const [sources, setSources] = useState<KnowledgeSource[]>([]);
+  const [sources, setSources] = useState<ListedSource[]>([]);
+  // Time of the last list refresh. Kept in state so render stays pure.
+  const [now, setNow] = useState(0);
   const [unanswered, setUnanswered] = useState<Unanswered[]>([]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -103,14 +193,24 @@ export function AiKnowledgeBoard() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [fileTitle, setFileTitle] = useState("");
+  const [filePurpose, setFilePurpose] = useState<PurposeValue>(EMPTY_PURPOSE);
+  const [urlPurpose, setUrlPurpose] = useState<PurposeValue>(EMPTY_PURPOSE);
+  const [importUrl, setImportUrl] = useState("");
+  const [urlTitle, setUrlTitle] = useState("");
+  // Which import is running, if any. The two cards are separate but share this lock.
+  const [importing, setImporting] = useState<ImportKind | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** Applies a fetch result to state. Kept separate so effects only set state in promise callbacks. */
-  const apply = useCallback((result: Awaited<ReturnType<typeof fetchBoard>>) => {
+  const apply = useCallback((result: BoardResult) => {
     if (result.ok) {
       setSources(result.sources);
       setVoiceEnabled(result.voiceEnabled);
-      setUnanswered(result.unanswered);
+      setNow(result.at);
+      if (result.unanswered) setUnanswered(result.unanswered);
     } else {
       setNotice({ tone: "error", text: result.error });
     }
@@ -125,13 +225,17 @@ export function AiKnowledgeBoard() {
     return () => { cancelled = true; };
   }, [apply]);
 
-  // While anything is being indexed, refresh every few seconds so the status updates by itself.
-  const anyPending = sources.some(source => indexState(source).pending);
+  // While anything is being prepared, refresh just the list every few seconds so the
+  // status updates by itself. Stuck entries stop the polling and show Retry instead.
+  const anyPending = sources.some(source => indexState(source, now).pending);
   useEffect(() => {
     if (!anyPending) return;
-    const timer = window.setInterval(() => { void load(); }, 4000);
-    return () => window.clearInterval(timer);
-  }, [anyPending, load]);
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void fetchBoard(false).then(result => { if (!cancelled && result.ok) apply(result); });
+    }, 4000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [anyPending, apply]);
 
   /** Runs an action; if it resolves to a string, that replaces the default success message. */
   async function run(action: () => Promise<unknown>, done: string) {
@@ -156,7 +260,13 @@ export function AiKnowledgeBoard() {
   }), [sources]);
   const visible = filter === "all" ? sources : sources.filter(source => source.status === filter);
   const existingTitles = useMemo(() => new Set(sources.map(source => source.title.trim().toLowerCase())), [sources]);
-  const editorValid = editor.title.trim().length >= 2 && editor.body.trim().length >= 10;
+  const editorMax = isImported(editor.kind) ? IMPORTED_BODY_MAX : OWNER_BODY_MAX;
+  const editorValid = editor.title.trim().length >= 2 && editor.body.trim().length >= 10 && editor.body.trim().length <= editorMax
+    // Older imported entries may have no description yet; once one is chosen it must be valid.
+    && !(isImported(editor.kind) && editor.purpose !== null && purposeError(editor.purpose, editor.purposeNote));
+  const fileValid = !!importFile && importFile.size <= MAX_IMPORT_BYTES && !purposeError(filePurpose.purpose, filePurpose.note);
+  const urlAddressValid = /^https?:\/\/\S+\.\S+/i.test(importUrl.trim());
+  const urlValid = urlAddressValid && !purposeError(urlPurpose.purpose, urlPurpose.note);
 
   function startNew(topic?: (typeof TOPIC_SUGGESTIONS)[number]) {
     setEditor({ ...EMPTY_EDITOR, kind: topic?.kind ?? "faq", title: topic?.title ?? "" });
@@ -164,15 +274,33 @@ export function AiKnowledgeBoard() {
     editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function startEdit(source: KnowledgeSource) {
-    if (source.generated) return;
-    setEditor({ id: source.id, version: source.version, kind: source.kind as Editor["kind"], title: source.title, body: source.body });
+  async function startEdit(listed: ListedSource) {
+    if (listed.generated) return;
+    let source: KnowledgeSource = listed;
+    // The list only has a preview of long entries. Load the full text first,
+    // otherwise saving would cut the entry down to the preview.
+    if ((listed.bodyLength ?? listed.body.length) > listed.body.length) {
+      setBusy(true);
+      try {
+        source = (await authFetch(`/api/ai/knowledge/${listed.id}`)).source as KnowledgeSource;
+      } catch (error) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not open the entry." });
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+    setEditor({ id: source.id, version: source.version, kind: source.kind as Editor["kind"], title: source.title, body: source.body,
+      purpose: source.purpose ?? null, purposeNote: source.purposeNote ?? "" });
     setHint(null);
     editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   const save = (publish: boolean) => run(async () => {
-    const payload = { title: editor.title.trim(), body: editor.body.trim() };
+    const payload = {
+      title: editor.title.trim(), body: editor.body.trim(),
+      ...(isImported(editor.kind) && editor.purpose ? { purpose: editor.purpose, purposeNote: editor.purposeNote.trim() } : {}),
+    };
     let message: string | undefined;
     if (editor.id) {
       const result = await authFetch(`/api/ai/knowledge/${editor.id}`, {
@@ -201,6 +329,65 @@ export function AiKnowledgeBoard() {
     return message;
   }, publish ? "Saved and published. Sophie can use it on new calls once it shows Ready." : "Saved as a draft. Sophie won't use it until you publish it.");
 
+  /** File import: get a signed link, upload straight to Storage, then ask the server to read it. */
+  async function importFromFile(file: File, title: string, described: PurposeValue) {
+    const start = await authFetch("/api/ai/knowledge/upload-url", {
+      method: "POST", body: JSON.stringify({ fileName: file.name, sizeBytes: file.size }),
+    });
+    // No login token here: the signed link is the permission, and the headers are part of its signature.
+    const put = await fetch(String(start.uploadUrl), { method: "PUT", headers: start.headers as Record<string, string>, body: file });
+    if (!put.ok) throw new Error("Upload failed. Please try again.");
+    return authFetch("/api/ai/knowledge/import", {
+      method: "POST", body: JSON.stringify({
+        uploadId: start.uploadId, ...(title ? { title } : {}),
+        purpose: described.purpose, ...(described.note.trim() ? { purposeNote: described.note.trim() } : {}),
+      }),
+    });
+  }
+
+  async function runImport(kind: ImportKind) {
+    if (importing || (kind === "file" ? !fileValid || !importFile : !urlValid)) return;
+    setImporting(kind);
+    setBusy(true);
+    setNotice(null);
+    try {
+      const rawTitle = (kind === "file" ? fileTitle : urlTitle).trim();
+      const title = rawTitle.length >= 2 ? rawTitle : "";
+      const result = kind === "file" && importFile
+        ? await importFromFile(importFile, title, filePurpose)
+        : await authFetch("/api/ai/knowledge/import-url", {
+          method: "POST", body: JSON.stringify({
+            url: importUrl.trim(), ...(title ? { title } : {}),
+            purpose: urlPurpose.purpose, ...(urlPurpose.note.trim() ? { purposeNote: urlPurpose.note.trim() } : {}),
+          }),
+        });
+      const flags = (result.flags as string[]) ?? [];
+      const parts = ["Imported as a draft. Read the text below, fix anything wrong, then publish. Sophie only uses published entries."];
+      if (flags.length) parts.push(`Held for review: it ${flags.map(flag => FLAG_LABEL[flag] ?? flag).join(" and ")}.`);
+      if (result.truncated === true) parts.push("Only the first 300,000 characters were kept. Split the document and import the rest.");
+      setNotice({ tone: "info", text: parts.join(" ") });
+      if (kind === "file") {
+        setImportFile(null);
+        setFileTitle("");
+        setFilePurpose(EMPTY_PURPOSE);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } else {
+        setImportUrl("");
+        setUrlTitle("");
+        setUrlPurpose(EMPTY_PURPOSE);
+      }
+      await load();
+      // Open the new entry so the owner can check the extracted text straight away.
+      const opened = await authFetch(`/api/ai/knowledge/${String(result.id)}`).catch(() => null);
+      if (opened?.source) await startEdit(opened.source as KnowledgeSource);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Import failed." });
+    } finally {
+      setImporting(null);
+      setBusy(false);
+    }
+  }
+
   const setStatus = (source: KnowledgeSource, status: "draft" | "published") => {
     let acknowledgeFlags = false;
     if (status === "published" && source.flags.length) {
@@ -213,6 +400,11 @@ export function AiKnowledgeBoard() {
       method: "PATCH", body: JSON.stringify({ version: source.version, status, ...(acknowledgeFlags ? { acknowledgeFlags: true } : {}) }),
     }), status === "published" ? "Published. Sophie can use it on new calls." : "Unpublished. Sophie will stop using it.");
   };
+
+  const retry = (source: KnowledgeSource) => run(
+    () => authFetch(`/api/ai/knowledge/${source.id}/reindex`, { method: "POST" }),
+    `Preparing "${source.title}" again. It shows Ready when done.`,
+  );
 
   const remove = (source: KnowledgeSource) => {
     if (!window.confirm(`Delete "${source.title}"? Sophie will stop using it.`)) return;
@@ -320,7 +512,8 @@ export function AiKnowledgeBoard() {
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-body text-[13px] font-semibold text-on-surface">{match.title}</p>
                       <span className="font-body text-[11px] text-on-surface-variant" title="Lower is a closer match">
-                        {match.distance < 0.3 ? "Strong match" : match.distance < 0.45 ? "Good match" : "Weak match"} · {match.distance}
+                        {match.distance === 0 ? "Matches your words"
+                          : `${match.distance < 0.3 ? "Strong match" : match.distance < 0.45 ? "Good match" : "Weak match"} · ${match.distance}`}
                       </span>
                     </div>
                     <p className="mt-1 line-clamp-3 whitespace-pre-wrap font-body text-[12px] text-on-surface-variant">{match.text}</p>
@@ -330,6 +523,96 @@ export function AiKnowledgeBoard() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Import a file */}
+      <div className={CARD_CLASS}>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary">upload_file</span>
+          <h3 className="font-display text-[17px] font-bold text-on-surface">Import a file</h3>
+        </div>
+        <p className="mb-3 font-body text-[13px] text-on-surface-variant">
+          Add a price list, spreadsheet, brochure, terms or slide deck. We read the text and save it as a draft for you to check.
+        </p>
+        <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); void runImport("file"); }}>
+          <div>
+            <label className="mb-1 block font-body text-[13px] font-semibold text-on-surface">File</label>
+            <div className="flex flex-wrap items-center gap-3">
+              <input ref={fileInputRef} type="file" accept={IMPORT_ACCEPT} disabled={!!importing} className="hidden" id="ai-knowledge-import-file"
+                onChange={event => {
+                  const file = event.target.files?.[0] ?? null;
+                  setImportFile(file);
+                  if (file && !fileTitle.trim()) setFileTitle(file.name.replace(/\.[^.]+$/, "").slice(0, 120));
+                }} />
+              <label htmlFor="ai-knowledge-import-file" className={`${SECONDARY_BUTTON} cursor-pointer`}>
+                <span className="material-symbols-outlined text-[16px]">attach_file</span>
+                Choose file…
+              </label>
+              {importFile && (
+                <span className={`font-body text-[13px] ${importFile.size > MAX_IMPORT_BYTES ? "text-error" : "text-on-surface"}`}>
+                  {importFile.name} ({formatBytes(importFile.size)}){importFile.size > MAX_IMPORT_BYTES ? " · too large" : ""}
+                </span>
+              )}
+            </div>
+            <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+              PDF, PowerPoint .pptx, Word .docx, Excel .xlsx, CSV, TXT or MD, up to 25 MB. Scanned PDFs and old .ppt/.doc/.xls files aren&apos;t supported.
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block font-body text-[13px] font-semibold text-on-surface">Title <span className="font-normal text-on-surface-variant">(optional)</span></label>
+            <input value={fileTitle} onChange={event => setFileTitle(event.target.value)} maxLength={120} disabled={!!importing}
+              placeholder="e.g. Prices" className={INPUT_CLASS} />
+          </div>
+          <PurposePicker id="import-file" value={filePurpose} onChange={setFilePurpose} disabled={!!importing} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="flex items-start gap-1 font-body text-[11px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px]">info</span>
+              Imported text is saved as a draft. Check it before you publish.
+            </p>
+            <button type="submit" disabled={busy || !!importing || !fileValid} className={PRIMARY_BUTTON}>
+              <span className={`material-symbols-outlined text-[18px] ${importing === "file" ? "animate-spin" : ""}`}>{importing === "file" ? "progress_activity" : "download"}</span>
+              {importing === "file" ? "Importing…" : "Import file"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Add a website page */}
+      <div className={CARD_CLASS}>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary">language</span>
+          <h3 className="font-display text-[17px] font-bold text-on-surface">Add a website page</h3>
+        </div>
+        <p className="mb-3 font-body text-[13px] text-on-surface-variant">
+          Paste the link to one page of your website, like Services, Pricing or FAQ. We read the main text and save it as a draft. Add each useful page separately.
+        </p>
+        <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); void runImport("website"); }}>
+          <div>
+            <label htmlFor="ai-knowledge-import-url" className="mb-1 block font-body text-[13px] font-semibold text-on-surface">Website URL</label>
+            <input id="ai-knowledge-import-url" value={importUrl} onChange={event => setImportUrl(event.target.value)} maxLength={2000}
+              type="url" inputMode="url" autoComplete="url" disabled={!!importing}
+              placeholder="https://yourbusiness.com.au/services" className={INPUT_CLASS} />
+            {importUrl.trim() && !urlAddressValid && (
+              <p className="mt-1 font-body text-[11px] text-error">Enter the full address, starting with https://</p>
+            )}
+          </div>
+          <div>
+            <label className="mb-1 block font-body text-[13px] font-semibold text-on-surface">Title <span className="font-normal text-on-surface-variant">(optional)</span></label>
+            <input value={urlTitle} onChange={event => setUrlTitle(event.target.value)} maxLength={120} disabled={!!importing}
+              placeholder="Uses the page title if left blank" className={INPUT_CLASS} />
+          </div>
+          <PurposePicker id="import-url" label="What is this page?" value={urlPurpose} onChange={setUrlPurpose} disabled={!!importing} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="flex items-start gap-1 font-body text-[11px] text-on-surface-variant">
+              <span className="material-symbols-outlined text-[14px]">info</span>
+              Pages built entirely with JavaScript may give little text. If so, copy the text into a new entry instead.
+            </p>
+            <button type="submit" disabled={busy || !!importing || !urlValid} className={PRIMARY_BUTTON}>
+              <span className={`material-symbols-outlined text-[18px] ${importing === "website" ? "animate-spin" : ""}`}>{importing === "website" ? "progress_activity" : "add_link"}</span>
+              {importing === "website" ? "Adding…" : "Add page"}
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Editor */}
@@ -371,6 +654,7 @@ export function AiKnowledgeBoard() {
                 <option value="faq">FAQ</option>
                 <option value="policy">Policy</option>
                 <option value="note">Note</option>
+                {isImported(editor.kind) && <option value={editor.kind}>{KIND_LABEL[editor.kind]}</option>}
               </select>
             </div>
             <div>
@@ -379,11 +663,28 @@ export function AiKnowledgeBoard() {
                 placeholder="e.g. Call-out fee" className={INPUT_CLASS} />
             </div>
           </div>
+          {isImported(editor.kind) && (
+            <div>
+              {!editor.purpose && (
+                <p className="mb-2 rounded-lg bg-error-container/60 px-3 py-2 font-body text-[12px] text-error">
+                  Choose what this is, so Sophie knows how to use it (for example, that these are products you sell).
+                </p>
+              )}
+              <PurposePicker id="editor" label="What is this?" value={{ purpose: editor.purpose, note: editor.purposeNote }}
+                onChange={value => setEditor({ ...editor, purpose: value.purpose, purposeNote: value.note })} />
+            </div>
+          )}
           <div>
-            <label className="mb-1 block font-body text-[13px] font-semibold text-on-surface">Answer</label>
-            <textarea value={editor.body} onChange={event => setEditor({ ...editor, body: event.target.value })} rows={5} maxLength={20000}
+            <label className="mb-1 block font-body text-[13px] font-semibold text-on-surface">{isImported(editor.kind) ? "Text" : "Answer"}</label>
+            <textarea value={editor.body} onChange={event => setEditor({ ...editor, body: event.target.value })}
+              rows={isImported(editor.kind) ? 14 : 5} maxLength={editorMax}
               placeholder={hint ?? "Write it the way you'd want Sophie to explain it on the phone. One topic per entry works best."}
               className={INPUT_CLASS} />
+            {isImported(editor.kind) && (
+              <p className="mt-1 font-body text-[11px] text-on-surface-variant">
+                {editor.body.length.toLocaleString()} / {editorMax.toLocaleString()} characters. Remove anything Sophie shouldn&apos;t say, like old prices or staff names.
+              </p>
+            )}
             <p className="mt-1 font-body text-[11px] text-on-surface-variant">
               Only include what&apos;s true and approved. Don&apos;t include customer details. Your business phone and email are already known to Sophie.
             </p>
@@ -458,7 +759,7 @@ export function AiKnowledgeBoard() {
         ) : (
           <ul className="flex flex-col gap-3">
             {visible.map(source => {
-              const state = indexState(source);
+              const state = indexState(source, now);
               const status = STATUS_STYLE[source.status];
               return (
                 <li key={source.id} className={`rounded-xl border p-4 ${editor.id === source.id ? "border-primary" : "border-outline-variant"}`}>
@@ -473,6 +774,23 @@ export function AiKnowledgeBoard() {
                         {state.pending && <span className="material-symbols-outlined animate-spin text-[12px]">progress_activity</span>}
                         {state.label}
                       </p>
+                      {source.purpose && (
+                        <p className="mt-1 flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
+                          <span className="material-symbols-outlined text-[12px]">label</span>
+                          {source.purpose === "other" ? source.purposeNote || PURPOSE_LABEL.other.title : PURPOSE_LABEL[source.purpose].title}
+                          {source.purpose !== "other" && source.purposeNote ? ` · ${source.purposeNote}` : ""}
+                        </p>
+                      )}
+                      {isImported(source.kind) && !source.purpose && (
+                        <p className="mt-1 font-body text-[11px] text-error">No description yet. Edit to say what this is.</p>
+                      )}
+                      {originLabel(source.origin) && (
+                        <p className="mt-1 flex items-center gap-1 font-body text-[11px] text-on-surface-variant">
+                          <span className="material-symbols-outlined text-[12px]">{source.origin?.type === "url" ? "language" : "description"}</span>
+                          {originLabel(source.origin)}
+                          {source.truncated && <span className="text-error"> · only the first 300,000 characters were kept</span>}
+                        </p>
+                      )}
                       {source.flags.length > 0 && (
                         <p className="mt-1 font-body text-[11px] text-error">
                           Check before publishing: {source.flags.map(flag => FLAG_LABEL[flag] ?? flag).join("; ")}.
@@ -480,8 +798,13 @@ export function AiKnowledgeBoard() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {state.error && (
+                        <button type="button" disabled={busy} onClick={() => void retry(source)} className={SECONDARY_BUTTON}>
+                          <span className="material-symbols-outlined text-[14px]">refresh</span>Retry
+                        </button>
+                      )}
                       {!source.generated && (
-                        <button type="button" disabled={busy} onClick={() => startEdit(source)} className={SECONDARY_BUTTON}>
+                        <button type="button" disabled={busy} onClick={() => void startEdit(source)} className={SECONDARY_BUTTON}>
                           <span className="material-symbols-outlined text-[14px]">edit</span>Edit
                         </button>
                       )}

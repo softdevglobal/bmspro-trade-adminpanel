@@ -34,7 +34,7 @@ export async function createVoiceKnowledgeTools(
   business: VoiceKnowledgeDependencies["business"],
   schedule: ScheduleVoiceTask,
 ) {
-  const [{ adminDb }, { createEmbedder }, { createVectorStore }, { knowledgeSettings }] = await Promise.all([
+  const [{ adminDb }, { createQueryEmbedder }, { createVectorStore }, { knowledgeSettings }] = await Promise.all([
     import("@/lib/firebase/admin"), import("../../rag/embeddings"), import("../../rag/vector-store"), import("../../rag/settings"),
   ]);
   const settings = knowledgeSettings();
@@ -42,8 +42,10 @@ export async function createVoiceKnowledgeTools(
   return knowledgeActions(binding, {
     enabled: () => settings.enabled,
     business,
-    embed: createEmbedder(settings),
+    // Short timeout + cache: a stuck embedding request must not hold the caller for long.
+    embed: createQueryEmbedder(settings),
     nearest: (businessId, vector) => store.nearest(businessId, vector, settings.topK, settings.maxDistance),
+    keywordCandidates: businessId => store.publishedPassages(businessId),
     unanswered: question => {
       try {
         schedule("knowledge-unanswered", async () => {

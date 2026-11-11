@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 const MAX_SOURCES_PER_BUSINESS = 200;
+const LIST_PREVIEW_CHARS = 600;
 
 export async function GET(request: Request) {
   const auth = await requireBusinessOwner(request);
@@ -24,7 +25,11 @@ export async function GET(request: Request) {
   try {
     const snapshot = await adminDb.collection(KNOWLEDGE_SOURCES_COLLECTION)
       .where("businessId", "==", auth.businessId).orderBy("updatedAt", "desc").limit(MAX_SOURCES_PER_BUSINESS).get();
-    const sources = snapshot.docs.map(doc => toKnowledgeSource(doc.id, doc.data())).filter(source => source.status !== "archived");
+    // The list only needs a preview. Imported documents can be 300,000 characters each,
+    // and the page re-fetches this list while entries are being prepared.
+    const sources = snapshot.docs.map(doc => toKnowledgeSource(doc.id, doc.data()))
+      .filter(source => source.status !== "archived")
+      .map(source => ({ ...source, body: source.body.slice(0, LIST_PREVIEW_CHARS), bodyLength: source.body.length }));
     return json({ ok: true, sources, voiceEnabled: process.env.AI_VOICE_KNOWLEDGE_ENABLED === "true" });
   } catch {
     return json({ ok: false, error: "Could not load AI knowledge." }, 503);

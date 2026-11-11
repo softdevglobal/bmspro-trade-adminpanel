@@ -1,10 +1,19 @@
+// Server-only gurde: build fails if this is imported into client code
 import "server-only";
+// FieldValue gives us server-side timestamps in firestore
 import { FieldValue } from "firebase-admin/firestore";
+// Firebase Admin firestore instance
 import { adminDb } from "@/lib/firebase/admin";
+// Name of the firestore collection that holds knowledge sources 
 import { KNOWLEDGE_SOURCES_COLLECTION, type KnowledgeKind } from "../data/knowledge-sources";
-import { chunkText } from "./chunker";
+
+import { chunkTableText, chunkText } from "./chunker";
+import { describePurpose } from "../data/knowledge-purpose";
+
 import { createEmbedder } from "./embeddings";
+
 import { knowledgeSettings } from "./settings";
+
 import { createVectorStore } from "./vector-store";
 
 const sources = () => adminDb.collection(KNOWLEDGE_SOURCES_COLLECTION);
@@ -25,7 +34,12 @@ export async function indexKnowledgeSource(sourceId: string): Promise<boolean> {
 
   const version = Number(data.version);
   try {
-    const chunks = chunkText(String(data.title), String(data.body));
+    // Every passage starts with the title and, for imports, what the file is
+    // (e.g. "These are products this business sells…"), so Sophie reads it in context.
+    const heading = [String(data.title), describePurpose(data.purpose, data.purposeNote)].filter(Boolean).join("\n");
+    // Spreadsheets split into small groups of whole rows; everything else by paragraph.
+    const tabular = ["xlsx", "csv"].includes(String(data.origin?.type));
+    const chunks = tabular ? chunkTableText(heading, String(data.body)) : chunkText(heading, String(data.body));
     const vectors = chunks.length ? await createEmbedder(settings)(chunks.map(chunk => chunk.text)) : [];
     await store.replaceSourceChunks({
       businessId: String(data.businessId),
@@ -55,19 +69,23 @@ export async function indexKnowledgeSource(sourceId: string): Promise<boolean> {
 export async function refreshGeneratedSources(businessId: string) {
   const business = (await adminDb.collection("businesses").doc(businessId).get()).data();
   if (!business) return;
-
+ // Build a plain-text facts block, one line per fact
   const facts = [
     `Business name: ${business.businessName ?? ""}`,
     business.businessPhone ? `Business phone: ${business.businessPhone}` : "",
     business.businessEmail ? `Business email: ${business.businessEmail}` : "",
     business.businessAddress ? `Business address: ${business.businessAddress}` : "",
+     // Only include service areas if it is a non-empty array
     Array.isArray(business.serviceAreas) && business.serviceAreas.length
       ? `Service areas: ${business.serviceAreas.join(", ")}` : "",
+    // Only include working hours if both start and end exist
     business.workingHours?.startTime && business.workingHours?.endTime
       ? `Usual working hours: ${business.workingHours.startTime} to ${business.workingHours.endTime}` : "",
-    `Timezone: ${business.timezone || "Australia/Melbourne"}`,
+    // Fall back to Melbourne time if no timezone is set
+      `Timezone: ${business.timezone || "Australia/Melbourne"}`,
   ].filter(Boolean).join("\n");
 
+    // Fetch all services belonging to this business
   const services = await adminDb.collection("services").where("businessId", "==", businessId).get();
   const serviceText = services.docs
     .map(doc => doc.data())
@@ -82,7 +100,7 @@ export async function refreshGeneratedSources(businessId: string) {
   await upsertGenerated(businessId, "business_facts", "Business facts", facts);
   if (serviceText) await upsertGenerated(businessId, "service_descriptions", "Service descriptions", serviceText);
 }
-
+// Creates or updates one generated source, then re-indexes it if it changed
 async function upsertGenerated(businessId: string, kind: "business_facts" | "service_descriptions", title: string, body: string) {
   const ref = sources().doc(`${businessId}__${kind}`);
   const changed = await adminDb.runTransaction(async tx => {
@@ -108,5 +126,9 @@ async function upsertGenerated(businessId: string, kind: "business_facts" | "ser
 
 export async function reindexBusiness(businessId: string) {
   const snapshot = await sources().where("businessId", "==", businessId).get();
-  for (const doc of snapshot.docs) await indexKnowledgeSource(doc.id);
+  // A few entries at a time: much faster than one by one, gentle on OpenAI rate limits.
+  const ids = snapshot.docs.map(doc => doc.id);
+  let next = 0;
+  const worker = async () => { while (next < ids.length) await indexKnowledgeSource(ids[next++]); };
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
 }

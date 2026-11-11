@@ -9,9 +9,10 @@ import { after } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
-import { KNOWLEDGE_SOURCES_COLLECTION, KnowledgeError, knowledgeSourcePatch, toKnowledgeSource,
+import { IMPORTED_BODY_MAX_BYTES, KNOWLEDGE_SOURCES_COLLECTION, KnowledgeError, OWNER_BODY_MAX, isImportedKind, knowledgeSourcePatch, toKnowledgeSource,
   type KnowledgeFlag, type KnowledgeStatus } from "@/lib/ai/data/knowledge-sources";
 import { scanKnowledgeText } from "@/lib/ai/learning/redact";
+import { isKnowledgePurpose, purposeError } from "@/lib/ai/data/knowledge-purpose";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,10 +57,30 @@ export async function PATCH(request: Request, context: Context) {
 
       const title = input.title ?? String(data.title);
       const text = input.body ?? String(data.body);
-      const textChanged = title !== data.title || text !== data.body;
+      const imported = isImportedKind(data.kind);
+      if (!imported && (input.purpose !== undefined || input.purposeNote !== undefined)) {
+        throw new KnowledgeError(400, "Only imported files and web pages have a description.");
+      }
+      const oldPurpose = isKnowledgePurpose(data.purpose) ? data.purpose : null;
+      const oldNote = typeof data.purposeNote === "string" ? data.purposeNote : "";
+      const purpose = input.purpose ?? oldPurpose;
+      const purposeNote = input.purposeNote ?? oldNote;
+      if (imported && (purpose !== oldPurpose || purposeNote !== oldNote)) {
+        const invalidPurpose = purposeError(purpose, purposeNote);
+        if (invalidPurpose) throw new KnowledgeError(400, invalidPurpose);
+      }
+      // The description is part of every passage, so changing it re-prepares the entry.
+      const textChanged = title !== data.title || text !== data.body || purpose !== oldPurpose || purposeNote !== oldNote;
       if (textChanged && data.generated === true) throw new KnowledgeError(400, "This entry updates from your business settings and services.");
+      // Only imported documents and web pages may be longer than a typed entry.
+      if (text.length > OWNER_BODY_MAX && !isImportedKind(data.kind)) {
+        throw new KnowledgeError(400, "Use an answer of 10–20,000 characters.");
+      }
+      if (new TextEncoder().encode(text).length > IMPORTED_BODY_MAX_BYTES) {
+        throw new KnowledgeError(400, "This text is too long to save. Split it into two entries.");
+      }
 
-      const flags: KnowledgeFlag[] = textChanged ? scanKnowledgeText(`${title}\n${text}`) : (data.flags ?? []);
+      const flags: KnowledgeFlag[] = textChanged ? scanKnowledgeText(`${title}\n${purposeNote}\n${text}`) : (data.flags ?? []);
       let status = data.status as KnowledgeStatus;
       if (textChanged) status = flags.length ? "needs_review" : status === "needs_review" ? "draft" : status;
       if (input.status === "draft") status = "draft";
@@ -71,6 +92,7 @@ export async function PATCH(request: Request, context: Context) {
       const version = Number(data.version) + (textChanged ? 1 : 0);
       tx.update(ref, {
         title, body: text, flags, status, version,
+        ...(imported ? { purpose, purposeNote } : {}),
         updatedAt: FieldValue.serverTimestamp(), updatedBy: auth.uid,
         ...(status === "published" && data.status !== "published" ? { publishedAt: FieldValue.serverTimestamp(), publishedBy: auth.uid } : {}),
       });
