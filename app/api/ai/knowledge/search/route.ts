@@ -25,25 +25,34 @@ export async function POST(request: Request) {
     if (!await consumeRateLimits([{ key: `ai-knowledge-test:${auth.businessId}`, limit: 30, windowMs: 60_000 }])) {
       return json({ ok: false, error: "Too many test questions. Wait a minute and try again." }, 429);
     }
-    const [{ adminDb }, { createQueryEmbedder }, { createVectorStore }, { knowledgeSettings }, { findPassages }] = await Promise.all([
+    const [{ adminDb }, { createQueryEmbedder }, { createVectorStore }, { knowledgeSettings }, { searchPassages, nearMissDistance }] = await Promise.all([
       import("@/lib/firebase/admin"), import("@/lib/ai/rag/embeddings"), import("@/lib/ai/rag/vector-store"), import("@/lib/ai/rag/settings"),
       import("@/lib/ai/rag/retriever"),
     ]);
     const settings = knowledgeSettings();
-    const started = performance.now();
     const store = createVectorStore(adminDb);
     // Same search as Sophie: keyword matches first, then matches by meaning.
-    const hits = await findPassages({
+    const { hits, stats } = await searchPassages({
       embed: createQueryEmbedder(settings),
-      nearest: (businessId, vector) => store.nearest(businessId, vector, settings.topK, settings.maxDistance),
-      keywordCandidates: businessId => store.publishedPassages(businessId),
+      nearest: (businessId, vector) => store.nearest(businessId, vector, settings.topK, nearMissDistance(settings.maxDistance)),
+      maxDistance: settings.maxDistance,
+      keywordCandidates: (businessId, terms) => store.keywordCandidates(businessId, terms),
     }, auth.businessId, parsed.data.question);
     return json({
       ok: true,
       status: hits.length ? "FOUND" : "NO_MATCH",
-      durationMs: Math.round(performance.now() - started),
+      durationMs: Math.round(stats.totalMs),
+      timings: { embedMs: stats.embedMs, nearestMs: stats.nearestMs, keywordMs: stats.keywordMs, totalMs: stats.totalMs },
+      // Closest entry by meaning, even if it was just too far to be used.
+      closestDistance: stats.closestDistance === null ? null : Number(stats.closestDistance.toFixed(3)),
+      maxDistance: settings.maxDistance,
       voiceEnabled: settings.enabled,
-      matches: hits.map(hit => ({ sourceId: hit.sourceId, title: hit.sourceTitle, text: hit.text, distance: Number(hit.distance.toFixed(3)) })),
+      matches: hits.map((hit, index) => ({
+        sourceId: hit.sourceId, title: hit.sourceTitle, text: hit.text,
+        // Meaning distance when there is one (a keyword-only match has none and reports 0).
+        distance: Number((stats.hits[index].distance ?? hit.distance).toFixed(3)),
+        matchedBy: stats.hits[index].keyword ? (stats.hits[index].distance === null ? "keyword" : "both") : "meaning",
+      })),
     });
   } catch {
     return json({ ok: false, error: "Search is unavailable. Check that the knowledge index is ready." }, 503);

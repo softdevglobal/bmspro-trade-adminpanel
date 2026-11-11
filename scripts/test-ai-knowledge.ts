@@ -4,7 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chunkTableText, chunkText } from "../lib/ai/rag/chunker";
 import { scanKnowledgeText, redactPersonalData } from "../lib/ai/learning/redact";
-import { keywordMatches, questionTerms, retrievePassages } from "../lib/ai/rag/retriever";
+import { keywordMatches, passageTerms, questionTerms, retrievePassages, searchPassages } from "../lib/ai/rag/retriever";
 import { knowledgeSettings } from "../lib/ai/rag/settings";
 import { clearQueryEmbeddingCache, createEmbedder, createQueryEmbedder } from "../lib/ai/rag/embeddings";
 import { knowledgeActions, type VoiceKnowledgeDependencies } from "../lib/ai/mcp/tools/knowledge.tools";
@@ -295,4 +295,108 @@ test("long imports are cut at a line break, within the character and byte limits
   // Multi-byte text (e.g. Chinese) is kept under the byte limit too.
   const wide = Array.from({ length: 200 }, () => "电工价格表").join("\n");
   assert.ok(new TextEncoder().encode(cutAtLine(wide, 100_000, 600)).length <= 600);
+});
+
+test("stored passage words cover every question word that keyword matching would find", () => {
+  const text = "Products\nname: Sparkelec Double Power Point SGPO2-DP White | price: 8.80\nname: Rice Cookers 1.8L | size: 2.5mm | Batteries";
+  const terms = new Set(passageTerms(text));
+  for (const question of ["Price of SGPO2-DP?", "Do you have SGPO2?", "Do you sell rice cookers?", "any battery?", "2.5mm", "1.8L cooker"]) {
+    for (const term of questionTerms(question)) assert.ok(terms.has(term), `"${term}" from "${question}" missing`);
+  }
+  // Stop words are never stored: no question can ask for them.
+  assert.ok(!terms.has("the") && !terms.has("price"));
+});
+
+test("keyword weighting uses the true total when only some passages were loaded", () => {
+  const row = (text: string) => passage(`Products\n${text}`);
+  // Only the 5 passages containing the words were loaded. Judged against just those
+  // 5, every word is "everywhere" and nothing matches; against the true total of
+  // 10,000 published passages, the words are rare and the rows match.
+  const loaded = Array.from({ length: 5 }, (_, i) => row(`name: White Switch ${i}`));
+  assert.equal(keywordMatches("white switch", loaded, 3, 5).length, 0);
+  assert.equal(keywordMatches("white switch", loaded, 3, 10_000).length, 3);
+  // The total can never be below the number of loaded passages.
+  assert.equal(keywordMatches("white switch", loaded, 3, 1).length, 0);
+});
+
+test("search reports timings and how each passage was found, and the tool logs it", async () => {
+  const keywordRow = passage("Products\nname: Rice Cooker 1.8L | price: 38.33", 0);
+  const meaning = passage("Call-out fee\n$90 in our area.", 0.31);
+  const askedWith: string[][] = [];
+  const { hits, stats } = await searchPassages({
+    embed: async () => [[1]],
+    nearest: async () => [meaning],
+    keywordCandidates: async (_id, terms) => { askedWith.push(terms); return { passages: [keywordRow], total: 500 }; },
+  }, "b", "Do you sell rice cookers?");
+  assert.deepEqual(askedWith, [["rice", "cooker"]]);
+  assert.equal(hits.length, 2);
+  assert.deepEqual(stats.hits.map(hit => [hit.keyword, hit.distance]), [[true, null], [false, 0.31]]);
+  assert.equal(stats.candidates, 1);
+  assert.ok(stats.totalMs >= 0 && stats.embedMs >= 0 && stats.nearestMs >= 0 && stats.keywordMs >= 0);
+
+  // No question words: the keyword store is not asked at all.
+  let asked = false;
+  await searchPassages({ embed: async () => [[1]], nearest: async () => [], keywordCandidates: async () => { asked = true; return []; } }, "b", "how much?");
+  assert.equal(asked, false);
+
+  const logs: { status: string; passagesSent: number }[] = [];
+  const { value } = deps({ logSearch: entry => { logs.push(entry); } });
+  await knowledgeActions(binding, value).search({ question: "Is there a call-out fee?" });
+  await knowledgeActions(binding, deps({ nearest: async () => [], logSearch: entry => { logs.push(entry); } }).value).search({ question: "Do you work Sundays?" });
+  await knowledgeActions(binding, deps({ logSearch: entry => { logs.push(entry); } }).value).search({ question: "x" });
+  assert.deepEqual(logs.map(log => [log.status, log.passagesSent]), [["FOUND", 1], ["NO_MATCH", 0]]);
+  // A failing logger never breaks the call.
+  const broken = deps({ logSearch: () => { throw new Error("log down"); } });
+  assert.equal((await knowledgeActions(binding, broken.value).search({ question: "Is there a call-out fee?" })).status, "FOUND");
+});
+
+test("near misses are recorded but never sent to Sophie", async () => {
+  const { nearMissDistance } = await import("../lib/ai/rag/retriever");
+  assert.equal(nearMissDistance(0.6), 0.75);
+  assert.equal(nearMissDistance(1.95), 1.99);
+  const close = passage("Opening hours\nMonday to Friday, 7am to 4pm.", 0.41);
+  const justPast = passage("Service areas\nLynbrook and Cranbourne.", 0.66);
+  const { hits, stats } = await searchPassages({ embed: async () => [[1]], nearest: async () => [close, justPast], maxDistance: 0.6 }, "b", "When are you open?");
+  assert.deepEqual(hits.map(hit => hit.distance), [0.41]);
+  assert.equal(stats.closestDistance, 0.41);
+  const miss = await searchPassages({ embed: async () => [[1]], nearest: async () => [justPast], maxDistance: 0.6 }, "b", "Do you work in Sydney?");
+  assert.deepEqual(miss.hits, []);
+  assert.equal(miss.stats.closestDistance, 0.66);
+  // The tool reports NO_MATCH for a near miss, and logs how close it was.
+  const logs: { status: string; stats: { closestDistance: number | null } }[] = [];
+  const result = await knowledgeActions(binding, deps({ nearest: async () => [justPast], maxDistance: 0.6, logSearch: entry => { logs.push(entry); } }).value)
+    .search({ question: "Do you work in Sydney?" });
+  assert.equal(result.status, "NO_MATCH");
+  assert.equal(logs[0].stats.closestDistance, 0.66);
+});
+
+test("search activity summary: counts, timings, near misses and most used entries", async () => {
+  const { summarizeSearchLogs, toSearchLogRow, percentile } = await import("../lib/ai/rag/search-stats");
+  const log = (status: "FOUND" | "NO_MATCH", totalMs: number, hits: { sourceTitle: string; keyword: boolean; distance: number | null }[], closestDistance: number | null) =>
+    toSearchLogRow(`l${totalMs}`, { status, totalMs, embedMs: totalMs - 50, nearestMs: 40, keywordMs: 5, hits, closestDistance, maxDistance: 0.6, question: "q", passagesSent: hits.length });
+  const rows = [
+    log("FOUND", 400, [{ sourceTitle: "Call-out fee", keyword: false, distance: 0.31 }], 0.31),
+    log("FOUND", 380, [{ sourceTitle: "Products", keyword: true, distance: null }], 0.7),           // keyword only
+    log("FOUND", 420, [{ sourceTitle: "Products", keyword: true, distance: 0.5 }, { sourceTitle: "Call-out fee", keyword: false, distance: 0.55 }], 0.5),
+    log("NO_MATCH", 390, [], 0.63),   // near miss, within 0.05
+    log("NO_MATCH", 1500, [], 0.74),  // near miss only within 0.15
+    log("NO_MATCH", 360, [], null),   // nothing close at all
+  ];
+  const summary = summarizeSearchLogs(rows);
+  assert.equal(summary.total, 6);
+  assert.equal(summary.found, 3);
+  assert.equal(summary.noMatch, 3);
+  assert.equal(summary.keywordOnly, 1);
+  assert.deepEqual(summary.nearMisses, [{ margin: 0.025, count: 0 }, { margin: 0.05, count: 1 }, { margin: 0.1, count: 1 }, { margin: 0.15, count: 2 }]);
+  assert.deepEqual(summary.topEntries, [{ title: "Call-out fee", count: 2 }, { title: "Products", count: 2 }]);
+  const total = summary.timings.find(timing => timing.step === "total")!;
+  assert.deepEqual([total.p50, total.max], [390, 1500]);
+  assert.equal(summary.maxDistance, 0.6);
+  assert.equal(percentile([], 0.5), NaN);
+  assert.deepEqual(summarizeSearchLogs([]).timings.map(timing => timing.p50), [0, 0, 0, 0]);
+  // Missing or odd fields never crash the dashboard.
+  const odd = toSearchLogRow("x", { hits: [null, { sourceTitle: 5 }], createdAt: { toMillis: () => 123 } });
+  assert.equal(odd.status, "FOUND");
+  assert.equal(odd.createdAt, 123);
+  assert.deepEqual(odd.hits, [{ sourceTitle: "", keyword: false, distance: null }, { sourceTitle: "", keyword: false, distance: null }]);
 });

@@ -6,6 +6,7 @@ import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { KNOWLEDGE_CHUNKS_COLLECTION, type KnowledgeKind } from "../data/knowledge-sources";
 // Types for chunk status (draft/published), a chunk to save, and a search result
 import type { ChunkStatus, ChunkToStore, KnowledgePassage } from "../data/knowledge-chunks";
+import { passageTerms } from "./retriever";
 
 // Everything needed to replace one source's chunks
 export type ReplaceChunksInput = {
@@ -23,10 +24,28 @@ export type ReplaceChunksInput = {
  * Published passages per business for keyword matching, kept for a minute on this
  * server so a call's lookups don't re-read them. A newly published entry becomes
  * keyword-searchable within that minute (search by meaning sees it at once).
+ *
+ * A business with more than KEYWORD_MAX_PASSAGES passages is too big to hold in
+ * memory. For those, each question asks Firestore for the passages that contain
+ * one of its words (the `terms` field), so no passage is ever skipped.
  */
 const KEYWORD_CACHE_TTL_MS = 60_000;
-const KEYWORD_MAX_PASSAGES = 8000;
-const keywordCache = new Map<string, { passages: KnowledgePassage[]; expiresAt: number }>();
+export const KEYWORD_MAX_PASSAGES = 8000;
+const KEYWORD_QUERY_LIMIT = 1000;
+type KeywordIndex = { complete: true; passages: KnowledgePassage[]; total: number } | { complete: false; total: number };
+const keywordCache = new Map<string, KeywordIndex & { expiresAt: number }>();
+const PASSAGE_FIELDS = ["businessId", "status", "sourceId", "sourceTitle", "kind", "text"] as const;
+type ChunkSnapshot = FirebaseFirestore.QuerySnapshot;
+const toPassages = (snapshot: ChunkSnapshot, businessId: string): KnowledgePassage[] => snapshot.docs
+  // Defence in depth: never trust the query alone for tenant isolation.
+  .filter(doc => doc.get("businessId") === businessId && doc.get("status") === "published")
+  .map(doc => ({
+    sourceId: String(doc.get("sourceId")),
+    sourceTitle: String(doc.get("sourceTitle")),
+    kind: doc.get("kind") as KnowledgeKind,
+    text: String(doc.get("text")),
+    distance: 0,
+  }));
 export function clearKeywordCache(businessId?: string) {
   if (businessId) keywordCache.delete(businessId); else keywordCache.clear();
 }
@@ -53,6 +72,7 @@ export function createVectorStore(db: Firestore) {
           sourceVersion: input.sourceVersion,
           ordinal: chunk.ordinal,                          // position of chunk within the source
           text: chunk.text,                                // chunk text (title + content)
+          terms: passageTerms(chunk.text),                 // words for keyword lookup in big businesses
           embedding: FieldValue.vector(chunk.embedding),   // stored as a Firestore vector field
           embeddingModel: input.model,                     // lets you spot stale vectors later
           status: input.status,
@@ -99,28 +119,32 @@ export function createVectorStore(db: Firestore) {
       for (const businessId of new Set(existing.docs.map(doc => String(doc.get("businessId"))))) clearKeywordCache(businessId);
     },
 
-    /** Text of every published passage for one business (no vectors), for keyword matching. */
-    async publishedPassages(businessId: string): Promise<KnowledgePassage[]> {
-      const cached = keywordCache.get(businessId);
-      if (cached && cached.expiresAt > Date.now()) return cached.passages;
-      const snapshot = await collection
-        .select("businessId", "status", "sourceId", "sourceTitle", "kind", "text")
-        .where("businessId", "==", businessId)
-        .where("status", "==", "published")
-        .limit(KEYWORD_MAX_PASSAGES)
+    /**
+     * Passages to score by keyword for one question (text only, no vectors).
+     * Small businesses: every published passage, cached. Big businesses: only the
+     * passages containing one of the question's words, plus the true total.
+     */
+    async keywordCandidates(businessId: string, terms: string[]): Promise<{ passages: KnowledgePassage[]; total: number }> {
+      const published = collection.where("businessId", "==", businessId).where("status", "==", "published");
+      let index = keywordCache.get(businessId);
+      if (!index || index.expiresAt <= Date.now()) {
+        // One extra row tells us whether the business is over the limit.
+        const snapshot = await published.select(...PASSAGE_FIELDS).limit(KEYWORD_MAX_PASSAGES + 1).get();
+        const fresh: KeywordIndex = snapshot.size <= KEYWORD_MAX_PASSAGES
+          ? { complete: true, passages: toPassages(snapshot, businessId), total: snapshot.size }
+          : { complete: false, total: (await published.count().get()).data().count };
+        if (keywordCache.size > 200) keywordCache.clear();
+        index = { ...fresh, expiresAt: Date.now() + KEYWORD_CACHE_TTL_MS };
+        keywordCache.set(businessId, index);
+      }
+      if (index.complete) return { passages: index.passages, total: index.total };
+      if (!terms.length) return { passages: [], total: index.total };
+      const snapshot = await published
+        .where("terms", "array-contains-any", terms.slice(0, 30))
+        .select(...PASSAGE_FIELDS)
+        .limit(KEYWORD_QUERY_LIMIT)
         .get();
-      const passages = snapshot.docs
-        .filter(doc => doc.get("businessId") === businessId && doc.get("status") === "published")
-        .map(doc => ({
-          sourceId: String(doc.get("sourceId")),
-          sourceTitle: String(doc.get("sourceTitle")),
-          kind: doc.get("kind") as KnowledgeKind,
-          text: String(doc.get("text")),
-          distance: 0,
-        }));
-      if (keywordCache.size > 200) keywordCache.clear();
-      keywordCache.set(businessId, { passages, expiresAt: Date.now() + KEYWORD_CACHE_TTL_MS });
-      return passages;
+      return { passages: toPassages(snapshot, businessId), total: index.total };
     },
 
     /** Tenant-filtered similarity search. businessId always comes from the server-side binding. */

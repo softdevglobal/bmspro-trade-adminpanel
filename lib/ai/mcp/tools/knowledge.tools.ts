@@ -1,11 +1,13 @@
 import { knowledgeQuestionArguments, type ScheduleVoiceTask } from "./action-schemas";
-import { retrievePassages, type KnowledgeResult, type RetrieverDependencies } from "../../rag/retriever";
+import { nearMissDistance, packagePassages, searchPassages, type KnowledgeResult, type RetrieverDependencies, type SearchStats } from "../../rag/retriever";
 import type { VoiceBusiness } from "../../config";
 
 export interface VoiceKnowledgeDependencies extends RetrieverDependencies {
   enabled(): boolean;
   business(): Promise<Record<string, unknown>>;
   unanswered(question: string): void;
+  /** Optional: records timings and matches after the response. Must never throw. */
+  logSearch?(entry: { question: string; status: "FOUND" | "NO_MATCH"; passagesSent: number; stats: SearchStats }): void;
 }
 
 /** Pure tool logic; dependencies are injected so tests need no Firestore or OpenAI. */
@@ -19,11 +21,17 @@ export function knowledgeActions(binding: VoiceBusiness, deps: VoiceKnowledgeDep
       if (!parsed.success) {
         return { status: "REJECTED", passages: [], message: "Ask one short question about this business." };
       }
+      const question = parsed.data.question;
       // The business check runs alongside the search to save a round trip. If the
       // business became inactive it throws, Promise.all rejects and no passages
       // are returned (the tool reports UNAVAILABLE).
-      const [, result] = await Promise.all([deps.business(), retrievePassages(deps, binding.businessId, parsed.data.question)]);
-      if (result.status === "NO_MATCH") deps.unanswered(parsed.data.question);
+      const [, found] = await Promise.all([deps.business(), searchPassages(deps, binding.businessId, question)]);
+      const result = packagePassages(found.hits);
+      if (result.status === "NO_MATCH") deps.unanswered(question);
+      if (result.status !== "REJECTED") {
+        try { deps.logSearch?.({ question, status: result.status, passagesSent: result.passages.length, stats: found.stats }); }
+        catch { /* Logging must never break a call. */ }
+      }
       return result;
     },
   };
@@ -44,8 +52,10 @@ export async function createVoiceKnowledgeTools(
     business,
     // Short timeout + cache: a stuck embedding request must not hold the caller for long.
     embed: createQueryEmbedder(settings),
-    nearest: (businessId, vector) => store.nearest(businessId, vector, settings.topK, settings.maxDistance),
-    keywordCandidates: businessId => store.publishedPassages(businessId),
+    // Looks slightly past the cut-off so near misses are logged; maxDistance drops them.
+    nearest: (businessId, vector) => store.nearest(businessId, vector, settings.topK, nearMissDistance(settings.maxDistance)),
+    maxDistance: settings.maxDistance,
+    keywordCandidates: (businessId, terms) => store.keywordCandidates(businessId, terms),
     unanswered: question => {
       try {
         schedule("knowledge-unanswered", async () => {
@@ -53,6 +63,14 @@ export async function createVoiceKnowledgeTools(
           await recordUnansweredQuestion(binding.businessId, question);
         });
       } catch { /* Learning must never break a call. */ }
+    },
+    logSearch: entry => {
+      schedule("knowledge-search-log", async () => {
+        const { recordKnowledgeSearch } = await import("../../rag/search-log");
+        await recordKnowledgeSearch(binding.businessId, {
+          ...entry, settings: { model: settings.model, topK: settings.topK, maxDistance: settings.maxDistance },
+        });
+      });
     },
   });
 }

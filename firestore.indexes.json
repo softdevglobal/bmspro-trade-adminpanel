@@ -304,6 +304,23 @@
       ]
     },
     {
+      "collectionGroup": "ai_knowledge_chunks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "terms", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "ai_knowledge_search_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "ai_knowledge_sources",
       "queryScope": "COLLECTION",
       "fields": [
@@ -332,6 +349,12 @@
   "fieldOverrides": [
     {
       "collectionGroup": "ai_call_logs",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "ai_knowledge_search_logs",
       "fieldPath": "expireAt",
       "ttl": true,
       "indexes": []

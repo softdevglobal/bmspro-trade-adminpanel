@@ -4,11 +4,13 @@
  *   npm run ai-knowledge -- seed   <businessId> <entries.json> [--publish]
  *   npm run ai-knowledge -- facts  <businessId>
  *   npm run ai-knowledge -- search <businessId> "Do you charge a call-out fee?"
+ *   npm run ai-knowledge -- search-stats <businessId> [days]
  *
  * seed   : upserts owner FAQ/policy/note entries from a JSON file and indexes them.
  *          Entries are drafts unless --publish is passed. Flagged text is never auto-published.
  * facts  : builds draft "Business facts" and "Service descriptions" from settings.
  * search : runs the same retrieval Sophie uses (published entries only) and prints passages.
+ * search-stats : real-call timings, NO_MATCH rate and near misses from the search logs.
  *
  * Uses OPENAI_API_KEY and the AI_KNOWLEDGE_* settings from .env.local.
  */
@@ -27,7 +29,7 @@ import { z } from "zod";
 
 const [command, businessId, arg, ...rest] = process.argv.slice(2);
 const usage = () => {
-  console.error('Usage: seed <businessId> <entries.json> [--publish] | facts <businessId> | search <businessId> "<question>"');
+  console.error('Usage: seed <businessId> <entries.json> [--publish] | facts <businessId> | search <businessId> "<question>" | search-stats <businessId> [days]');
   process.exit(1);
 };
 
@@ -88,9 +90,40 @@ async function search(question: string) {
   for (const passage of result.passages) console.log(`\n--- ${passage.title}\n${passage.text}`);
 }
 
+/** Real-call numbers from ai_knowledge_search_logs: timings, NO_MATCH rate, near misses. */
+async function searchStats(days: number) {
+  const { Timestamp } = await import("firebase-admin/firestore");
+  const { KNOWLEDGE_SEARCH_LOGS_COLLECTION } = await import("../lib/ai/data/knowledge-sources");
+  const snapshot = await adminDb.collection(KNOWLEDGE_SEARCH_LOGS_COLLECTION)
+    .where("businessId", "==", businessId)
+    .where("createdAt", ">=", Timestamp.fromMillis(Date.now() - days * 86_400_000))
+    .orderBy("createdAt", "desc").limit(5000).get();
+  // Same summary the dashboard's "Search activity" card shows.
+  const { summarizeSearchLogs, toSearchLogRow } = await import("../lib/ai/rag/search-stats");
+  const rows = snapshot.docs.map(doc => toSearchLogRow(doc.id, doc.data()));
+  if (!rows.length) { console.log(`No knowledge searches logged in the last ${days} days.`); return; }
+  const summary = summarizeSearchLogs(rows);
+  const stepLabel = { embed: "Question embedding", nearest: "Firestore vector search", keyword: "Keyword lookup + scoring", total: "Whole search" };
+  console.log(`\n${summary.total} searches in the last ${days} days`);
+  console.table(summary.timings.map(timing => ({ step: stepLabel[timing.step], "p50 ms": timing.p50, "p95 ms": timing.p95, "max ms": timing.max })));
+  console.log(`FOUND ${summary.found}, NO_MATCH ${summary.noMatch} (${((summary.noMatch / summary.total) * 100).toFixed(1)}%)`);
+  console.log(`Answered only thanks to keyword search: ${summary.keywordOnly}`);
+  console.log(`\nCut-off now: ${summary.maxDistance}. NO_MATCH searches whose closest entry was just past it:`);
+  for (const { margin, count } of summary.nearMisses) {
+    console.log(`  raising it to ${((summary.maxDistance ?? 0) + margin).toFixed(3)} would return something for ${count} of them`);
+  }
+  console.log("Check those questions below before raising it: a near miss can be the wrong entry.\n");
+  for (const row of rows.filter(row => row.status === "NO_MATCH" && row.closestDistance !== null).slice(0, 30)) {
+    console.log(`  ${row.closestDistance!.toFixed(3)}  "${row.question}"`);
+  }
+  console.log("\nMost used entries:");
+  for (const entry of summary.topEntries) console.log(`  ${entry.count}×  ${entry.title}`);
+}
+
 async function main() {
   await requireBusiness(businessId);
   if (command === "seed") { if (!arg) usage(); await seed(arg, rest.includes("--publish")); }
+  else if (command === "search-stats") { await searchStats(Number(arg) > 0 ? Number(arg) : 7); }
   else if (command === "facts") { await refreshGeneratedSources(businessId); console.log("Generated sources refreshed (drafts until published)."); }
   else if (command === "search") { if (!arg) usage(); await search([arg, ...rest].join(" ")); }
   else usage();

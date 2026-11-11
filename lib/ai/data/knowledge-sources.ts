@@ -4,6 +4,8 @@ import { KNOWLEDGE_PURPOSES, PURPOSE_NOTE_MAX, isKnowledgePurpose, type Knowledg
 export const KNOWLEDGE_SOURCES_COLLECTION = "ai_knowledge_sources";
 export const KNOWLEDGE_CHUNKS_COLLECTION = "ai_knowledge_chunks";
 export const UNANSWERED_COLLECTION = "ai_unanswered_questions";
+/** One document per knowledge search during a call (server-only, deleted after 30 days). */
+export const KNOWLEDGE_SEARCH_LOGS_COLLECTION = "ai_knowledge_search_logs";
 /** One document per file upload link (server-only). See app/api/ai/knowledge/upload-url. */
 export const KNOWLEDGE_UPLOADS_COLLECTION = "ai_knowledge_uploads";
 

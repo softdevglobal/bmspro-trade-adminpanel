@@ -35,12 +35,14 @@ code that runs and the exact shape of the data at that point.
    - [A6. Indexing: chunk → embed → store](#a6-indexing-chunk--embed--store)
    - [A7. Owner publishes](#a7-owner-publishes)
 5. [Part B: getting knowledge out (a live call)](#5-part-b-getting-knowledge-out-a-live-call)
+   - [Who does what: voice bridge vs admin panel](#who-does-what-voice-bridge-vs-admin-panel)
 6. [Worked example: one Excel row, end to end](#6-worked-example-one-excel-row-end-to-end)
 7. [Data shapes at each stage](#7-data-shapes-at-each-stage)
 8. [Firestore collections](#8-firestore-collections)
 9. [Settings (environment variables)](#9-settings-environment-variables)
 10. [Safety checks along the way](#10-safety-checks-along-the-way)
 11. [File map](#11-file-map)
+12. [Measuring and tuning the search](#12-measuring-and-tuning-the-search)
 
 ---
 
@@ -154,13 +156,17 @@ cosine similarity = (A · B) / (|A| × |B|)        ranges from -1 to 1
 cosine distance   = 1 − cosine similarity         0 = same meaning, bigger = less related
 ```
 
-In practice, for this model:
+Measured with `text-embedding-3-small` on the test set (see
+[section 12](#12-measuring-and-tuning-the-search)):
 
-| Cosine distance | Rough meaning |
+| Cosine distance | What we saw |
 |---|---|
-| 0.0 – 0.3 | Almost the same thing |
-| 0.3 – 0.55 | Related; usually a useful answer |
-| above 0.55 | Probably unrelated → **dropped** (`AI_KNOWLEDGE_MAX_DISTANCE`) |
+| 0.21 – 0.36 | The closest 10% of right answers: almost the same wording |
+| 0.36 – 0.60 | Most right answers (median 0.545) |
+| 0.60 – 0.75 | Mixed: reworded right answers **and** the nearest wrong passages (from 0.636) |
+| above 0.75 | Unrelated |
+
+The cut-off (`AI_KNOWLEDGE_MAX_DISTANCE`) is **0.60**. Above it, matches are dropped.
 
 We keep at most the 4 closest (`AI_KNOWLEDGE_TOP_K`) that are under the cut-off. If
 nothing is close enough, the result is `NO_MATCH`, which is far better than handing
@@ -279,7 +285,7 @@ searching automatically on every sentence.
 | Text splitter | Our list-aware chunker ([chunker.ts](../lib/ai/rag/chunker.ts)) |
 | Embedding model | OpenAI `text-embedding-3-small`, 1536 dimensions ([embeddings.ts](../lib/ai/rag/embeddings.ts)) |
 | Vector store | Firestore `ai_knowledge_chunks` + vector index ([vector-store.ts](../lib/ai/rag/vector-store.ts)) |
-| Similarity | Cosine distance, cut-off 0.55, top 4 |
+| Similarity | Cosine distance, cut-off 0.60, top 4 |
 | Retriever | Hybrid: keyword + meaning ([retriever.ts](../lib/ai/rag/retriever.ts)) |
 | How retrieval is triggered | LLM tool call `search_business_knowledge` over MCP |
 | Generator (LLM) | The voice bridge's LLM (Sophie) |
@@ -800,6 +806,89 @@ Now the chunks have `status: "published"` and Sophie can find them.
 
 ## 5. Part B: getting knowledge out (a live call)
 
+### Who does what: voice bridge vs admin panel
+
+**The voice bridge only sends the question as plain text. The admin panel turns it
+into numbers (the embedding), and the LLM never sees any numbers at all.**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller
+    box Voice bridge (bmspro-voice-bridge)
+        participant Live as OpenAI Live voice model<br/>(gpt-live-1)
+        participant Brain as Backend LLM<br/>(gpt-6-luna)
+        participant Bridge as bridge.mjs runTool<br/>+ trade-action-policy.mjs
+    end
+    box Admin panel (bmspro-trade-adminpanel)
+        participant MCP as /api/ai/mcp<br/>route.ts + mcp-server.ts
+        participant Tool as knowledge.tools.ts
+        participant Ret as retriever.ts
+        participant Emb as embeddings.ts
+    end
+    participant OpenAI as OpenAI embeddings API
+    participant FS as Firestore<br/>ai_knowledge_chunks
+
+    Caller->>Live: speaks "Do you have rice cookers?"
+    Live->>Brain: caller's words as text
+    Brain->>Bridge: tool call search_business_knowledge<br/>{ "question": "Do you sell rice cookers?" }
+    Bridge->>Bridge: check question (3–300 chars),<br/>reuse result if already asked this call
+    Bridge->>MCP: POST /api/ai/mcp (MCP tools/call)<br/>Bearer secret + called number (DID)
+    MCP->>MCP: verify secret, find business from DID
+    MCP->>Tool: search({ question })
+    Tool->>Ret: searchPassages(businessId, question)
+    par Search by meaning
+        Ret->>Emb: embed(["Do you sell rice cookers?"])
+        Emb->>OpenAI: text (or cache hit)
+        OpenAI-->>Emb: 1,536 numbers
+        Emb-->>Ret: vector
+        Ret->>FS: findNearest(vector)<br/>this business, published only
+        FS-->>Ret: closest pieces + distances
+    and Search by keyword
+        Ret->>FS: keyword candidates (cached 60 s)
+        FS-->>Ret: published texts
+        Ret->>Ret: keywordMatches("rice", "cooker")
+    end
+    Ret-->>Tool: hits + timings
+    Tool->>Tool: packagePassages() → FOUND / NO_MATCH<br/>log search, record unanswered (after response)
+    Tool-->>MCP: { status, passages: [{ title, text }], message }
+    MCP-->>Bridge: JSON text
+    Bridge->>Bridge: validate result, cache it for this call
+    Bridge-->>Brain: function_call_output (text)
+    Brain->>Live: answer written from the passages
+    Live->>Caller: speaks "Yes, a 1.8 litre rice cooker for $38.33"
+```
+
+| Step | Where | What moves | Responsible files |
+|---|---|---|---|
+| 1. Caller asks "Do you have rice cookers?" | Voice bridge | Speech is turned into text by the OpenAI Live voice model | [bridge.mjs](../../../bmspro-voice-bridge/src/server/bridge.mjs) (opens the Live session, `session.start`, `gpt-live-1`) |
+| 2. The LLM decides to search and writes a short question | Voice bridge (backend LLM, `gpt-6-luna`) | Text: `{ "question": "Do you sell rice cookers?" }` | [trade-tools.mjs](../../../bmspro-voice-bridge/src/agents/trade/trade-tools.mjs) (`knowledgeInstructions`: when and how to search), [bridge.mjs](../../../bmspro-voice-bridge/src/server/bridge.mjs) (tools given to the model under `delegation`) |
+| 3. The bridge calls the `search_business_knowledge` tool | Bridge → admin panel (`POST /api/ai/mcp`) | Same text, plus the bridge secret and the called number (DID) | [bridge.mjs](../../../bmspro-voice-bridge/src/server/bridge.mjs) (`runTool`), [trade-action-policy.mjs](../../../bmspro-voice-bridge/src/agents/trade/trade-action-policy.mjs) (checks the question, per-call cache), [trade-tools.mjs](../../../bmspro-voice-bridge/src/agents/trade/trade-tools.mjs) (MCP client `callTool`, 12 s timeout), [tenant-routing.mjs](../../../bmspro-voice-bridge/src/routing/tenant-routing.mjs) (which admin-panel URL) |
+| 3b. The admin panel checks the caller | Admin panel | Secret checked; business found from the DID | [app/api/ai/mcp/route.ts](../app/api/ai/mcp/route.ts), [lib/ai/config.ts](../lib/ai/config.ts) (`authenticateVoiceBridge`), [lib/ai/mcp/mcp-server.ts](../lib/ai/mcp/mcp-server.ts) (registers the tool), [knowledge.tools.ts](../lib/ai/mcp/tools/knowledge.tools.ts) (`search`) |
+| 4. **The question is turned into numbers** | **Admin panel**, which calls OpenAI | Text in, 1,536 numbers out | [embeddings.ts](../lib/ai/rag/embeddings.ts) (`createQueryEmbedder`: 3.5 s timeout, 6-hour cache), [settings.ts](../lib/ai/rag/settings.ts) (model, dimensions) |
+| 5. The closest pieces are found by meaning and by keyword | Admin panel + Firestore | Numbers compared with stored numbers; question words compared with stored text | [retriever.ts](../lib/ai/rag/retriever.ts) (`searchPassages`, `keywordMatches`), [vector-store.ts](../lib/ai/rag/vector-store.ts) (`nearest`, `keywordCandidates`) |
+| 6. The matching pieces go back to the bridge | Admin panel → bridge | Text: `{ status: "FOUND", passages: [{ title, text }], message }` | [retriever.ts](../lib/ai/rag/retriever.ts) (`packagePassages`), [mcp-server.ts](../lib/ai/mcp/mcp-server.ts) (wraps as JSON), [search-log.ts](../lib/ai/rag/search-log.ts) and [unanswered.ts](../lib/ai/learning/unanswered.ts) (after the response) |
+| 7. The LLM reads the passages and writes the answer | Voice bridge (LLM) | Text, then speech | [trade-action-policy.mjs](../../../bmspro-voice-bridge/src/agents/trade/trade-action-policy.mjs) (validates: ≤ 8 passages, each ≤ 2,000 chars), [bridge.mjs](../../../bmspro-voice-bridge/src/server/bridge.mjs) (sends `function_call_output`, then `response.create`) |
+
+So:
+
+- **The LLM's part:** deciding when to search, writing the question (step 2), and
+  writing the answer from the passages it gets back (step 7). That's the "G" in RAG.
+- **The admin panel's part:** turning the question into numbers, searching, and
+  packaging the results (steps 4–6). That's the "R" in RAG.
+- **The LLM never receives numbers.** It sends text and gets text back.
+
+Why the embedding happens in the admin panel and not the bridge:
+
+1. **Same model on both sides.** The stored pieces were turned into numbers in the
+   admin panel with one model and size. The question must use exactly the same ones,
+   or the numbers can't be compared. Keeping both in one place guarantees that.
+2. **The bridge needs no extra secrets.** It never needs the OpenAI embedding key or
+   Firestore access. It only holds the bridge secret.
+3. **One business only.** The business comes from the phone number that was called,
+   checked by the admin panel. The LLM can't pick a business, so it can never search
+   another business's knowledge.
+
 ### B1. Sophie decides to search
 
 The voice bridge ([bmspro-voice-bridge](../../../bmspro-voice-bridge)) runs the LLM
@@ -857,9 +946,11 @@ search: async (raw) => {
   if (!parsed.success) return { status: "REJECTED", ... };
 
   // Check the business is still active, in parallel with the search
-  const [, result] = await Promise.all([deps.business(), retrievePassages(deps, binding.businessId, parsed.data.question)]);
+  const [, found] = await Promise.all([deps.business(), searchPassages(deps, binding.businessId, question)]);
+  const result = packagePassages(found.hits);
 
-  if (result.status === "NO_MATCH") deps.unanswered(parsed.data.question); // saved for the owner, after the response
+  if (result.status === "NO_MATCH") deps.unanswered(question);        // saved for the owner, after the response
+  deps.logSearch?.({ question, status, passagesSent, stats: found.stats }); // timings + matches, after the response
   return result;
 }
 ```
@@ -867,23 +958,31 @@ search: async (raw) => {
 Wired dependencies:
 
 ```ts
-embed:             createQueryEmbedder(settings),                       // 3.5 s timeout + cache
-nearest:           (id, v) => store.nearest(id, v, settings.topK, settings.maxDistance),
-keywordCandidates: id => store.publishedPassages(id),
+embed:             createQueryEmbedder(settings),                                        // 3.5 s timeout + cache
+nearest:           (id, v) => store.nearest(id, v, settings.topK, nearMissDistance(settings.maxDistance)), // cut-off + 0.15
+maxDistance:       settings.maxDistance,                                                 // real cut-off, applied in searchPassages
+keywordCandidates: (id, terms) => store.keywordCandidates(id, terms),
+logSearch:         entry => schedule(() => recordKnowledgeSearch(businessId, entry)),
 ```
+
+Firestore is asked for matches up to 0.15 past the cut-off. Only matches inside the
+cut-off are used. The closest one that just missed is logged (`closestDistance`), so
+the cut-off can be tuned from real calls.
 
 ### B4. Find the passages: keyword + meaning, in parallel
 
-**File:** [lib/ai/rag/retriever.ts](../lib/ai/rag/retriever.ts) → `findPassages()`
+**File:** [lib/ai/rag/retriever.ts](../lib/ai/rag/retriever.ts) → `searchPassages()`
 
 ```ts
-const [byMeaning, candidates] = await Promise.all([
-  deps.embed([question]).then(([vector]) => deps.nearest(businessId, vector)),  // search by meaning
-  deps.keywordCandidates(businessId),                                           // all published texts
+const [byMeaning, byKeyword] = await Promise.all([
+  embed → nearest → drop anything past maxDistance,     // search by meaning (timed: embedMs, nearestMs)
+  keywordCandidates(businessId, questionTerms(question)) → keywordMatches(...), // timed: keywordMs
 ]);
-const byKeyword = keywordMatches(question, candidates);
-return dedupe([...byKeyword, ...byMeaning]);   // exact word matches first
+hits  = dedupe([...byKeyword, ...byMeaning]);          // exact word matches first
+stats = { embedMs, nearestMs, keywordMs, totalMs, candidates, closestDistance, hits: [{ keyword, distance }] };
 ```
+
+`findPassages()` and `retrievePassages()` still exist and call `searchPassages()`.
 
 **Search by meaning:**
 
@@ -900,28 +999,34 @@ collection
   .findNearest({
     vectorField: "embedding", queryVector: vector, limit: topK,   // default 4
     distanceMeasure: "COSINE", distanceResultField: "distance",
-    distanceThreshold: maxDistance,                               // default 0.55
+    distanceThreshold: maxDistance + 0.15,                        // near misses, for the log
   })
 ```
 
-Cosine distance: `0` = same meaning, bigger = less related. Anything above `0.55` is
-dropped. Results are filtered again in code by `businessId` and `status`
-("defence in depth").
+Cosine distance: `0` = same meaning, bigger = less related. Anything above the cut-off
+(`0.60`) is dropped in `searchPassages`. Results are filtered again in code by
+`businessId` and `status` ("defence in depth").
 
 **Search by keyword** (why we need it: meaning search is weak at exact product names;
 "rice cooker" inside a 50-item list chunk matches only faintly):
 
-1. `publishedPassages()` loads the text of all published chunks for this business (no
-   vectors), cached for 60 s per server.
-2. `questionTerms("Do you sell rice cookers?")` → `["rice", "cooker"]` (drops
+1. `questionTerms("Do you sell rice cookers?")` → `["rice", "cooker"]` (drops
    "do/you/sell", stems plurals, keeps codes like `SGPO2-DP` or `1.8L` whole).
+2. `store.keywordCandidates(businessId, terms)` finds passages to score:
+   - **Up to 8,000 published chunks** (almost every business): loads the text of all
+     of them (no vectors), cached for 60 s per server.
+   - **More than 8,000:** too many to hold in memory. Each chunk stores a `terms` list
+     (`passageTerms()`, written at indexing time), so Firestore returns only chunks that
+     contain a question word (`array-contains-any`, up to 1,000), plus the true total
+     count. Before this fix, chunks past 8,000 were silently never keyword-searched.
 3. `keywordMatches` scores each passage like a search engine: rare words count more
-   than common ones. A passage needs ≥ 60% of the question's total weight and at least
-   one distinctive word. Top 3 are kept.
+   than common ones (using the true total, so weighting stays right when only some
+   chunks were loaded). A passage needs ≥ 60% of the question's total weight and at
+   least one distinctive word. Top 3 are kept.
 
 ### B5. Package the answer
 
-`retrievePassages()`:
+`packagePassages()`:
 
 ```ts
 for (const hit of hits) {
@@ -961,6 +1066,33 @@ On `NO_MATCH`, `recordUnansweredQuestion()`
 - one document per business + normalised question (SHA-256 id), with a `count`
 - the owner sees it in the dashboard and can write an answer, which becomes a new
   knowledge entry and goes through Part A.
+
+### B8. Search log
+
+Every FOUND or NO_MATCH search is also written to `ai_knowledge_search_logs` after the
+response ([search-log.ts](../lib/ai/rag/search-log.ts)):
+
+| Field | Meaning |
+|---|---|
+| `question` | Redacted question (no emails/phones/long numbers) |
+| `status`, `passagesSent`, `hitCount` | What Sophie got |
+| `hits[]` | `sourceTitle`, `keyword` (found by words?), `distance` (meaning distance, or null) |
+| `closestDistance` | Closest entry by meaning, **including near misses past the cut-off** |
+| `embedMs`, `nearestMs`, `keywordMs`, `totalMs` | Timings |
+| `model`, `topK`, `maxDistance` | Settings used |
+| `expireAt` | Deleted automatically after 30 days (Firestore TTL) |
+
+Logging never blocks or breaks a call. Owner test searches are not logged.
+
+**Where it's shown:**
+
+| Who | Where | Code |
+|---|---|---|
+| Business owner | AI knowledge dashboard → **Search activity** card: searches, % answered, couldn't answer, typical and slowest time, time per step, entries used most, recent searches with a "Nearly matched" tag (24 h / 7 / 30 days) | [ai-search-activity.tsx](../components/ai-search-activity.tsx) → `GET /api/ai/knowledge/search-logs?days=` ([route.ts](../app/api/ai/knowledge/search-logs/route.ts)) |
+| Developer | `npm run ai-knowledge -- search-stats <businessId> [days]` | [seed-ai-knowledge.ts](../scripts/seed-ai-knowledge.ts) |
+
+Both use the same `summarizeSearchLogs()` in [search-stats.ts](../lib/ai/rag/search-stats.ts),
+so the numbers always agree. The route only returns the signed-in owner's own business.
 
 ---
 
@@ -1011,7 +1143,12 @@ number[][]   // one vector per chunk
 
 // Stored chunk (ai_knowledge_chunks)
 { businessId, sourceId, sourceTitle, kind, sourceVersion, ordinal, text,
+  terms: string[],   // words for keyword lookup in big businesses
   embedding: VectorValue, embeddingModel, status: "draft" | "published", updatedAt }
+
+// Search stats (searchPassages)
+SearchStats { embedMs, nearestMs, keywordMs, totalMs, candidates, closestDistance,
+              hits: { sourceId, sourceTitle, keyword: boolean, distance: number | null }[] }
 
 // Search hit
 KnowledgePassage { sourceId, sourceTitle, kind, text, distance }
@@ -1028,11 +1165,17 @@ KnowledgePassage { sourceId, sourceTitle, kind, text, distance }
 |---|---|---|---|
 | `ai_knowledge_uploads` | one signed upload link | `upload-url`, `import` | `import` |
 | `ai_knowledge_sources` | one knowledge entry (full text) | `import`, `import-url`, typed entries, `refreshGeneratedSources`, `PATCH` | dashboard, `indexKnowledgeSource` |
-| `ai_knowledge_chunks` | one chunk + its vector | `vector-store.ts` only | `nearest`, `publishedPassages` |
+| `ai_knowledge_chunks` | one chunk + its vector + its words | `vector-store.ts` only | `nearest`, `keywordCandidates` |
 | `ai_unanswered_questions` | one unanswered question per business | `recordUnansweredQuestion` | dashboard |
+| `ai_knowledge_search_logs` | one search during a call (30-day TTL) | `recordKnowledgeSearch` | `npm run ai-knowledge -- search-stats` |
 
-The chunks collection needs a **vector index** on `embedding` with the
-`businessId` + `status` filters, matching `AI_KNOWLEDGE_EMBEDDING_DIMENSIONS`.
+Indexes in [firestore.indexes.json](../firestore.indexes.json):
+
+- `ai_knowledge_chunks`: **vector index** on `embedding` with the `businessId` + `status`
+  filters, matching `AI_KNOWLEDGE_EMBEDDING_DIMENSIONS`.
+- `ai_knowledge_chunks`: `businessId` + `status` + `terms` (array-contains), for
+  keyword lookup in businesses over 8,000 chunks.
+- `ai_knowledge_search_logs`: `businessId` + `createdAt`, plus a TTL policy on `expireAt`.
 
 Also note: two entries are generated automatically by `refreshGeneratedSources()` in
 [ingest.ts](../lib/ai/rag/ingest.ts): **Business facts** (name, phone, address,
@@ -1052,13 +1195,15 @@ From [lib/ai/rag/settings.ts](../lib/ai/rag/settings.ts):
 | `AI_KNOWLEDGE_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
 | `AI_KNOWLEDGE_EMBEDDING_DIMENSIONS` | `1536` | Vector length (256–2048); must match the Firestore index |
 | `AI_KNOWLEDGE_TOP_K` | `4` | Max chunks from meaning search (1–8) |
-| `AI_KNOWLEDGE_MAX_DISTANCE` | `0.55` | Cosine distance cut-off; lower = stricter |
+| `AI_KNOWLEDGE_MAX_DISTANCE` | `0.6` (was 0.55; see section 12) | Cosine distance cut-off; lower = stricter |
 
 Changing the model or dimensions means every chunk must be re-embedded
 (`POST /api/ai/knowledge/reindex`).
 
 The owner's **Test search** box (`POST /api/ai/knowledge/search`) runs the exact same
-`findPassages()` and shows the distance of each match. It works even before
+`searchPassages()` and returns each match's distance and `matchedBy`
+(`keyword` / `meaning` / `both`), the `timings`, and `closestDistance` (closest entry
+even if it was just past the cut-off). It works even before
 `AI_VOICE_KNOWLEDGE_ENABLED` is on.
 
 ---
@@ -1104,3 +1249,100 @@ The owner's **Test search** box (`POST /api/ai/knowledge/search`) runs the exact
 | [lib/ai/learning/redact.ts](../lib/ai/learning/redact.ts) | Scanning and redaction |
 | [app/api/ai/knowledge/search/route.ts](../app/api/ai/knowledge/search/route.ts) | Owner's test search (same retrieval) |
 | [lib/ai/rag/settings.ts](../lib/ai/rag/settings.ts) | Settings and validation |
+| [lib/ai/rag/search-log.ts](../lib/ai/rag/search-log.ts) | B8: live search log |
+| [scripts/eval-ai-knowledge.ts](../scripts/eval-ai-knowledge.ts) | Section 12: accuracy + speed test |
+| [scripts/knowledge/eval/nira-electrical-lynbrook.eval.json](../scripts/knowledge/eval/nira-electrical-lynbrook.eval.json) | Test questions and expected answers |
+| [scripts/seed-ai-knowledge.ts](../scripts/seed-ai-knowledge.ts) | `search-stats`: real-call numbers from the log |
+
+---
+
+## 12. Measuring and tuning the search
+
+Two tools give real numbers instead of guesses:
+
+| Tool | Data | Answers |
+|---|---|---|
+| `npm run eval:ai-knowledge` | A fixed test set, real OpenAI embeddings, the real chunker/keyword/packaging code; vector search in memory with Firestore's exact rule | How accurate is it? Which `topK` / `maxDistance` is best? Is a bigger model worth it? |
+| `npm run ai-knowledge -- search-stats <businessId> [days]` | `ai_knowledge_search_logs` from real calls | Real speed including Firestore, NO_MATCH rate, and how many near misses a looser cut-off would rescue |
+
+### The test set
+
+[nira-electrical-lynbrook.eval.json](../scripts/knowledge/eval/nira-electrical-lynbrook.eval.json):
+17 typed entries plus a 36-product catalogue (26 chunks), and **74 caller questions**:
+
+- 47 about hours, areas, fees, policies, warranty and so on, many reworded
+  ("Do you charge just to come out and have a look?")
+- 17 about products, where the right **row** must come back (checked by product code)
+- 10 with no answer in the knowledge ("What is your ABN?"), where nothing wrong may be sent
+
+### What is measured
+
+| Metric | Meaning |
+|---|---|
+| **recall** | Answerable questions where the right passage was sent to Sophie at all |
+| **hit@1** | ...where it was the **first** passage |
+| **MRR** | Average of 1/rank of the right passage (1.0 = always first) |
+| **noMatch ok** | Unanswerable questions where nothing wrong was sent |
+| **score** | (recall + noMatch ok) / 2. Missing an answer and sending a wrong one count the same |
+| **avg chars sent** | How much text Sophie has to read (speed and cost of the LLM step) |
+
+### Results (11 Nov 2026, `text-embedding-3-small`, 1536 dims)
+
+**Speed** (this machine → OpenAI; Firestore not included):
+
+| Step | p50 | p95 | max |
+|---|---|---|---|
+| Question embedding, uncached | 318 ms | 356 ms | 768 ms |
+| Question embedding, cached repeat | 0.02 ms | 0.04 ms | 0.05 ms |
+| Keyword scoring, 26 chunks | 1.1 ms | 2.1 ms | 2.7 ms |
+| Keyword scoring, 1,000 chunks | 0.8 ms | 1.3 ms | 1.3 ms |
+| Keyword scoring, 8,000 chunks | 4.0 ms | 7.3 ms | 8.1 ms |
+| Indexing 26 chunks (one-off) | 2.6 s total | | |
+
+The question embedding is ~99% of the search time we can measure here. Keyword search
+runs at the same time, so even at 8,000 chunks it adds nothing to the wait. Firestore's
+`findNearest` time comes from `search-stats` once calls are logged.
+
+**Distances:**
+
+| | min | p10 | p50 | p90 | max |
+|---|---|---|---|---|---|
+| Right answer (64 answerable) | 0.219 | 0.359 | 0.545 | 0.662 | 0.754 |
+| Nearest wrong passage (10 unanswerable) | 0.636 | 0.688 | 0.720 | 0.822 | 0.852 |
+
+The two ranges overlap between about 0.64 and 0.75, so no single cut-off gets every
+answer without also letting wrong passages through.
+
+**Accuracy vs cut-off** (topK 4; at 0.60, every topK from 2 to 8 gave the same result, and topK 1 lost 1.6% recall):
+
+| maxDistance | recall | hit@1 | noMatch ok | score |
+|---|---|---|---|---|
+| 0.45 | 78.1% | 76.6% | 100% | 89.1% |
+| 0.50 | 81.3% | 79.7% | 100% | 90.6% |
+| 0.55 (old default) | 82.8% | 81.3% | 100% | 91.4% |
+| **0.60 (new default)** | **89.1%** | **85.9%** | **100%** | **94.5%** |
+| 0.625 | 89.1% | 85.9% | 100% | 94.5% |
+| 0.65 | 92.2% | 89.1% | 90% | 91.1% |
+| 0.70 | 96.9% | 90.6% | 60% | 78.4% |
+
+- **0.60 is the best cut-off.** It finds 6 more answers per 100 questions than 0.55,
+  with no wrong passages. From 0.65 up, wrong passages start coming back.
+- **topK 4** stays. Larger values cost nothing here, and leave room for questions that
+  need two entries.
+- **All 17 product questions found the right row**, thanks to keyword search.
+- **`text-embedding-3-large` was not better** (89.1% recall at best, same as small).
+  Don't switch.
+
+**Still missed at 0.60 (7)**, all reworded questions whose right answer sits at 0.63–0.75:
+"What time do you start in the morning?", "Do you work in Sydney?", "Can I pay with
+Afterpay?", "Will I get a compliance certificate?", "Can you find out why my lights keep
+tripping?", "Can you wire a big factory?", "Where are you based?". These go to the
+owner's unanswered list. A reranker is the tool that targets exactly this; only add one
+if `search-stats` shows many near misses on real calls.
+
+### Caveats
+
+- One business, 74 questions written by us. Real callers phrase things differently, so
+  confirm with `search-stats` after a week of calls.
+- When the knowledge, the chunker or the model changes, run `npm run eval:ai-knowledge`
+  again. Add a question to the test set whenever a real call gets a wrong answer.

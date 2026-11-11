@@ -5,6 +5,7 @@ import type { KnowledgeKind, KnowledgeOrigin, KnowledgeSource, KnowledgeStatus }
 import { KNOWLEDGE_PURPOSES, PURPOSE_LABEL, PURPOSE_NOTE_MAX, describePurpose, purposeError,
   type KnowledgePurpose } from "@/lib/ai/data/knowledge-purpose";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AiSearchActivity } from "./ai-search-activity";
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
@@ -66,8 +67,13 @@ const FLAG_LABEL: Record<string, string> = {
 
 type Filter = "all" | "published" | "draft" | "needs_review";
 type Unanswered = { id: string; question: string; count: number };
-type TestMatch = { sourceId: string; title: string; text: string; distance: number };
-type TestResult = { status: "FOUND" | "NO_MATCH"; durationMs: number; matches: TestMatch[] };
+type TestMatch = { sourceId: string; title: string; text: string; distance: number; matchedBy?: "keyword" | "meaning" | "both" };
+type TestTimings = { embedMs: number; nearestMs: number; keywordMs: number; totalMs: number };
+type TestResult = {
+  status: "FOUND" | "NO_MATCH"; durationMs: number; matches: TestMatch[];
+  timings: TestTimings | null; closestDistance: number | null; maxDistance: number | null;
+};
+const ms = (value: number) => `${Math.round(value)} ms`;
 type Editor = {
   id: string | null; version: number; kind: "faq" | "policy" | "note" | "document" | "website"; title: string; body: string;
   /** Imported entries only. Null on entries imported before descriptions existed. */
@@ -424,7 +430,12 @@ export function AiKnowledgeBoard() {
     setNotice(null);
     try {
       const result = await authFetch("/api/ai/knowledge/search", { method: "POST", body: JSON.stringify({ question: question.trim() }) });
-      setTestResult({ status: result.status as TestResult["status"], durationMs: Number(result.durationMs), matches: (result.matches as TestMatch[]) ?? [] });
+      setTestResult({
+        status: result.status as TestResult["status"], durationMs: Number(result.durationMs), matches: (result.matches as TestMatch[]) ?? [],
+        timings: (result.timings as TestTimings | undefined) ?? null,
+        closestDistance: typeof result.closestDistance === "number" ? result.closestDistance : null,
+        maxDistance: typeof result.maxDistance === "number" ? result.maxDistance : null,
+      });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Search failed." });
     } finally {
@@ -501,6 +512,16 @@ export function AiKnowledgeBoard() {
             {testResult.status === "NO_MATCH" ? (
               <p className="rounded-lg bg-surface-container-low px-3 py-2 font-body text-[13px] text-on-surface-variant">
                 No published entry matches. Sophie would say she doesn&apos;t have that detail on hand. Add an entry to cover it.
+                {testResult.closestDistance !== null && testResult.maxDistance !== null && (
+                  <span className="mt-1 block text-[12px]">
+                    {testResult.closestDistance <= testResult.maxDistance + 0.05
+                      ? "An entry nearly matched. If it does answer this, add the caller’s wording to that entry."
+                      : "Nothing came close."}{" "}
+                    <span title="Lower is closer. Entries further than the cut-off are not used.">
+                      (closest {testResult.closestDistance.toFixed(3)}, cut-off {testResult.maxDistance})
+                    </span>
+                  </span>
+                )}
               </p>
             ) : (
               <>
@@ -511,15 +532,22 @@ export function AiKnowledgeBoard() {
                   <div key={`${match.sourceId}-${index}`} className="rounded-xl border border-outline-variant p-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-body text-[13px] font-semibold text-on-surface">{match.title}</p>
-                      <span className="font-body text-[11px] text-on-surface-variant" title="Lower is a closer match">
-                        {match.distance === 0 ? "Matches your words"
+                      <span className="text-right font-body text-[11px] text-on-surface-variant" title="Lower is a closer match">
+                        {match.matchedBy === "keyword" || (!match.matchedBy && match.distance === 0) ? "Matched your words"
                           : `${match.distance < 0.3 ? "Strong match" : match.distance < 0.45 ? "Good match" : "Weak match"} · ${match.distance}`}
+                        {match.matchedBy === "both" && <span className="block">and your words</span>}
                       </span>
                     </div>
                     <p className="mt-1 line-clamp-3 whitespace-pre-wrap font-body text-[12px] text-on-surface-variant">{match.text}</p>
                   </div>
                 ))}
               </>
+            )}
+            {testResult.timings && (
+              <p className="font-body text-[11px] text-on-surface-variant">
+                Time: understanding the question {ms(testResult.timings.embedMs)}, search by meaning {ms(testResult.timings.nearestMs)},
+                search by words {ms(testResult.timings.keywordMs)} (at the same time) · total {ms(testResult.timings.totalMs)}
+              </p>
             )}
           </div>
         )}
@@ -734,6 +762,9 @@ export function AiKnowledgeBoard() {
           </ul>
         </div>
       )}
+
+      {/* How searches went on real calls */}
+      <AiSearchActivity fetcher={authFetch} />
 
       {/* Entries */}
       <div className={CARD_CLASS}>
