@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import {
   repeatingVisitCountForBookingId,
+  seriesKeyForBookingId,
   uniqueQuotationsForBoard,
 } from "@/lib/bookings/board-grouping";
 import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
@@ -1548,7 +1549,7 @@ function CancelQuotationConfirmModal({
 }
 
 export function QuotationsBoard() {
-  const { user, status: authStatus } = useAuth();
+  const { user, status: authStatus, role } = useAuth();
   const { canUseModule, modulesReady } = useBusinessModuleSettings();
   const jobsModuleEnabled = canUseModule("jobs");
   const profile = useBusinessProfile();
@@ -1815,6 +1816,11 @@ export function QuotationsBoard() {
     }
   }
 
+  const deleteSeries = role === "business_owner" && Boolean(deleteTarget && seriesKeyForBookingId(
+    deleteTarget.bookingId ?? requestById.get(deleteTarget.inspectionRequestId)?.bookingId,
+    bookingById,
+  ));
+
   async function confirmDeleteQuotation() {
     if (!user || !deleteTarget) return;
     setDeleting(true);
@@ -1822,20 +1828,19 @@ export function QuotationsBoard() {
     try {
       const token = await user.getIdToken();
       const response = await fetch(
-        `/api/quotations/${encodeURIComponent(deleteTarget.id)}`,
+        `/api/quotations/${encodeURIComponent(deleteTarget.id)}${deleteSeries ? "?scope=series" : ""}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; deletedIds?: string[] };
       if (!response.ok || !data.ok) {
         throw new Error(data.error ?? "Could not delete quotation.");
       }
-      setQuotations((prev) =>
-        prev.filter((entry) => entry.id !== deleteTarget.id),
-      );
-      if (selectedId === deleteTarget.id) {
+      const deletedIds = new Set(data.deletedIds ?? [deleteTarget.id]);
+      setQuotations((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
+      if (selectedId && deletedIds.has(selectedId)) {
         setSelectedId(null);
         setPreviewMode("review");
       }
@@ -2041,9 +2046,11 @@ export function QuotationsBoard() {
       />
       <DeleteConfirmModal
         open={deleteTarget !== null}
-        title="Delete this quotation?"
+        title={deleteSeries ? "Delete quotations for this series?" : "Delete this quotation?"}
         description={
-          deleteTarget
+          deleteSeries
+            ? "All quotations grouped under this recurring series will be permanently removed. Linked jobs, requests and invoices will be kept."
+            : deleteTarget
             ? `Only ${displayQuotationCode(deleteTarget)} for ${
                 deleteTarget.customer.fullName || "this customer"
               } will be permanently removed.${
@@ -2053,7 +2060,7 @@ export function QuotationsBoard() {
               } This cannot be undone.`
             : ""
         }
-        confirmLabel="Yes, delete quotation"
+        confirmLabel={deleteSeries ? "Yes, delete series quotations" : "Yes, delete quotation"}
         cancelLabel="Keep quotation"
         onCancel={() => {
           if (!deleting) setDeleteTarget(null);

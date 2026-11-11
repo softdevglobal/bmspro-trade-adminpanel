@@ -81,7 +81,8 @@ test("dashboard saves are unique, version-checked, audited and require an active
   assert.equal(await resolveVoiceDidMapping(input.did), null, "environment setup cannot route an unsaved DID");
   assert.equal((await PUT(request("admin", { ...input, businessId: "missing" }))).status, 400);
   assert.equal(state.writes, 0);
-  assert.equal((await PUT(request())).status, 200);
+  assert.equal((await PUT(request("admin", { ...input, forwardingExtension: "2000" }))).status, 400);
+  assert.equal((await PUT(request("admin", { ...input, forwardingExtension: "3101" }))).status, 200);
   assert.equal((await PUT(request())).status, 409, "duplicate create/stale edit cannot overwrite the assignment");
   assert.equal(state.writes, 1);
   assert.equal(state.audit.length, 1);
@@ -89,10 +90,14 @@ test("dashboard saves are unique, version-checked, audited and require an active
   assert.equal(list.mappings.length, 1);
   assert.equal(list.mappings[0].source, "dashboard");
   assert.equal(list.mappings[0].businessName, "Business A");
-  const reassigned = { ...input, businessId: "business-b", version: 1 };
+  assert.equal(list.mappings[0].forwardingExtension, "3101");
+  assert.equal((await PUT(request("admin", { ...input, version: 1 }))).status, 200);
+  assert.equal(state.docs.get(`ai_did_mappings:${input.did}`)?.forwardingExtension, "3101");
+  const reassigned = { ...input, businessId: "business-b", version: 2 };
   assert.equal((await PUT(request("admin", reassigned))).status, 200);
   assert.equal((await resolveVoiceDidMapping(input.did))?.businessId, "business-b");
-  assert.equal((await PUT(request("admin", { ...reassigned, version: 2, isActive: false }))).status, 200);
+  assert.equal(state.docs.get(`ai_did_mappings:${input.did}`)?.forwardingExtension, null);
+  assert.equal((await PUT(request("admin", { ...reassigned, version: 3, isActive: false }))).status, 200);
   assert.equal(await resolveVoiceDidMapping(input.did), null, "disabled dashboard entry cannot fall back to environment setup");
 });
 
@@ -109,10 +114,14 @@ test("authenticated discovery reads dashboard assignments and distinguishes disa
     const readsBefore = state.reads;
     assert.equal((await discover("wrong")).status, 401);
     assert.equal(state.reads, readsBefore);
-    state.docs.set(`ai_did_mappings:${input.did}`, { ...mapping, businessId: "business-b" });
+    state.docs.set(`ai_did_mappings:${input.did}`, { ...mapping, businessId: "business-b", forwardingExtension: "3202" });
     const active = await discover();
     assert.equal(active.headers.get("Cache-Control"), "no-store");
-    assert.deepEqual(await active.json(), { matched: true, brand: "trade", did: input.did, businessId: "business-b" });
+    assert.deepEqual(await active.json(), {
+      matched: true, brand: "trade", did: input.did, businessId: "business-b",
+      profile: { businessName: "Business B", timezone: "Australia/Melbourne" },
+      forwardingExtension: "3202",
+    });
     state.docs.set("businesses:business-b", { isActive: false, status: "suspended" });
     assert.equal((await discover()).status, 403);
     state.docs.set("businesses:business-b", { isActive: true, status: "active" });

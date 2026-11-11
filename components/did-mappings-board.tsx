@@ -99,7 +99,8 @@ export function DidMappingsBoard() {
 
   function edit(mapping: DidMappingRow) {
     setEditing(mapping);
-    setForm({ did: mapping.did, businessId: mapping.businessId, isActive: mapping.isActive, version: mapping.version });
+    setForm({ did: mapping.did, businessId: mapping.businessId, isActive: mapping.isActive,
+      version: mapping.version, forwardingExtension: mapping.forwardingExtension ?? null });
     setShowForm(true); setError(""); setMessage("");
   }
 
@@ -130,11 +131,19 @@ export function DidMappingsBoard() {
           </div>
           <div>
             <label htmlFor="mapping-business" className="mb-1.5 block text-sm font-medium text-on-surface">Trade business</label>
-            <select id="mapping-business" required disabled={saving} value={form.businessId} onChange={event => setForm(current => ({ ...current, businessId: event.target.value }))} className={inputClass}>
+            <select id="mapping-business" required disabled={saving} value={form.businessId} onChange={event => setForm(current => ({ ...current, businessId: event.target.value, forwardingExtension: null }))} className={inputClass}>
               <option value="">Choose a business</option>
               {form.businessId && !businesses.some(business => business.id === form.businessId) && <option value={form.businessId}>Unavailable business</option>}
               {businesses.map(business => <option key={business.id} value={business.id} disabled={!business.isActive && business.id !== form.businessId}>{business.name}{business.isActive ? "" : " (inactive)"}</option>)}
             </select>
+          </div>
+          <div>
+            <label htmlFor="mapping-forwarding" className="mb-1.5 block text-sm font-medium text-on-surface">Yeastar forwarding extension</label>
+            <input id="mapping-forwarding" type="text" inputMode="numeric" autoComplete="off" pattern="[0-9]{2,11}" maxLength={11}
+              disabled={saving} value={form.forwardingExtension ?? ""} placeholder="3101" className={inputClass}
+              aria-describedby="mapping-forwarding-help"
+              onChange={event => setForm(current => ({ ...current, forwardingExtension: event.target.value || null }))} />
+            <p id="mapping-forwarding-help" className="mt-1 text-xs text-on-surface-variant">Optional. Enter this business’s internal owner extension. Leave blank to disable transfers.</p>
           </div>
         </div>
         <label className="flex items-start gap-3 text-sm text-on-surface">
@@ -163,11 +172,12 @@ export function DidMappingsBoard() {
             <p className="mt-1 text-sm text-on-surface-variant">{search ? "Try another number or business name." : "Add a mapping to connect a number to a Trade business."}</p>
           </div> : <div className="overflow-x-auto"><table className="w-full text-left text-sm">
             <thead className="bg-surface-container-low text-xs text-on-surface-variant"><tr>
-              <th scope="col" className="px-5 py-3 font-medium">Phone number</th><th scope="col" className="px-5 py-3 font-medium">Business</th><th scope="col" className="px-5 py-3 font-medium">Status</th><th scope="col" className="px-5 py-3 text-right font-medium">Actions</th>
+              <th scope="col" className="px-5 py-3 font-medium">Phone number</th><th scope="col" className="px-5 py-3 font-medium">Business</th><th scope="col" className="px-5 py-3 font-medium">Forward to</th><th scope="col" className="px-5 py-3 font-medium">Status</th><th scope="col" className="px-5 py-3 text-right font-medium">Actions</th>
             </tr></thead>
             <tbody className="divide-y divide-outline-variant/60">{filtered.map(mapping => <tr key={mapping.did}>
               <td className="whitespace-nowrap px-5 py-4 font-medium tabular-nums text-on-surface">{mapping.did}{mapping.source === "setup" && <span className="mt-1 block text-xs font-normal text-on-surface-variant">Existing setup · save to manage here</span>}</td>
               <td className="px-5 py-4 text-on-surface">{mapping.businessName}{!mapping.businessActive && <span className="mt-1 block text-xs text-error">Business unavailable · calls blocked</span>}</td>
+              <td className="px-5 py-4 tabular-nums text-on-surface">{mapping.forwardingExtension ?? "Off"}</td>
               <td className="px-5 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${mapping.isActive && mapping.source === "dashboard" ? "bg-primary-fixed text-on-primary-fixed-variant" : "bg-surface-container-high text-on-surface-variant"}`}>{mapping.source === "setup" ? "Needs saving" : mapping.isActive ? "Enabled" : "Disabled"}</span></td>
               <td className="whitespace-nowrap px-5 py-4 text-right"><div className="inline-flex gap-1">
                 <button type="button" disabled={saving} onClick={() => edit(mapping)} aria-label={`Edit mapping for ${mapping.did}`} className="rounded-lg px-3 py-2 font-medium text-primary disabled:opacity-50">Edit</button>

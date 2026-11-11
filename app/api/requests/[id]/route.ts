@@ -739,10 +739,11 @@ export async function DELETE(
 
   const { id } = await context.params;
   const pendingCallJobOnly = new URL(request.url).searchParams.get("kind") === "pending-call-job";
+  const deleteSeries = new URL(request.url).searchParams.get("scope") === "series";
   const result = await deleteBusinessInspectionRequest(
     auth.businessId,
     id,
-    pendingCallJobOnly ? { pendingCallJobOnly: true } : undefined,
+    pendingCallJobOnly ? { pendingCallJobOnly: true } : deleteSeries ? { deleteSeries: true } : undefined,
   );
   if (!result.ok) {
     return NextResponse.json(
@@ -768,8 +769,9 @@ export async function DELETE(
     targetLabel: result.request.customer.fullName || null,
     metadata: {
       requestCode: result.request.requestCode,
+      ...(result.deletedIds ? { deletedRequestIds: result.deletedIds } : {}),
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, deletedIds: result.deletedIds });
 }

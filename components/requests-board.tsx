@@ -68,6 +68,7 @@ import {
 import { sortInspectionRequestsForBoard } from "@/lib/inspection/map-inspection-doc";
 import {
   canonicalRequestId,
+  seriesKeyForBookingId,
   uniqueRequestsForBoard,
 } from "@/lib/bookings/board-grouping";
 import { recurringVisitCount } from "@/lib/bookings/map-booking-doc";
@@ -250,6 +251,7 @@ export function RequestsBoard() {
     }
     return map;
   }, [bookings]);
+  const deleteSeries = Boolean(seriesKeyForBookingId(deleteTarget?.bookingId, bookingById));
 
   const isLoading = requestsLoading;
   const loadError = requestsError;
@@ -389,20 +391,19 @@ export function RequestsBoard() {
     try {
       const token = await user.getIdToken();
       const response = await fetch(
-        `/api/requests/${encodeURIComponent(deleteTarget.id)}`,
+        `/api/requests/${encodeURIComponent(deleteTarget.id)}${deleteSeries ? "?scope=series" : ""}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; deletedIds?: string[] };
       if (!response.ok || !data.ok) {
         throw new Error(data.error ?? "Could not delete request.");
       }
-      setRequestsLocal((prev) =>
-        prev.filter((entry) => entry.id !== deleteTarget.id),
-      );
-      if (selectedId === deleteTarget.id) {
+      const deletedIds = new Set(data.deletedIds ?? [deleteTarget.id]);
+      setRequestsLocal((prev) => prev.filter((entry) => !deletedIds.has(entry.id)));
+      if (selectedId && deletedIds.has(selectedId)) {
         setSelectedId(null);
         setDrawerOpenMode(null);
       }
@@ -419,6 +420,9 @@ export function RequestsBoard() {
   }
 
   function requestDeleteDescription(request: InspectionRequestDetail): string {
+    if (deleteSeries) {
+      return "All inspection requests grouped under this recurring series will be permanently removed. Linked jobs, quotations and invoices will be kept.";
+    }
     const linked: string[] = [];
     if (request.bookingId) linked.push("job");
     if (request.quotation) linked.push("quotation");
@@ -556,9 +560,9 @@ export function RequestsBoard() {
 
       <DeleteConfirmModal
         open={deleteTarget !== null}
-        title="Delete this request?"
+        title={deleteSeries ? "Delete inspection requests for this series?" : "Delete this request?"}
         description={deleteTarget ? requestDeleteDescription(deleteTarget) : ""}
-        confirmLabel="Yes, delete request"
+        confirmLabel={deleteSeries ? "Yes, delete series requests" : "Yes, delete request"}
         cancelLabel="Keep request"
         onCancel={() => {
           if (!deleting) setDeleteTarget(null);
