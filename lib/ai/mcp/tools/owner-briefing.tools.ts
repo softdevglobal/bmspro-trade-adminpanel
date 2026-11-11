@@ -1,6 +1,24 @@
 import "server-only";
 
+import { Timestamp } from "firebase-admin/firestore";
+
+import {
+  matchStaff,
+  resolveReportDate,
+  summarizeDayActivity,
+  summarizeStaffDay,
+  type ActivityCheckIn,
+  type ActivityInspection,
+  type ActivityInvoice,
+  type ActivityJob,
+  type ActivityQuote,
+  type ActivityStaff,
+  type ScheduledVisit,
+} from "@/lib/ai/owner-call/day-activity";
+import { AUDIT_COLLECTION } from "@/lib/audit/types";
 import { bookingScheduleDays, mapBookingDoc } from "@/lib/bookings/map-booking-doc";
+import { INVOICE_COLLECTION, mapInvoiceDoc } from "@/lib/invoices/server";
+import { QUOTATION_COLLECTION, mapQuotationDoc } from "@/lib/quotations/server";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
@@ -55,9 +73,149 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
     }).sort((left, right) => left.createdAt - right.createdAt);
   }
 
+  const toMs = (value: unknown): number | null => {
+    if (value instanceof Timestamp) return value.toMillis();
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    return null;
+  };
+
+  /** Quotes and invoices created in the 180 days before the day (decisions and payments can come later). */
+  const since = (date: string) => Timestamp.fromMillis(Date.parse(`${date}T00:00:00Z`) - 180 * 86_400_000);
+
+  async function activityRecords(date: string) {
+    const [jobDocs, requestDocs, quoteDocs, invoiceDocs, sentDocs, visits] = await Promise.all([
+      jobs.get(),
+      requests.get(),
+      adminDb.collection(QUOTATION_COLLECTION).where("businessId", "==", businessId)
+        .where("createdAt", ">=", since(date)).get(),
+      adminDb.collection(INVOICE_COLLECTION).where("businessId", "==", businessId)
+        .where("createdAt", ">=", since(date)).get(),
+      adminDb.collection(AUDIT_COLLECTION).where("businessId", "==", businessId)
+        .where("action", "==", "quotation.sent").get(),
+      todaysVisits(date),
+    ]);
+    const jobRows: ActivityJob[] = jobDocs.docs.map((doc) => {
+      const job = mapBookingDoc(doc.id, doc.data());
+      return {
+        code: job.bookingCode, service: job.serviceName ?? job.customRequest?.title ?? null,
+        customer: job.customer?.fullName || null, suburb: job.address?.suburb || null,
+        status: job.status, staffUid: job.assignedTo?.uid ?? null, staffName: job.assignedTo?.name ?? null,
+        visitStartedAt: job.visitStartedAt, visitEndedAt: job.visitEndedAt,
+        cancelledAt: job.cancelledAt, missedAt: job.missedAt, missedReason: job.missedReason,
+      };
+    });
+    const inspectionRows: ActivityInspection[] = requestDocs.docs.map((doc) => {
+      const request = mapInspectionDoc(doc.id, doc.data());
+      return {
+        code: request.requestCode, service: request.serviceName ?? request.customRequest?.title ?? null,
+        customer: request.customer?.fullName || null, suburb: request.address?.suburb || null,
+        status: request.status, staffUid: request.assignedTo?.uid ?? null, staffName: request.assignedTo?.name ?? null,
+        visitStartedAt: request.visitStartedAt, visitEndedAt: request.visitEndedAt,
+        cancelledAt: request.cancelledAt, missedAt: null, missedReason: null,
+        createdAt: request.createdAt, source: request.createdSource ?? null,
+        fromSophie: request.sophieJobRequest === true,
+      };
+    });
+    const quoteRows: ActivityQuote[] = quoteDocs.docs.map((doc) => {
+      const quote = mapQuotationDoc(doc.id, doc.data());
+      return {
+        code: quote.quotationCode, customer: quote.customer?.fullName || null,
+        valueAud: quote.finalPriceAud, createdAt: quote.createdAt, createdByUid: quote.createdBy || null,
+        customerDecision: quote.customerDecision, customerDecisionAt: quote.customerDecisionAt,
+        depositPaidAt: quote.depositPayment?.paidAt ?? null, depositAud: quote.depositPayment?.amountAud ?? 0,
+      };
+    });
+    const invoiceRows: ActivityInvoice[] = invoiceDocs.docs.map((doc) => {
+      const invoice = mapInvoiceDoc(doc.id, doc.data());
+      return {
+        code: invoice.invoiceCode, customer: invoice.customer?.fullName || null,
+        status: invoice.status, invoiceDate: invoice.invoiceDate || null, totalAud: invoice.finalPriceAud,
+        payments: invoice.payments.map((payment) => ({ amountAud: payment.amountAud, paidAt: payment.paidAt })),
+        markedPaidAt: toMs(doc.get("markedPaidAt")),
+      };
+    });
+    const quoteSentAt = sentDocs.docs.map((doc) => {
+      const value = doc.get("metadata.finalPriceAud");
+      return { at: toMs(doc.get("createdAt")), valueAud: typeof value === "number" ? value : 0 };
+    });
+    const scheduled: ScheduledVisit[] = [
+      ...visits.jobs.map((visit) => ({ kind: "job" as const, code: visit.code, status: visit.status,
+        staffUid: visit.staffUid ?? null, startTime: visit.startTime ?? null })),
+      ...visits.inspections.map((visit) => ({ kind: "inspection" as const, code: visit.code, status: visit.status,
+        staffUid: visit.staffUid ?? null, startTime: visit.startTime ?? null })),
+    ];
+    return { jobRows, inspectionRows, quoteRows, invoiceRows, quoteSentAt, scheduled };
+  }
+
+  async function activeStaff(date: string): Promise<ActivityStaff[]> {
+    const [staffDocs, leave] = await Promise.all([
+      adminDb.collection("users").where("businessId", "==", businessId).where("role", "==", "staff").get(),
+      listApprovedLeaveForBusiness(businessId),
+    ]);
+    return staffDocs.docs
+      .filter((doc) => doc.get("isActive") !== false && doc.get("status") !== "inactive")
+      .map((doc) => ({
+        uid: doc.id,
+        name: String(doc.get("fullName") ?? "Team member"),
+        offDay: isStaffOffOnDate(offDayIdsFromAvailability(doc.get("availability")), date, timeZone),
+        approvedLeave: leave
+          .filter((item) => item.requesterUid === doc.id && item.fromDate && item.toDate &&
+            item.fromDate <= date && item.toDate >= date)
+          .map((item) => ({ fullDay: item.isFullDay, startTime: item.startTime ?? null, endTime: item.endTime ?? null })),
+      }));
+  }
+
+  async function checkInsFor(staff: ActivityStaff[]): Promise<ActivityCheckIn[]> {
+    const lists = await Promise.all(staff.map((member) =>
+      adminDb.collection("staff_check_ins").where("staffId", "==", member.uid)
+        .where("businessId", "==", businessId).get()));
+    return lists.flatMap((snapshot, index) => snapshot.docs.map((doc) => ({
+      staffUid: staff[index].uid,
+      checkInAt: toMs(doc.get("checkInTime")),
+      checkOutAt: toMs(doc.get("checkOutTime")),
+      breakSeconds: typeof doc.get("totalBreakSeconds") === "number" ? doc.get("totalBreakSeconds") : 0,
+      workingSeconds: typeof doc.get("workingSeconds") === "number" ? doc.get("workingSeconds") : null,
+    })));
+  }
+
   return {
-    async dailySummary(offset: number) {
-      const date = platformTodayIso(new Date(), timeZone);
+    /** What happened across the business on a day (work done, quotes, invoices, money). */
+    async dayActivity(day: string | undefined) {
+      const resolved = resolveReportDate(day, new Date(), timeZone);
+      if (!resolved.ok) return { status: "INVALID_DATE", error: resolved.error };
+      const records = await activityRecords(resolved.date);
+      return summarizeDayActivity({
+        date: resolved.date, timeZone,
+        jobs: records.jobRows, inspections: records.inspectionRows, quotes: records.quoteRows,
+        quoteSentAt: records.quoteSentAt, invoices: records.invoiceRows, scheduled: records.scheduled,
+      });
+    },
+    /** What each staff member (or one named staff member) did on a day. */
+    async staffDayReport(day: string | undefined, staffName: string | undefined, offset: number) {
+      const resolved = resolveReportDate(day, new Date(), timeZone);
+      if (!resolved.ok) return { status: "INVALID_DATE", error: resolved.error };
+      const allStaff = await activeStaff(resolved.date);
+      const matched = matchStaff(allStaff, staffName);
+      if (staffName?.trim() && matched.length === 0) {
+        return { status: "NO_MATCH", staffNames: allStaff.map((member) => member.name) };
+      }
+      const pageStaff = matched.slice(offset, offset + 10);
+      const [records, checkIns] = await Promise.all([activityRecords(resolved.date), checkInsFor(pageStaff)]);
+      return {
+        date: resolved.date, timeZone,
+        staff: summarizeStaffDay({
+          date: resolved.date, timeZone, now: new Date(), staff: pageStaff, checkIns,
+          jobs: records.jobRows, inspections: records.inspectionRows, quotes: records.quoteRows,
+          scheduled: records.scheduled,
+        }),
+        total: matched.length,
+        nextOffset: offset + 10 < matched.length ? offset + 10 : null,
+      };
+    },
+    async dailySummary(offset: number, day?: string) {
+      const resolved = resolveReportDate(day, new Date(), timeZone);
+      if (!resolved.ok) return { status: "INVALID_DATE", error: resolved.error };
+      const date = resolved.date;
       const [visits, pending] = await Promise.all([todaysVisits(date), pendingJobs()]);
       const counts = (rows: { status: string }[]) => rows.reduce<Record<string, number>>((totals, row) => {
         totals[row.status] = (totals[row.status] ?? 0) + 1;
