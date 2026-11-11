@@ -16,6 +16,7 @@ import {
 
 const BOOKING_ROUTES = [
   "/dashboard/requests",
+  "/dashboard/quotations",
   "/dashboard/jobs",
   "/dashboard/calendar",
 ] as const;

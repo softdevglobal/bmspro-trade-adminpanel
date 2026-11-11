@@ -1917,12 +1917,13 @@ async function clearBookingMirrors(
   await batch.commit();
 }
 
-/** Permanently removes a job and clears its mirrors on the linked request. */
+/** Permanently removes a job or its series and clears the linked booking mirrors. */
 export async function deleteBusinessBooking(
   businessId: string,
   bookingId: string,
+  deleteSeries = false,
 ): Promise<
-  | { ok: true; booking: BookingDetail }
+  | { ok: true; booking: BookingDetail; deletedIds: string[] }
   | { ok: false; status: number; error: string }
 > {
   const id = bookingId.trim();
@@ -1930,29 +1931,40 @@ export async function deleteBusinessBooking(
     return { ok: false, status: 400, error: "Job is required." };
   }
 
-  const ref = adminDb.collection(JOBS_COLLECTION).doc(id);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    return { ok: false, status: 404, error: "Job not found." };
-  }
+  const jobs = adminDb.collection(JOBS_COLLECTION);
+  const result = await adminDb.runTransaction(async (transaction) => {
+    const snap = await transaction.get(jobs.doc(id));
+    const data = snap.data();
+    if (data?.businessId !== businessId) {
+      return { ok: false as const, status: 404, error: "Job not found." };
+    }
+    const booking = mapBookingDoc(snap.id, data);
+    if (deleteSeries && !booking.seriesId && !booking.recurrence) {
+      return { ok: false as const, status: 409, error: "This job is no longer part of a recurring series." };
+    }
+    const series = deleteSeries && booking.seriesId
+      ? await transaction.get(jobs.where("businessId", "==", businessId).where("seriesId", "==", booking.seriesId))
+      : null;
+    const visits = series?.docs ?? [snap];
+    for (const visit of visits) transaction.delete(visit.ref);
+    return {
+      ok: true as const,
+      booking,
+      deleted: visits.map((visit) => ({ id: visit.id, requestId: visit.get("inspectionRequestId") as unknown })),
+    };
+  });
+  if (!result.ok) return result;
 
-  const booking = mapBookingDoc(snap.id, snap.data() ?? {});
-  if (booking.businessId !== businessId) {
-    return { ok: false, status: 404, error: "Job not found." };
-  }
-
-  await ref.delete();
-
-  const requestId = booking.inspectionRequestId?.trim();
-  if (requestId) {
+  await Promise.all(result.deleted.map(async ({ id, requestId }) => {
+    if (typeof requestId !== "string" || !requestId.trim()) return;
     try {
-      await clearBookingMirrors(businessId, requestId, id);
+      await clearBookingMirrors(businessId, requestId.trim(), id);
     } catch (error) {
       console.error("[booking] request cleanup failed:", error);
     }
-  }
+  }));
 
-  return { ok: true, booking };
+  return { ok: true, booking: result.booking, deletedIds: result.deleted.map((visit) => visit.id) };
 }
 
 /**

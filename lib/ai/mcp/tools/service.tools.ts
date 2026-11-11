@@ -5,11 +5,15 @@ export async function createTradeServiceTools(binding: VoiceBusiness) {
   const [{ adminDb }, { isTenantAccessAllowed }] = await Promise.all([
     import("@/lib/firebase/admin"), import("@/lib/onboarding/business-status"),
   ]);
-  const business = async () => {
+  // A fresh service instance is created per MCP request. Share its business
+  // read between tool registration and execution without caching across calls.
+  const loadBusiness = async () => {
     const data = (await adminDb.collection("businesses").doc(binding.businessId).get()).data();
     if (!data || !isTenantAccessAllowed(data.status, data.isActive)) throw new Error("Business unavailable.");
     return data;
   };
+  let snapshot: ReturnType<typeof loadBusiness> | undefined;
+  const business = () => snapshot ??= loadBusiness();
   return {
     business,
     profile: async () => {

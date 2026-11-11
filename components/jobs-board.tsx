@@ -282,12 +282,14 @@ function BookingStatusPill({ status }: { status: BookingStatus }) {
 
 function BookingCardMenu({
   editHref,
+  deleteLabel,
   onDelete,
   onCancel,
   onMarkMissed,
   onUndoCancel,
 }: {
   editHref?: string | null;
+  deleteLabel: string;
   onDelete: () => void;
   onCancel?: () => void;
   onMarkMissed?: () => void;
@@ -404,7 +406,7 @@ function BookingCardMenu({
             <span className="material-symbols-outlined text-[18px] text-rose-600">
               delete
             </span>
-            Delete job
+            {deleteLabel}
           </button>
         </div>
       ) : null}
@@ -496,6 +498,7 @@ function BookingCard({
           </p>
         </div>
         <BookingCardMenu
+          deleteLabel={booking.seriesId || booking.recurrence ? "Delete series" : "Delete job"}
           editHref={
             canCancelBooking(booking)
               ? `/dashboard/jobs?edit=${encodeURIComponent(booking.id)}`
@@ -1431,7 +1434,7 @@ function BookingPreviewContent({
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 font-body text-[14px] font-semibold text-rose-700 transition-colors hover:bg-rose-100"
             >
               <span className="material-symbols-outlined text-[20px]">delete</span>
-              Delete job
+              {booking.seriesId || booking.recurrence ? "Delete series" : "Delete job"}
             </button>
           </div>
         ) : null}
@@ -1488,6 +1491,7 @@ export function JobsBoard({
   const [filter, setFilter] = useState<JobsFilter>("active");
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BookingDetail | null>(null);
+  const deleteSeries = Boolean(deleteTarget?.seriesId || deleteTarget?.recurrence);
   const [deleteCallJobTarget, setDeleteCallJobTarget] = useState<InspectionRequestDetail | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1598,13 +1602,15 @@ export function JobsBoard({
       const token = await user.getIdToken();
       const id = encodeURIComponent(target.id);
       const response = await fetch(
-        deleteCallJobTarget ? `/api/requests/${id}?kind=pending-call-job` : `/api/jobs/${id}`,
+        deleteCallJobTarget
+          ? `/api/requests/${id}?kind=pending-call-job`
+          : `/api/jobs/${id}${deleteSeries ? "?scope=series" : ""}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
         },
       );
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; deletedIds?: string[] };
       if (!response.ok || !data.ok) {
         throw new Error(data.error ?? "Could not delete job.");
       }
@@ -1614,15 +1620,16 @@ export function JobsBoard({
         setDeleteCallJobTarget(null);
         return;
       }
+      const deletedIds = new Set(data.deletedIds ?? [target.id]);
       setLocalBookingState((current) => {
         const base =
           current?.source === bookings ? current.bookings : bookings;
         return {
           source: bookings,
-          bookings: base.filter((entry) => entry.id !== target.id),
+          bookings: base.filter((entry) => !deletedIds.has(entry.id)),
         };
       });
-      if (selectedId === target.id) {
+      if (selectedId && deletedIds.has(selectedId)) {
         setSelectedId(null);
       }
       setDeleteTarget(null);
@@ -2035,17 +2042,19 @@ export function JobsBoard({
 
       <DeleteConfirmModal
         open={deleteTarget !== null || deleteCallJobTarget !== null}
-        title={deleteCallJobTarget ? "Delete this call job request?" : "Delete this job?"}
+        title={deleteCallJobTarget ? "Delete this call job request?" : deleteSeries ? "Delete this recurring series?" : "Delete this job?"}
         description={
           deleteCallJobTarget
             ? `The call job request for ${deleteCallJobTarget.customer.fullName || "this customer"} and its generated quotation will be permanently removed.`
+            : deleteSeries
+              ? "Every visit in this recurring series will be permanently removed. Linked requests and quotations will be kept."
             : deleteTarget
             ? `Only ${displayBookingCode(deleteTarget)} for ${
                 deleteTarget.customer.fullName || "this customer"
               } will be permanently removed. Any linked request and quotation will be kept. This cannot be undone.`
             : ""
         }
-        confirmLabel={deleteCallJobTarget ? "Yes, delete request" : "Yes, delete job"}
+        confirmLabel={deleteCallJobTarget ? "Yes, delete request" : deleteSeries ? "Yes, delete series" : "Yes, delete job"}
         cancelLabel="Keep job"
         onCancel={() => {
           if (!deleting) {

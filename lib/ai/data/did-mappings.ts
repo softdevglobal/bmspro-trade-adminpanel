@@ -10,13 +10,21 @@ import { assertMappingVersion, didMappingInput, DidMappingError,
 export const DID_MAPPINGS_COLLECTION = "ai_did_mappings";
 function parseStored(did: string, data: Record<string, unknown> | undefined): StoredDidMapping | null {
   if (!data) return null;
-  const result = didMappingInput.safeParse({ did: data.did, businessId: data.businessId, isActive: data.isActive, version: data.version });
+  const result = didMappingInput.safeParse({
+    did: data.did, businessId: data.businessId, isActive: data.isActive, version: data.version,
+    forwardingExtension: data.forwardingExtension,
+  });
   if (!result.success || result.data.did !== did || result.data.version < 1) throw new DidMappingError(503, "A saved phone mapping is invalid. Contact support.");
   return result.data;
 }
 const setupMappings = () => parseVoiceBusinesses(process.env.AI_VOICE_TRADE_DID_CONFIG_JSON ?? "[]");
 
-export type VoiceDidRoute = { state: "unmapped" } | { state: "disabled" } | { state: "active"; binding: VoiceBusiness };
+export type VoiceDidRoute = { state: "unmapped" } | { state: "disabled" } | {
+  state: "active";
+  binding: VoiceBusiness;
+  business: FirebaseFirestore.DocumentData;
+  forwardingExtension?: string;
+};
 export async function lookupVoiceDidRoute(did: string): Promise<VoiceDidRoute> {
   if (!/^\d{6,15}$/.test(did)) return { state: "unmapped" };
   const snapshot = await adminDb.collection(DID_MAPPINGS_COLLECTION).doc(did).get();
@@ -25,7 +33,8 @@ export async function lookupVoiceDidRoute(did: string): Promise<VoiceDidRoute> {
   if (!stored.isActive) return { state: "disabled" };
   const business = (await adminDb.collection("businesses").doc(stored.businessId).get()).data();
   if (!business || !isTenantAccessAllowed(business.status, business.isActive)) return { state: "disabled" };
-  return { state: "active", binding: { did, businessId: stored.businessId } };
+  return { state: "active", binding: { did, businessId: stored.businessId }, business,
+    forwardingExtension: stored.forwardingExtension ?? undefined };
 }
 
 export async function resolveVoiceDidMapping(did: string): Promise<VoiceBusiness | null> {
@@ -73,14 +82,20 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
       throw new DidMappingError(400, "Choose an active business before enabling this number.");
     }
     const version = (current?.version ?? 0) + 1;
+    const forwardingExtension = input.forwardingExtension === undefined && current?.businessId === input.businessId
+      ? current.forwardingExtension ?? null
+      : input.forwardingExtension ?? null;
     tx.set(ref, { did: input.did, businessId: input.businessId, isActive: input.isActive, version,
+      forwardingExtension,
       createdAt: existing.data()?.createdAt ?? FieldValue.serverTimestamp(),
       createdBy: existing.data()?.createdBy ?? actor.uid, updatedBy: actor.uid, updatedAt: FieldValue.serverTimestamp() });
-    return { version, previousBusinessId: current?.businessId ?? null };
+    return { version, forwardingExtension, previousBusinessId: current?.businessId ?? null };
   });
   await logAuditEvent({ businessId: input.businessId, category: "integration", action: "voice.did_mapping.updated",
     actor: { uid: actor.uid, role: actor.role, email: actor.email ?? null, name: null }, source: actor.role === "system" ? "system" : "admin_panel",
     summary: `Phone number ${input.did} ${input.isActive ? "assigned" : "disabled"} for AI reception.`, targetId: input.did, targetLabel: input.did,
-    metadata: { did: input.did, previousBusinessId: outcome.previousBusinessId, isActive: input.isActive, version: outcome.version } });
-  return { did: input.did, businessId: input.businessId, isActive: input.isActive, version: outcome.version };
+    metadata: { did: input.did, previousBusinessId: outcome.previousBusinessId, isActive: input.isActive,
+      version: outcome.version, forwardingExtension: outcome.forwardingExtension } });
+  return { did: input.did, businessId: input.businessId, isActive: input.isActive,
+    version: outcome.version, forwardingExtension: outcome.forwardingExtension };
 }

@@ -5,7 +5,9 @@ import { after } from "next/server";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const started = performance.now();
   const auth = await authenticateVoiceBridge(request);
+  const authMs = Math.round(performance.now() - started);
   if (!auth.ok) return Response.json({ error: "Trade voice connection unavailable or unauthorized." }, {
     status: auth.status, headers: { "Cache-Control": "no-store" },
   });
@@ -17,7 +19,9 @@ export async function POST(request: Request) {
     const reads = await createTradeVoiceReads(auth.binding, (stage, task) => after(async () => {
       try { await task(); } catch { console.error("[trade-voice] Post-save task failed", { stage }); }
     }));
-    return await handleTradeVoiceMcp(request, reads);
+    const response = await handleTradeVoiceMcp(request, reads);
+    response.headers.set("Server-Timing", `trade;dur=${Math.round(performance.now() - started)}, auth;dur=${authMs}`);
+    return response;
   } catch {
     return Response.json({ error: "Trade voice business is unavailable." }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }

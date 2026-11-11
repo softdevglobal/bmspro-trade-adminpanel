@@ -19,6 +19,7 @@ import {
   sortInspectionRequestsNewestFirst,
 } from "@/lib/inspection/map-inspection-doc";
 import { getRequestDocument } from "@/lib/inspection/request-document";
+import { readSeriesRequestLinks } from "@/lib/bookings/series-records";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import {
   InspectionAssignment,
@@ -1106,9 +1107,9 @@ export async function customerRejectJobProposedSlots(
 export async function deleteBusinessInspectionRequest(
   businessId: string,
   requestId: string,
-  options?: { pendingCallJobOnly: true },
+  options?: { pendingCallJobOnly?: true; deleteSeries?: true },
 ): Promise<
-  | { ok: true; request: InspectionRequestDetail }
+  | { ok: true; request: InspectionRequestDetail; deletedIds?: string[] }
   | { ok: false; status: number; error: string }
 > {
   const id = requestId.trim();
@@ -1119,6 +1120,24 @@ export async function deleteBusinessInspectionRequest(
   const snap = await getRequestDocument(id);
   if (!snap) {
     return { ok: false, status: 404, error: "Request not found." };
+  }
+
+  if (options?.deleteSeries) {
+    return adminDb.runTransaction(async (transaction) => {
+      const current = await transaction.get(snap.ref);
+      const data = current.data();
+      if (!data || data.businessId !== businessId) return { ok: false, status: 404, error: "Request not found." };
+      const request = mapInspectionDoc(current.id, data);
+      const links = await readSeriesRequestLinks(transaction, businessId, request.bookingId, request.id);
+      if (!links) return { ok: false, status: 409, error: "This request is no longer linked to a recurring series." };
+      const requests = adminDb.collection(REQUESTS_COLLECTION);
+      const siblings = [...links.keys()].filter((id) => id !== request.id).map((id) => requests.doc(id));
+      const records = siblings.length ? [current, ...await transaction.getAll(...siblings)] : [current];
+      const owned = records.filter((record) =>
+        record.get("businessId") === businessId && links.get(record.id)?.has(record.get("bookingId")));
+      for (const record of owned) transaction.delete(record.ref);
+      return { ok: true, request, deletedIds: owned.map((record) => record.id) };
+    });
   }
 
   if (options?.pendingCallJobOnly) {
