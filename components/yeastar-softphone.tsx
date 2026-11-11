@@ -3,10 +3,12 @@
 import { Phone, PhoneIncoming, Delete, Minus, Power, X } from "lucide-react";
 import Image from "next/image";
 import { OwnerVoiceSession } from "@/components/owner-voice-session";
+import { SophieLiveCalls } from "@/components/sophie-live-calls";
 import { useRightDrawerInset } from "@/lib/ui/right-drawer-slot";
 import { CallerCustomerDrawer } from "@/components/caller-customer-drawer";
 import { useAuth } from "@/lib/auth/auth-context";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { CallStatus, PhoneOperator } from "ys-webrtc-sdk-core";
 
 type PhoneState = "disconnected" | "connecting" | "registered" | "error";
@@ -39,7 +41,8 @@ function callInfo(status: CallStatus): CallInfo {
 }
 
 export function YeastarSoftphone() {
-  const { user, role, status: authStatus } = useAuth();
+  const { user, businessId, role, status: authStatus } = useAuth();
+  const profile = useBusinessProfile();
   const drawerInset = useRightDrawerInset();
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerMatch | null>(null);
   const closeCustomer = useCallback(() => setSelectedCustomer(null), []);
@@ -372,9 +375,12 @@ export function YeastarSoftphone() {
     sophieButton.current?.focus();
   }
 
-  return (
+  const renderPhone = (activeCount = 0, liveCallsPanel?: ReactNode) => (
     <div className={`fixed ${drawerInset ? (calls.length === 0 ? "z-[30]" : "z-[90]") : "z-[60]"} w-[min(360px,calc(100vw-2rem))] ${role === "business_owner" ? "bottom-[84px] right-4 sm:bottom-[92px] sm:right-6" : "bottom-4 right-4 sm:bottom-6 sm:right-6"}`}>
       {selectedCustomer ? <CallerCustomerDrawer key={selectedCustomer.uid} customer={selectedCustomer} onClose={closeCustomer} /> : null}
+      <span className="sr-only" role="status">
+        {activeCount > 0 ? `Sophie has ${activeCount} live ${activeCount === 1 ? "call" : "calls"}` : ""}
+      </span>
       {open ? (
         <section className="max-h-[calc(100dvh-8rem)] overflow-y-auto rounded-3xl border border-outline-variant bg-surface shadow-[0_20px_60px_rgba(15,23,42,.24)]" aria-label="Yeastar softphone">
           <header className="flex items-center justify-between bg-primary px-4 py-3 text-white">
@@ -385,6 +391,7 @@ export function YeastarSoftphone() {
             <button type="button" onClick={() => setOpen(false)} className="rounded-lg px-2 py-1 text-sm hover:bg-white/15" aria-label="Minimize phone"><Minus className="h-5 w-5" /></button>
           </header>
           <div className="space-y-3 p-4">
+            {liveCallsPanel}
             {phoneState !== "registered" ? (
               <button type="button" onClick={() => void connect()} disabled={phoneState === "connecting"} className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
                 {phoneState === "connecting" ? "Connecting-" : phoneState === "error" ? "Retry connection" : "Connect phone"}
@@ -432,7 +439,7 @@ export function YeastarSoftphone() {
         </section>
       ) : (
         <div className="flex flex-col items-end gap-3">
-          {role === "business_owner" ? (
+          {role === "business_owner" && user && businessId && profile?.sophieTalkEnabled === true ? (
             <div
               className="relative"
               onKeyDown={(event) => {
@@ -450,9 +457,9 @@ export function YeastarSoftphone() {
                 aria-expanded={sophieOpen}
                 aria-controls={sophieOpen ? "sophie-voice-panel" : undefined}
                 title="Talk to Sophie"
-                className="block h-14 w-14 overflow-hidden rounded-full border-2 border-surface shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className="relative block h-14 w-14 rounded-full border-2 border-surface shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
-                <Image src="/sophie-avatar.webp" alt="" width={56} height={56} className="h-full w-full object-cover" />
+                <Image src="/sophie-avatar.webp" alt="" width={56} height={56} className="h-full w-full rounded-full object-cover" />
               </button>
               {sophieOpen ? (
                 <section
@@ -469,19 +476,26 @@ export function YeastarSoftphone() {
                   <OwnerVoiceSession />
                 </section>
               ) : null}
-            </div>
+                </div>
           ) : null}
           <div className="flex items-center justify-end gap-3">
             {ringing ? <button type="button" onClick={openPhone} role="status" aria-live="polite" className="max-w-[240px] rounded-2xl border border-emerald-200 bg-surface px-4 py-3 text-left shadow-lg"><span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-600">Incoming call</span><span className="block truncate text-sm font-semibold">{ringingCall?.number || "Unknown number"}</span>{ringingCall?.name ? <span className="block truncate text-xs text-on-surface-variant">{ringingCall.name}</span> : null}</button> : null}
-            <button type="button" onClick={openPhone} aria-label={ringing ? `Answer incoming call from ${ringingCall?.number || "unknown number"}` : "Open phone dial pad"} aria-expanded={open} className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white shadow-lg transition-colors ${ringing ? "bg-emerald-600 yeastar-phone-ringing" : "bg-primary hover:bg-primary/90"}`}>
+            <button type="button" onClick={openPhone} aria-label={ringing ? `Answer incoming call from ${ringingCall?.number || "unknown number"}` : activeCount ? `Open phone, ${activeCount} live Sophie ${activeCount === 1 ? "call" : "calls"}` : "Open phone dial pad"} aria-expanded={open} className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white shadow-lg transition-colors ${ringing ? "bg-emerald-600 yeastar-phone-ringing" : "bg-primary hover:bg-primary/90"}`}>
               {ringing ? <span aria-hidden className="absolute inset-0 rounded-full bg-emerald-400/40 motion-safe:animate-ping" /> : null}
               {ringing ? <PhoneIncoming className="relative h-6 w-6" /> : <Phone className="h-6 w-6" />}
               <span className={`absolute right-0 top-0 h-3.5 w-3.5 rounded-full border-2 border-surface ${phoneState === "registered" ? "bg-emerald-400" : phoneState === "error" ? "bg-rose-400" : "bg-slate-400"}`} />
+              {activeCount > 0 && <span aria-hidden="true" className="absolute -left-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-surface bg-rose-600 px-1 text-[10px] font-bold leading-none">
+                {activeCount}
+              </span>}
             </button>
           </div>
         </div>
       )}
     </div>
   );
+
+  return role === "business_owner" && user && businessId && profile?.sophieLiveListenEnabled === true
+    ? <SophieLiveCalls key={user.uid + ":" + businessId} user={user}>{renderPhone}</SophieLiveCalls>
+    : renderPhone();
 }
 

@@ -150,6 +150,12 @@ const NAV_ITEMS: NavItem[] = [
     businessOwner: true,
   },
   {
+    href: "/dashboard/call-recordings",
+    label: "Call recordings",
+    icon: "record_voice_over",
+    businessOwner: true,
+  },
+  {
     href: "/dashboard/sms",
     label: "SMS",
     icon: "sms",

@@ -389,6 +389,8 @@ export type BusinessProfile = {
   sophieBookingAuthority: boolean;
   /** Owner permission for Sophie to book, reschedule and cancel jobs by voice. */
   sophieJobAuthority: boolean;
+  sophieTalkEnabled: boolean;
+  sophieLiveListenEnabled: boolean;
   workingHours: BusinessWorkingHours;
   enabledModules: BusinessModuleSettings;
   /** Who covers the Stripe processing fee on customer payments. */
@@ -481,6 +483,8 @@ export async function getBusinessProfile(
     slotCapacityInspectionRequests:
       parseSlotCapacityFromBusiness(data).maxInspectionsPerHour,
     sophieBookingAuthority: data.sophieBookingAuthority === true,
+    sophieTalkEnabled: data.sophieTalkEnabled === true,
+    sophieLiveListenEnabled: data.sophieLiveListenEnabled === true,
     sophieJobAuthority: data.sophieJobAuthority === true,
     workingHours: parseWorkingHoursFromBusiness(data),
     enabledModules: parseBusinessModuleSettings(data),
