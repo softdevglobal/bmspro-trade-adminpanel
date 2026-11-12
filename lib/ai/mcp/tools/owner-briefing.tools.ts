@@ -1,6 +1,9 @@
 import "server-only";
 
 import { Timestamp } from "firebase-admin/firestore";
+import { listCallRecordings, recordingConfig } from "@/lib/ai/calls/recordings";
+import { ownerOperations } from "@/lib/ai/owner-call/operations";
+import { zonedDateTimeToUtcMs } from "@/lib/platform/zoned-datetime";
 
 import {
   matchStaff,
@@ -17,14 +20,17 @@ import {
 } from "@/lib/ai/owner-call/day-activity";
 import { AUDIT_COLLECTION } from "@/lib/audit/types";
 import { bookingScheduleDays, mapBookingDoc } from "@/lib/bookings/map-booking-doc";
-import { INVOICE_COLLECTION, mapInvoiceDoc } from "@/lib/invoices/server";
+import { INVOICE_COLLECTION, listOverdueInvoicePage, mapInvoiceDoc } from "@/lib/invoices/server";
+import { resolveInvoicePaymentDue } from "@/lib/invoices/payment-due";
+import type { InvoiceStatus } from "@/lib/invoices/types";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 import { QUOTATION_COLLECTION, mapQuotationDoc } from "@/lib/quotations/server";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import { listApprovedLeaveForBusiness } from "@/lib/leave/server";
-import { platformTodayIso, resolvePlatformTimeZone } from "@/lib/platform/timezone";
+import { PLATFORM_TIME_ZONE, platformTodayIso, resolvePlatformTimeZone } from "@/lib/platform/timezone";
 import { isStaffOffOnDate, offDayIdsFromAvailability } from "@/lib/team/staff-availability";
 
 export function ownerBriefingTools(businessId: string, timezone: string | null) {
@@ -179,6 +185,74 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
   }
 
   return {
+    ...ownerOperations(businessId, timeZone),
+    async invoices(offset: number, search?: string, status?: InvoiceStatus) {
+      const profile = await getBusinessProfile(businessId);
+      if (!profile?.enabledModules.invoices) return { status: "UNAVAILABLE" };
+      const snapshot = await adminDb.collection(INVOICE_COLLECTION).where("businessId", "==", businessId).get();
+      const query = search?.trim().toLowerCase() || "";
+      const matches = snapshot.docs.map(doc => mapInvoiceDoc(doc.id, doc.data()))
+        .filter(invoice => (!status || invoice.status === status) && (!query ||
+          [invoice.invoiceCode, invoice.customer.fullName].some(value => value.toLowerCase().includes(query))))
+        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id));
+      const counts = { draft: 0, sent: 0, paid: 0, cancelled: 0 };
+      for (const invoice of matches) counts[invoice.status]++;
+      const now = new Date();
+      const pageSize = 8;
+      return {
+        status: "OK", total: matches.length, counts,
+        nextOffset: offset + pageSize < matches.length ? offset + pageSize : null,
+        invoices: matches.slice(offset, offset + pageSize).map(invoice => {
+          const due = resolveInvoicePaymentDue(invoice, timeZone, now);
+          return {
+            invoiceCode: invoice.invoiceCode, customerName: invoice.customer.fullName, status: invoice.status,
+            invoiceDate: invoice.invoiceDate, dueDate: due.isPayable ? invoice.dueDate : null,
+            totalAud: invoice.finalPriceAud, recordedStripePaymentsAud: invoice.amountPaidAud,
+            outstandingAud: due.outstandingAud, overdue: due.isOverdue,
+          };
+        }),
+      };
+    },
+    async overdueInvoices() {
+      const profile = await getBusinessProfile(businessId);
+      if (!profile?.enabledModules.invoices) return { status: "UNAVAILABLE" };
+      const invoices: Awaited<ReturnType<typeof listOverdueInvoicePage>>["invoices"] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const result = await listOverdueInvoicePage(businessId, timeZone, cursor);
+        invoices.push(...result.invoices);
+        cursor = result.nextCursor ?? undefined;
+        if (!cursor) break;
+      }
+      invoices.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.invoiceCode.localeCompare(b.invoiceCode));
+      return {
+        status: "OK",
+        complete: cursor === undefined,
+        overdueCount: invoices.length,
+        outstandingAud: invoices.reduce((sum, invoice) => sum + Math.round(invoice.outstandingAud * 100), 0) / 100,
+        oldestInvoices: invoices.slice(0, 8).map(({ invoiceCode, dueDate, outstandingAud }) => ({ invoiceCode, dueDate, outstandingAud })),
+      };
+    },
+    async missedCalls(day?: string) {
+      // Calls uses Melbourne calendar dates in both the table and its filters.
+      const resolved = resolveReportDate(day, new Date(), PLATFORM_TIME_ZONE);
+      if (!resolved.ok) return { status: "INVALID_DATE", error: resolved.error };
+      const config = recordingConfig();
+      const start = zonedDateTimeToUtcMs(resolved.date, "00:00");
+      const endMinute = zonedDateTimeToUtcMs(resolved.date, "23:59");
+      if (!config || start === null || endMinute === null) return { status: "UNAVAILABLE" };
+      const result = await listCallRecordings(config, businessId, 1, { start, end: endMinute + 60_000 }, "missed");
+      if (!result.hasRecordingHistory) return { status: "UNAVAILABLE" };
+      const formatTime = new Intl.DateTimeFormat("en-AU", { timeZone: PLATFORM_TIME_ZONE, hour: "numeric", minute: "2-digit" });
+      return {
+        status: "OK", date: resolved.date, pageCount: result.recordings.length,
+        hasMore: result.hasMore || result.recordings.length > 10,
+        calls: result.recordings.slice(0, 10).map(call => ({
+          customerName: call.customerName,
+          time: formatTime.format(call.startedAt),
+        })),
+      };
+    },
     /** What happened across the business on a day (work done, quotes, invoices, money). */
     async dayActivity(day: string | undefined) {
       const resolved = resolveReportDate(day, new Date(), timeZone);

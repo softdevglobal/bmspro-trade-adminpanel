@@ -11,6 +11,8 @@ function InvoicesPageInner() {
   const quotationId = searchParams.get("quotation")?.trim() ?? "";
   const draftInvoiceId = searchParams.get("invoice")?.trim() ?? "";
   const isNew = searchParams.get("new") === "1";
+  const filter = searchParams.get("filter");
+  const initialFilter = filter === "overdue" || filter === "all" ? filter : "due";
   const isEditor = Boolean(quotationId || draftInvoiceId || isNew);
 
   const editorMeta = useMemo(
@@ -38,7 +40,7 @@ function InvoicesPageInner() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <InvoicesBoard />
+      <InvoicesBoard key={initialFilter} initialFilter={initialFilter} />
     </div>
   );
 }

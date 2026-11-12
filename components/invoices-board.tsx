@@ -31,7 +31,7 @@ import { useOpenFromViewParam } from "@/lib/ui/use-view-param";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-type InvoiceFilter = "due" | "draft" | "paid" | "cancelled" | "all";
+type InvoiceFilter = "due" | "overdue" | "draft" | "paid" | "cancelled" | "all";
 
 /** A draft or sent invoice can be cancelled; paid/cancelled cannot. */
 function canCancelInvoice(invoice: InvoiceDetail): boolean {
@@ -993,13 +993,13 @@ function InvoicePreviewDrawer({
   );
 }
 
-export function InvoicesBoard() {
+export function InvoicesBoard({ initialFilter = "due" }: { initialFilter?: InvoiceFilter }) {
   const { user, status: authStatus } = useAuth();
   const profile = useBusinessProfile();
   const [invoices, setInvoices] = useState<InvoiceDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<InvoiceFilter>("due");
+  const [filter, setFilter] = useState<InvoiceFilter>(initialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useOpenFromViewParam(setSelectedId);
   const [deleteTarget, setDeleteTarget] = useState<InvoiceDetail | null>(null);
@@ -1055,13 +1055,19 @@ export function InvoicesBoard() {
     return () => cancelAnimationFrame(frame);
   }, [load]);
 
+  const overdueInvoices = useMemo(() => {
+    const now = new Date();
+    return invoices.filter(invoice => resolveInvoicePaymentDue(invoice, timeZone, now).isOverdue);
+  }, [invoices, timeZone]);
+
   const filtered = useMemo(() => {
+    if (filter === "overdue") return overdueInvoices;
     if (filter === "due") {
       return invoices.filter((invoice) => invoice.status === "sent");
     }
     if (filter === "all") return invoices;
     return invoices.filter((invoice) => invoice.status === filter);
-  }, [invoices, filter]);
+  }, [invoices, filter, overdueInvoices]);
 
   const counts = useMemo(
     () => ({
@@ -1304,6 +1310,12 @@ export function InvoicesBoard() {
           count={counts.due}
           active={filter === "due"}
           onClick={() => setFilter("due")}
+        />
+        <FilterChip
+          label="Overdue"
+          count={overdueInvoices.length}
+          active={filter === "overdue"}
+          onClick={() => setFilter("overdue")}
         />
         <FilterChip
           label="Draft"

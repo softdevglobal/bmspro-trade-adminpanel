@@ -30,25 +30,28 @@ async function requestRecordings(user: User, path: string, options: RequestInit)
   return response;
 }
 
-export function CallRecordingsBoard({ initialView }: { initialView: "recordings" | "ai" }) {
+type CallView = "recordings" | "missed" | "ai";
+type InitialCallView = { initialView: CallView; initialDate?: string };
+
+export function CallRecordingsBoard(props: InitialCallView) {
   const { user, businessId } = useAuth();
-  return user && businessId ? <Recordings key={user.uid + ":" + businessId} user={user} businessId={businessId} initialView={initialView} /> : null;
+  return user && businessId ? <Recordings key={user.uid + ":" + businessId} user={user} businessId={businessId} {...props} /> : null;
 }
 
-function Recordings({ user, businessId, initialView }: { user: User; businessId: string; initialView: "recordings" | "ai" }) {
+function Recordings({ user, businessId, initialView, initialDate }: InitialCallView & { user: User; businessId: string }) {
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
   const [result, setResult] = useState<RecordingPage | null>(null);
   const [error, setError] = useState("");
   const [readError, setReadError] = useState("");
-  const markReadOnLoad = useRef(false);
+  const markReadOnLoad = useRef(initialView === "missed");
   const [selected, setSelected] = useState<Recording | null>(null);
-  const [view, setView] = useState<"recordings" | "missed" | "ai">(initialView);
+  const [view, setView] = useState<CallView>(initialView);
   const missed = view === "missed";
   const listLabel = missed ? "missed calls" : "recordings";
   const [dateRange, setDateRange] = useState(() => {
-    const today = platformTodayIso();
-    return { from: today, to: today };
+    const date = initialDate ?? platformTodayIso();
+    return { from: date, to: date };
   });
   const [draftDates, setDraftDates] = useState(dateRange);
 
