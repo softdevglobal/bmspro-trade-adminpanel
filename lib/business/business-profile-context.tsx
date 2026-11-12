@@ -19,6 +19,8 @@ export type BusinessProfileLite = {
   bookingSlug: string | null;
   bookingPath: string | null;
   timezone: string;
+  sophieTalkEnabled?: boolean;
+  sophieLiveListenEnabled?: boolean;
 };
 
 const PROFILE_CACHE_KEY = "bms.business.profile";
@@ -96,6 +98,8 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
           bookingSlug?: string | null;
           bookingPath?: string | null;
           timezone?: string | null;
+          sophieTalkEnabled?: boolean;
+          sophieLiveListenEnabled?: boolean;
         };
       };
       if (!response.ok || !body.ok || !body.profile) return;
@@ -108,6 +112,8 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
         businessName: body.profile.businessName,
         logoUrl: body.profile.logoUrl,
         bookingSlug: slug,
+        sophieTalkEnabled: body.profile.sophieTalkEnabled === true,
+        sophieLiveListenEnabled: body.profile.sophieLiveListenEnabled === true,
         bookingPath:
           typeof body.profile.bookingPath === "string"
             ? body.profile.bookingPath
@@ -158,6 +164,8 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
           bookingSlug: current?.bookingSlug ?? null,
           bookingPath: current?.bookingPath ?? null,
           timezone: current?.timezone ?? PLATFORM_TIME_ZONE,
+          sophieTalkEnabled: current?.sophieTalkEnabled === true,
+          sophieLiveListenEnabled: current?.sophieLiveListenEnabled === true,
           ...patch,
         };
         writeProfileCache(businessId, next);

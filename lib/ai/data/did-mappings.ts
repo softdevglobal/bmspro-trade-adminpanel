@@ -8,6 +8,7 @@ import { assertMappingVersion, didMappingInput, DidMappingError,
   type DidMappingRow, type StoredDidMapping, type DidBusinessOption } from "./did-mapping-types";
 
 export const DID_MAPPINGS_COLLECTION = "ai_did_mappings";
+export const DID_RECORDING_PERIODS_COLLECTION = "ai_did_recording_periods";
 function parseStored(did: string, data: Record<string, unknown> | undefined): StoredDidMapping | null {
   if (!data) return null;
   const result = didMappingInput.safeParse({
@@ -24,18 +25,21 @@ export type VoiceDidRoute = { state: "unmapped" } | { state: "disabled" } | {
   binding: VoiceBusiness;
   business: FirebaseFirestore.DocumentData;
   forwardingExtension?: string;
+  recordingPeriodVersion?: number;
 };
 
 /** Always reads Firestore. Used by call-start discovery, which runs once per call. */
 export async function lookupVoiceDidRoute(did: string): Promise<VoiceDidRoute> {
   const snapshot = await adminDb.collection(DID_MAPPINGS_COLLECTION).doc(did).get();
-  const stored = parseStored(did, snapshot.data());
+  const data = snapshot.data();
+  const stored = parseStored(did, data);
   if (!stored) return { state: "unmapped" };
   if (!stored.isActive) return { state: "disabled" };
   const business = (await adminDb.collection("businesses").doc(stored.businessId).get()).data();
   if (!business || !isTenantAccessAllowed(business.status, business.isActive)) return { state: "disabled" };
   return { state: "active", binding: { did, businessId: stored.businessId }, business,
-    forwardingExtension: stored.forwardingExtension ?? undefined };
+    forwardingExtension: stored.forwardingExtension ?? undefined,
+    recordingPeriodVersion: typeof data?.recordingPeriodVersion === "number" ? data.recordingPeriodVersion : undefined };
 }
 
 /**
@@ -94,7 +98,8 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
   const ref = adminDb.collection(DID_MAPPINGS_COLLECTION).doc(input.did);
   const outcome = await adminDb.runTransaction(async tx => {
     const [existing, business] = await tx.getAll(ref, adminDb.collection("businesses").doc(input.businessId));
-    const current = parseStored(input.did, existing.data());
+    const existingData = existing.data();
+    const current = parseStored(input.did, existingData);
     assertMappingVersion(current, input.version);
     const businessData = business.data();
     if (input.isActive && (!businessData || !isTenantAccessAllowed(businessData.status, businessData.isActive))) {
@@ -104,8 +109,20 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
     const forwardingExtension = input.forwardingExtension === undefined && current?.businessId === input.businessId
       ? current.forwardingExtension ?? null
       : input.forwardingExtension ?? null;
+    const previousPeriod = existingData?.recordingPeriodVersion;
+    const sameAssignment = input.isActive && current?.isActive && current.businessId === input.businessId;
+    const recordingPeriodVersion = input.isActive ? (sameAssignment && previousPeriod ? previousPeriod : version) : null;
+    const periods = adminDb.collection(DID_RECORDING_PERIODS_COLLECTION);
+    if (previousPeriod && !sameAssignment) {
+      tx.set(periods.doc(`${input.did}-${previousPeriod}`), { endedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    if (recordingPeriodVersion === version) {
+      tx.set(periods.doc(`${input.did}-${version}`), {
+        did: input.did, businessId: input.businessId, startedAt: FieldValue.serverTimestamp(), endedAt: null,
+      });
+    }
     tx.set(ref, { did: input.did, businessId: input.businessId, isActive: input.isActive, version,
-      forwardingExtension,
+      forwardingExtension, recordingPeriodVersion,
       createdAt: existing.data()?.createdAt ?? FieldValue.serverTimestamp(),
       createdBy: existing.data()?.createdBy ?? actor.uid, updatedBy: actor.uid, updatedAt: FieldValue.serverTimestamp() });
     return { version, forwardingExtension, previousBusinessId: current?.businessId ?? null };

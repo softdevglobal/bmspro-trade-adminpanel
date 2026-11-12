@@ -1,6 +1,5 @@
 "use client";
 
-import { SettingsSection } from "@/components/settings-section";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useState } from "react";
 
@@ -77,11 +76,8 @@ export function BusinessAiBookingSettings({ enabled, jobsEnabled, loading = fals
   }
 
   return (
-    <SettingsSection
-      title="Sophie booking authority"
-      description="Choose what Sophie can confirm by herself for inspections and jobs."
-      icon="smart_toy"
-    >
+    <div className="space-y-3">
+      <h4 className="font-display text-sm font-semibold text-on-surface">Booking authority</h4>
       {loading ? (
         <div className="flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
           <span className="material-symbols-outlined animate-spin text-[18px] text-primary">progress_activity</span>
@@ -127,6 +123,6 @@ export function BusinessAiBookingSettings({ enabled, jobsEnabled, loading = fals
           </button>
         </div>
       )}
-    </SettingsSection>
+    </div>
   );
 }

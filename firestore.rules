@@ -472,12 +472,22 @@ service cloud.firestore {
     function isAdminSdkOnlyCollection() {
       return isCareplusCollection()
         || isEmailIntegrationCollection()
-        || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions', 'aiAssignmentGuards', 'ai_voice_submissions', 'ai_did_mappings', 'ai_knowledge_sources', 'ai_knowledge_chunks', 'ai_knowledge_uploads', 'ai_unanswered_questions', 'ai_call_logs', 'ai_knowledge_search_logs'];
+        || request.path[3] in ['document_counters', 'participant_onboarding', 'account_activations', 'security_rate_limits', 'payment_checkout_sessions', 'payment_checkout_targets', 'payment_receipts', 'attendance_sessions', 'aiAssignmentGuards', 'ai_voice_submissions', 'ai_did_mappings', 'ai_did_recording_periods', 'ai_knowledge_sources', 'ai_knowledge_chunks', 'ai_knowledge_uploads', 'ai_unanswered_questions', 'ai_call_logs', 'ai_knowledge_search_logs'];
     }
 
     // Super admins can access remaining collections in the admin portal.
     match /{document=**} {
-      allow read, write: if isSuperAdmin() && !isAdminSdkOnlyCollection();
+      allow read: if isSuperAdmin() && !isAdminSdkOnlyCollection();
+      allow write: if isSuperAdmin() && !isAdminSdkOnlyCollection()
+        && !changesSophieVoicePermissions();
+    }
+
+    function changesSophieVoicePermissions() {
+      let permissionFields = ['sophieTalkEnabled', 'sophieLiveListenEnabled'];
+      return request.path[3] == 'businesses' && request.resource != null
+        && (resource == null
+          ? request.resource.data.keys().hasAny(permissionFields)
+          : request.resource.data.diff(resource.data).affectedKeys().hasAny(permissionFields));
     }
   }
 }
