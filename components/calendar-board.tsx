@@ -6,7 +6,6 @@ import {
   TIME_RANGE_SHORT_LABELS,
   formatVisitWindow,
   isClockTime,
-  type InspectionTimeRange,
 } from "@/lib/inspection/types";
 import { useBookings } from "@/lib/bookings/use-bookings";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
@@ -811,11 +810,7 @@ export function CalendarBoard() {
     loading: requestsLoading,
     error: requestsError,
   } = useInspectionRequests();
-  const {
-    bookings,
-    loading: bookingsLoading,
-    error: bookingsError,
-  } = useBookings();
+  const { bookings } = useBookings();
   const {
     events: personalEvents,
     reload: reloadPersonalEvents,

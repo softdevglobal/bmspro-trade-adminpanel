@@ -82,6 +82,7 @@ export function ServiceSetupReview({ mode, isServiceCreate, form }: Props) {
           ) : (
             <div className="relative mx-auto h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-high sm:mx-0">
               {form.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={form.imageUrl}
                   alt={displayName}

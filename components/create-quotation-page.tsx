@@ -163,16 +163,6 @@ function parseNum(value: string): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-/** @deprecated Use computeQuotationLineAmounts — kept for gross-before-discount checks. */
-function lineAmount(
-  quantity: number,
-  rate: number,
-  discountPercent: number,
-): number {
-  const base = quantity * rate * (1 - discountPercent / 100);
-  return Math.round(base * 100) / 100;
-}
-
 function lineGstPercent(
   applyGst: boolean,
   gstEnabled: boolean,
@@ -978,7 +968,7 @@ export function CreateQuotationPage() {
           </li>
         ) : null}
         {catalogSuggestions.map((item) => (
-          <li key={item.id} role="option">
+          <li key={item.id} role="option" aria-selected={false}>
             <button
               type="button"
               onMouseDown={(event) => event.preventDefault()}
@@ -2088,6 +2078,7 @@ export function CreateQuotationPage() {
                             </span>
                           </div>
                         ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={url}
                             alt=""

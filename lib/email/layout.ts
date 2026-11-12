@@ -332,8 +332,6 @@ export function renderEmail(content: EmailTemplateContent): string {
     "'Saira','Finlandica',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   const FONT_DISPLAY =
     "'Bitter','Saira',Georgia,'Times New Roman',Times,serif";
-  const FONT_BODY =
-    "'Finlandica','Saira',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
   return `<!DOCTYPE html>
 <html lang="en">

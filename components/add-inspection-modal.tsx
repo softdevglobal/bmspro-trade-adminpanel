@@ -58,7 +58,6 @@ import {
 import type {
   InspectionRequestType,
   InspectionSlot,
-  InspectionTimeRange,
 } from "@/lib/inspection/types";
 import type { BusinessServiceDetail } from "@/lib/onboarding/services/display";
 import { SERVICE_SKILLS } from "@/lib/onboarding/services/types";
@@ -471,6 +470,7 @@ function ServiceThumbnail({
       className={`${sizeClass} shrink-0 overflow-hidden bg-surface-container`}
     >
       {service.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={service.imageUrl}
           alt=""
@@ -1342,16 +1342,23 @@ export function AddInspectionModal({
   initialPreferredSlot = null,
   variant = "inspection",
 }: Props) {
-  const resolvedCalendarWindow =
-    initialCalendarWindow ??
-    (initialPreferredSlot?.date
-      ? {
-          date: initialPreferredSlot.date,
-          startTime: "08:00",
-          endTime: "09:00",
-          timeRange: initialPreferredSlot.timeRange,
-        }
-      : null);
+  // Memoized: the reset effect below depends on this, and a new object on
+  // every render would reset the form on every render.
+  const preferredDate = initialPreferredSlot?.date;
+  const preferredTimeRange = initialPreferredSlot?.timeRange;
+  const resolvedCalendarWindow = useMemo(
+    () =>
+      initialCalendarWindow ??
+      (preferredDate && preferredTimeRange
+        ? {
+            date: preferredDate,
+            startTime: "08:00",
+            endTime: "09:00",
+            timeRange: preferredTimeRange,
+          }
+        : null),
+    [initialCalendarWindow, preferredDate, preferredTimeRange],
+  );
   const isCalendarFlow = Boolean(resolvedCalendarWindow?.date?.trim());
   // Every entry point now uses the customer-first flow (customer + address on
   // step 1), matching the calendar experience.
@@ -1595,12 +1602,16 @@ export function AddInspectionModal({
       ? recurrenceRule.end.date
       : undefined;
 
-  const weeklyRepeatContext = isWeeklyJobRepeat
-    ? {
-        weekdays: recurrenceRule.weekdays,
-        weekdayTimes: recurrenceRule.weekdayTimes ?? {},
-      }
-    : null;
+  const weeklyRepeatContext = useMemo(
+    () =>
+      isWeeklyJobRepeat
+        ? {
+            weekdays: recurrenceRule.weekdays,
+            weekdayTimes: recurrenceRule.weekdayTimes ?? {},
+          }
+        : null,
+    [isWeeklyJobRepeat, recurrenceRule.weekdays, recurrenceRule.weekdayTimes],
+  );
 
   const weeklyStartWeekday = useMemo(() => {
     const first = sortInspectionSlots(form.preferredSlots)[0];

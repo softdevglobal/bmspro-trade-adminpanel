@@ -5,21 +5,11 @@ import {
   listBusinessQuotations,
   listQuotationsForInspection,
   listQuotationsForMember,
-  listStaffQuotations,
 } from "@/lib/quotations/server";
 import { requireQuotationAuthor } from "@/lib/quotations/author-auth";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-
-type QuotationAuthor = {
-  uid: string;
-  email: string | null;
-  name: string | null;
-  role: string | null;
-  businessId: string;
-  restrictToOwnQuotations: boolean;
-};
 
 export async function POST(request: Request) {
   const auth = await requireQuotationAuthor(request);

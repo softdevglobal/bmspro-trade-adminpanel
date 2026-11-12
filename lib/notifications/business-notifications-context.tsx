@@ -86,7 +86,9 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
     }
   }, [enabled, user]);
 
-  reloadRef.current = reload;
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
 
   useEffect(() => {
     if (!enabled || !user || !pageVisible) {

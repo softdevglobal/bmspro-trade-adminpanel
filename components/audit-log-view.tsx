@@ -8,7 +8,6 @@ import {
   SOURCE_LABELS,
   type AuditCategory,
   countAuditEntriesForCategory,
-  isBusinessOwnerAuthEntry,
   matchesAuditCategoryFilter,
   normalizeAuditLogEntries,
   type AuditLogEntry,

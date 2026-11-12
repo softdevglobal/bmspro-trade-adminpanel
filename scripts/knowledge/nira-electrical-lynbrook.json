@@ -1,0 +1,87 @@
+[
+  {
+    "kind": "note",
+    "title": "About Nira Electrical Lynbrook",
+    "body": "Nira Electrical Lynbrook is an electrical business based in Lynbrook, in Melbourne's south-east. We handle electrical work for homes and businesses, and customers can book an inspection or ask for advice over the phone."
+  },
+  {
+    "kind": "faq",
+    "title": "Power Plant Installation",
+    "body": "We offer Power Plant Installation. A standard installation usually takes about three hours on site. The team confirms the exact scope and time after reviewing the request."
+  },
+  {
+    "kind": "faq",
+    "title": "Opening hours",
+    "body": "We work Monday to Friday, 7am to 4pm. We are closed on weekends and public holidays."
+  },
+  {
+    "kind": "faq",
+    "title": "Service areas",
+    "body": "We cover Lynbrook, Lyndhurst, Hampton Park, Cranbourne, Narre Warren and Dandenong. For other suburbs in Melbourne's south-east, the team will confirm when they review the request."
+  },
+  {
+    "kind": "policy",
+    "title": "Call-out fee",
+    "body": "We charge a $90 call-out fee within our service area. It is waived if you go ahead with the quoted work."
+  },
+  {
+    "kind": "policy",
+    "title": "Quotes",
+    "body": "Quotes are free for standard jobs. For bigger jobs we inspect the site first and send a written quote within two business days of the visit."
+  },
+  {
+    "kind": "policy",
+    "title": "Payment methods",
+    "body": "We accept card and bank transfer. We do not accept cash. Payment is due when the job is finished, and larger jobs need a 30 percent deposit before work starts."
+  },
+  {
+    "kind": "faq",
+    "title": "Licensing and insurance",
+    "body": "All our electricians are licensed in Victoria, and the business holds public liability insurance. We provide a Certificate of Electrical Safety for work that needs one."
+  },
+  {
+    "kind": "policy",
+    "title": "Warranty",
+    "body": "All our workmanship has a 12-month warranty, and parts carry the manufacturer's warranty. If something we installed stops working, contact us and we will come back to check it."
+  },
+  {
+    "kind": "faq",
+    "title": "Emergency work",
+    "body": "We do not offer after-hours emergency call-outs. For an electrical emergency, such as sparks, burning smells or fallen power lines, call 000 or your electricity distributor straight away."
+  },
+  {
+    "kind": "policy",
+    "title": "Cancellations and rescheduling",
+    "body": "Please let us know at least 24 hours before the visit if you need to cancel or move it. Late cancellations may be charged the call-out fee."
+  },
+  {
+    "kind": "faq",
+    "title": "Safety inspections",
+    "body": "A safety inspection checks the switchboard, safety switches, smoke alarms, power points and visible wiring. It usually takes about an hour, and you receive a written report afterwards."
+  },
+  {
+    "kind": "faq",
+    "title": "Types of work we do",
+    "body": "We do power point and light installation, switchboard upgrades, safety switch installation, smoke alarm installation and testing, fault finding, ceiling fan installation and power plant installation. We do not do solar panel installation or air conditioning installation."
+  },
+  {
+    "kind": "faq",
+    "title": "Residential and commercial work",
+    "body": "We work on both homes and small commercial sites such as shops and offices. We do not take on large industrial projects."
+  },
+  {
+    "kind": "faq",
+    "title": "Being home for the visit",
+    "body": "Someone aged 18 or over needs to be home to let the electrician in. Please make sure the switchboard is easy to reach and pets are kept away from the work area."
+  },
+  {
+    "kind": "faq",
+    "title": "Parts and brands",
+    "body": "We use quality Australian-approved parts from brands such as Clipsal and HPM. If you have bought your own fittings, the electrician can install them, but the parts warranty then comes from the place you bought them."
+  },
+  {
+    "kind": "faq",
+    "title": "Seniors and pensioner discount",
+    "body": "We offer a 10 percent discount on labour for seniors and pensioners who show a valid card at the visit."
+  }
+]

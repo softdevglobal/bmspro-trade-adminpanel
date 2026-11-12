@@ -386,6 +386,7 @@ export function ServiceOwnerDetailsStep({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           <div className="relative mx-auto h-32 w-32 shrink-0 overflow-hidden rounded-2xl border-2 border-dashed border-primary/30 bg-gradient-to-br from-primary-fixed/40 to-surface-container-low shadow-inner sm:mx-0">
             {form.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={form.imageUrl}
                 alt="Service"

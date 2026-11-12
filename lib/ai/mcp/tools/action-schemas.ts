@@ -27,6 +27,10 @@ export const inspectionArguments = z.object({
   budgetAud: z.number().finite().positive().max(99_999_999).nullable().default(null),
   customerNotes: z.string().trim().max(2000).default(""),
 }).strict();
+/** One short, self-contained question about this business. No business ID. */
+export const knowledgeQuestionArguments = z.object({
+  question: z.string().trim().min(3).max(300),
+}).strict();
 /** Spoken references arrive with spaces or without the BK prefix; stored codes are `BK` + nine characters. */
 export const voiceJobCode = z.string().trim().max(40).transform(value => {
   const compact = value.toUpperCase().replace(/[^0-9A-Z]/g, "");

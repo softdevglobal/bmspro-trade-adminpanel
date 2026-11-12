@@ -112,6 +112,7 @@ function DrawerPanel({
         >
           <div className="flex min-w-0 items-start gap-3">
             {target.type === "service" && target.record.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={target.record.imageUrl}
                 alt=""

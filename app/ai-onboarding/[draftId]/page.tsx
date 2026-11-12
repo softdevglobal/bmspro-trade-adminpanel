@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { sendEmailVerification, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { commandCentreBackendUrl } from "@/lib/commandCentreBackendUrl";
 
@@ -10,8 +10,15 @@ type Review = {
   draftId: string;
   version: number;
   status: string;
-  configuration: Record<string, any>;
+  configuration: ReviewConfiguration;
   approval: unknown;
+};
+
+/** The parts of the draft configuration this page displays. All optional: the backend may omit any of them. */
+type ReviewConfiguration = {
+  business?: { tradingName?: string; ownerName?: string; ownerPhone?: string; address?: string };
+  tradeBusiness?: { businessType?: string; serviceAreas?: unknown; state?: string; postcode?: string };
+  terms?: { version?: string; billingSummary?: string; privacySummary?: string; recording?: string; retentionDays?: number };
 };
 
 const backend = commandCentreBackendUrl(process.env.NEXT_PUBLIC_COMMAND_CENTRE_BACKEND_URL, process.env.NODE_ENV === "development");

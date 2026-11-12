@@ -2251,6 +2251,7 @@ function BookingServiceListItem({
       <div className="flex items-stretch gap-2.5 p-2.5 sm:gap-4 sm:p-4">
         <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-stone-100 sm:h-20 sm:w-20">
           {service.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={service.imageUrl}
               alt=""

@@ -1045,72 +1045,6 @@ function BookingDetailRow({
   );
 }
 
-function BookingSlotsList({
-  slots,
-  variant = "default",
-  timeZone,
-}: {
-  slots: InspectionSlot[];
-  variant?: "default" | "proposed" | "confirmed";
-  timeZone?: string | null;
-}) {
-  if (slots.length === 0) {
-    return (
-      <p className="mt-0.5 font-body text-[13px] text-on-surface-variant">—</p>
-    );
-  }
-
-  const cardClass =
-    variant === "proposed"
-      ? "border-violet-200/90 bg-violet-50/70"
-      : variant === "confirmed"
-        ? "border-emerald-200/90 bg-emerald-50/60"
-        : "border-stone-200/80 bg-white";
-
-  const timeClass =
-    variant === "proposed"
-      ? "text-violet-900"
-      : variant === "confirmed"
-        ? "text-emerald-900"
-        : "text-on-surface-variant";
-
-  return (
-    <ul className="mt-1.5 space-y-2">
-      {slots.map((slot, index) => (
-        <li
-          key={`${slot.date}-${slot.timeRange}-${index}`}
-          className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 shadow-sm ${cardClass}`}
-        >
-          {slots.length > 1 ? (
-            <span
-              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 font-body text-[11px] font-bold text-primary"
-              aria-hidden
-            >
-              {index + 1}
-            </span>
-          ) : null}
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold leading-snug text-on-surface">
-              <span className="material-symbols-outlined text-[17px] text-primary">
-                event
-              </span>
-              {formatSlotDate(slot.date, timeZone)}
-            </p>
-            <p
-              className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
-            >
-              <span className="material-symbols-outlined text-[16px] text-primary/85">
-                {slotTimeIcon(slot.timeRange)}
-              </span>
-              {TIME_RANGE_LABELS[slot.timeRange]}
-            </p>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function ProposedSlotPicker({
   slots,
   selected,
@@ -1356,7 +1290,7 @@ function BookingCard({
   onChanged: () => void;
   focusRequestId?: string | null;
 }) {
-  const { getIdToken, activeBookingSlug } = useCustomerAuth();
+  const { getIdToken } = useCustomerAuth();
   const cardRef = useRef<HTMLElement | null>(null);
   const isFocused = Boolean(focusRequestId && focusRequestId === booking.id);
   const [expanded, setExpanded] = useState(isFocused);

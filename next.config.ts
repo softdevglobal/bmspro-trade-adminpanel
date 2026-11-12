@@ -39,6 +39,9 @@ const canonicalOrigin =
   process.env.CANONICAL_ORIGIN ?? "https://trade.bmspros.com.au";
 
 const nextConfig: NextConfig = {
+  // AI knowledge import readers use Node-only features; load them with plain
+  // Node require instead of bundling them.
+  serverExternalPackages: ["pdf-parse", "officeparser", "mammoth", "jsdom", "@mozilla/readability"],
   turbopack: {
     root: projectRoot,
   },

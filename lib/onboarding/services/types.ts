@@ -5,10 +5,7 @@
  * See collections.ts for persisted document shapes and README.md for the save flow.
  */
 
-import {
-  BUSINESS_TYPES,
-  type BusinessType,
-} from "@/lib/onboarding/types";
+import { BUSINESS_TYPES } from "@/lib/onboarding/types";
 import {
   SERVICE_TEMPLATE_TRADES,
   type ServiceTemplateTrade,

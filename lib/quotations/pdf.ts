@@ -432,12 +432,6 @@ export async function generateDocumentPdf(
   const textWidth = (text: string, size: number, bold = false) =>
     (bold ? fontBold : font).widthOfTextAtSize(pdfSafeText(text), size);
 
-  const numericWidth = (text: string, size: number, bold = false) =>
-    (bold ? fontNumericBold : fontNumeric).widthOfTextAtSize(
-      pdfSafeText(text),
-      size,
-    );
-
   const drawNumber = (
     text: string,
     x: number,

@@ -35,6 +35,7 @@ export function ServiceOwnerCard({
     >
       <div className="relative h-[12.5rem] w-full overflow-hidden sm:h-[10.5rem]">
         {service.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={service.imageUrl}
             alt=""

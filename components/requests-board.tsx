@@ -56,7 +56,6 @@ import {
   STATUS_LABELS,
   TIME_RANGE_LABELS,
   TIME_RANGE_SHORT_LABELS,
-  TIME_RANGES,
   type InspectionRequestDetail,
   type InspectionRequestStatus,
   type InspectionSlot,
@@ -89,7 +88,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -1028,33 +1026,6 @@ function RequestCard({
   );
 }
 
-function SlotPill({
-  slot,
-  tone,
-}: {
-  slot: InspectionSlot;
-  tone: "customer" | "owner";
-}) {
-  const timeZone = useRequestsTimeZone();
-  return (
-    <span
-      className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 font-body text-[10px] font-semibold sm:px-2.5 sm:text-[11px] ${
-        tone === "customer"
-          ? "border border-stone-200 bg-stone-50 text-on-surface"
-          : "border border-violet-200 bg-violet-50 text-violet-700"
-      }`}
-    >
-      <span className="material-symbols-outlined shrink-0 text-[12px] leading-none text-primary">
-        event
-      </span>
-      <span className="truncate">
-        {formatSlotDate(slot.date, timeZone)} ·{" "}
-        {TIME_RANGE_SHORT_LABELS[slot.timeRange]}
-      </span>
-    </span>
-  );
-}
-
 /* ==========================================================================
  * Detail drawer + actions
  * ========================================================================== */
@@ -1185,7 +1156,6 @@ function DrawerReviewFooter({
   onProposeJobDates: () => void;
   onQuotationDecided: (decision: "accepted" | "rejected") => void;
 }) {
-  const timeZone = useRequestsTimeZone();
   const { canUseModule } = useBusinessModuleSettings();
   const jobsModuleEnabled = canUseModule("jobs");
   const quotationsModuleEnabled = canUseModule("quotations");
@@ -1576,7 +1546,6 @@ function DetailDrawerContent({
       end: request.scheduledEndTime ?? defaults.end,
     };
   }, [
-    request.id,
     request.scheduledSlot?.timeRange,
     request.scheduledStartTime,
     request.scheduledEndTime,
@@ -1617,18 +1586,18 @@ function DetailDrawerContent({
     mode === "review";
 
   useEffect(() => {
-    const slot = request.scheduledSlot;
-    if (!slot) return;
+    const timeRange = request.scheduledSlot?.timeRange;
+    if (!timeRange) return;
     if (request.scheduledStartTime) {
       setAcceptStartTime(request.scheduledStartTime);
     } else {
-      const defaults = DEFAULT_VISIT_WINDOW[slot.timeRange];
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
       setAcceptStartTime(defaults.start);
     }
     if (request.scheduledEndTime) {
       setAcceptEndTime(request.scheduledEndTime);
     } else {
-      const defaults = DEFAULT_VISIT_WINDOW[slot.timeRange];
+      const defaults = DEFAULT_VISIT_WINDOW[timeRange];
       setAcceptEndTime(defaults.end);
     }
   }, [
@@ -2771,86 +2740,6 @@ function slotTimeIcon(timeRange: InspectionTimeRange): string {
   return timeRange === "morning" ? "wb_twilight" : "wb_sunny";
 }
 
-function InspectionSlotsList({
-  slots,
-  variant = "customer",
-  timeWindow = null,
-}: {
-  slots: InspectionSlot[];
-  variant?: "customer" | "proposed" | "scheduled";
-  timeWindow?: string | null;
-}) {
-  const timeZone = useRequestsTimeZone();
-  if (slots.length === 0) return null;
-
-  const orderedSlots = sortInspectionSlots(slots);
-
-  const cardClass =
-    variant === "proposed"
-      ? "border-violet-200/90 bg-violet-50/70"
-      : variant === "scheduled"
-        ? "border-emerald-200/90 bg-emerald-50/70"
-        : "border-outline-variant/50 bg-surface-container-lowest";
-
-  const timeClass =
-    variant === "proposed"
-      ? "text-violet-900"
-      : variant === "scheduled"
-        ? "text-emerald-900"
-        : "text-on-surface-variant";
-
-  return (
-    <ul className="mt-1.5 space-y-1.5">
-      {orderedSlots.map((slot, index) => (
-        <li
-          key={`${slot.date}-${slot.timeRange}-${index}`}
-          className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 shadow-sm ${cardClass}`}
-        >
-          {orderedSlots.length > 1 ? (
-            <span
-              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 font-body text-[11px] font-bold text-primary"
-              aria-hidden
-            >
-              {index + 1}
-            </span>
-          ) : null}
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1.5 font-body text-[13px] font-semibold leading-snug text-on-surface">
-              <span className="material-symbols-outlined text-[17px] text-primary">
-                event
-              </span>
-              {formatSlotDate(slot.date, timeZone)}
-            </p>
-            <p
-              className={`mt-1 flex items-center gap-1.5 font-body text-[12px] leading-snug ${timeClass}`}
-            >
-              <span className="material-symbols-outlined text-[16px] text-primary/85">
-                {slotTimeIcon(slot.timeRange)}
-              </span>
-              {TIME_RANGE_LABELS[slot.timeRange]}
-            </p>
-            {variant === "scheduled" && timeWindow ? (
-              <p className="mt-1 flex items-center gap-1.5 font-body text-[12px] font-semibold leading-snug text-emerald-900">
-                <span className="material-symbols-outlined text-[16px] text-emerald-700">
-                  schedule
-                </span>
-                {timeWindow}
-              </p>
-            ) : variant === "scheduled" && !timeWindow ? (
-              <p className="mt-1 flex items-center gap-1.5 font-body text-[12px] font-medium leading-snug text-amber-800/90">
-                <span className="material-symbols-outlined text-[16px] text-amber-700">
-                  schedule
-                </span>
-                Exact time to be added below
-              </p>
-            ) : null}
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function CustomerExtrasSection({
   request,
 }: {
@@ -3271,6 +3160,8 @@ function ScheduledVisitSection({
   request: InspectionRequestDetail;
   inlineVisitTime?: InlineVisitTimeControl;
 }) {
+  // Hooks must run on every render, so this stays above the early return.
+  const timeZone = useRequestsTimeZone();
   const slot = request.scheduledSlot;
   if (!slot) return null;
 
@@ -3280,7 +3171,6 @@ function ScheduledVisitSection({
   );
   const customerAccepted =
     request.status === "scheduled" && request.ownerProposedSlots.length > 0;
-  const timeZone = useRequestsTimeZone();
 
   return (
     <ScheduleSubsection
@@ -3400,7 +3290,6 @@ function CancelForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
-  const timeZone = useRequestsTimeZone();
   return (
     <section className="rounded-xl border border-rose-200 bg-rose-50/50 p-4">
       <p className="font-display text-[14px] font-semibold text-on-surface">

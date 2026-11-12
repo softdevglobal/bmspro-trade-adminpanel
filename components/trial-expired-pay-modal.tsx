@@ -60,8 +60,9 @@ export function TrialExpiredPayModal() {
     };
   }, [showModal]);
 
+  const planId = subscription?.planId;
   const startCheckout = useCallback(async () => {
-    if (!user || !subscription?.planId) return;
+    if (!user || !planId) return;
     setPaying(true);
     setError(null);
     try {
@@ -73,7 +74,7 @@ export function TrialExpiredPayModal() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          planId: subscription.planId,
+          planId,
           successPath: "/dashboard/subscription?checkout=success",
           cancelPath: "/dashboard/subscription?checkout=canceled",
         }),
@@ -93,7 +94,7 @@ export function TrialExpiredPayModal() {
     } finally {
       setPaying(false);
     }
-  }, [subscription?.planId, user]);
+  }, [planId, user]);
 
   const handleLogout = useCallback(async () => {
     setSigningOut(true);

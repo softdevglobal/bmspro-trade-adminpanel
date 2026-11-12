@@ -82,7 +82,9 @@ export function CustomerNotificationsProvider({
     }
   }, [activeBookingSlug, enabled, getIdToken, notifications.length]);
 
-  reloadRef.current = reload;
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
 
   useEffect(() => {
     if (!enabled || !pageVisible) {

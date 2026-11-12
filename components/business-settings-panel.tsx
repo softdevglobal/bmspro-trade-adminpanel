@@ -162,7 +162,7 @@ export function BusinessSettingsPanel() {
     return () => {
       active = false;
     };
-  }, [user?.uid]);
+  }, [user]);
 
   const heroData = useMemo(
     () => ({

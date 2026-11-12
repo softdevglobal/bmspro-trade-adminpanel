@@ -36,7 +36,6 @@ import {
   resolveBusinessOwnerUid,
   sendBusinessAdminMobilePush,
   sendOwnerMobilePush,
-  sendStaffMobilePush,
 } from "@/lib/notifications/push";
 import {
   formatInPlatformTimeZone,
@@ -657,7 +656,6 @@ export async function notifyCustomerOfAssignment(
   context: CustomerNotifyContext = {},
 ): Promise<void> {
   if (!request.assignedTo) return;
-  const business = context.businessName ?? "The business";
   const timeZone = context.timezone;
   const visitWindow = formatVisitWindow(
     request.scheduledStartTime,

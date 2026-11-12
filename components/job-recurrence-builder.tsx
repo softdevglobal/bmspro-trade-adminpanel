@@ -19,7 +19,7 @@ import {
   type RecurrenceUnit,
   type SeriesUpdateMode,
 } from "@/lib/bookings/recurrence";
-import { WEEK_DAY_IDS, type WeekDayId } from "@/lib/team/staff-availability";
+import { WEEK_DAY_IDS } from "@/lib/team/staff-availability";
 import { useId } from "react";
 
 const LABEL_CLASS =

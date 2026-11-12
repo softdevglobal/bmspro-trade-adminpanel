@@ -322,6 +322,7 @@ export function ItemListBoard() {
             >
               <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
                 {item.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={item.imageUrl}
                     alt={item.name}
@@ -709,6 +710,7 @@ function ItemEditorModal({
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="relative mx-auto h-24 w-24 shrink-0 overflow-hidden rounded-xl border-2 border-dashed border-outline-variant bg-surface-container-low sm:mx-0">
                     {imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={imageUrl}
                         alt="Item preview"
@@ -1038,6 +1040,7 @@ function ItemPreviewPanel({
       <div className="flex items-center gap-4 p-5">
         <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary-container text-on-primary">
           {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt={name} className="h-full w-full object-cover" />
           ) : (
             <span className="material-symbols-outlined text-[26px]">sell</span>
