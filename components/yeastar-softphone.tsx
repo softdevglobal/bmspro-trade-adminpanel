@@ -52,6 +52,7 @@ export function YeastarSoftphone() {
   const [phoneState, setPhoneState] = useState<PhoneState>("disconnected");
   const [error, setError] = useState("");
   const [dialNumber, setDialNumber] = useState("");
+  const outboundStarting = useRef(false);
   const [calls, setCalls] = useState<CallInfo[]>([]);
   const [customerMatches, setCustomerMatches] = useState<Record<string, CustomerMatch | null | "loading" | "error">>({});
   const customersRef = useRef<CustomerMatch[] | null>(null);
@@ -299,21 +300,42 @@ export function YeastarSoftphone() {
     void connect();
   }, [authStatus, user, role, connect, disconnect]);
 
-  const makeCall = async () => {
-    const number = dialNumber.trim();
-    if (!number || !phoneRef.current) return;
+  const makeCall = useCallback(async (destination = dialNumber) => {
+    const number = destination.trim();
+    if (!number || !phoneRef.current || outboundStarting.current) return;
     if (!/^[+\d*#().\s-]{2,40}$/.test(number)) {
       setError("Enter a valid phone number or extension.");
       return;
     }
+    outboundStarting.current = true;
     setError("");
     try {
       await phoneRef.current.call(number);
       setDialNumber("");
     } catch {
       setError("Call could not be started. Check the number and try again.");
+    } finally {
+      outboundStarting.current = false;
     }
-  };
+  }, [dialNumber]);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated" || role !== "business_owner" || !user || !businessId) return;
+    function callBack(event: Event) {
+      const detail = (event as CustomEvent<{ number: string; businessId: string; uid: string }>).detail;
+      if (detail?.businessId !== businessId || detail.uid !== user?.uid ||
+          typeof detail.number !== "string" || !/^\+?\d{1,15}$/.test(detail.number)) return;
+      setSophieOpen(false);
+      setOpen(true);
+      setError("");
+      setDialNumber(detail.number);
+      if (phoneState === "registered" && calls.length === 0 && incomingIds.length === 0) {
+        void makeCall(detail.number);
+      }
+    }
+    window.addEventListener("trade:missed-call-callback", callBack);
+    return () => window.removeEventListener("trade:missed-call-callback", callBack);
+  }, [authStatus, role, user, businessId, phoneState, calls.length, incomingIds.length, makeCall]);
 
   const endCall = (call: CallInfo) => {
     const phone = phoneRef.current;
