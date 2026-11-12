@@ -149,6 +149,14 @@ test("recording access follows historical DID ownership and playback grants are 
     assert.equal(url.searchParams.get("did"), input.did + ":Main");
     assert.equal(url.searchParams.get("order_by"), "desc");
     searchStarts.push(url.searchParams.get("start_time") ?? "");
+    if (url.searchParams.get("status") === "NO ANSWER") {
+      return Response.json({ errcode: 0, total_number: 4, data: [
+        { ...records[0], uid: "missed", record_file: undefined, disposition: "NO ANSWER" },
+        { ...records[0], uid: "missed", record_file: undefined, disposition: "NO ANSWER" },
+        { ...records[0], disposition: "ANSWERED" },
+        { ...records[3], disposition: "NO ANSWER" },
+      ] });
+    }
     return Response.json({ errcode: 0, data: records, total_number: records.length });
   });
   const [old, next] = await Promise.all([
@@ -165,7 +173,16 @@ test("recording access follows historical DID ownership and playback grants are 
     start: (cutoff - 180) * 1000, end: (cutoff - 120) * 1000,
   });
   assert.deepEqual(filtered.recordings, [], "a call exactly at the exclusive end is outside the selected dates");
+  const missed = await listCallRecordings(config, "business-a", 1, {}, "missed");
+  assert.deepEqual(missed.recordings.map(record => record.id), ["missed"]);
+  assert.equal(missed.recordings[0].grant, null);
+  assert.equal(missed.recordings[0].customerName, "Test Customer");
+  const readMissed = await listCallRecordings(config, "business-a", 1, { readThrough: (cutoff - 90) * 1000 }, "missed", false);
+  assert.deepEqual(readMissed.recordings, []);
+  const newerMissed = await listCallRecordings(config, "business-a", 1, { readThrough: (cutoff - 100) * 1000 }, "missed", false);
+  assert.deepEqual(newerMissed.recordings.map(call => call.id), ["missed"]);
   const grant = old.recordings[0].grant;
+  assert.ok(grant);
   assert.equal(recordingFileForGrant(config, "business-a", grant), "old.wav");
   assert.equal(recordingFileForGrant(config, "business-b", grant), null);
   assert.equal(recordingFileForGrant(config, "business-a", grant + "x"), null);

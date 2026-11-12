@@ -132,11 +132,12 @@ const cdr = z.object({
   uid: z.string().min(1).max(128), call_type: z.literal("Inbound"),
   did_number: z.string().regex(/^\d{6,15}$/), src_trunk: z.string(),
   timestamp: z.number().int().positive().max(4_102_444_800),
-  duration: z.number().int().nonnegative().max(86400), record_file: recordingFile,
+  duration: z.number().int().nonnegative().max(86400), record_file: z.unknown().optional(),
+  disposition: z.unknown().optional(),
   call_from_number: z.unknown().optional(),
 });
 
-export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number } = {}) {
+export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number; readThrough?: number } = {}, view: "recordings" | "missed" = "recordings", includeCustomerNames = true) {
   const cutoff = Date.now() - 30 * 86400_000;
   const snapshots = await adminDb.collection(DID_RECORDING_PERIODS_COLLECTION).where("businessId", "==", businessId).get();
   const periods = snapshots.docs.flatMap(doc => {
@@ -151,7 +152,8 @@ export async function listCallRecordings(config: Config, businessId: string, pag
   if (!dids.length) return { recordings: [], hasMore: false, hasRecordingHistory: false };
   // Keep calls that predate this business's ownership out of the PBX pages.
   // The per-DID ownership check below still applies across reassignments.
-  const searchStart = Math.max(cutoff, range.start ?? cutoff, periods.reduce((earliest, period) => Math.min(earliest, period.start), Infinity));
+  const searchStart = Math.max(cutoff, range.start ?? cutoff, (range.readThrough ?? cutoff) - 86_400_000,
+    periods.reduce((earliest, period) => Math.min(earliest, period.start), Infinity));
   if (searchStart >= Math.min(range.end ?? Infinity, Date.now())) {
     return { recordings: [], hasMore: false, hasRecordingHistory: true };
   }
@@ -160,13 +162,18 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     start_time: String(Math.floor(searchStart / 1000)), sort_by: "time", order_by: "desc",
     ...(range.end !== undefined && { end_time: String(Math.ceil(range.end / 1000) - 1) }),
     page: String(page), page_size: String(pageSize),
+    ...(view === "missed" && { status: "NO ANSWER" }),
   }));
   if (!Array.isArray(data.data) && !(data.data == null && data.total_number === 0)) throw new Error("Invalid PBX call list.");
+  const seen = new Set<string>();
   const recordings = ((data.data ?? []) as unknown[]).flatMap(row => {
     const parsed = cdr.safeParse(row);
     if (!parsed.success) return [];
     const call = parsed.data;
+    const file = recordingFile.safeParse(call.record_file);
+    if (view === "missed" ? call.disposition !== "NO ANSWER" : !file.success) return [];
     const startedAt = call.timestamp * 1000;
+    if (range.readThrough !== undefined && startedAt + call.duration * 1000 <= range.readThrough) return [];
     // PBX timestamps are only second-precision. Exclude calls touching an ownership boundary.
     if (startedAt < Math.max(cutoff, range.start ?? cutoff) || startedAt >= (range.end ?? Infinity) ||
         !config.trunks.includes(call.src_trunk) ||
@@ -174,12 +181,17 @@ export async function listCallRecordings(config: Config, businessId: string, pag
           startedAt + (call.duration + 1) * 1000 <= period.end)) return [];
     const number = typeof call.call_from_number === "string" ? call.call_from_number.trim() : "";
     const callerNumber = /^\+?[0-9][0-9 ().-]{0,31}$/.test(number) && /\d$/.test(number) ? number : null;
-    return [{ id: call.uid, did: call.did_number, startedAt, duration: call.duration, callerNumber,
-      grant: issueGrant(config, businessId, call.record_file) }];
+    const rowKey = view === "recordings" && file.success
+      ? createHash("sha256").update(JSON.stringify([call.uid, file.data])).digest("hex")
+      : call.uid;
+    if (seen.has(rowKey)) return [];
+    seen.add(rowKey);
+    return [{ id: call.uid, rowKey, did: call.did_number, startedAt, duration: call.duration, callerNumber,
+      grant: view === "recordings" && file.success ? issueGrant(config, businessId, file.data) : null }];
   });
   const callerKeys = recordings.map(recording => phoneComparisonKey(recording.callerNumber));
   const customerNames = new Map<string, string | null>();
-  if (callerKeys.some(Boolean)) {
+  if (includeCustomerNames && callerKeys.some(Boolean)) {
     const customers = await adminDb.collection("customers").where("registeredBusinessId", "==", businessId)
       .select("phone", "fullName").get();
     const wantedKeys = new Set(callerKeys);

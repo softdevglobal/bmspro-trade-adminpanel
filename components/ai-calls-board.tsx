@@ -108,7 +108,7 @@ export function AiCallsBoard() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="font-display text-2xl font-semibold text-on-surface">AI calls</h1>
+          <h3 className="font-display text-lg font-semibold text-on-surface">Sophie call history</h3>
           <p className="mt-1 max-w-2xl font-body text-[13px] text-on-surface-variant">
             Calls answered by Sophie, newest first. Open a call to read the conversation. Logs are deleted automatically after the retention period.
           </p>
