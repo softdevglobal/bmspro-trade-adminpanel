@@ -4,8 +4,10 @@ import { auth } from "@/lib/firebase/client";
 import type { KnowledgeKind, KnowledgeOrigin, KnowledgeSource, KnowledgeStatus } from "@/lib/ai/data/knowledge-sources";
 import { KNOWLEDGE_PURPOSES, PURPOSE_LABEL, PURPOSE_NOTE_MAX, describePurpose, purposeError,
   type KnowledgePurpose } from "@/lib/ai/data/knowledge-purpose";
+import { useVoiceDraft } from "@/lib/ai/owner-call/voice-draft-store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AiSearchActivity } from "./ai-search-activity";
+import { VoiceDraftCard } from "./voice-draft-card";
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
@@ -231,6 +233,15 @@ export function AiKnowledgeBoard() {
     return () => { cancelled = true; };
   }, [apply]);
 
+  // A note saved from Talk to Sophie (by voice or the card's button) appears in the list.
+  const voiceSavedId = useVoiceDraft().savedId;
+  useEffect(() => {
+    if (!voiceSavedId) return;
+    let cancelled = false;
+    void fetchBoard().then(result => { if (!cancelled) apply(result); });
+    return () => { cancelled = true; };
+  }, [voiceSavedId, apply]);
+
   // While anything is being prepared, refresh just the list every few seconds so the
   // status updates by itself. Stuck entries stop the polling and show Retry instead.
   const anyPending = sources.some(source => indexState(source, now).pending);
@@ -300,6 +311,15 @@ export function AiKnowledgeBoard() {
       purpose: source.purpose ?? null, purposeNote: source.purposeNote ?? "" });
     setHint(null);
     editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /** "Review and publish" on a saved voice draft: open it in the editor below. */
+  async function openVoiceDraft(id: string) {
+    try {
+      await startEdit((await authFetch(`/api/ai/knowledge/${id}`)).source as KnowledgeSource);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not open the draft." });
+    }
   }
 
   const save = (publish: boolean) => run(async () => {
@@ -491,6 +511,9 @@ export function AiKnowledgeBoard() {
           {notice.text}
         </p>
       )}
+
+      {/* Note Sophie prepared in Talk to Sophie, waiting for the owner's OK */}
+      <VoiceDraftCard onOpenSaved={openVoiceDraft} />
 
       {/* Test a question */}
       <div className={CARD_CLASS}>
@@ -800,6 +823,11 @@ export function AiKnowledgeBoard() {
                         <p className="font-body text-[14px] font-semibold text-on-surface">{source.title}</p>
                         <span className={`rounded-full px-2 py-0.5 font-body text-[11px] font-semibold ${status.className}`}>{status.label}</span>
                         <span className="rounded-full border border-outline-variant px-2 py-0.5 font-body text-[11px] text-on-surface-variant">{KIND_LABEL[source.kind] ?? source.kind}</span>
+                        {source.createdVia === "owner_voice" && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 font-body text-[11px] font-semibold text-amber-900">
+                            <span className="material-symbols-outlined text-[12px]">mic</span>Added by voice
+                          </span>
+                        )}
                       </div>
                       <p className={`mt-1 flex items-center gap-1 font-body text-[11px] ${state.error ? "text-error" : "text-on-surface-variant"}`}>
                         {state.pending && <span className="material-symbols-outlined animate-spin text-[12px]">progress_activity</span>}

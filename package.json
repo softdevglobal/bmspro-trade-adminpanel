@@ -21,6 +21,7 @@
     "test:ai-voice-bridge": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-voice-bridge.ts scripts/test-ai-did-mappings.ts scripts/test-ai-voice-actions.ts scripts/test-ai-voice-customer-account.ts scripts/test-ai-voice-jobs.ts",
     "test:ai-voice-quotation": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-voice-quotation.ts",
     "test:ai-knowledge": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-knowledge.ts",
+    "test:ai-owner-call": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-owner-call.ts",
     "eval:ai-knowledge": "tsx --env-file=.env.local --import ./scripts/stub-server-only.mjs scripts/eval-ai-knowledge.ts",
     "test:ai-import": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-import.ts",
     "test:ai-call-logs": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-call-logs.ts",

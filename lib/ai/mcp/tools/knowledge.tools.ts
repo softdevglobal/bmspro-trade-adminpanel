@@ -1,6 +1,19 @@
 import { knowledgeQuestionArguments, type ScheduleVoiceTask } from "./action-schemas";
 import { nearMissDistance, packagePassages, searchPassages, type KnowledgeResult, type RetrieverDependencies, type SearchStats } from "../../rag/retriever";
-import type { VoiceBusiness } from "../../config";
+import type { KnowledgeSearchSource } from "../../rag/search-log";
+
+/**
+ * The business to search. Phone calls pass their full DID binding; the owner
+ * call passes the business from the owner's login. Only businessId is used.
+ */
+export type KnowledgeBinding = { businessId: string };
+
+export type KnowledgeToolOptions = {
+  /** Record NO_MATCH questions for the Unanswered page. Owner calls pass false. */
+  recordUnanswered?: boolean;
+  /** Who searched, stored on the search log. */
+  source?: KnowledgeSearchSource;
+};
 
 export interface VoiceKnowledgeDependencies extends RetrieverDependencies {
   enabled(): boolean;
@@ -11,7 +24,7 @@ export interface VoiceKnowledgeDependencies extends RetrieverDependencies {
 }
 
 /** Pure tool logic; dependencies are injected so tests need no Firestore or OpenAI. */
-export function knowledgeActions(binding: VoiceBusiness, deps: VoiceKnowledgeDependencies) {
+export function knowledgeActions(binding: KnowledgeBinding, deps: VoiceKnowledgeDependencies) {
   return {
     search: async (raw: unknown): Promise<KnowledgeResult> => {
       if (!deps.enabled()) {
@@ -38,9 +51,10 @@ export function knowledgeActions(binding: VoiceBusiness, deps: VoiceKnowledgeDep
 }
 
 export async function createVoiceKnowledgeTools(
-  binding: VoiceBusiness,
+  binding: KnowledgeBinding,
   business: VoiceKnowledgeDependencies["business"],
   schedule: ScheduleVoiceTask,
+  { recordUnanswered = true, source = "phone" }: KnowledgeToolOptions = {},
 ) {
   const [{ adminDb }, { createQueryEmbedder }, { createVectorStore }, { knowledgeSettings }] = await Promise.all([
     import("@/lib/firebase/admin"), import("../../rag/embeddings"), import("../../rag/vector-store"), import("../../rag/settings"),
@@ -57,6 +71,7 @@ export async function createVoiceKnowledgeTools(
     maxDistance: settings.maxDistance,
     keywordCandidates: (businessId, terms) => store.keywordCandidates(businessId, terms),
     unanswered: question => {
+      if (!recordUnanswered) return;
       try {
         schedule("knowledge-unanswered", async () => {
           const { recordUnansweredQuestion } = await import("../../learning/unanswered");
@@ -68,7 +83,7 @@ export async function createVoiceKnowledgeTools(
       schedule("knowledge-search-log", async () => {
         const { recordKnowledgeSearch } = await import("../../rag/search-log");
         await recordKnowledgeSearch(binding.businessId, {
-          ...entry, settings: { model: settings.model, topK: settings.topK, maxDistance: settings.maxDistance },
+          ...entry, source, settings: { model: settings.model, topK: settings.topK, maxDistance: settings.maxDistance },
         });
       });
     },
