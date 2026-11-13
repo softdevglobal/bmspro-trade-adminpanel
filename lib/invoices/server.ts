@@ -304,6 +304,7 @@ export function mapInvoiceDoc(id: string, data: Record<string, unknown>): Invoic
     cancelledAt: toMillis(data.cancelledAt),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
+    overdueReminderCustomerSentAt: toMillis(data.overdueReminderCustomerSentAt),
   };
 }
 
@@ -397,18 +398,37 @@ export async function claimOverdueInvoiceReminder(input: {
   });
 }
 
+export async function recordOverdueCustomerReminderSent(businessId: string, invoiceId: string): Promise<void> {
+  const ref = adminDb.collection(INVOICE_COLLECTION).doc(invoiceId);
+  await adminDb.runTransaction(async transaction => {
+    const invoice = await transaction.get(ref);
+    if (invoice.get("businessId") === businessId) {
+      transaction.update(ref, { overdueReminderCustomerSentAt: FieldValue.serverTimestamp() });
+    }
+  });
+}
+
 async function generateInvoicePdfBytes(
   invoice: InvoiceDetail,
   businessId: string,
 ): Promise<Buffer | null> {
   const profile = await getBusinessProfile(businessId);
+  return (await prepareInvoiceEmailDocument(invoice, profile)).pdfBytes;
+}
+
+/** Use the same payment options in the email and the attached invoice. */
+export async function prepareInvoiceEmailDocument(
+  invoice: InvoiceDetail,
+  profile: Awaited<ReturnType<typeof getBusinessProfile>>,
+) {
   const connected = Boolean(
     profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
   );
-  const payUrl = await resolveInvoicePayUrl(businessId, invoice, connected);
+  const payUrl = await resolveInvoicePayUrl(invoice.businessId, invoice, connected);
+  const fileName = `${invoice.invoiceCode.trim() || "invoice"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-");
   try {
     const { generateInvoicePdf } = await import("@/lib/invoices/pdf");
-    return await generateInvoicePdf(invoice, {
+    const pdfBytes = await generateInvoicePdf(invoice, {
       businessName: profile?.businessName ?? null,
       logoUrl: profile?.logoUrl ?? null,
       businessAddress: profile?.businessAddress ?? null,
@@ -420,9 +440,10 @@ async function generateInvoicePdfBytes(
       payUrl,
       bankTransferDetails: profile?.bankTransferDetails ?? null,
     });
+    return { pdfBytes, fileName, payUrl };
   } catch (error) {
     console.error("[invoice] PDF generation failed:", error);
-    return null;
+    return { pdfBytes: null, fileName, payUrl };
   }
 }
 

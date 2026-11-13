@@ -7,52 +7,16 @@ import { useEmailSending } from "@/lib/email-integration/client";
 import { countPendingInspectionRequests } from "@/lib/inspection/request-counts";
 import { useInspectionRequests } from "@/lib/inspection/use-inspection-requests";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
-import { usePageVisible } from "@/lib/notifications/use-page-visible";
+import { useMissedCallsCount } from "@/lib/notifications/missed-calls-context";
 import { useSmsBalance } from "@/lib/sms/sms-balance-context";
 import { useTenantSubscription } from "@/lib/subscription/tenant-subscription-context";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import type { User } from "firebase/auth";
 
-function MissedCallsBadge({ user, businessId, expanded }: { user: User; businessId: string; expanded: boolean }) {
-  const [hasMissedCalls, setHasMissedCalls] = useState(false);
-  const visible = usePageVisible();
-  useEffect(() => {
-    if (!visible) return;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    let revision = 0;
-    function clearBadge(event: Event) {
-      const detail = (event as CustomEvent<{ businessId: string; uid: string }>).detail;
-      if (detail?.businessId !== businessId || detail.uid !== user.uid) return;
-      revision++;
-      setHasMissedCalls(false);
-    }
-    async function checkMissedCalls() {
-      const checkedRevision = revision;
-      try {
-        const query = new URLSearchParams({ view: "missed", summary: "1" });
-        const token = await user.getIdToken();
-        const response = await fetch("/api/business/call-recordings?" + query, {
-          headers: { Authorization: "Bearer " + token }, cache: "no-store", signal: controller.signal,
-        });
-        const result = response.ok ? await response.json() : null;
-        if (!controller.signal.aborted && checkedRevision === revision && result) setHasMissedCalls(result.hasMissedCalls === true);
-      } catch {
-        // Keep the last known state through temporary network failures.
-      }
-      if (!controller.signal.aborted) timer = setTimeout(checkMissedCalls, 60_000);
-    }
-    window.addEventListener("trade:missed-calls-read", clearBadge);
-    void checkMissedCalls();
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-      window.removeEventListener("trade:missed-calls-read", clearBadge);
-    };
-  }, [user, businessId, visible]);
-  if (!hasMissedCalls) return null;
+function MissedCallsBadge({ expanded }: { expanded: boolean }) {
+  const { unread } = useMissedCallsCount();
+  if (!unread) return null;
   return (
     <span title="Unread missed calls" className={expanded ? "ml-auto shrink-0" : "absolute -right-1 -top-1"}>
       <span aria-hidden="true" className="block h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-on-background" />
@@ -540,7 +504,7 @@ export function Sidebar({
               <>
                 <span className="relative shrink-0">
                   <span className={navIconClass(isActive)}>{item.icon}</span>
-                  {showMissedCallsBadge && !showLabels ? <MissedCallsBadge key={user.uid + ":" + businessId} user={user} businessId={businessId} expanded={false} /> : null}
+                  {showMissedCallsBadge && !showLabels ? <MissedCallsBadge key={user.uid + ":" + businessId} expanded={false} /> : null}
                   {showSmsLowDot ? (
                     <span
                       className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-on-background"
@@ -565,7 +529,7 @@ export function Sidebar({
                       : item.label}
                   </span>
                 )}
-                {showMissedCallsBadge && showLabels ? <MissedCallsBadge key={user.uid + ":" + businessId} user={user} businessId={businessId} expanded /> : null}
+                {showMissedCallsBadge && showLabels ? <MissedCallsBadge key={user.uid + ":" + businessId} expanded /> : null}
                 {showPendingBadge && showLabels ? (
                   <span
                     className={`inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 font-body text-[10px] font-bold tabular-nums text-white ${

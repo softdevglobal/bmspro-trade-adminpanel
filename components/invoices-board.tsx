@@ -316,6 +316,12 @@ function InvoiceCard({
               : ADMIN_COPY.noAmountDue}
           </span>
         ) : null}
+        {invoice.overdueReminderCustomerSentAt ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-low px-2.5 py-1 font-body text-[11px] text-on-surface-variant">
+            <span aria-hidden="true" className="material-symbols-outlined text-[14px]">mail</span>
+            Customer reminder sent · {formatWhen(invoice.overdueReminderCustomerSentAt, timeZone)}
+          </span>
+        ) : null}
         {/*
           Only show an outstanding amount when it differs from the total —
           repeating the same figure as "Balance" adds noise.

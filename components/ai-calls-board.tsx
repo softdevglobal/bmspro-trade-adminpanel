@@ -3,6 +3,9 @@
 import { auth } from "@/lib/firebase/client";
 import type { CallLogDetail, CallLogSummary, CallOutcome } from "@/lib/ai/data/call-logs";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+
+type LinkedCallDetail = CallLogDetail & { links?: { href: string; label: string }[] };
 
 const CARD_CLASS = "rounded-2xl border border-outline-variant bg-surface p-5 shadow-sm sm:p-6";
 const SECONDARY_BUTTON =
@@ -63,7 +66,7 @@ export function AiCallsBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<CallLogDetail | null>(null);
+  const [detail, setDetail] = useState<LinkedCallDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -80,7 +83,7 @@ export function AiCallsBoard() {
   async function open(call: CallLogSummary) {
     if (openId === call.id) { setOpenId(null); setDetail(null); return; }
     setOpenId(call.id); setDetail(null); setDetailLoading(true);
-    try { setDetail((await authFetch(`/api/ai/calls/${call.id}`)).call as CallLogDetail); }
+    try { setDetail((await authFetch(`/api/ai/calls/${call.id}`)).call as LinkedCallDetail); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not load the call."); }
     finally { setDetailLoading(false); }
   }
@@ -154,10 +157,17 @@ export function AiCallsBoard() {
 
                   {isOpen && (
                     <div className="border-t border-outline-variant p-4">
-                      {detailLoading || !detail ? (
+                      {detailLoading || detail?.id !== call.id ? (
                         <span className="material-symbols-outlined animate-spin text-[20px] text-primary">progress_activity</span>
                       ) : (
                         <div className="flex flex-col gap-4">
+                          {!!detail.links?.length && (
+                            <div className="flex flex-wrap gap-2" aria-label="Related records">
+                              {[...new Map(detail.links.map(link => [link.href, link])).values()].map(link => (
+                                <Link key={link.href} href={link.href} className={SECONDARY_BUTTON}>{link.label}</Link>
+                              ))}
+                            </div>
+                          )}
                           {detail.tools.length > 0 && (
                             <div className="flex flex-wrap gap-2">
                               {detail.tools.map((tool, index) => (

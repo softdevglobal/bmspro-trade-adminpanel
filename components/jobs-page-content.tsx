@@ -29,7 +29,8 @@ function JobsPageInner() {
     return <EditJobPage jobId={editJobId} />;
   }
 
-  return <JobsBoard initialJobId={jobId || null} />;
+  const callRequestId = searchParams.get("callRequest")?.trim() || null;
+  return <JobsBoard key={callRequestId ?? jobId} initialJobId={jobId || null} initialCallRequestId={callRequestId} />;
 }
 
 export function JobsPageContent() {

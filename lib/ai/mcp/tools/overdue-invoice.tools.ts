@@ -3,7 +3,12 @@ import "server-only";
 import { renderEmail } from "@/lib/email/layout";
 import { sendEmail } from "@/lib/email/zeptomail";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { claimOverdueInvoiceReminder, listOverdueInvoicePage } from "@/lib/invoices/server";
+import {
+  claimOverdueInvoiceReminder,
+  listOverdueInvoicePage,
+  prepareInvoiceEmailDocument,
+  recordOverdueCustomerReminderSent,
+} from "@/lib/invoices/server";
 import { getBusinessProfile, type BusinessMemberAuth } from "@/lib/onboarding/server";
 import { platformTodayIso } from "@/lib/platform/timezone";
 
@@ -39,20 +44,48 @@ export async function notifyOverdueInvoice({ businessId }: Pick<BusinessMemberAu
   const sendReminder = async (to: string | null, recipient: "customer" | "owner", skipped: string) => {
     if (!to) return skipped;
     try {
+      const isCustomer = recipient === "customer";
+      const document = isCustomer ? await prepareInvoiceEmailDocument(invoice, profile) : null;
+      if (isCustomer && !document?.pdfBytes?.length) return "UNCONFIRMED";
+      const bank = isCustomer ? profile?.bankTransferDetails : null;
+      const details = [{ label: "Invoice", value: invoiceCode }, { label: "Due date", value: invoice.dueDate }];
+      if (bank) {
+        details.push(
+          { label: "Bank", value: bank.bankName },
+          { label: "Account name", value: bank.businessName },
+          { label: "BSB", value: bank.bsb },
+          { label: "Account number", value: bank.accountNumber },
+          { label: "Transfer reference", value: invoiceCode },
+        );
+      }
       const sent = await sendEmail({
         sender: "request", to, subject: `Overdue invoice ${invoiceCode}`,
+        attachments: document?.pdfBytes ? [{
+          content: document.pdfBytes.toString("base64"),
+          mimeType: "application/pdf",
+          name: document.fileName,
+        }] : undefined,
         htmlBody: renderEmail({
-          title: recipient === "customer" ? "Your invoice is overdue" : "An invoice is overdue",
+          title: isCustomer ? "Your invoice is overdue" : "An invoice is overdue",
           tone: "warning",
-          body: recipient === "customer"
-            ? "This is a reminder that payment is overdue. Please refer to the invoice we sent you for payment details."
+          body: isCustomer
+            ? (bank || document?.payUrl
+              ? "This is a reminder that payment is overdue. You can pay using the options below. A copy of your invoice is attached."
+              : "This is a reminder that payment is overdue. A copy of your invoice is attached. Please contact the business for payment instructions.")
             : `The invoice for ${invoice.customer.fullName || "your customer"} has an outstanding balance.`,
-          details: [{ label: "Invoice", value: invoiceCode }, { label: "Due date", value: invoice.dueDate }],
+          details,
           highlight: amount,
           highlightLabel: "Outstanding balance",
+          ctaUrl: document?.payUrl,
+          ctaLabel: "Pay invoice",
           businessName: profile?.businessName,
         }),
       });
+      if (sent && isCustomer) {
+        await recordOverdueCustomerReminderSent(businessId, invoiceId).catch(() => {
+          console.error("[overdue-invoice] Could not record sent reminder", { invoiceId });
+        });
+      }
       return sent ? "SENT" : "UNCONFIRMED";
     } catch {
       return "UNCONFIRMED";

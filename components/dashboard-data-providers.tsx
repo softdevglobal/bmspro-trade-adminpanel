@@ -7,6 +7,7 @@ import { InspectionRequestsProvider } from "@/lib/inspection/inspection-requests
 import { LeaveRequestsProvider } from "@/lib/leave/leave-requests-context";
 import { SmsBalanceProvider } from "@/lib/sms/sms-balance-context";
 import { BusinessNotificationsProvider } from "@/lib/notifications/business-notifications-context";
+import { MissedCallsProvider } from "@/lib/notifications/missed-calls-context";
 import { TenantSubscriptionProvider } from "@/lib/subscription/tenant-subscription-context";
 import { TenantSubscriptionAccessGuard } from "@/components/tenant-subscription-access-guard";
 import { TrialExpiredPayModal } from "@/components/trial-expired-pay-modal";
@@ -25,7 +26,7 @@ export function DashboardDataProviders({ children }: { children: ReactNode }) {
                 <BusinessNotificationsProvider>
                   <TrialExpiredPayModal />
                   <TenantSubscriptionAccessGuard>
-                    {children}
+                    <MissedCallsProvider>{children}</MissedCallsProvider>
                   </TenantSubscriptionAccessGuard>
                 </BusinessNotificationsProvider>
               </BookingsProvider>

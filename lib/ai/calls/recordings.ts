@@ -27,6 +27,30 @@ export function recordingConfig() {
 
 type Config = NonNullable<ReturnType<typeof recordingConfig>>;
 
+const callbackClaim = z.object({
+  businessId: z.string(), callerKey: z.string().regex(/^\d{6,32}$/),
+  startedAt: z.number().int().nonnegative(), expiresAt: z.number(),
+});
+
+function signCallback(config: Config, payload: string) {
+  return createHmac("sha256", config.secret).update("trade-callback:" + payload).digest();
+}
+
+export function verifyCallbackGrant(config: Config, businessId: string, grant: string) {
+  if (!/^[\w-]{1,1000}\.[\w-]{43}$/.test(grant)) return null;
+  const [payload, signature] = grant.split(".");
+  const actual = Buffer.from(signature, "base64url");
+  const expected = signCallback(config, payload);
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+  try {
+    const parsed = callbackClaim.safeParse(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
+    return parsed.success && parsed.data.businessId === businessId && parsed.data.expiresAt > Date.now()
+      ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function sign(config: Config, payload: string) {
   return createHmac("sha256", config.secret).update("trade-recording:" + payload).digest();
 }
@@ -183,7 +207,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     const callerNumber = /^\+?[0-9][0-9 ().-]{0,31}$/.test(number) && /\d$/.test(number) ? number : null;
     const rowKey = view === "recordings" && file.success
       ? createHash("sha256").update(JSON.stringify([call.uid, file.data])).digest("hex")
-      : call.uid;
+      : createHash("sha256").update(JSON.stringify([call.uid, call.did_number, startedAt, callerNumber])).digest("hex");
     if (seen.has(rowKey)) return [];
     seen.add(rowKey);
     return [{ id: call.uid, rowKey, did: call.did_number, startedAt, duration: call.duration, callerNumber,
@@ -204,9 +228,17 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     }
   }
   return {
-    recordings: recordings.map((recording, index) => ({
-      ...recording, customerName: customerNames.get(callerKeys[index] ?? "") ?? null,
-    })),
+    recordings: recordings.map((recording, index) => {
+      const callerKey = callerKeys[index];
+      let callbackGrant: string | null = null;
+      if (view === "missed" && includeCustomerNames && callerKey) {
+        const payload = Buffer.from(JSON.stringify({
+          businessId, callerKey, startedAt: recording.startedAt, expiresAt: Date.now() + 60 * 60_000,
+        })).toString("base64url");
+        callbackGrant = payload + "." + signCallback(config, payload).toString("base64url");
+      }
+      return { ...recording, callerKey, callbackGrant, customerName: customerNames.get(callerKey ?? "") ?? null };
+    }),
     hasMore: page * pageSize < Number(data.total_number), hasRecordingHistory: true,
   };
 }
