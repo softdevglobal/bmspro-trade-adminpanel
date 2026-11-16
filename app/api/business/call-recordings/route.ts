@@ -1,3 +1,4 @@
+import { callbackState, resolveCallback } from "@/lib/ai/calls/callback-state";
 import { fetchRecordingAudio, listCallRecordings, RecordingAccessError, RecordingTokenLimitError, recordingConfig, recordingFileForGrant, verifyCallbackGrant } from "@/lib/ai/calls/recordings";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
@@ -29,11 +30,6 @@ async function authorize(request: Request, operation: "list" | "play") {
 function readState(businessId: string, uid: string) {
   const id = createHash("sha256").update(JSON.stringify([businessId, uid])).digest("hex");
   return adminDb.collection("missed_call_read_states").doc(id);
-}
-
-function callbackState(businessId: string, callerKey: string) {
-  const id = createHash("sha256").update(JSON.stringify([businessId, callerKey])).digest("hex");
-  return adminDb.collection("missed_call_callback_states").doc(id);
 }
 
 export async function GET(request: Request) {
@@ -100,13 +96,7 @@ export async function PATCH(request: Request) {
       const config = recordingConfig();
       const claim = config && verifyCallbackGrant(config, auth.businessId, grant);
       if (!claim) return json({ error: "Callback record unavailable. Refresh and try again." }, 404);
-      const ref = callbackState(auth.businessId, claim.callerKey);
-      await adminDb.runTransaction(async transaction => {
-        const current = (await transaction.get(ref)).get("through") as number | undefined;
-        if ((current ?? -1) < claim.startedAt) {
-          transaction.set(ref, { through: claim.startedAt, updatedAt: FieldValue.serverTimestamp() });
-        }
-      });
+      await resolveCallback(auth.businessId, claim.callerKey, claim.startedAt);
       return json({ ok: true });
     }
     await readState(auth.businessId, auth.uid).set({ readThrough: FieldValue.serverTimestamp() }, { merge: true });

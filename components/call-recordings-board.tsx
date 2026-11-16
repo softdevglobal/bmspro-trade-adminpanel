@@ -33,14 +33,14 @@ async function requestRecordings(user: User, path: string, options: RequestInit)
 }
 
 type CallView = "recordings" | "missed" | "ai";
-type InitialCallView = { initialView: CallView; initialDate?: string };
+type InitialCallView = { initialView: CallView; initialDate?: string; sophieCallbackEnabled?: boolean };
 
 export function CallRecordingsBoard(props: InitialCallView) {
   const { user, businessId } = useAuth();
   return user && businessId ? <Recordings key={user.uid + ":" + businessId} user={user} businessId={businessId} {...props} /> : null;
 }
 
-function Recordings({ user, businessId, initialView, initialDate }: InitialCallView & { user: User; businessId: string }) {
+function Recordings({ user, businessId, initialView, initialDate, sophieCallbackEnabled }: InitialCallView & { user: User; businessId: string }) {
   const { unread, capped } = useMissedCallsCount();
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
@@ -49,6 +49,8 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
   const [readError, setReadError] = useState("");
   const [callbackError, setCallbackError] = useState("");
   const [savingCallback, setSavingCallback] = useState<string | null>(null);
+  const [dialing, setDialing] = useState<string | null>(null);
+  const [callbackResults, setCallbackResults] = useState<Record<string, string>>({});
   const markReadOnLoad = useRef(initialView === "missed");
   const [selected, setSelected] = useState<Recording | null>(null);
   const [view, setView] = useState<CallView>(initialView);
@@ -103,6 +105,32 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
     event.preventDefault();
     setDateRange(draftDates);
     load(1);
+  }
+
+  async function callWithSophie(recording: Recording) {
+    if (dialing || !recording.callbackGrant || !recording.callerNumber ||
+        !window.confirm(`Have Sophie return the missed call to ${recording.callerNumber}?`)) return;
+    setDialing(recording.rowKey);
+    setCallbackError("");
+    try {
+      const response = await fetch("/api/business/sophie-callback", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${await user.getIdToken()}`, "x-callback-grant": recording.callbackGrant },
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error ?? "Sophie could not start the callback.");
+      const messages: Record<string, string> = {
+        ANSWERED: "Phone answered", NO_ANSWER: "No answer", FAILED: "Call failed", UNKNOWN: "Call result unknown",
+      };
+      const message = messages[result?.status] ?? messages.UNKNOWN;
+      const diagnostic = (result?.status === "FAILED" || result?.status === "UNKNOWN") && result?.code
+        ? ` (${result.code}${result.reason ? `, Asterisk reason ${result.reason}` : ""})` : "";
+      setCallbackResults(current => ({ ...current, [recording.rowKey]: message + diagnostic }));
+    } catch (reason) {
+      setCallbackError(reason instanceof Error ? reason.message : "Could not start Sophie’s callback.");
+    } finally {
+      setDialing(null);
+    }
   }
 
   async function completeCallback(recording: Recording) {
@@ -243,6 +271,14 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
                             disabled={savingCallback !== null} onClick={() => void completeCallback(recording)}>
                             {savingCallback === recording.rowKey ? "Saving…" : "Mark callback complete"}
                           </button>}
+                          {sophieCallbackEnabled && !recording.callbackComplete && recording.callbackGrant &&
+                            recording.callerNumber && (
+                              <button type="button" className={controlClass} disabled={dialing !== null || !!callbackResults[recording.rowKey]}
+                                onClick={() => void callWithSophie(recording)}>
+                                {dialing === recording.rowKey ? "Calling…" : "Call back with Sophie"}
+                              </button>
+                          )}
+                          {callbackResults[recording.rowKey] && <span role="status">{callbackResults[recording.rowKey]}</span>}
                         </div> : <button type="button" aria-expanded={expanded} className={controlClass}
                           onClick={() => setSelected(expanded ? null : recording)}>
                           <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{expanded ? "close" : "play_circle"}</span>

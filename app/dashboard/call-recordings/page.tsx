@@ -9,6 +9,7 @@ export default async function CallRecordingsPage({ searchParams }: { searchParam
   const initialView = view === "ai" || view === "missed" ? view : "recordings";
   const initialDate = initialView === "missed" && typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
   return <BusinessOwnerGuard>
-    <CallRecordingsBoard key={initialView + ":" + (initialDate ?? "")} initialView={initialView} initialDate={initialDate} />
+    <CallRecordingsBoard key={initialView + ":" + (initialDate ?? "")} initialView={initialView} initialDate={initialDate}
+      sophieCallbackEnabled={process.env.AI_SOPHIE_CALLBACK_ENABLED === "true"} />
   </BusinessOwnerGuard>;
 }

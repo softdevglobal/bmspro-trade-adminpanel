@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       ? { businessName, timezone: timezone || "Australia/Melbourne" }
       : undefined;
     return json({ matched: true, brand: "trade", ...route.binding, profile,
-      forwardingExtension: route.forwardingExtension }, 200, timing);
+      forwardingExtension: route.forwardingExtension, ...(route.callback && { callback: route.callback }) }, 200, timing);
   } catch { return json({ error: "Trade voice routing is unavailable." }, 503); }
 }
 

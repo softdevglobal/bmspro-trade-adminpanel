@@ -13,7 +13,7 @@ function parseStored(did: string, data: Record<string, unknown> | undefined): St
   if (!data) return null;
   const result = didMappingInput.safeParse({
     did: data.did, businessId: data.businessId, isActive: data.isActive, version: data.version,
-    forwardingExtension: data.forwardingExtension,
+    forwardingExtension: data.forwardingExtension, callback: data.callback,
   });
   if (!result.success || result.data.did !== did || result.data.version < 1) throw new DidMappingError(503, "A saved phone mapping is invalid. Contact support.");
   return result.data;
@@ -25,6 +25,8 @@ export type VoiceDidRoute = { state: "unmapped" } | { state: "disabled" } | {
   binding: VoiceBusiness;
   business: FirebaseFirestore.DocumentData;
   forwardingExtension?: string;
+  callback?: StoredDidMapping["callback"];
+  autoCallbackSince?: number;
   recordingPeriodVersion?: number;
 };
 
@@ -38,7 +40,8 @@ export async function lookupVoiceDidRoute(did: string): Promise<VoiceDidRoute> {
   const business = (await adminDb.collection("businesses").doc(stored.businessId).get()).data();
   if (!business || !isTenantAccessAllowed(business.status, business.isActive)) return { state: "disabled" };
   return { state: "active", binding: { did, businessId: stored.businessId }, business,
-    forwardingExtension: stored.forwardingExtension ?? undefined,
+    forwardingExtension: stored.forwardingExtension ?? undefined, callback: stored.callback,
+    autoCallbackSince: data?.autoCallbackSince?.toMillis?.(),
     recordingPeriodVersion: typeof data?.recordingPeriodVersion === "number" ? data.recordingPeriodVersion : undefined };
 }
 
@@ -109,6 +112,12 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
     const forwardingExtension = input.forwardingExtension === undefined && current?.businessId === input.businessId
       ? current.forwardingExtension ?? null
       : input.forwardingExtension ?? null;
+    const callback = input.callback === undefined && current?.businessId === input.businessId
+      ? current.callback ?? null : input.callback ?? null;
+    const autoCallbackSince = input.isActive && callback?.automatic
+      ? (current?.isActive && current.businessId === input.businessId && current.callback?.automatic
+        ? existingData?.autoCallbackSince : null) ?? FieldValue.serverTimestamp()
+      : null;
     const previousPeriod = existingData?.recordingPeriodVersion;
     const sameAssignment = input.isActive && current?.isActive && current.businessId === input.businessId;
     const recordingPeriodVersion = input.isActive ? (sameAssignment && previousPeriod ? previousPeriod : version) : null;
@@ -122,10 +131,10 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
       });
     }
     tx.set(ref, { did: input.did, businessId: input.businessId, isActive: input.isActive, version,
-      forwardingExtension, recordingPeriodVersion,
+      forwardingExtension, callback, autoCallbackSince, recordingPeriodVersion,
       createdAt: existing.data()?.createdAt ?? FieldValue.serverTimestamp(),
       createdBy: existing.data()?.createdBy ?? actor.uid, updatedBy: actor.uid, updatedAt: FieldValue.serverTimestamp() });
-    return { version, forwardingExtension, previousBusinessId: current?.businessId ?? null };
+    return { version, forwardingExtension, callback, previousBusinessId: current?.businessId ?? null };
   });
   clearVoiceDidRouteCache(input.did);
   await logAuditEvent({ businessId: input.businessId, category: "integration", action: "voice.did_mapping.updated",
@@ -134,5 +143,5 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
     metadata: { did: input.did, previousBusinessId: outcome.previousBusinessId, isActive: input.isActive,
       version: outcome.version, forwardingExtension: outcome.forwardingExtension } });
   return { did: input.did, businessId: input.businessId, isActive: input.isActive,
-    version: outcome.version, forwardingExtension: outcome.forwardingExtension };
+    version: outcome.version, forwardingExtension: outcome.forwardingExtension, callback: outcome.callback };
 }

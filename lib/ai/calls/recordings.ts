@@ -30,6 +30,7 @@ type Config = NonNullable<ReturnType<typeof recordingConfig>>;
 const callbackClaim = z.object({
   businessId: z.string(), callerKey: z.string().regex(/^\d{6,32}$/),
   startedAt: z.number().int().nonnegative(), expiresAt: z.number(),
+  did: z.string().regex(/^\d{6,15}$/), number: z.string().max(32),
 });
 
 function signCallback(config: Config, payload: string) {
@@ -161,7 +162,7 @@ const cdr = z.object({
   call_from_number: z.unknown().optional(),
 });
 
-export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number; readThrough?: number } = {}, view: "recordings" | "missed" = "recordings", includeCustomerNames = true) {
+export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number; readThrough?: number } = {}, view: "recordings" | "missed" | "answered" = "recordings", includeCustomerNames = true) {
   const cutoff = Date.now() - 30 * 86400_000;
   const snapshots = await adminDb.collection(DID_RECORDING_PERIODS_COLLECTION).where("businessId", "==", businessId).get();
   const periods = snapshots.docs.flatMap(doc => {
@@ -186,7 +187,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     start_time: String(Math.floor(searchStart / 1000)), sort_by: "time", order_by: "desc",
     ...(range.end !== undefined && { end_time: String(Math.ceil(range.end / 1000) - 1) }),
     page: String(page), page_size: String(pageSize),
-    ...(view === "missed" && { status: "NO ANSWER" }),
+    ...(view !== "recordings" && { status: view === "missed" ? "NO ANSWER" : "ANSWERED" }),
   }));
   if (!Array.isArray(data.data) && !(data.data == null && data.total_number === 0)) throw new Error("Invalid PBX call list.");
   const seen = new Set<string>();
@@ -195,7 +196,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     if (!parsed.success) return [];
     const call = parsed.data;
     const file = recordingFile.safeParse(call.record_file);
-    if (view === "missed" ? call.disposition !== "NO ANSWER" : !file.success) return [];
+    if (view === "missed" ? call.disposition !== "NO ANSWER" : view === "answered" ? call.disposition !== "ANSWERED" : !file.success) return [];
     const startedAt = call.timestamp * 1000;
     if (range.readThrough !== undefined && startedAt + call.duration * 1000 <= range.readThrough) return [];
     // PBX timestamps are only second-precision. Exclude calls touching an ownership boundary.
@@ -233,7 +234,8 @@ export async function listCallRecordings(config: Config, businessId: string, pag
       let callbackGrant: string | null = null;
       if (view === "missed" && includeCustomerNames && callerKey) {
         const payload = Buffer.from(JSON.stringify({
-          businessId, callerKey, startedAt: recording.startedAt, expiresAt: Date.now() + 60 * 60_000,
+          businessId, callerKey, did: recording.did, number: recording.callerNumber,
+          startedAt: recording.startedAt, expiresAt: Date.now() + 60 * 60_000,
         })).toString("base64url");
         callbackGrant = payload + "." + signCallback(config, payload).toString("base64url");
       }
