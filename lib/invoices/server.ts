@@ -1,6 +1,8 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { createHash } from "node:crypto";
+import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "@/lib/ai/calls/invoice-call-history";
 import {
   completeBookingForInvoicedQuotation,
   type InvoicedBookingAudit,
@@ -304,6 +306,7 @@ export function mapInvoiceDoc(id: string, data: Record<string, unknown>): Invoic
     cancelledAt: toMillis(data.cancelledAt),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
+    overdueReminderCustomerSentAt: toMillis(data.overdueReminderCustomerSentAt),
   };
 }
 
@@ -397,18 +400,45 @@ export async function claimOverdueInvoiceReminder(input: {
   });
 }
 
+export async function recordOverdueCustomerReminderSent(businessId: string, invoiceId: string, reminderDate: string): Promise<void> {
+  const ref = adminDb.collection(INVOICE_COLLECTION).doc(invoiceId);
+  const id = createHash("sha256").update(JSON.stringify(["overdue-email", businessId, invoiceId, reminderDate])).digest("hex");
+  const callRef = adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(id);
+  await adminDb.runTransaction(async transaction => {
+    const invoice = await transaction.get(ref);
+    if (invoice.get("businessId") !== businessId) return;
+    const queueEnabled = process.env.AI_SOPHIE_CALLBACK_ENABLED === "true";
+    const attempt = queueEnabled ? await transaction.get(callRef) : null;
+    transaction.update(ref, { overdueReminderCustomerSentAt: FieldValue.serverTimestamp(),
+      ...(queueEnabled && { overdueReminderCallId: id }) });
+    if (attempt && !attempt.exists) {
+      transaction.create(callRef, { businessId, invoiceId, source: "overdue_email", status: "QUEUED",
+        queuedAt: Date.now(), attemptedAt: Date.now() });
+    }
+  });
+}
+
 async function generateInvoicePdfBytes(
   invoice: InvoiceDetail,
   businessId: string,
 ): Promise<Buffer | null> {
   const profile = await getBusinessProfile(businessId);
+  return (await prepareInvoiceEmailDocument(invoice, profile)).pdfBytes;
+}
+
+/** Use the same payment options in the email and the attached invoice. */
+export async function prepareInvoiceEmailDocument(
+  invoice: InvoiceDetail,
+  profile: Awaited<ReturnType<typeof getBusinessProfile>>,
+) {
   const connected = Boolean(
     profile?.stripeConnectAccountId && profile?.stripeConnectOnboarded,
   );
-  const payUrl = await resolveInvoicePayUrl(businessId, invoice, connected);
+  const payUrl = await resolveInvoicePayUrl(invoice.businessId, invoice, connected);
+  const fileName = `${invoice.invoiceCode.trim() || "invoice"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-");
   try {
     const { generateInvoicePdf } = await import("@/lib/invoices/pdf");
-    return await generateInvoicePdf(invoice, {
+    const pdfBytes = await generateInvoicePdf(invoice, {
       businessName: profile?.businessName ?? null,
       logoUrl: profile?.logoUrl ?? null,
       businessAddress: profile?.businessAddress ?? null,
@@ -420,9 +450,10 @@ async function generateInvoicePdfBytes(
       payUrl,
       bankTransferDetails: profile?.bankTransferDetails ?? null,
     });
+    return { pdfBytes, fileName, payUrl };
   } catch (error) {
     console.error("[invoice] PDF generation failed:", error);
-    return null;
+    return { pdfBytes: null, fileName, payUrl };
   }
 }
 

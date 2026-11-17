@@ -47,7 +47,7 @@ export function YeastarSoftphone() {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerMatch | null>(null);
   const closeCustomer = useCallback(() => setSelectedCustomer(null), []);
   const [open, setOpen] = useState(false);
-  const [sophieOpen, setSophieOpen] = useState(false);
+  const [sophiePanel, setSophiePanel] = useState<"closed" | "open" | "minimized">("closed");
   const sophieButton = useRef<HTMLButtonElement>(null);
   const [phoneState, setPhoneState] = useState<PhoneState>("disconnected");
   const [error, setError] = useState("");
@@ -325,7 +325,7 @@ export function YeastarSoftphone() {
       const detail = (event as CustomEvent<{ number: string; businessId: string; uid: string }>).detail;
       if (detail?.businessId !== businessId || detail.uid !== user?.uid ||
           typeof detail.number !== "string" || !/^\+?\d{1,15}$/.test(detail.number)) return;
-      setSophieOpen(false);
+      setSophiePanel("closed");
       setOpen(true);
       setError("");
       setDialNumber(detail.number);
@@ -388,15 +388,21 @@ export function YeastarSoftphone() {
   if (authStatus !== "authenticated" || (role !== "business_owner" && role !== "staff")) return null;
 
   function openPhone() {
-    setSophieOpen(false);
+    setSophiePanel("closed");
     setOpen(true);
   }
 
   function closeSophie() {
-    setSophieOpen(false);
+    setSophiePanel("closed");
     sophieButton.current?.focus();
   }
 
+  function minimizeSophie() {
+    setSophiePanel("minimized");
+    sophieButton.current?.focus();
+  }
+
+  const sophieOpen = sophiePanel === "open";
   const renderPhone = (activeCount = 0, liveCallsPanel?: ReactNode) => (
     <div className={`fixed ${drawerInset ? (calls.length === 0 ? "z-[30]" : "z-[90]") : "z-[60]"} w-[min(360px,calc(100vw-2rem))] ${role === "business_owner" ? "bottom-[84px] right-4 sm:bottom-[92px] sm:right-6" : "bottom-4 right-4 sm:bottom-6 sm:right-6"}`}>
       {selectedCustomer ? <CallerCustomerDrawer key={selectedCustomer.uid} customer={selectedCustomer} onClose={closeCustomer} /> : null}
@@ -474,28 +480,34 @@ export function YeastarSoftphone() {
               <button
                 ref={sophieButton}
                 type="button"
-                onClick={() => setSophieOpen((visible) => !visible)}
-                aria-label="Talk to Sophie"
+                onClick={() => setSophiePanel(current => current === "open" ? "minimized" : "open")}
+                aria-label={sophiePanel === "minimized" ? "Restore Sophie" : "Talk to Sophie"}
                 aria-expanded={sophieOpen}
-                aria-controls={sophieOpen ? "sophie-voice-panel" : undefined}
-                title="Talk to Sophie"
+                aria-controls={sophiePanel !== "closed" ? "sophie-voice-panel" : undefined}
+                title={sophiePanel === "minimized" ? "Restore Sophie" : "Talk to Sophie"}
                 className="relative block h-14 w-14 rounded-full border-2 border-surface shadow-lg transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 <Image src="/sophie-avatar.webp" alt="" width={56} height={56} className="h-full w-full rounded-full object-cover" />
               </button>
-              {sophieOpen ? (
+              {sophiePanel !== "closed" ? (
                 <section
                   id="sophie-voice-panel"
+                  hidden={!sophieOpen}
                   aria-labelledby="sophie-voice-title"
-                  className="absolute bottom-full right-0 mb-3 max-h-[calc(100dvh-14rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-outline-variant bg-surface shadow-xl sm:bottom-0 sm:right-full sm:mb-0 sm:mr-3"
+                  className="absolute bottom-full right-0 mb-3 max-h-[calc(100dvh-14rem)] w-[min(30rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-outline-variant bg-surface shadow-xl sm:bottom-0 sm:right-full sm:mb-0 sm:mr-3 sm:max-h-[calc(100dvh-8rem)] sm:w-[min(30rem,calc(100vw-7rem))]"
                 >
                   <header className="flex items-center justify-between bg-primary px-4 py-3 text-white">
                     <h2 id="sophie-voice-title" className="text-sm font-semibold">Talk to Sophie</h2>
-                    <button type="button" onClick={closeSophie} aria-label="Close Sophie" className="rounded-lg p-1 hover:bg-white/15">
-                      <X className="h-5 w-5" />
-                    </button>
+                    <div className="flex gap-1">
+                      <button type="button" onClick={minimizeSophie} aria-label="Minimize Sophie" title="Minimize" className="rounded-lg p-1 hover:bg-white/15">
+                        <Minus className="h-5 w-5" />
+                      </button>
+                      <button type="button" onClick={closeSophie} aria-label="Close Sophie" title="Close" className="rounded-lg p-1 hover:bg-white/15">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
                   </header>
-                  <OwnerVoiceSession />
+                  <OwnerVoiceSession key={user.uid + ":" + businessId} />
                 </section>
               ) : null}
                 </div>

@@ -5,7 +5,8 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
 import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
-import { DID_RECORDING_PERIODS_COLLECTION } from "../data/did-mappings";
+import { DID_MAPPINGS_COLLECTION, DID_RECORDING_PERIODS_COLLECTION } from "../data/did-mappings";
+import { CALL_LOGS_COLLECTION } from "../data/call-logs";
 
 const pageSize = 50;
 const recordingFile = z.string().regex(/^[a-zA-Z0-9_.-]{1,240}\.(wav|mp3)$/i);
@@ -26,6 +27,31 @@ export function recordingConfig() {
 }
 
 type Config = NonNullable<ReturnType<typeof recordingConfig>>;
+
+const callbackClaim = z.object({
+  businessId: z.string(), callerKey: z.string().regex(/^\d{6,32}$/),
+  startedAt: z.number().int().nonnegative(), expiresAt: z.number(),
+  did: z.string().regex(/^\d{6,15}$/), number: z.string().max(32),
+});
+
+function signCallback(config: Config, payload: string) {
+  return createHmac("sha256", config.secret).update("trade-callback:" + payload).digest();
+}
+
+export function verifyCallbackGrant(config: Config, businessId: string, grant: string) {
+  if (!/^[\w-]{1,1000}\.[\w-]{43}$/.test(grant)) return null;
+  const [payload, signature] = grant.split(".");
+  const actual = Buffer.from(signature, "base64url");
+  const expected = signCallback(config, payload);
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
+  try {
+    const parsed = callbackClaim.safeParse(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
+    return parsed.success && parsed.data.businessId === businessId && parsed.data.expiresAt > Date.now()
+      ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 function sign(config: Config, payload: string) {
   return createHmac("sha256", config.secret).update("trade-recording:" + payload).digest();
@@ -137,7 +163,7 @@ const cdr = z.object({
   call_from_number: z.unknown().optional(),
 });
 
-export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number; readThrough?: number } = {}, view: "recordings" | "missed" = "recordings", includeCustomerNames = true) {
+export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number; readThrough?: number } = {}, view: "recordings" | "missed" | "answered" = "recordings", includeCustomerNames = true) {
   const cutoff = Date.now() - 30 * 86400_000;
   const snapshots = await adminDb.collection(DID_RECORDING_PERIODS_COLLECTION).where("businessId", "==", businessId).get();
   const periods = snapshots.docs.flatMap(doc => {
@@ -162,7 +188,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     start_time: String(Math.floor(searchStart / 1000)), sort_by: "time", order_by: "desc",
     ...(range.end !== undefined && { end_time: String(Math.ceil(range.end / 1000) - 1) }),
     page: String(page), page_size: String(pageSize),
-    ...(view === "missed" && { status: "NO ANSWER" }),
+    ...(view !== "recordings" && { status: view === "missed" ? "NO ANSWER" : "ANSWERED" }),
   }));
   if (!Array.isArray(data.data) && !(data.data == null && data.total_number === 0)) throw new Error("Invalid PBX call list.");
   const seen = new Set<string>();
@@ -171,7 +197,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     if (!parsed.success) return [];
     const call = parsed.data;
     const file = recordingFile.safeParse(call.record_file);
-    if (view === "missed" ? call.disposition !== "NO ANSWER" : !file.success) return [];
+    if (view === "missed" ? call.disposition !== "NO ANSWER" : view === "answered" ? call.disposition !== "ANSWERED" : !file.success) return [];
     const startedAt = call.timestamp * 1000;
     if (range.readThrough !== undefined && startedAt + call.duration * 1000 <= range.readThrough) return [];
     // PBX timestamps are only second-precision. Exclude calls touching an ownership boundary.
@@ -183,7 +209,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     const callerNumber = /^\+?[0-9][0-9 ().-]{0,31}$/.test(number) && /\d$/.test(number) ? number : null;
     const rowKey = view === "recordings" && file.success
       ? createHash("sha256").update(JSON.stringify([call.uid, file.data])).digest("hex")
-      : call.uid;
+      : createHash("sha256").update(JSON.stringify([call.uid, call.did_number, startedAt, callerNumber])).digest("hex");
     if (seen.has(rowKey)) return [];
     seen.add(rowKey);
     return [{ id: call.uid, rowKey, did: call.did_number, startedAt, duration: call.duration, callerNumber,
@@ -204,10 +230,85 @@ export async function listCallRecordings(config: Config, businessId: string, pag
     }
   }
   return {
-    recordings: recordings.map((recording, index) => ({
-      ...recording, customerName: customerNames.get(callerKeys[index] ?? "") ?? null,
-    })),
+    recordings: recordings.map((recording, index) => {
+      const callerKey = callerKeys[index];
+      let callbackGrant: string | null = null;
+      if (view === "missed" && includeCustomerNames && callerKey) {
+        const payload = Buffer.from(JSON.stringify({
+          businessId, callerKey, did: recording.did, number: recording.callerNumber,
+          startedAt: recording.startedAt, expiresAt: Date.now() + 60 * 60_000,
+        })).toString("base64url");
+        callbackGrant = payload + "." + signCallback(config, payload).toString("base64url");
+      }
+      return { ...recording, callerKey, callbackGrant, customerName: customerNames.get(callerKey ?? "") ?? null };
+    }),
     hasMore: page * pageSize < Number(data.total_number), hasRecordingHistory: true,
+  };
+}
+
+export async function listSophieOutboundRecordings(config: Config, businessId: string, page: number,
+  range: { start?: number; end?: number }) {
+  const start = Math.max(Date.now() - 30 * 86400_000, range.start ?? 0);
+  const end = range.end ?? Date.now();
+  const limit = 10;
+  const [calls, mappings] = await Promise.all([
+    adminDb.collection(CALL_LOGS_COLLECTION).where("businessId", "==", businessId)
+      .where("startedAt", ">=", Timestamp.fromMillis(start)).where("startedAt", "<", Timestamp.fromMillis(end))
+      .orderBy("startedAt", "desc").select("did", "startedAt", "endedAt", "callerNumber", "callbackAttemptId", "answered").get(),
+    adminDb.collection(DID_MAPPINGS_COLLECTION).where("isActive", "==", true)
+      .select("businessId", "callback").get(),
+  ]);
+  const ownRoutes = new Map(mappings.docs.filter(doc => doc.get("businessId") === businessId).map(doc => [doc.id, doc]));
+  const otherCallerIds = new Set(mappings.docs.filter(doc => doc.get("businessId") !== businessId)
+    .map(doc => phoneComparisonKey(doc.get("callback.callerId") ?? doc.id)));
+  const outbound = calls.docs.filter(doc => doc.get("answered") === true &&
+    /^[a-f0-9]{64}$/.test(doc.get("callbackAttemptId") ?? "") && !!phoneComparisonKey(doc.get("callerNumber")));
+  const from = (page - 1) * limit;
+  const candidates = outbound.slice(from, from + limit);
+  const matches = candidates.length ? await withToken(config, token => Promise.all(candidates.map(async doc => {
+    const did = doc.get("did");
+    const route = ownRoutes.get(did);
+    const callerId = phoneComparisonKey(route?.get("callback.callerId"));
+    const callerNumber = doc.get("callerNumber") as string;
+    const destination = phoneComparisonKey(callerNumber);
+    if (!route || !callerId || otherCallerIds.has(callerId)) return null;
+    const startedAt = doc.get("startedAt") as Timestamp;
+    const endedAt = doc.get("endedAt") as Timestamp | undefined;
+    if (!endedAt || endedAt.toMillis() < startedAt.toMillis()) return null;
+    const duration = (endedAt.toMillis() - startedAt.toMillis()) / 1000;
+    const prefix = String(route.get("callback.dialPrefix") ?? "").replace(/\D/g, "");
+    const result = await pbxQuery(config, "cdr/search", token, {
+      start_time: String(startedAt.seconds - 35), end_time: String(startedAt.seconds + 3),
+      status: "ANSWERED", page: "1", page_size: String(pageSize),
+    });
+    if (!Array.isArray(result.data) || Number(result.total_number) > pageSize) return null;
+    const cdrRows = result.data as Record<string, unknown>[];
+    const eligible = cdrRows.filter(row => {
+      const number = typeof row.call_to_number === "string" ? row.call_to_number.replace(/\D/g, "") : "";
+      const sameDestination = phoneComparisonKey(number) === destination ||
+        (!!prefix && number.startsWith(prefix) && phoneComparisonKey(number.slice(prefix.length)) === destination);
+      return row.call_type === "Outbound" && row.disposition === "ANSWERED" && sameDestination &&
+        typeof row.dst_trunk === "string" && config.trunks.includes(row.dst_trunk) &&
+        typeof row.dod_number === "string" && phoneComparisonKey(row.dod_number) === callerId &&
+        typeof row.timestamp === "number" && typeof row.ring_duration === "number" &&
+        Math.abs(row.timestamp + row.ring_duration - startedAt.seconds) <= 2 &&
+        typeof row.talk_duration === "number" && Math.abs(row.talk_duration - duration) <= 3;
+    });
+    if (eligible.length !== 1) return null;
+    const file = recordingFile.safeParse(eligible[0].record_file);
+    if (!file.success || cdrRows.some(row => row.call_type === "Inbound" && row.record_file === file.data)) return null;
+    return { id: doc.id, rowKey: doc.id, did, startedAt: startedAt.toMillis(), duration: Math.round(duration),
+      callerNumber, customerName: null, grant: issueGrant(config, businessId, file.data), file: file.data };
+  }))) : [];
+  return {
+    recordings: matches.flatMap((row, index) => {
+      if (!row || matches.some((other, otherIndex) => otherIndex !== index && other?.file === row.file)) return [];
+      const { file, ...safe } = row;
+      return file ? [safe] : [];
+    }),
+    hasMore: from + limit < outbound.length && page < 200,
+    hasRecordingHistory: true,
+    recordingDirection: "outbound" as const,
   };
 }
 

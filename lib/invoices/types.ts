@@ -49,6 +49,8 @@ export type InvoiceDetail = {
   cancelledAt: number | null;
   createdAt: number | null;
   updatedAt: number | null;
+  /** Last overdue reminder accepted by the mail provider for the customer. */
+  overdueReminderCustomerSentAt?: number | null;
 };
 
 export type CreateInvoiceInput = {

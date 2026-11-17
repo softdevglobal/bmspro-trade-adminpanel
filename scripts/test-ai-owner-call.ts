@@ -57,7 +57,9 @@ after(() => {
 });
 
 const BRIEFING_TOOLS = [
-  "get_daily_summary", "get_day_activity", "get_staff_day_report",
+  "get_customer_call_history", "lookup_customer_jobs", "suggest_scheduling", "list_quote_follow_ups",
+  "get_sophie_call_summaries", "get_daily_summary", "get_day_activity", "get_staff_day_report",
+  "list_invoices", "list_overdue_invoices", "list_missed_calls",
   "list_jobs_awaiting_scheduling", "get_staff_working_today",
 ];
 const secret = "trade-bridge-test-secret-0000000000000000";
@@ -249,8 +251,8 @@ test("voice draft tools are offered only with their own flag, within the bridge 
     const session = await startSession(t);
     const names = session.tools.map(tool => tool.name);
     assert.deepEqual(names, [...BRIEFING_TOOLS, "search_business_knowledge", ...DRAFT_TOOLS]);
-    // The bridge allows at most its 9 known names (bmspro-voice-bridge/src/server/owner-voice.mjs).
-    assert.ok(names.length <= 9);
+    // The bridge allows at most its 17 known names (bmspro-voice-bridge/src/server/owner-voice.mjs).
+    assert.ok(names.length <= 17);
     assert.ok(!names.some(name => /publish|delete|edit/.test(name)), "no publish, edit or delete tool");
     const save = session.tools.find(tool => tool.name === "save_knowledge_draft")!;
     assert.deepEqual(save.parameters.required, ["confirmed"]);

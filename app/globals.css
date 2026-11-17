@@ -175,6 +175,21 @@ body {
   }
 }
 
+.sophie-speaking-bar {
+  animation: sophie-speaking 700ms ease-in-out infinite alternate;
+}
+
+@keyframes sophie-speaking {
+  from { transform: scaleY(0.3); }
+  to { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sophie-speaking-bar {
+    animation: none;
+  }
+}
+
 @keyframes phone-ring {
   0%, 100% { transform: rotate(0deg); }
   20%, 60% { transform: rotate(-18deg); }

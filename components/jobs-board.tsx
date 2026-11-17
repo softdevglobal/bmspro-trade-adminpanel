@@ -1460,8 +1460,10 @@ function BookingPreviewContent({
 
 export function JobsBoard({
   initialJobId = null,
+  initialCallRequestId = null,
 }: {
   initialJobId?: string | null;
+  initialCallRequestId?: string | null;
 }) {
   const { status: authStatus, user, role, businessId } = useAuth();
   const profile = useBusinessProfile();
@@ -1474,7 +1476,7 @@ export function JobsBoard({
     [requests],
   );
   const [selectedId, setSelectedId] = useState<string | null>(initialJobId);
-  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
+  const [pendingJobId, setPendingJobId] = useState<string | null>(initialCallRequestId);
   const [callJobsFeed, setCallJobsFeed] = useState<{
     businessId: string;
     requests: InspectionRequestDetail[];

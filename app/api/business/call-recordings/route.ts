@@ -1,4 +1,5 @@
-import { fetchRecordingAudio, listCallRecordings, RecordingAccessError, RecordingTokenLimitError, recordingConfig, recordingFileForGrant } from "@/lib/ai/calls/recordings";
+import { callbackState, resolveCallback } from "@/lib/ai/calls/callback-state";
+import { fetchRecordingAudio, listCallRecordings, listSophieOutboundRecordings, RecordingAccessError, RecordingTokenLimitError, recordingConfig, recordingFileForGrant, verifyCallbackGrant } from "@/lib/ai/calls/recordings";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { zonedDateTimeToUtcMs } from "@/lib/platform/zoned-datetime";
@@ -51,14 +52,37 @@ export async function GET(request: Request) {
     const start = from ? zonedDateTimeToUtcMs(from, "00:00") : null;
     const endMinute = to ? zonedDateTimeToUtcMs(to, "23:59") : null;
     if ((from && start === null) || (to && endMinute === null)) return json({ error: "Enter valid start and end dates." }, 400);
+    if (view === "recordings" && params.get("direction") === "outbound") {
+      return json(await listSophieOutboundRecordings(access.config, access.businessId, page, {
+        start: start ?? undefined, end: endMinute === null ? undefined : endMinute + 60_000,
+      }));
+    }
     const readThrough = summary
       ? (await readState(access.businessId, access.uid).get()).data()?.readThrough?.toMillis()
       : undefined;
     const result = await listCallRecordings(access.config, access.businessId, page, {
       start: start ?? undefined, end: endMinute === null ? undefined : endMinute + 60_000, readThrough,
     }, view, !summary);
-    if (summary) return json({ hasMissedCalls: result.recordings.length > 0 });
-    return json({ ...result, hasMore: result.hasMore && page < 200 });
+    if (summary) {
+      const unread = new Set(result.recordings.map(row => row.rowKey));
+      let more = result.hasMore;
+      for (let next = page + 1; more && next <= Math.min(page + 2, 200); next++) {
+        const remaining = await listCallRecordings(access.config, access.businessId, next, {
+          start: start ?? undefined, end: endMinute === null ? undefined : endMinute + 60_000, readThrough,
+        }, "missed", false);
+        for (const row of remaining.recordings) unread.add(row.rowKey);
+        more = remaining.hasMore;
+      }
+      return json({ hasMissedCalls: unread.size > 0, unreadCount: unread.size, unreadCountCapped: more });
+    }
+    const callerKeys = view === "missed" ? [...new Set(result.recordings.flatMap(row => row.callerKey ? [row.callerKey] : []))] : [];
+    const states = callerKeys.length ? await adminDb.getAll(...callerKeys.map(key => callbackState(access.businessId, key))) : [];
+    const completed = new Map(callerKeys.map((key, index) => [key, states[index].get("through") as number | undefined]));
+    const recordings = result.recordings.map(row => ({
+      ...row, callbackComplete: row.startedAt <= (completed.get(row.callerKey ?? "") ?? -1),
+    }));
+    return json({ ...result, recordings, hasMore: result.hasMore && page < 200,
+      ...(view === "recordings" && { recordingDirection: "inbound" }) });
   } catch (error) {
     if (error instanceof RecordingTokenLimitError) return json({ error: "Yeastar has reached its API token limit. Try again after an existing token expires." }, 503);
     if (error instanceof RecordingAccessError) return json({ error: "Yeastar denied access to call records. Ask your administrator to check the recording API permissions." }, 502);
@@ -72,6 +96,14 @@ export async function PATCH(request: Request) {
     if (!auth.ok) return json({ error: auth.error }, auth.status);
     if (!await consumeRateLimits([{ key: "trade-missed-calls-read:" + auth.businessId + ":" + auth.uid, limit: 30, windowMs: 60_000 }])) {
       return json({ error: "Too many updates. Try again in a minute." }, 429);
+    }
+    const grant = request.headers.get("x-callback-grant");
+    if (grant !== null) {
+      const config = recordingConfig();
+      const claim = config && verifyCallbackGrant(config, auth.businessId, grant);
+      if (!claim) return json({ error: "Callback record unavailable. Refresh and try again." }, 404);
+      await resolveCallback(auth.businessId, claim.callerKey, claim.startedAt);
+      return json({ ok: true });
     }
     await readState(auth.businessId, auth.uid).set({ readThrough: FieldValue.serverTimestamp() }, { merge: true });
     return json({ ok: true });
