@@ -6,6 +6,7 @@
 
 The Trade call-center API works end to end through Command Center. The agent logged in once to Command Center and created **10 bookings for PD Plumbing**. The same session then confirmed, rescheduled and cancelled some of them, flagged customer notifications, logged calls and read the chat inboxes. Every security check held.
 
+
 | Run | Checks | Passed | Notes |
 |-----|--------|--------|-------|
 | Main run | 105 | 99 | All 6 non-passes were explained (section 7): 4 were test data (a staff member's day off), 1 was a flawed tamper test, 1 was the right denial with a different status code |
