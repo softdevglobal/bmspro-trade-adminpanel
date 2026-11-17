@@ -5,7 +5,8 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
 import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
-import { DID_RECORDING_PERIODS_COLLECTION } from "../data/did-mappings";
+import { DID_MAPPINGS_COLLECTION, DID_RECORDING_PERIODS_COLLECTION } from "../data/did-mappings";
+import { CALL_LOGS_COLLECTION } from "../data/call-logs";
 
 const pageSize = 50;
 const recordingFile = z.string().regex(/^[a-zA-Z0-9_.-]{1,240}\.(wav|mp3)$/i);
@@ -242,6 +243,72 @@ export async function listCallRecordings(config: Config, businessId: string, pag
       return { ...recording, callerKey, callbackGrant, customerName: customerNames.get(callerKey ?? "") ?? null };
     }),
     hasMore: page * pageSize < Number(data.total_number), hasRecordingHistory: true,
+  };
+}
+
+export async function listSophieOutboundRecordings(config: Config, businessId: string, page: number,
+  range: { start?: number; end?: number }) {
+  const start = Math.max(Date.now() - 30 * 86400_000, range.start ?? 0);
+  const end = range.end ?? Date.now();
+  const limit = 10;
+  const [calls, mappings] = await Promise.all([
+    adminDb.collection(CALL_LOGS_COLLECTION).where("businessId", "==", businessId)
+      .where("startedAt", ">=", Timestamp.fromMillis(start)).where("startedAt", "<", Timestamp.fromMillis(end))
+      .orderBy("startedAt", "desc").select("did", "startedAt", "endedAt", "callerNumber", "callbackAttemptId", "answered").get(),
+    adminDb.collection(DID_MAPPINGS_COLLECTION).where("isActive", "==", true)
+      .select("businessId", "callback").get(),
+  ]);
+  const ownRoutes = new Map(mappings.docs.filter(doc => doc.get("businessId") === businessId).map(doc => [doc.id, doc]));
+  const otherCallerIds = new Set(mappings.docs.filter(doc => doc.get("businessId") !== businessId)
+    .map(doc => phoneComparisonKey(doc.get("callback.callerId") ?? doc.id)));
+  const outbound = calls.docs.filter(doc => doc.get("answered") === true &&
+    /^[a-f0-9]{64}$/.test(doc.get("callbackAttemptId") ?? "") && !!phoneComparisonKey(doc.get("callerNumber")));
+  const from = (page - 1) * limit;
+  const candidates = outbound.slice(from, from + limit);
+  const matches = candidates.length ? await withToken(config, token => Promise.all(candidates.map(async doc => {
+    const did = doc.get("did");
+    const route = ownRoutes.get(did);
+    const callerId = phoneComparisonKey(route?.get("callback.callerId"));
+    const callerNumber = doc.get("callerNumber") as string;
+    const destination = phoneComparisonKey(callerNumber);
+    if (!route || !callerId || otherCallerIds.has(callerId)) return null;
+    const startedAt = doc.get("startedAt") as Timestamp;
+    const endedAt = doc.get("endedAt") as Timestamp | undefined;
+    if (!endedAt || endedAt.toMillis() < startedAt.toMillis()) return null;
+    const duration = (endedAt.toMillis() - startedAt.toMillis()) / 1000;
+    const prefix = String(route.get("callback.dialPrefix") ?? "").replace(/\D/g, "");
+    const result = await pbxQuery(config, "cdr/search", token, {
+      start_time: String(startedAt.seconds - 35), end_time: String(startedAt.seconds + 3),
+      status: "ANSWERED", page: "1", page_size: String(pageSize),
+    });
+    if (!Array.isArray(result.data) || Number(result.total_number) > pageSize) return null;
+    const cdrRows = result.data as Record<string, unknown>[];
+    const eligible = cdrRows.filter(row => {
+      const number = typeof row.call_to_number === "string" ? row.call_to_number.replace(/\D/g, "") : "";
+      const sameDestination = phoneComparisonKey(number) === destination ||
+        (!!prefix && number.startsWith(prefix) && phoneComparisonKey(number.slice(prefix.length)) === destination);
+      return row.call_type === "Outbound" && row.disposition === "ANSWERED" && sameDestination &&
+        typeof row.dst_trunk === "string" && config.trunks.includes(row.dst_trunk) &&
+        typeof row.dod_number === "string" && phoneComparisonKey(row.dod_number) === callerId &&
+        typeof row.timestamp === "number" && typeof row.ring_duration === "number" &&
+        Math.abs(row.timestamp + row.ring_duration - startedAt.seconds) <= 2 &&
+        typeof row.talk_duration === "number" && Math.abs(row.talk_duration - duration) <= 3;
+    });
+    if (eligible.length !== 1) return null;
+    const file = recordingFile.safeParse(eligible[0].record_file);
+    if (!file.success || cdrRows.some(row => row.call_type === "Inbound" && row.record_file === file.data)) return null;
+    return { id: doc.id, rowKey: doc.id, did, startedAt: startedAt.toMillis(), duration: Math.round(duration),
+      callerNumber, customerName: null, grant: issueGrant(config, businessId, file.data), file: file.data };
+  }))) : [];
+  return {
+    recordings: matches.flatMap((row, index) => {
+      if (!row || matches.some((other, otherIndex) => otherIndex !== index && other?.file === row.file)) return [];
+      const { file, ...safe } = row;
+      return file ? [safe] : [];
+    }),
+    hasMore: from + limit < outbound.length && page < 200,
+    hasRecordingHistory: true,
+    recordingDirection: "outbound" as const,
   };
 }
 

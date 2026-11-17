@@ -32,9 +32,10 @@ export async function notifyOverdueInvoice({ businessId }: Pick<BusinessMemberAu
     }
   }
   const now = new Date();
+  const reminderDate = platformTodayIso(now, profile?.timezone);
   const claim = await claimOverdueInvoiceReminder({
     businessId, invoiceId, ownerEmail, now,
-    timeZone: profile?.timezone, date: platformTodayIso(now, profile?.timezone),
+    timeZone: profile?.timezone, date: reminderDate,
   });
   if (!claim) return { status: "NOT_OVERDUE_OR_NOT_FOUND" };
 
@@ -82,7 +83,7 @@ export async function notifyOverdueInvoice({ businessId }: Pick<BusinessMemberAu
         }),
       });
       if (sent && isCustomer) {
-        await recordOverdueCustomerReminderSent(businessId, invoiceId).catch(() => {
+        await recordOverdueCustomerReminderSent(businessId, invoiceId, reminderDate).catch(() => {
           console.error("[overdue-invoice] Could not record sent reminder", { invoiceId });
         });
       }

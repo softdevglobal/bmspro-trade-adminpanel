@@ -4,6 +4,8 @@ import { auth } from "@/lib/firebase/client";
 import type { CallLogDetail, CallLogSummary, CallOutcome } from "@/lib/ai/data/call-logs";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useBusinessProfile } from "@/lib/business/use-business-profile";
+import { formatInPlatformTimeZone, resolvePlatformTimeZone } from "@/lib/platform/timezone";
 
 type LinkedCallDetail = CallLogDetail & { links?: { href: string; label: string }[] };
 
@@ -56,16 +58,15 @@ const duration = (ms: number) => {
   const seconds = Math.round(ms / 1000);
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 };
-const when = (ms: number | null) => ms === null ? "—" : new Date(ms).toLocaleString(undefined, {
-  weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
-});
 const offset = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 
-export function AiCallsBoard() {
+export function AiCallsBoard({ initialCallId }: { initialCallId?: string } = {}) {
+  const profile = useBusinessProfile();
+  const timeZone = resolvePlatformTimeZone(profile?.timezone);
   const [calls, setCalls] = useState<CallLogSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialCallId ?? null);
   const [detail, setDetail] = useState<LinkedCallDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -79,6 +80,18 @@ export function AiCallsBoard() {
     void fetchCalls().then(result => { if (!cancelled) apply(result); });
     return () => { cancelled = true; };
   }, [apply]);
+
+  useEffect(() => {
+    if (!initialCallId) return;
+    const controller = new AbortController();
+    void authFetch(`/api/ai/calls/${initialCallId}`, { signal: controller.signal })
+      .then(result => { if (!controller.signal.aborted) setDetail(result.call as LinkedCallDetail); })
+      .catch(error => { if (!controller.signal.aborted) setError(error.message); });
+    return () => controller.abort();
+  }, [initialCallId]);
+
+  const visibleCalls = detail?.id === initialCallId && detail && !calls.some(call => call.id === detail.id)
+    ? [detail, ...calls] : calls;
 
   async function open(call: CallLogSummary) {
     if (openId === call.id) { setOpenId(null); setDetail(null); return; }
@@ -124,11 +137,11 @@ export function AiCallsBoard() {
       {error && <p className="rounded-lg bg-error-container/60 px-3 py-2 font-body text-[13px] text-error">{error}</p>}
 
       <div className={CARD_CLASS}>
-        {calls.length === 0 ? (
+        {visibleCalls.length === 0 ? (
           <p className="px-3 py-8 text-center font-body text-[13px] text-on-surface-variant">No AI calls yet. Calls appear here after they end.</p>
         ) : (
           <ul className="flex flex-col gap-3">
-            {calls.map(call => {
+            {visibleCalls.map(call => {
               const outcome = OUTCOME[call.outcome];
               const isOpen = openId === call.id;
               return (
@@ -137,7 +150,10 @@ export function AiCallsBoard() {
                     <span className="material-symbols-outlined text-primary">{call.answered ? "call" : "call_missed"}</span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-2">
-                        <span className="font-body text-[14px] font-semibold text-on-surface">{when(call.startedAt)}</span>
+                        <span className="font-body text-[14px] font-semibold text-on-surface" title={timeZone}>{call.startedAt === null ? "—" :
+                          formatInPlatformTimeZone(call.startedAt, {
+                            weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+                          }, timeZone)}</span>
                         <span className={`rounded-full px-2 py-0.5 font-body text-[11px] font-semibold ${outcome.className}`}>{outcome.label}</span>
                         {call.knowledgeSearches > 0 && (
                           <span className="rounded-full border border-outline-variant px-2 py-0.5 font-body text-[11px] text-on-surface-variant">

@@ -1,6 +1,8 @@
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
+import { createHash } from "node:crypto";
+import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "@/lib/ai/calls/invoice-call-history";
 import {
   completeBookingForInvoicedQuotation,
   type InvoicedBookingAudit,
@@ -398,12 +400,20 @@ export async function claimOverdueInvoiceReminder(input: {
   });
 }
 
-export async function recordOverdueCustomerReminderSent(businessId: string, invoiceId: string): Promise<void> {
+export async function recordOverdueCustomerReminderSent(businessId: string, invoiceId: string, reminderDate: string): Promise<void> {
   const ref = adminDb.collection(INVOICE_COLLECTION).doc(invoiceId);
+  const id = createHash("sha256").update(JSON.stringify(["overdue-email", businessId, invoiceId, reminderDate])).digest("hex");
+  const callRef = adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(id);
   await adminDb.runTransaction(async transaction => {
     const invoice = await transaction.get(ref);
-    if (invoice.get("businessId") === businessId) {
-      transaction.update(ref, { overdueReminderCustomerSentAt: FieldValue.serverTimestamp() });
+    if (invoice.get("businessId") !== businessId) return;
+    const queueEnabled = process.env.AI_SOPHIE_CALLBACK_ENABLED === "true";
+    const attempt = queueEnabled ? await transaction.get(callRef) : null;
+    transaction.update(ref, { overdueReminderCustomerSentAt: FieldValue.serverTimestamp(),
+      ...(queueEnabled && { overdueReminderCallId: id }) });
+    if (attempt && !attempt.exists) {
+      transaction.create(callRef, { businessId, invoiceId, source: "overdue_email", status: "QUEUED",
+        queuedAt: Date.now(), attemptedAt: Date.now() });
     }
   });
 }

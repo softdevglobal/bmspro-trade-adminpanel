@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { adminDb } from "@/lib/firebase/admin";
 import { DID_MAPPINGS_COLLECTION, lookupVoiceDidRoute } from "@/lib/ai/data/did-mappings";
-import { callbackState, resolveCallback } from "@/lib/ai/calls/callback-state";
+import { callbackResultStatus, callbackState, resolveCallback, saveCallbackAttempt, type CallbackAttempt } from "@/lib/ai/calls/callback-state";
 import { normalizeCallbackMobile } from "@/lib/ai/calls/callback-number";
 import { listCallRecordings, recordingConfig } from "@/lib/ai/calls/recordings";
 import { requestSophieCallback } from "@/lib/ai/calls/request-callback";
@@ -73,7 +73,7 @@ export async function runSophieCallbacks(localTest = false) {
         if (Date.now() - started > 220_000) break;
         const answer = answered.get(callerKey) ?? 0;
         if (answer > row.startedAt) {
-          await resolveCallback(businessId, callerKey, answer);
+          await resolveCallback(businessId, callerKey, answer, "returned_call_answered");
           counts.resolved++;
           continue;
         }
@@ -90,14 +90,14 @@ export async function runSophieCallbacks(localTest = false) {
         const recentAnswer = (await history(businessId, "answered", started, Date.now()))
           .reduce((latest, call) => call.callerKey === callerKey ? Math.max(latest, call.startedAt) : latest, 0);
         if (recentAnswer > row.startedAt) {
-          await resolveCallback(businessId, callerKey, recentAnswer);
+          await resolveCallback(businessId, callerKey, recentAnswer, "returned_call_answered");
           counts.resolved++;
           continue;
         }
         const attempt = await adminDb.runTransaction(async tx => {
           const state = (await tx.get(ref)).data();
           const through = Math.max(answer, state?.through ?? 0);
-          if (row.startedAt <= through || (state?.leaseUntil ?? 0) > Date.now()) return null;
+          if (row.startedAt <= through || Math.max(state?.leaseUntil ?? 0, state?.manualLeaseUntil ?? 0) > Date.now()) return null;
           const sameEpisode = (state?.episode ?? 0) > through;
           const attempts = sameEpisode ? state!.attempts as number : 0;
           if (attempts >= maxAttempts || (sameEpisode && retryDueAt(state!) > Date.now())) return null;
@@ -109,9 +109,14 @@ export async function runSophieCallbacks(localTest = false) {
           return { id, attempts };
         });
         if (!attempt) continue;
+        const entry: CallbackAttempt = { id: attempt.id, did: row.did, missedAt: row.startedAt,
+          attemptedAt: Date.now(), source: "automatic", status: "REQUESTED" };
+        await saveCallbackAttempt(businessId, callerKey, entry);
+        let status: CallbackAttempt["status"] = "UNKNOWN";
         try {
           const response = await requestSophieCallback({ id: attempt.id, did: row.did, businessId, number, automatic: true });
           if (response.status === 429) {
+            status = "DEFERRED";
             await adminDb.runTransaction(async tx => {
               if ((await tx.get(ref)).get("attemptId") === attempt.id) {
                 tx.update(ref, { attempts: attempt.attempts, nextAt: Date.now() + 5 * 60_000, leaseUntil: 0 });
@@ -120,11 +125,14 @@ export async function runSophieCallbacks(localTest = false) {
             continue;
           }
           const result = response.ok ? await response.json() : null;
+          status = response.ok ? callbackResultStatus(result?.status) : response.status < 500 ? "FAILED" : "UNKNOWN";
           counts.dialled++;
-          if (result?.status === "ANSWERED") await resolveCallback(businessId, callerKey, row.startedAt);
+          if (result?.status === "ANSWERED") await resolveCallback(businessId, callerKey, row.startedAt, "sophie_callback_answered");
           else if (result?.status !== "NO_ANSWER") counts.errors++;
         } catch {
           counts.errors++;
+        } finally {
+          await saveCallbackAttempt(businessId, callerKey, { ...entry, status });
         }
       }
     } catch {

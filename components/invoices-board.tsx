@@ -4,6 +4,7 @@ import { CancelConfirmModal } from "@/components/cancel-confirm-modal";
 import { CopyDataModal } from "@/components/copy-data-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DocumentEmailPanel } from "@/components/document-email-panel";
+import { InvoiceCallPanel } from "@/components/invoice-call-panel";
 import { PaymentLinkButton } from "@/components/payment-link-button";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -623,6 +624,8 @@ function InvoicePreviewDrawer({
                   {formatAddressForDisplay(invoice.address)}
                 </p>
               </section>
+              <InvoiceCallPanel key={invoice.id} invoiceId={invoice.id} customer={invoice.customer.fullName}
+                overdue={drawerPaymentDue.isOverdue} timeZone={timeZone} />
 
               <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
                 <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">

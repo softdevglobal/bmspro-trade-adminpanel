@@ -4,6 +4,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { CALL_LOGS_COLLECTION, toCallLogDetail } from "@/lib/ai/data/call-logs";
 import { resolveReportDate } from "@/lib/ai/owner-call/day-activity";
+import { customerCallHistory } from "@/lib/ai/owner-call/customer-call-history";
 import { bookingScheduleDays, mapBookingDoc } from "@/lib/bookings/map-booking-doc";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { parseWorkingHoursFromBusiness } from "@/lib/calendar/working-hours";
@@ -32,6 +33,8 @@ export function ownerOperations(businessId: string, timeZone: string) {
   const owned = (collection: string) => adminDb.collection(collection).where("businessId", "==", businessId);
 
   return {
+    customerCallHistory: (search?: string, offset = 0, date?: string, time?: string) =>
+      customerCallHistory(businessId, timeZone, search, offset, date, time),
     async lookupCustomerJobs(search?: string, offset = 0) {
       const term = normalize(search);
       if (!term) return { status: "SEARCH_REQUIRED" };
@@ -185,7 +188,7 @@ export function ownerOperations(businessId: string, timeZone: string) {
           ...callerTurns.slice(4).slice(-2).map(turn => turn.text),
           ...(callerTurns.length === 0 && call.firstCallerLine ? [call.firstCallerLine] : []),
         ])].map(line => line.slice(0, 240));
-        return [{ startedAt: call.startedAt, durationMs: call.durationMs, outcome: call.outcome,
+        return [{ callId: call.id, date: day, startedAt: call.startedAt, durationMs: call.durationMs, outcome: call.outcome,
           verifiedToolOutcomes: call.outcomes, excerpts, endReason: call.endReason }];
       });
       return { status: "OK", date: day, timeZone, calls, nextOffset: snapshot.size > pageSize ? offset + pageSize : null };

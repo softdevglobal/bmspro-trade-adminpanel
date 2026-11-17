@@ -1,5 +1,5 @@
 import { callbackState, resolveCallback } from "@/lib/ai/calls/callback-state";
-import { fetchRecordingAudio, listCallRecordings, RecordingAccessError, RecordingTokenLimitError, recordingConfig, recordingFileForGrant, verifyCallbackGrant } from "@/lib/ai/calls/recordings";
+import { fetchRecordingAudio, listCallRecordings, listSophieOutboundRecordings, RecordingAccessError, RecordingTokenLimitError, recordingConfig, recordingFileForGrant, verifyCallbackGrant } from "@/lib/ai/calls/recordings";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { zonedDateTimeToUtcMs } from "@/lib/platform/zoned-datetime";
@@ -52,6 +52,11 @@ export async function GET(request: Request) {
     const start = from ? zonedDateTimeToUtcMs(from, "00:00") : null;
     const endMinute = to ? zonedDateTimeToUtcMs(to, "23:59") : null;
     if ((from && start === null) || (to && endMinute === null)) return json({ error: "Enter valid start and end dates." }, 400);
+    if (view === "recordings" && params.get("direction") === "outbound") {
+      return json(await listSophieOutboundRecordings(access.config, access.businessId, page, {
+        start: start ?? undefined, end: endMinute === null ? undefined : endMinute + 60_000,
+      }));
+    }
     const readThrough = summary
       ? (await readState(access.businessId, access.uid).get()).data()?.readThrough?.toMillis()
       : undefined;
@@ -76,7 +81,8 @@ export async function GET(request: Request) {
     const recordings = result.recordings.map(row => ({
       ...row, callbackComplete: row.startedAt <= (completed.get(row.callerKey ?? "") ?? -1),
     }));
-    return json({ ...result, recordings, hasMore: result.hasMore && page < 200 });
+    return json({ ...result, recordings, hasMore: result.hasMore && page < 200,
+      ...(view === "recordings" && { recordingDirection: "inbound" }) });
   } catch (error) {
     if (error instanceof RecordingTokenLimitError) return json({ error: "Yeastar has reached its API token limit. Try again after an existing token expires." }, 503);
     if (error instanceof RecordingAccessError) return json({ error: "Yeastar denied access to call records. Ask your administrator to check the recording API permissions." }, 502);

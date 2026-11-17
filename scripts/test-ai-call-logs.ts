@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { callLogInput, callOutcome, callLogRetentionDays, toCallLogSummary, type CallLogInput } from "../lib/ai/data/call-logs";
+import { callConversationHighlights, callLogInput, callOutcome, callLogRetentionDays, toCallLogSummary, type CallLogInput } from "../lib/ai/data/call-logs";
 
 const valid: CallLogInput = {
   callId: "0a41e31d-0620-47d1-9ef9-c9c60cef73a8",
@@ -27,6 +27,18 @@ test("a bridge call log validates, and business or unknown fields are rejected",
   assert.equal(callLogInput.safeParse({ ...valid, tools: [{ name: "bad name!", status: "OK", durationMs: 1 }] }).success, false);
   assert.equal(callLogInput.safeParse({ ...valid, callerNumber: "+61 412" }).success, false);
   assert.equal(callLogInput.safeParse({ ...valid, transcript: Array(501).fill(valid.transcript[0]) }).success, false);
+});
+
+test("call highlights preserve chronological evidence and stay bounded for long conversations", () => {
+  assert.deepEqual(callConversationHighlights(valid.transcript), valid.transcript);
+  const turns = Array.from({ length: 100 }, (_, atMs) => ({
+    speaker: atMs % 2 === 0 ? "sophie" as const : "caller" as const, atMs, text: "x".repeat(400),
+  }));
+  const highlights = callConversationHighlights(turns);
+  assert.equal(highlights.length, 24);
+  assert.equal(highlights[0].atMs, 0);
+  assert.equal(highlights.at(-1)?.atMs, 99);
+  assert.ok(highlights.every(turn => turn.text.length === 350));
 });
 
 test("the headline outcome reflects booking tool results", () => {

@@ -13,7 +13,7 @@ type Recording = {
   callerNumber: string | null; customerName: string | null;
   callerKey?: string | null; callbackGrant?: string | null; callbackComplete?: boolean;
 };
-type RecordingPage = { recordings: Recording[]; hasMore: boolean; hasRecordingHistory: boolean };
+type RecordingPage = { recordings: Recording[]; hasMore: boolean; hasRecordingHistory: boolean; recordingDirection?: "inbound" | "outbound" };
 type RecordingResponse = Omit<RecordingPage, "recordings"> & {
   recordings: (Omit<Recording, "rowKey"> & { rowKey?: string })[];
 };
@@ -33,18 +33,18 @@ async function requestRecordings(user: User, path: string, options: RequestInit)
 }
 
 type CallView = "recordings" | "missed" | "ai";
-type InitialCallView = { initialView: CallView; initialDate?: string; sophieCallbackEnabled?: boolean };
+type InitialCallView = { initialView: CallView; initialDate?: string; initialCallId?: string; sophieCallbackEnabled?: boolean };
 
 export function CallRecordingsBoard(props: InitialCallView) {
   const { user, businessId } = useAuth();
   return user && businessId ? <Recordings key={user.uid + ":" + businessId} user={user} businessId={businessId} {...props} /> : null;
 }
 
-function Recordings({ user, businessId, initialView, initialDate, sophieCallbackEnabled }: InitialCallView & { user: User; businessId: string }) {
+function Recordings({ user, businessId, initialView, initialDate, initialCallId, sophieCallbackEnabled }: InitialCallView & { user: User; businessId: string }) {
   const { unread, capped } = useMissedCallsCount();
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
-  const [result, setResult] = useState<RecordingPage | null>(null);
+  const [loadedResult, setResult] = useState<RecordingPage | null>(null);
   const [error, setError] = useState("");
   const [readError, setReadError] = useState("");
   const [callbackError, setCallbackError] = useState("");
@@ -54,6 +54,7 @@ function Recordings({ user, businessId, initialView, initialDate, sophieCallback
   const markReadOnLoad = useRef(initialView === "missed");
   const [selected, setSelected] = useState<Recording | null>(null);
   const [view, setView] = useState<CallView>(initialView);
+  const [direction, setDirection] = useState<"inbound" | "outbound">("inbound");
   const missed = view === "missed";
   const listLabel = missed ? "missed calls" : "recordings";
   const [dateRange, setDateRange] = useState(() => {
@@ -66,12 +67,16 @@ function Recordings({ user, businessId, initialView, initialDate, sophieCallback
     if (view === "ai") return;
     const controller = new AbortController();
     const params = new URLSearchParams({ page: String(page), view });
+    if (view === "recordings" && direction === "outbound") params.set("direction", direction);
     if (dateRange.from) params.set("from", dateRange.from);
     if (dateRange.to) params.set("to", dateRange.to);
     void requestRecordings(user, "?" + params, { signal: controller.signal })
       .then(response => response.json() as Promise<RecordingResponse>)
       .then(async data => {
         if (controller.signal.aborted) return;
+        if (view === "recordings" && data.recordingDirection !== direction) {
+          throw new Error("The server returned a different recording list. Refresh Trade and try again.");
+        }
         const rows = new Map<string, Recording>();
         for (const recording of data.recordings) {
           const rowKey = recording.rowKey || "legacy:" + JSON.stringify([recording.id, recording.did, recording.startedAt]);
@@ -91,7 +96,7 @@ function Recordings({ user, businessId, initialView, initialDate, sophieCallback
       })
       .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
     return () => controller.abort();
-  }, [user, businessId, page, refresh, dateRange, view]);
+  }, [user, businessId, page, refresh, dateRange, view, direction]);
 
   function load(nextPage: number) {
     setResult(null);
@@ -151,6 +156,7 @@ function Recordings({ user, businessId, initialView, initialDate, sophieCallback
     }
   }
 
+  const result = view === "recordings" && loadedResult?.recordingDirection !== direction ? null : loadedResult;
   const groups = new Map<string, { recording: Recording; count: number }>();
   for (const recording of result?.recordings ?? []) {
     const key = missed && recording.callerKey ? `caller:${recording.callerKey}` : `row:${recording.rowKey}`;
@@ -187,7 +193,16 @@ function Recordings({ user, businessId, initialView, initialDate, sophieCallback
         </button>
       ))}
     </div>
-    {view === "ai" ? <AiCallsBoard /> : <>
+    {view === "recordings" && <div className="flex flex-wrap gap-2" role="group" aria-label="Recording direction">
+      {(["inbound", "outbound"] as const).map(option => (
+        <button key={option} type="button" aria-pressed={direction === option}
+          className={controlClass + (direction === option ? " border-primary text-primary" : "")}
+          onClick={() => { if (direction !== option) { setDirection(option); load(1); } }}>
+          {option === "inbound" ? "Inbound" : "Sophie outbound"}
+        </button>
+      ))}
+    </div>}
+    {view === "ai" ? <AiCallsBoard initialCallId={initialCallId} /> : <>
     {readError && <p role="alert" className="text-sm text-error">{readError}</p>}
     <div className="flex flex-wrap items-end justify-between gap-3">
       <form onSubmit={applyDates} onReset={(event) => {
@@ -236,7 +251,7 @@ function Recordings({ user, businessId, initialView, initialDate, sophieCallback
               <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-lowest text-on-surface-variant">
                 <tr>
                   <th scope="col" className="px-3 py-2.5 font-semibold">When</th>
-                  <th scope="col" className="px-3 py-2.5 font-semibold">Caller</th>
+                  <th scope="col" className="px-3 py-2.5 font-semibold">{!missed && direction === "outbound" ? "Customer called" : "Caller"}</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">Business number</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">Duration</th>
                   <th scope="col" className="px-3 py-2.5 text-right font-semibold">{missed ? "Status and action" : "Recording"}</th>
