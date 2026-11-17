@@ -149,6 +149,12 @@ test("recording access follows historical DID ownership and playback grants are 
     assert.equal(url.searchParams.get("did"), input.did + ":Main");
     assert.equal(url.searchParams.get("order_by"), "desc");
     searchStarts.push(url.searchParams.get("start_time") ?? "");
+    if (url.searchParams.get("status") === "ANSWERED") {
+      return Response.json({ errcode: 0, total_number: 2, data: [
+        { ...records[0], uid: "return", record_file: undefined, disposition: "ANSWERED" },
+        { ...records[3], disposition: "ANSWERED" },
+      ] });
+    }
     if (url.searchParams.get("status") === "NO ANSWER") {
       return Response.json({ errcode: 0, total_number: 4, data: [
         { ...records[0], uid: "missed", record_file: undefined, disposition: "NO ANSWER" },
@@ -177,6 +183,9 @@ test("recording access follows historical DID ownership and playback grants are 
   assert.deepEqual(missed.recordings.map(record => record.id), ["missed"]);
   assert.equal(missed.recordings[0].grant, null);
   assert.equal(missed.recordings[0].customerName, "Test Customer");
+  const answered = await listCallRecordings(config, "business-a", 1, {}, "answered", false);
+  assert.deepEqual(answered.recordings.map(record => record.id), ["return"]);
+  assert.equal(answered.recordings[0].callerKey, missed.recordings[0].callerKey);
   const readMissed = await listCallRecordings(config, "business-a", 1, { readThrough: (cutoff - 90) * 1000 }, "missed", false);
   assert.deepEqual(readMissed.recordings, []);
   const newerMissed = await listCallRecordings(config, "business-a", 1, { readThrough: (cutoff - 100) * 1000 }, "missed", false);

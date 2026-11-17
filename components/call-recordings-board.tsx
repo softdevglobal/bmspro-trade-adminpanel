@@ -6,12 +6,14 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { AiCallsBoard } from "@/components/ai-calls-board";
 import { formatTenantDate } from "@/lib/onboarding/tenant-display";
 import { platformTodayIso } from "@/lib/platform/timezone";
+import { useMissedCallsCount } from "@/lib/notifications/missed-calls-context";
 
 type Recording = {
   id: string; rowKey: string; did: string; startedAt: number; duration: number; grant: string | null;
   callerNumber: string | null; customerName: string | null;
+  callerKey?: string | null; callbackGrant?: string | null; callbackComplete?: boolean;
 };
-type RecordingPage = { recordings: Recording[]; hasMore: boolean; hasRecordingHistory: boolean };
+type RecordingPage = { recordings: Recording[]; hasMore: boolean; hasRecordingHistory: boolean; recordingDirection?: "inbound" | "outbound" };
 type RecordingResponse = Omit<RecordingPage, "recordings"> & {
   recordings: (Omit<Recording, "rowKey"> & { rowKey?: string })[];
 };
@@ -31,22 +33,28 @@ async function requestRecordings(user: User, path: string, options: RequestInit)
 }
 
 type CallView = "recordings" | "missed" | "ai";
-type InitialCallView = { initialView: CallView; initialDate?: string };
+type InitialCallView = { initialView: CallView; initialDate?: string; initialCallId?: string; sophieCallbackEnabled?: boolean };
 
 export function CallRecordingsBoard(props: InitialCallView) {
   const { user, businessId } = useAuth();
   return user && businessId ? <Recordings key={user.uid + ":" + businessId} user={user} businessId={businessId} {...props} /> : null;
 }
 
-function Recordings({ user, businessId, initialView, initialDate }: InitialCallView & { user: User; businessId: string }) {
+function Recordings({ user, businessId, initialView, initialDate, initialCallId, sophieCallbackEnabled }: InitialCallView & { user: User; businessId: string }) {
+  const { unread, capped } = useMissedCallsCount();
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
-  const [result, setResult] = useState<RecordingPage | null>(null);
+  const [loadedResult, setResult] = useState<RecordingPage | null>(null);
   const [error, setError] = useState("");
   const [readError, setReadError] = useState("");
+  const [callbackError, setCallbackError] = useState("");
+  const [savingCallback, setSavingCallback] = useState<string | null>(null);
+  const [dialing, setDialing] = useState<string | null>(null);
+  const [callbackResults, setCallbackResults] = useState<Record<string, string>>({});
   const markReadOnLoad = useRef(initialView === "missed");
   const [selected, setSelected] = useState<Recording | null>(null);
   const [view, setView] = useState<CallView>(initialView);
+  const [direction, setDirection] = useState<"inbound" | "outbound">("inbound");
   const missed = view === "missed";
   const listLabel = missed ? "missed calls" : "recordings";
   const [dateRange, setDateRange] = useState(() => {
@@ -59,12 +67,16 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
     if (view === "ai") return;
     const controller = new AbortController();
     const params = new URLSearchParams({ page: String(page), view });
+    if (view === "recordings" && direction === "outbound") params.set("direction", direction);
     if (dateRange.from) params.set("from", dateRange.from);
     if (dateRange.to) params.set("to", dateRange.to);
     void requestRecordings(user, "?" + params, { signal: controller.signal })
       .then(response => response.json() as Promise<RecordingResponse>)
       .then(async data => {
         if (controller.signal.aborted) return;
+        if (view === "recordings" && data.recordingDirection !== direction) {
+          throw new Error("The server returned a different recording list. Refresh Trade and try again.");
+        }
         const rows = new Map<string, Recording>();
         for (const recording of data.recordings) {
           const rowKey = recording.rowKey || "legacy:" + JSON.stringify([recording.id, recording.did, recording.startedAt]);
@@ -84,7 +96,7 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
       })
       .catch((reason: Error) => { if (!controller.signal.aborted) setError(reason.message); });
     return () => controller.abort();
-  }, [user, businessId, page, refresh, dateRange, view]);
+  }, [user, businessId, page, refresh, dateRange, view, direction]);
 
   function load(nextPage: number) {
     setResult(null);
@@ -100,7 +112,63 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
     load(1);
   }
 
+  async function callWithSophie(recording: Recording) {
+    if (dialing || !recording.callbackGrant || !recording.callerNumber ||
+        !window.confirm(`Have Sophie return the missed call to ${recording.callerNumber}?`)) return;
+    setDialing(recording.rowKey);
+    setCallbackError("");
+    try {
+      const response = await fetch("/api/business/sophie-callback", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${await user.getIdToken()}`, "x-callback-grant": recording.callbackGrant },
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error ?? "Sophie could not start the callback.");
+      const messages: Record<string, string> = {
+        ANSWERED: "Phone answered", NO_ANSWER: "No answer", FAILED: "Call failed", UNKNOWN: "Call result unknown",
+      };
+      const message = messages[result?.status] ?? messages.UNKNOWN;
+      const diagnostic = (result?.status === "FAILED" || result?.status === "UNKNOWN") && result?.code
+        ? ` (${result.code}${result.reason ? `, Asterisk reason ${result.reason}` : ""})` : "";
+      setCallbackResults(current => ({ ...current, [recording.rowKey]: message + diagnostic }));
+    } catch (reason) {
+      setCallbackError(reason instanceof Error ? reason.message : "Could not start Sophie’s callback.");
+    } finally {
+      setDialing(null);
+    }
+  }
+
+  async function completeCallback(recording: Recording) {
+    if (!recording.callbackGrant || !recording.callerKey || savingCallback) return;
+    setSavingCallback(recording.rowKey);
+    setCallbackError("");
+    try {
+      await requestRecordings(user, "", { method: "PATCH", headers: { "x-callback-grant": recording.callbackGrant } });
+      setResult(current => current && ({
+        ...current,
+        recordings: current.recordings.map(row => row.callerKey === recording.callerKey && row.startedAt <= recording.startedAt
+          ? { ...row, callbackComplete: true } : row),
+      }));
+    } catch (reason) {
+      setCallbackError(reason instanceof Error ? reason.message : "Could not complete the callback.");
+    } finally {
+      setSavingCallback(null);
+    }
+  }
+
+  const result = view === "recordings" && loadedResult?.recordingDirection !== direction ? null : loadedResult;
+  const groups = new Map<string, { recording: Recording; count: number }>();
+  for (const recording of result?.recordings ?? []) {
+    const key = missed && recording.callerKey ? `caller:${recording.callerKey}` : `row:${recording.rowKey}`;
+    const group = groups.get(key);
+    groups.set(key, {
+      recording: group && group.recording.startedAt >= recording.startedAt ? group.recording : recording,
+      count: (group?.count ?? 0) + 1,
+    });
+  }
+
   return <section className="min-w-0 space-y-4">
+    {missed && callbackError && <p role="alert" className="text-sm text-error">{callbackError}</p>}
     <div className="flex flex-wrap gap-2" role="group" aria-label="Call history view">
       {([
         { value: "recordings", label: "Recordings" },
@@ -116,10 +184,25 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
             load(1);
           }}>
           {label}
+          {option === "missed" && unread > 0 && (
+            <span aria-label={`${capped ? "At least " : ""}${unread} unread missed calls`}
+              className="rounded-full bg-rose-600 px-1.5 text-[11px] leading-5 text-white">
+              {unread}{capped ? "+" : ""}
+            </span>
+          )}
         </button>
       ))}
     </div>
-    {view === "ai" ? <AiCallsBoard /> : <>
+    {view === "recordings" && <div className="flex flex-wrap gap-2" role="group" aria-label="Recording direction">
+      {(["inbound", "outbound"] as const).map(option => (
+        <button key={option} type="button" aria-pressed={direction === option}
+          className={controlClass + (direction === option ? " border-primary text-primary" : "")}
+          onClick={() => { if (direction !== option) { setDirection(option); load(1); } }}>
+          {option === "inbound" ? "Inbound" : "Sophie outbound"}
+        </button>
+      ))}
+    </div>}
+    {view === "ai" ? <AiCallsBoard initialCallId={initialCallId} /> : <>
     {readError && <p role="alert" className="text-sm text-error">{readError}</p>}
     <div className="flex flex-wrap items-end justify-between gap-3">
       <form onSubmit={applyDates} onReset={(event) => {
@@ -168,14 +251,14 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
               <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-lowest text-on-surface-variant">
                 <tr>
                   <th scope="col" className="px-3 py-2.5 font-semibold">When</th>
-                  <th scope="col" className="px-3 py-2.5 font-semibold">Caller</th>
+                  <th scope="col" className="px-3 py-2.5 font-semibold">{!missed && direction === "outbound" ? "Customer called" : "Caller"}</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">Business number</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">Duration</th>
                   <th scope="col" className="px-3 py-2.5 text-right font-semibold">{missed ? "Status and action" : "Recording"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/60">
-                {result.recordings.map(recording => {
+                {[...groups.values()].map(({ recording, count }) => {
                   const expanded = selected?.rowKey === recording.rowKey;
                   const callbackNumber = recording.callerNumber?.replace(/[\s().-]/g, "") ?? "";
                   return <Fragment key={recording.rowKey}>
@@ -184,12 +267,13 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
                       <td className="px-3 py-2.5 text-on-surface">
                         {recording.customerName && <p className="font-semibold">{recording.customerName}</p>}
                         <p className="whitespace-nowrap tabular-nums text-on-surface-variant">{recording.callerNumber ?? "Number unavailable"}</p>
+                        {count > 1 && <p className="text-on-surface-variant">{count} missed calls on this page</p>}
                       </td>
                       <td className="px-3 py-2.5 font-medium tabular-nums text-on-surface">{recording.did}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 tabular-nums text-on-surface-variant">{Math.floor(recording.duration / 60)}m {recording.duration % 60}s</td>
                       <td className="px-3 py-2.5 text-right">
                         {missed ? <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-                          <span className="font-medium text-on-surface-variant">No answer</span>
+                          <span className="font-medium text-on-surface-variant">{recording.callbackComplete ? "Callback complete" : "No answer"}</span>
                           {/^\+?\d{1,15}$/.test(callbackNumber) && <button type="button" className={controlClass}
                             aria-label={`Call back ${recording.customerName ?? callbackNumber}`}
                             onClick={() => window.dispatchEvent(new CustomEvent("trade:missed-call-callback", {
@@ -198,6 +282,18 @@ function Recordings({ user, businessId, initialView, initialDate }: InitialCallV
                             <span className="material-symbols-outlined text-[18px]" aria-hidden="true">call</span>
                             Call back
                           </button>}
+                          {!recording.callbackComplete && recording.callbackGrant && <button type="button" className={controlClass}
+                            disabled={savingCallback !== null} onClick={() => void completeCallback(recording)}>
+                            {savingCallback === recording.rowKey ? "Saving…" : "Mark callback complete"}
+                          </button>}
+                          {sophieCallbackEnabled && !recording.callbackComplete && recording.callbackGrant &&
+                            recording.callerNumber && (
+                              <button type="button" className={controlClass} disabled={dialing !== null || !!callbackResults[recording.rowKey]}
+                                onClick={() => void callWithSophie(recording)}>
+                                {dialing === recording.rowKey ? "Calling…" : "Call back with Sophie"}
+                              </button>
+                          )}
+                          {callbackResults[recording.rowKey] && <span role="status">{callbackResults[recording.rowKey]}</span>}
                         </div> : <button type="button" aria-expanded={expanded} className={controlClass}
                           onClick={() => setSelected(expanded ? null : recording)}>
                           <span className="material-symbols-outlined text-[18px]" aria-hidden="true">{expanded ? "close" : "play_circle"}</span>

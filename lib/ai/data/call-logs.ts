@@ -21,6 +21,7 @@ export const callLogInput = z.object({
   setupMs: z.number().int().min(0).max(600_000).nullable(),
   endReason: z.string().trim().min(1).max(120),
   callerNumber: z.string().regex(/^\d{6,15}$/).nullable(),
+  callbackAttemptId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   tools: z.array(z.object({ name: code, status: code, durationMs: z.number().int().min(0).max(600_000) }).strict()).max(100),
   outcomes: z.array(z.object({
     tool: code, status: code, reference: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).nullable(),
@@ -95,4 +96,13 @@ export function toCallLogDetail(id: string, data: Record<string, unknown>): Call
 export function callLogRetentionDays(env: Readonly<Record<string, string | undefined>> = process.env) {
   const days = Number(env.AI_CALL_LOG_RETENTION_DAYS || 90);
   return Number.isInteger(days) && days >= 1 && days <= 730 ? days : 90;
+}
+
+export function callConversationHighlights(transcript: CallLogInput["transcript"]) {
+  const count = 24;
+  const positions = new Set(Array.from({ length: Math.min(count, transcript.length) }, (_, i) =>
+    transcript.length <= count ? i : Math.round(i * (transcript.length - 1) / (count - 1))));
+  return transcript.filter((_, index) => positions.has(index)).map(turn => ({
+    speaker: turn.speaker, atMs: turn.atMs, text: turn.text.slice(0, 350),
+  }));
 }

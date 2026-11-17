@@ -6,6 +6,9 @@
  */
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { CALL_LOGS_COLLECTION, toCallLogDetail } from "@/lib/ai/data/call-logs";
+import { adminDb } from "@/lib/firebase/admin";
+import { JOBS_COLLECTION } from "@/lib/bookings/types";
+import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,18 +23,42 @@ async function ownedCall(request: Request, context: Context) {
   if (!auth.ok) return { response: json({ ok: false, error: auth.error }, auth.status) };
   const { id } = await context.params;
   if (!validId(id)) return { response: notFound() };
-  const { adminDb } = await import("@/lib/firebase/admin");
   const ref = adminDb.collection(CALL_LOGS_COLLECTION).doc(id);
   const data = (await ref.get()).data();
   if (!data || data.businessId !== auth.businessId) return { response: notFound() };
-  return { id, ref, data };
+  return { id, ref, data, businessId: auth.businessId };
 }
 
 export async function GET(request: Request, context: Context) {
   try {
     const call = await ownedCall(request, context);
     if ("response" in call) return call.response;
-    return json({ ok: true, call: toCallLogDetail(call.id, call.data) });
+    const detail = toCallLogDetail(call.id, call.data);
+    const links = await Promise.allSettled(detail.outcomes.map(async ({ tool, status, reference }) => {
+      if (typeof reference !== "string" || !/^[\w-]{1,128}$/.test(reference)) return null;
+      if ((tool === "create_inspection_request" && ["CONFIRMED", "PENDING_REVIEW"].includes(status)) ||
+          (tool === "create_job_booking" && status === "PENDING_REVIEW")) {
+        const record = await adminDb.collection(REQUESTS_COLLECTION).doc(reference).get();
+        if (record.get("businessId") !== call.businessId) return null;
+        if (tool === "create_inspection_request") {
+          return { href: `/dashboard/requests?request=${reference}`, label: "Open inspection request" };
+        }
+        const bookingId: unknown = record.get("bookingId");
+        if (typeof bookingId === "string" && /^[\w-]{1,128}$/.test(bookingId)) {
+          const job = await adminDb.collection(JOBS_COLLECTION).doc(bookingId).get();
+          return job.get("businessId") === call.businessId ? { href: `/dashboard/jobs?job=${bookingId}`, label: "Open job" } : null;
+        }
+        return { href: `/dashboard/jobs?callRequest=${reference}`, label: "Open job request" };
+      }
+      if ((["create_job_booking", "reschedule_job"].includes(tool) && status === "CONFIRMED") ||
+          (tool === "cancel_job" && status === "CANCELLED")) {
+        const jobs = await adminDb.collection(JOBS_COLLECTION).where("businessId", "==", call.businessId)
+          .where("bookingCode", "==", reference).limit(2).get();
+        if (jobs.size === 1) return { href: `/dashboard/jobs?job=${encodeURIComponent(jobs.docs[0].id)}`, label: "Open job" };
+      }
+      return null;
+    }));
+    return json({ ok: true, call: { ...detail, links: links.flatMap(link => link.status === "fulfilled" && link.value ? [link.value] : []) } });
   } catch {
     return json({ ok: false, error: "Could not load the call." }, 503);
   }

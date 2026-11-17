@@ -89,7 +89,7 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
   },
   "/dashboard/call-recordings": {
     title: "Calls",
-    subtitle: "Recordings and missed inbound calls to your business numbers from the last 30 days.",
+    subtitle: "Inbound recordings, Sophie outbound recordings, and missed calls from the last 30 days.",
     icon: "record_voice_over",
   },
   "/dashboard/sms": {

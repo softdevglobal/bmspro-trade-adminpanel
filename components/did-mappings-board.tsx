@@ -100,7 +100,7 @@ export function DidMappingsBoard() {
   function edit(mapping: DidMappingRow) {
     setEditing(mapping);
     setForm({ did: mapping.did, businessId: mapping.businessId, isActive: mapping.isActive,
-      version: mapping.version, forwardingExtension: mapping.forwardingExtension ?? null });
+      version: mapping.version, callback: mapping.callback ?? null, forwardingExtension: mapping.forwardingExtension ?? null });
     setShowForm(true); setError(""); setMessage("");
   }
 
@@ -131,7 +131,7 @@ export function DidMappingsBoard() {
           </div>
           <div>
             <label htmlFor="mapping-business" className="mb-1.5 block text-sm font-medium text-on-surface">Trade business</label>
-            <select id="mapping-business" required disabled={saving} value={form.businessId} onChange={event => setForm(current => ({ ...current, businessId: event.target.value, forwardingExtension: null }))} className={inputClass}>
+            <select id="mapping-business" required disabled={saving} value={form.businessId} onChange={event => setForm(current => ({ ...current, businessId: event.target.value, forwardingExtension: null, callback: null }))} className={inputClass}>
               <option value="">Choose a business</option>
               {form.businessId && !businesses.some(business => business.id === form.businessId) && <option value={form.businessId}>Unavailable business</option>}
               {businesses.map(business => <option key={business.id} value={business.id} disabled={!business.isActive && business.id !== form.businessId}>{business.name}{business.isActive ? "" : " (inactive)"}</option>)}
@@ -150,6 +150,30 @@ export function DidMappingsBoard() {
           <input type="checkbox" checked={form.isActive} disabled={saving} onChange={event => setForm(current => ({ ...current, isActive: event.target.checked }))} className="mt-0.5 accent-primary" />
           <span><span className="font-medium">Enable this number</span><span className="mt-0.5 block text-xs text-on-surface-variant">Disabled numbers cannot use Sophie’s Trade tools.</span></span>
         </label>
+        <fieldset disabled={saving} className="space-y-3 rounded-xl border border-outline-variant p-3">
+          <legend className="px-1 text-sm font-medium">Sophie outbound callbacks</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={Boolean(form.callback)}
+              onChange={event => setForm(current => ({ ...current, callback: event.target.checked
+                ? { callerId: current.did, dialPrefix: "", automatic: false } : null }))} />
+            Enable callbacks
+          </label>
+          {form.callback && <>
+            <label className="block text-sm">Approved outbound caller ID
+              <input className={inputClass} required maxLength={16} value={form.callback.callerId}
+                onChange={event => setForm(current => current.callback ? { ...current, callback: { ...current.callback, callerId: event.target.value } } : current)} />
+            </label>
+            <label className="block text-sm">Yeastar dial prefix
+              <input className={inputClass} maxLength={6} value={form.callback.dialPrefix}
+                onChange={event => setForm(current => current.callback ? { ...current, callback: { ...current.callback, dialPrefix: event.target.value } } : current)} />
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.callback.automatic}
+                onChange={event => setForm(current => current.callback ? { ...current, callback: { ...current.callback, automatic: event.target.checked } } : current)} />
+              Automatically return new missed calls, with up to three retries 90 minutes apart
+            </label>
+          </>}
+        </fieldset>
         {editing && editing.businessId !== form.businessId && <p className="rounded-lg bg-tertiary-fixed px-3 py-2 text-sm text-on-tertiary-fixed-variant">Changing the business redirects new calls. Current calls bound to the previous business will lose tool access.</p>}
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={saving} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary disabled:opacity-50">{saving ? "Saving…" : "Save mapping"}</button>

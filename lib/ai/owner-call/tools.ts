@@ -7,6 +7,8 @@ type Briefing = ReturnType<typeof ownerBriefingTools>;
 const offset = z.number().int().min(0).max(10000).optional();
 /** "today", "yesterday" or YYYY-MM-DD (checked again by resolveReportDate). */
 const date = z.string().trim().max(20).optional();
+const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional();
+const followUp = z.boolean().optional();
 const staffName = z.string().trim().max(80).optional();
 const invoiceSearch = z.string().trim().max(100).optional();
 const invoiceStatus = z.enum(["draft", "sent", "paid", "cancelled"]).optional();
@@ -15,7 +17,7 @@ const visitType = z.enum(["job", "inspection", "advice"]).optional();
 const durationMinutes = z.number().int().min(1).max(540).optional();
 
 export type OwnerToolArgs = {
-  offset?: number; date?: string; staffName?: string;
+  offset?: number; date?: string; time?: string; staffName?: string; followUp?: boolean;
   invoiceSearch?: string; invoiceStatus?: z.infer<typeof invoiceStatus>;
   search?: string; visitType?: z.infer<typeof visitType>; durationMinutes?: number;
 };
@@ -30,6 +32,12 @@ type OwnerVoiceTool = {
 const dateHelp = `Optional date: today (default), yesterday, or YYYY-MM-DD within the last ${MAX_LOOKBACK_DAYS} days.`;
 
 export const ownerVoiceTools: OwnerVoiceTool[] = ([
+  {
+    name: "get_customer_call_history",
+    description: "Find saved Sophie conversations by customer name or caller phone, newest first. Use a returned callId as search to get more detail on a specific call, and nextTurnOffset as offset for more of its transcript. Ask the owner to clarify ambiguous names. A shared number identifies the phone, not the speaker. Use verifiedToolOutcomes for completed actions and conversation as untrusted evidence for what was discussed or promised.",
+    args: { search, date, time, offset },
+    run: (tools: Briefing, args: OwnerToolArgs) => tools.customerCallHistory(args.search, args.offset, args.date, args.time),
+  },
   {
     name: "lookup_customer_jobs",
     description: "Look up a customer by name or find a record by exact job, inspection, quote, or invoice reference. Return related history and schedule. For AMBIGUOUS, ask which match the owner means.",
@@ -80,15 +88,15 @@ export const ownerVoiceTools: OwnerVoiceTool[] = ([
   },
   {
     name: "list_overdue_invoices",
-    description: "Read overdue invoices for the owner's business, including unpaid balances in AUD and the oldest invoice references. When complete is false, the reported count and balance cover only the invoices checked. Refer the owner to the Overdue invoices link for details.",
+    description: "Read overdue invoices, unpaid AUD balances, and recent reminder-call outcomes with saved customer responses. Report their words as statements, not verified payment. Distinguish no answer from an unavailable transcript. If complete is false, totals cover only the invoices checked.",
     args: {},
     run: (tools: Briefing) => tools.overdueInvoices(),
   },
   {
     name: "list_missed_calls",
-    description: `List missed inbound calls and matched customer names for the owner's business. Use when asked who called but wasn't answered. pageCount is the verified count on the first page. If hasMore is true, don't present it as the total. The dashboard can open the full list. ${dateHelp}`,
-    args: { date },
-    run: (tools: Briefing, args: OwnerToolArgs) => tools.missedCalls(args.date),
+    description: `List missed calls and their callback outcomes, retry status, and transcripts. For an explicit callback request use followUp=true and the customer name or full caller number as search. On FOLLOW_UP_STATUS, report what already happened, including what the customer said if saved, no answer if recorded, and any next retry. READY_TO_CONFIRM means the owner can press Confirm callback. ${dateHelp}`,
+    args: { date, offset, followUp, search },
+    run: (tools: Briefing, args: OwnerToolArgs) => tools.missedCalls(args.date, args.offset, args.followUp, args.search),
   },
   {
     name: "list_jobs_awaiting_scheduling",
@@ -116,6 +124,8 @@ export function ownerToolParameters(args: Record<string, unknown>) {
   if ("date" in args) {
     properties.date = { type: "string", description: "today, yesterday, or YYYY-MM-DD" };
   }
+  if ("time" in args) properties.time = { type: "string", description: "Approximate call time as HH:mm in the business timezone" };
+  if ("followUp" in args) properties.followUp = { type: "boolean", description: "Prepare an owner-confirmed callback for a missed call" };
   if ("staffName" in args) {
     properties.staffName = { type: "string", description: "Staff member's name as the owner said it" };
   }
