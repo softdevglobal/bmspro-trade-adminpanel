@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+
 export function ActivationForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");

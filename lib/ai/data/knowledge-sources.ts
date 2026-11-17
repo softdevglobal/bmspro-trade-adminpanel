@@ -66,6 +66,8 @@ export type KnowledgeSource = {
   /** Imported entries: "What is this file?" and the owner's note. Null on older entries. */
   purpose: KnowledgePurpose | null;
   purposeNote: string;
+  /** "owner_voice" when Sophie saved it from Talk to Sophie after the owner confirmed. */
+  createdVia: "owner_voice" | null;
 };
 
 /** Owner creates a FAQ, policy or note. Business comes from the session, never the body. */
@@ -73,6 +75,8 @@ export const knowledgeSourceCreate = z.object({
   kind: z.enum(OWNER_KINDS),
   title: z.string().trim().min(2).max(120),
   body: z.string().trim().min(10).max(OWNER_BODY_MAX),
+  /** Set by Talk to Sophie (lib/ai/owner-call/voice-draft-store.ts). Still saved as a draft. */
+  createdVia: z.literal("owner_voice").optional(),
 }).strict();
 
 /** Owner edits or changes status. `version` guards against overwriting a newer edit. */
@@ -116,5 +120,6 @@ export function toKnowledgeSource(id: string, data: Record<string, unknown>): Kn
     truncated: data.truncated === true,
     purpose: isKnowledgePurpose(data.purpose) ? data.purpose : null,
     purposeNote: typeof data.purposeNote === "string" ? data.purposeNote : "",
+    createdVia: data.createdVia === "owner_voice" ? "owner_voice" : null,
   };
 }

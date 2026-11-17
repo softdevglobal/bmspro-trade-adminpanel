@@ -15,8 +15,13 @@ import type { SearchStats } from "./retriever";
 
 const KEEP_DAYS = 30;
 
+/** Who searched: a customer phone call or the owner talking to Sophie in Trade. */
+export type KnowledgeSearchSource = "phone" | "owner_voice";
+
 export type KnowledgeSearchLog = {
   question: string;
+  /** Older callers omit it; stored as "phone". */
+  source?: KnowledgeSearchSource;
   status: "FOUND" | "NO_MATCH";
   passagesSent: number;
   stats: SearchStats;
@@ -29,6 +34,7 @@ export async function recordKnowledgeSearch(businessId: string, entry: Knowledge
     businessId,
     question: redactPersonalData(entry.question).slice(0, 300),
     status: entry.status,
+    source: entry.source ?? "phone",
     passagesSent: entry.passagesSent,
     hitCount: entry.stats.hits.length,
     hits: entry.stats.hits.slice(0, 10).map(hit => ({
