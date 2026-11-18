@@ -625,7 +625,7 @@ function InvoicePreviewDrawer({
                 </p>
               </section>
               <InvoiceCallPanel key={invoice.id} invoiceId={invoice.id} customer={invoice.customer.fullName}
-                overdue={drawerPaymentDue.isOverdue} timeZone={timeZone} />
+                customerNumber={invoice.customer.phone} overdue={drawerPaymentDue.isOverdue} timeZone={timeZone} />
 
               <section className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3">
                 <p className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">

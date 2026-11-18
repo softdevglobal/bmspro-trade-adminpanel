@@ -1,5 +1,6 @@
 import { runSophieCallbacks } from "@/lib/ai/calls/run-sophie-callbacks";
 import { runOverdueInvoiceCalls } from "@/lib/ai/calls/run-overdue-invoice-calls";
+import { runScheduledSophieCallbacks } from "@/lib/ai/calls/run-scheduled-callbacks";
 
 export const maxDuration = 300;
 
@@ -10,6 +11,8 @@ export async function GET(request: Request) {
   }
   const localTest = process.env.NODE_ENV === "development" &&
     ["localhost", "127.0.0.1", "[::1]"].includes(new URL(request.url).hostname);
-  const [callbacks, invoiceCalls] = await Promise.all([runSophieCallbacks(localTest), runOverdueInvoiceCalls()]);
-  return Response.json({ ...callbacks, invoiceCalls });
+  const [callbacks, invoiceCalls, scheduledCallbacks] = await Promise.all([
+    runSophieCallbacks(localTest), runOverdueInvoiceCalls(), runScheduledSophieCallbacks(),
+  ]);
+  return Response.json({ ...callbacks, invoiceCalls, scheduledCallbacks });
 }

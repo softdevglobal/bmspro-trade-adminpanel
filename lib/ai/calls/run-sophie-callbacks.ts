@@ -7,9 +7,11 @@ import { callbackResultStatus, callbackState, resolveCallback, saveCallbackAttem
 import { normalizeCallbackMobile } from "@/lib/ai/calls/callback-number";
 import { listCallRecordings, recordingConfig } from "@/lib/ai/calls/recordings";
 import { requestSophieCallback } from "@/lib/ai/calls/request-callback";
+import { isCustomerCallOptedOut } from "@/lib/ai/calls/call-preferences";
+import { isWithinSophieCallingHours } from "@/lib/ai/calls/calling-hours";
 
 const retryInterval = 90 * 60_000;
-const localRetryInterval = 5 * 60_000;
+const localRetryInterval = 1 * 60_000;
 const attemptLease = 60_000;
 const maxAttempts = 4;
 const discoveryWindow = 24 * 60 * 60_000;
@@ -27,7 +29,7 @@ export async function runSophieCallbacks(localTest = false) {
     if (!localTest || !state.leaseUntil) return nextAt;
     return Math.min(nextAt, state.leaseUntil - attemptLease + localRetryInterval);
   }
-  const counts = { dialled: 0, resolved: 0, errors: 0 };
+  const counts = { dialled: 0, resolved: 0, errors: 0, deferred: 0 };
   const mappings = await adminDb.collection(DID_MAPPINGS_COLLECTION)
     .where("isActive", "==", true).where("callback.automatic", "==", true).get();
   const businesses = new Map<string, { did: string; since: number }[]>();
@@ -79,14 +81,29 @@ export async function runSophieCallbacks(localTest = false) {
         }
         const number = normalizeCallbackMobile(row.callerNumber ?? "");
         if (!number || number === row.did) continue;
+        if (await isCustomerCallOptedOut(businessId, number)) {
+          await resolveCallback(businessId, callerKey, row.startedAt, "customer_opt_out");
+          continue;
+        }
         const ref = callbackState(businessId, callerKey);
         const known = (await ref.get()).data();
         if (row.startedAt <= (known?.through ?? 0) ||
             (known?.episode > Math.max(answer, known?.through ?? 0) &&
               (retryDueAt(known ?? {}) > Date.now() || known?.attempts >= maxAttempts))) continue;
         const route = await lookupVoiceDidRoute(row.did);
-        if (route.state !== "active" || route.binding.businessId !== businessId || !route.callback?.automatic ||
-            !route.autoCallbackSince || row.startedAt <= route.autoCallbackSince) continue;
+        if (route.state !== "active" || route.binding.businessId !== businessId) continue;
+        if (route.business.sophieMissedCallbacksEnabled !== true) {
+          await resolveCallback(businessId, callerKey, row.startedAt, "automation_disabled");
+          continue;
+        }
+        const ownerEnabledAt = typeof route.business.sophieMissedCallbacksEnabledAt?.toMillis === "function"
+          ? route.business.sophieMissedCallbacksEnabledAt.toMillis() : 0;
+        if (row.startedAt <= ownerEnabledAt) {
+          await resolveCallback(businessId, callerKey, row.startedAt, "automation_disabled");
+          continue;
+        }
+        if (!route.callback?.automatic || !route.autoCallbackSince || row.startedAt <= route.autoCallbackSince) continue;
+        if (!isWithinSophieCallingHours(Date.now(), route.business.timezone ?? "Australia/Melbourne", route.business.sophieCallingHours)) continue;
         const recentAnswer = (await history(businessId, "answered", started, Date.now()))
           .reduce((latest, call) => call.callerKey === callerKey ? Math.max(latest, call.startedAt) : latest, 0);
         if (recentAnswer > row.startedAt) {
@@ -117,9 +134,11 @@ export async function runSophieCallbacks(localTest = false) {
           const response = await requestSophieCallback({ id: attempt.id, did: row.did, businessId, number, automatic: true });
           if (response.status === 429) {
             status = "DEFERRED";
+            counts.deferred++;
+            const retryAt = Date.now() + (localTest ? localRetryInterval : 5 * 60_000);
             await adminDb.runTransaction(async tx => {
               if ((await tx.get(ref)).get("attemptId") === attempt.id) {
-                tx.update(ref, { attempts: attempt.attempts, nextAt: Date.now() + 5 * 60_000, leaseUntil: 0 });
+                tx.update(ref, { attempts: attempt.attempts, nextAt: retryAt, leaseUntil: 0 });
               }
             });
             continue;

@@ -5,15 +5,16 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatInPlatformTimeZone } from "@/lib/platform/timezone";
 
-type InvoiceCall = { id: string; attemptedAt: number; status: string; reason?: string | null; callId: string | null; responses: string[] };
+type InvoiceCall = { id: string; attemptedAt: number; scheduledAt?: number | null; status: string; reason?: string | null; callId: string | null; responses: string[] };
 type InvoiceCalls = { routes: string[]; canCall: boolean; unavailableReason: string | null; destination: string | null; history: InvoiceCall[] };
 const labels: Record<string, string> = {
   REQUESTED: "Calling", ANSWERED: "Phone answered", NO_ANSWER: "No answer",
-  FAILED: "Call failed", UNKNOWN: "Outcome unverified", QUEUED: "Waiting to call", SKIPPED: "Call skipped",
+  FAILED: "Call failed", UNKNOWN: "Outcome unverified", QUEUED: "Waiting to call", SCHEDULED: "Customer requested a callback",
+  CALLING: "Calling", CANCELLED: "Callback cancelled", SKIPPED: "Call skipped",
 };
 
-export function InvoiceCallPanel({ invoiceId, customer, overdue, timeZone }: {
-  invoiceId: string; customer: string; overdue: boolean; timeZone?: string | null;
+export function InvoiceCallPanel({ invoiceId, customer, customerNumber, overdue, timeZone }: {
+  invoiceId: string; customer: string; customerNumber: string; overdue: boolean; timeZone?: string | null;
 }) {
   const { user, role } = useAuth();
   const [data, setData] = useState<InvoiceCalls | null>(null);
@@ -21,6 +22,8 @@ export function InvoiceCallPanel({ invoiceId, customer, overdue, timeZone }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [customerOptedOut, setCustomerOptedOut] = useState<boolean | null>(null);
+  const [savingPreference, setSavingPreference] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!user || role !== "business_owner") return;
@@ -35,6 +38,25 @@ export function InvoiceCallPanel({ invoiceId, customer, overdue, timeZone }: {
       if (!signal?.aborted) setError(reason instanceof Error ? reason.message : "Could not load invoice calls.");
     }
   }, [invoiceId, role, user]);
+
+  useEffect(() => {
+    if (!user || role !== "business_owner" || !customerNumber) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/business/call-preferences", {
+          method: "POST", headers: { Authorization: "Bearer " + await user.getIdToken(), "Content-Type": "application/json" },
+          body: JSON.stringify({ numbers: [customerNumber] }), cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "Could not load customer call preference.");
+        if (!cancelled) setCustomerOptedOut(result.optedOut?.[0] === true);
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "Could not load customer call preference.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customerNumber, role, user]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,7 +86,7 @@ export function InvoiceCallPanel({ invoiceId, customer, overdue, timeZone }: {
 
   const route = did || (data?.routes.length === 1 ? data.routes[0] : "");
   async function callCustomer() {
-    if (!user || !route || !data?.canCall || !data.destination || busy || awaitingTranscript ||
+    if (!user || !route || !data?.canCall || !data.destination || busy || awaitingTranscript || customerOptedOut !== false ||
         !window.confirm(`Have Sophie call ${customer} at ${data.destination} about this overdue invoice?`)) return;
     setBusy(true);
     setError("");
@@ -84,6 +106,27 @@ export function InvoiceCallPanel({ invoiceId, customer, overdue, timeZone }: {
     }
   }
 
+  async function updateCallPreference() {
+    if (!user || !customerNumber || customerOptedOut === null || savingPreference) return;
+    const next = !customerOptedOut;
+    if (!window.confirm(next
+      ? `Block Sophie from calling ${customer}?`
+      : `Only clear this block if the customer asked to receive calls again. Clear it for ${customer}?`)) return;
+    setSavingPreference(true);
+    setError("");
+    try {
+      const response = await fetch("/api/business/call-preferences", {
+        method: "PATCH", headers: { Authorization: "Bearer " + await user.getIdToken(), "Content-Type": "application/json" },
+        body: JSON.stringify({ number: customerNumber, doNotCall: next }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Could not update customer call preference.");
+      setCustomerOptedOut(next);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update customer call preference.");
+    } finally { setSavingPreference(false); }
+  }
+
   if (role !== "business_owner" || (!overdue && !data?.history.length)) return null;
   return <section className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3 text-sm">
     <div className="flex items-center justify-between gap-2">
@@ -96,17 +139,27 @@ export function InvoiceCallPanel({ invoiceId, customer, overdue, timeZone }: {
         <option value="">Choose business number</option>
         {data.routes.map(number => <option key={number} value={number}>{number}</option>)}
       </select>}
-      <button type="button" disabled={!data?.canCall || !route || busy || awaitingTranscript} onClick={() => void callCustomer()}
+      <button type="button" disabled={!data?.canCall || !route || busy || awaitingTranscript || customerOptedOut !== false} onClick={() => void callCustomer()}
         className="rounded-lg bg-primary px-3 py-2 font-semibold text-on-primary disabled:opacity-50">
-        {busy ? "Calling…" : "Call with Sophie"}
+        {busy ? "Calling…" : customerOptedOut ? "Customer opted out" : "Call with Sophie"}
       </button>
     </div>}
     {overdue && !data && !error && <p role="status">Checking Sophie call settings…</p>}
     {overdue && data?.unavailableReason && <p>{data.unavailableReason}</p>}
+    {overdue && customerNumber && <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/50 pt-2">
+      <span className="text-xs text-on-surface-variant">{customerOptedOut === null ? "Checking call preference…"
+        : customerOptedOut ? "Customer is blocked from Sophie calls." : "Customer can receive Sophie calls."}</span>
+      <button type="button" disabled={customerOptedOut === null || savingPreference} onClick={() => void updateCallPreference()}
+        className="rounded-lg border border-outline-variant px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50">
+        {savingPreference ? "Saving…" : customerOptedOut ? "Allow Sophie calls" : "Block Sophie calls"}
+      </button>
+    </div>}
+    {customerOptedOut && overdue && <p className="text-xs text-error">Sophie cannot call this customer while the block is active.</p>}
     {awaitingTranscript && <p role="status">Waiting for the call outcome or transcript.</p>}
     {error && <p role="alert" className="text-error">{error}</p>}
     {data?.history.map(call => <div key={call.id} className="space-y-1 border-t border-outline-variant/50 pt-2">
-      <p className="font-medium">{labels[call.status] ?? "Outcome unverified"} · {formatInPlatformTimeZone(call.attemptedAt,
+      <p className="font-medium">{labels[call.status] ?? "Outcome unverified"} · {formatInPlatformTimeZone(
+        call.status === "SCHEDULED" && call.scheduledAt ? call.scheduledAt : call.attemptedAt,
         { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }, timeZone)}</p>
       {call.reason && <p>{call.reason}</p>}
       {call.responses.length > 0 && <details><summary className="cursor-pointer">Customer responses</summary>

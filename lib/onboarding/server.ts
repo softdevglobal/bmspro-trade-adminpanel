@@ -363,6 +363,9 @@ export type BankTransferDetails = {
   accountNumber: string;
 };
 
+export type SophieCallingHours = { start: string; end: string; weekdaysOnly: boolean };
+export const DEFAULT_SOPHIE_CALLING_HOURS: SophieCallingHours = { start: "09:00", end: "17:00", weekdaysOnly: true };
+
 /** Reads a small profile for the current owner's business. */
 export type BusinessProfile = {
   businessName: string | null;
@@ -391,6 +394,11 @@ export type BusinessProfile = {
   sophieJobAuthority: boolean;
   sophieTalkEnabled: boolean;
   sophieLiveListenEnabled: boolean;
+  /** Owner permission for automatic missed-call callbacks. */
+  sophieMissedCallbacksEnabled: boolean;
+  /** Explicit business-owner permission for Sophie invoice calls. */
+  sophieInvoiceCallsEnabled: boolean;
+  sophieCallingHours: SophieCallingHours;
   workingHours: BusinessWorkingHours;
   enabledModules: BusinessModuleSettings;
   /** Who covers the Stripe processing fee on customer payments. */
@@ -485,6 +493,18 @@ export async function getBusinessProfile(
     sophieBookingAuthority: data.sophieBookingAuthority === true,
     sophieTalkEnabled: data.sophieTalkEnabled === true,
     sophieLiveListenEnabled: data.sophieLiveListenEnabled === true,
+    sophieMissedCallbacksEnabled: data.sophieMissedCallbacksEnabled === true,
+    sophieInvoiceCallsEnabled: data.sophieInvoiceCallsEnabled === true,
+    sophieCallingHours: (() => {
+      const hours = data.sophieCallingHours;
+      if (!hours || typeof hours !== "object") return DEFAULT_SOPHIE_CALLING_HOURS;
+      const value = hours as Record<string, unknown>;
+      const start = typeof value.start === "string" ? value.start : "";
+      const end = typeof value.end === "string" ? value.end : "";
+      const validTime = (time: unknown) => typeof time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+      if (!validTime(start) || !validTime(end) || start >= end) return DEFAULT_SOPHIE_CALLING_HOURS;
+      return { start, end, weekdaysOnly: value.weekdaysOnly !== false };
+    })(),
     sophieJobAuthority: data.sophieJobAuthority === true,
     workingHours: parseWorkingHoursFromBusiness(data),
     enabledModules: parseBusinessModuleSettings(data),

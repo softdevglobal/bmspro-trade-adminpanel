@@ -21,6 +21,9 @@ export type BusinessProfileLite = {
   timezone: string;
   sophieTalkEnabled?: boolean;
   sophieLiveListenEnabled?: boolean;
+  sophieMissedCallbacksEnabled?: boolean;
+  sophieInvoiceCallsEnabled?: boolean;
+  sophieCallingHours?: { start: string; end: string; weekdaysOnly: boolean };
 };
 
 const PROFILE_CACHE_KEY = "bms.business.profile";
@@ -100,6 +103,9 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
           timezone?: string | null;
           sophieTalkEnabled?: boolean;
           sophieLiveListenEnabled?: boolean;
+          sophieMissedCallbacksEnabled?: boolean;
+          sophieInvoiceCallsEnabled?: boolean;
+          sophieCallingHours?: { start: string; end: string; weekdaysOnly: boolean };
         };
       };
       if (!response.ok || !body.ok || !body.profile) return;
@@ -114,6 +120,9 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
         bookingSlug: slug,
         sophieTalkEnabled: body.profile.sophieTalkEnabled === true,
         sophieLiveListenEnabled: body.profile.sophieLiveListenEnabled === true,
+        sophieMissedCallbacksEnabled: body.profile.sophieMissedCallbacksEnabled === true,
+        sophieInvoiceCallsEnabled: body.profile.sophieInvoiceCallsEnabled === true,
+        sophieCallingHours: body.profile.sophieCallingHours ?? { start: "09:00", end: "17:00", weekdaysOnly: true },
         bookingPath:
           typeof body.profile.bookingPath === "string"
             ? body.profile.bookingPath
@@ -166,6 +175,9 @@ export function BusinessProfileProvider({ children }: { children: ReactNode }) {
           timezone: current?.timezone ?? PLATFORM_TIME_ZONE,
           sophieTalkEnabled: current?.sophieTalkEnabled === true,
           sophieLiveListenEnabled: current?.sophieLiveListenEnabled === true,
+          sophieMissedCallbacksEnabled: current?.sophieMissedCallbacksEnabled === true,
+          sophieInvoiceCallsEnabled: current?.sophieInvoiceCallsEnabled === true,
+          sophieCallingHours: current?.sophieCallingHours ?? { start: "09:00", end: "17:00", weekdaysOnly: true },
           ...patch,
         };
         writeProfileCache(businessId, next);
