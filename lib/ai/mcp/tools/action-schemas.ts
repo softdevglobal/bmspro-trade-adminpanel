@@ -65,6 +65,22 @@ export type VoiceActionResult = {
 };
 export type ScheduleVoiceTask = (stage: string, task: () => Promise<unknown>) => void;
 
+/** What Sophie should do when a caller's email fails validation: ask for it letter by letter, kindly. */
+export const SPELL_EMAIL_GUIDANCE = "The email was not captured correctly. Kindly ask the caller to spell it letter by letter " +
+  "(for example \"Sorry, I didn't quite catch that. Could you spell the email for me, letter by letter?\"), " +
+  "then read it back slowly letter by letter, saying \"at\" and \"dot\" as words, and wait for a yes before trying again. " +
+  "If only one part was unclear, ask for just that part. Do not ask for the other details again.";
+
+/**
+ * A REJECTED result for arguments that failed validation. When the email is what failed, it adds the
+ * letter-by-letter guidance and the INVALID_EMAIL code, so Sophie asks for only the email, in a friendly way.
+ */
+export function voiceArgumentsRejected(error: z.ZodError, message: string): VoiceActionResult {
+  return error.issues.some(issue => issue.path.includes("email"))
+    ? { status: "REJECTED", code: "INVALID_EMAIL", message: `${message} ${SPELL_EMAIL_GUIDANCE}` }
+    : { status: "REJECTED", message };
+}
+
 /** Contact matching does not prove identity; expose no stored profile/history. */
 export function voiceCustomerMatches(profile: Record<string, unknown> | undefined, businessId: string, contact: { email: string; phone: string }) {
   return !!profile && profile.registeredBusinessId === businessId && typeof profile.email === "string" &&

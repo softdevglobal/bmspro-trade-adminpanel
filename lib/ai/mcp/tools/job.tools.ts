@@ -1,5 +1,5 @@
 import { jobBookingArguments, jobCancelArguments, jobLookupArguments, jobRescheduleArguments, voiceCustomerMatches,
-  type VoiceActionResult, type VoiceJobSlot, type ScheduleVoiceTask } from "./action-schemas";
+  voiceArgumentsRejected, type VoiceActionResult, type VoiceJobSlot, type ScheduleVoiceTask } from "./action-schemas";
 import { parseInspectionRequestInput, parseSlotsArray, type InspectionCustomer, type InspectionAddress, type InspectionRequestDetail, type InspectionSlot } from "@/lib/inspection/types";
 import type { BookingDetail } from "@/lib/bookings/types";
 import { minutesBetweenClockTimes } from "@/lib/bookings/job-estimate";
@@ -120,7 +120,7 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
   return {
     lookup: async (raw: unknown): Promise<VoiceActionResult> => {
       const args = jobLookupArguments.safeParse(raw);
-      if (!args.success) return { status: "REJECTED", message: "Ask for the job reference from the booking message, plus the email and mobile on the job." };
+      if (!args.success) return voiceArgumentsRejected(args.error, "Ask for the job reference from the booking message, plus the email and mobile on the job.");
       const business = await deps.business(), timezone = timezoneOf(business);
       const job = await locate(args.data.jobCode, args.data);
       if (!job) return notFound();
@@ -132,7 +132,7 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
     create: async (raw: unknown): Promise<VoiceActionResult> => {
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Job booking is disabled." };
       const args = jobBookingArguments.safeParse(raw);
-      if (!args.success) return { status: "REJECTED", message: "Check the service, site address, preferred times and contacts. If a start and finish are given, finish must be after start. Read back the details and obtain explicit confirmation." };
+      if (!args.success) return voiceArgumentsRejected(args.error, "Check the service, site address, preferred times and contacts. If a start and finish are given, finish must be after start. Read back the details and obtain explicit confirmation.");
       const business = await deps.business();
       const autoConfirm = deps.autoConfirmEnabled() && authorised(business);
       const timezone = timezoneOf(business);
@@ -175,7 +175,7 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
     reschedule: async (raw: unknown): Promise<VoiceActionResult> => {
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Job changes are disabled." };
       const args = jobRescheduleArguments.safeParse(raw);
-      if (!args.success) return { status: "REJECTED", message: "Confirm the job reference, contacts and new preferred times, then obtain explicit confirmation." };
+      if (!args.success) return voiceArgumentsRejected(args.error, "Confirm the job reference, contacts and new preferred times, then obtain explicit confirmation.");
       const business = await deps.business();
       if (!authorised(business) || !deps.autoConfirmEnabled()) return noAuthority();
       const timezone = timezoneOf(business);
@@ -202,7 +202,7 @@ export function jobActions(binding: VoiceBusiness, deps: VoiceJobDependencies) {
     cancel: async (raw: unknown): Promise<VoiceActionResult> => {
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Job changes are disabled." };
       const args = jobCancelArguments.safeParse(raw);
-      if (!args.success) return { status: "REJECTED", message: "Confirm the job reference and contacts, read back the job, and obtain explicit confirmation to cancel it." };
+      if (!args.success) return voiceArgumentsRejected(args.error, "Confirm the job reference and contacts, read back the job, and obtain explicit confirmation to cancel it.");
       const business = await deps.business();
       if (!authorised(business)) return noAuthority();
       const timezone = timezoneOf(business);
