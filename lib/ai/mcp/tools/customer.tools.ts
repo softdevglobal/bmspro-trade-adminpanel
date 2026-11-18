@@ -1,4 +1,4 @@
-import { findCustomerArguments, registerCustomerArguments, voiceCustomerMatches,
+import { findCustomerArguments, registerCustomerArguments, voiceCustomerMatches, voiceArgumentsRejected,
   type VoiceActionResult, type VoiceCustomerInput, type ScheduleVoiceTask } from "./action-schemas";
 import { runVoiceOperation, voiceOperationStore } from "./operation";
 import type { VoiceBusiness } from "../../config";
@@ -20,7 +20,7 @@ export function customerActions(binding: VoiceBusiness, deps: VoiceCustomerDepen
   return {
     find: async (raw: unknown): Promise<VoiceActionResult> => {
       const parsed = findCustomerArguments.safeParse(raw);
-      if (!parsed.success) return { status: "REJECTED", message: "Ask for a valid email and phone number." };
+      if (!parsed.success) return voiceArgumentsRejected(parsed.error, "Ask for a valid email and phone number.");
       await deps.business();
       const records = await deps.find(parsed.data.email);
       const record = records.length === 1 ? records[0] : null;
@@ -31,7 +31,7 @@ export function customerActions(binding: VoiceBusiness, deps: VoiceCustomerDepen
     register: async (raw: unknown): Promise<VoiceActionResult> => {
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Customer registration is disabled." };
       const parsed = registerCustomerArguments.safeParse(raw);
-      if (!parsed.success) return { status: "REJECTED", message: "Read back the name, email and phone, and obtain explicit permission to create a customer account." };
+      if (!parsed.success) return voiceArgumentsRejected(parsed.error, "Read back the name, email and phone, and obtain explicit permission to create a customer account.");
       const business = await deps.business();
       return deps.once(parsed.data.requestKey, parsed.data.customer, async () => {
         const records = await deps.find(parsed.data.customer.email);

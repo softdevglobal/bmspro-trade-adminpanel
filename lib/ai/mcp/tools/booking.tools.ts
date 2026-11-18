@@ -1,4 +1,4 @@
-import { availabilityArguments, inspectionArguments, voiceCustomerMatches,
+import { availabilityArguments, inspectionArguments, voiceCustomerMatches, voiceArgumentsRejected,
   type VoiceActionResult, type ScheduleVoiceTask } from "./action-schemas";
 import { parseInspectionRequestInput, type InspectionRequestInput, type InspectionRequestDetail } from "@/lib/inspection/types";
 import { runVoiceOperation, voiceOperationStore } from "./operation";
@@ -29,7 +29,7 @@ export function bookingActions(binding: VoiceBusiness, deps: VoiceBookingDepende
     create: async (raw: unknown): Promise<VoiceActionResult> => {
       if (!deps.writesEnabled()) return { status: "REJECTED", message: "Inspection submission is disabled." };
       const args = inspectionArguments.safeParse(raw);
-      if (!args.success) return { status: "REJECTED", message: "Check the required details and obtain explicit confirmation after reading them back." };
+      if (!args.success) return voiceArgumentsRejected(args.error, "Check the required details and obtain explicit confirmation after reading them back.");
       const { requestKey, requestType, serviceId, customRequest, customerId, customer, address, preferredSlots, budgetAud, customerNotes } = args.data;
       if (requestType === "existing_service" ? !serviceId || customRequest !== null : serviceId !== null || !customRequest) {
         return { status: "REJECTED", code: "INVALID_REQUEST_TYPE", message: "Choose either an existing service with its service reference, or advice with a scope of work and no service reference." };

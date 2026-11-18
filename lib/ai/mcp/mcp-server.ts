@@ -31,7 +31,7 @@ export async function handleTradeVoiceMcp(request: Request, reads: TradeVoiceRea
     }
   };
   server.tool("get_business_profile", "Read the assigned Trade business profile. Business identity is controlled by the server.", {}, () => tool(reads.profile));
-  server.tool("list_services", "List active services for the assigned business. No prices or availability may be invented.", {}, () => tool(reads.services));
+  server.tool("list_services", "List active services for the assigned business. Use the names to answer service questions straight away in a warm, natural way: mention the two or three most relevant names, never read a long list or any IDs aloud. No prices or availability may be invented.", {}, () => tool(reads.services));
   const find = reads.findCustomer, availability = reads.availability;
   if (find) server.tool("find_customer", "Match an exact caller-provided email and phone in this business only. Returns a reference, not stored profile data. Matching contacts does not verify identity or permit reading history.", findCustomerArguments.shape, args => tool(() => find(args)));
   if (availability) server.tool("get_available_slots", "Read live unavailable morning/afternoon sessions over a 1-90 day range. Other sessions are preferences, not confirmed bookings.", availabilityArguments.shape, args => tool(() => availability(args)));
