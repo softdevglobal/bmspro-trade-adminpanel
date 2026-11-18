@@ -8,6 +8,7 @@ import { recordingConfig, verifyCallbackGrant } from "@/lib/ai/calls/recordings"
 import { lookupVoiceDidRoute } from "@/lib/ai/data/did-mappings";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
+import { isCustomerCallOptedOut } from "@/lib/ai/calls/call-preferences";
 
 export const maxDuration = 60;
 
@@ -47,6 +48,9 @@ export async function POST(request: Request) {
     const mapping = await lookupVoiceDidRoute(claim.did);
     if (mapping.state !== "active" || mapping.binding.businessId !== auth.businessId) {
       return json({ error: "This business number is unavailable for callbacks." }, 403);
+    }
+    if (await isCustomerCallOptedOut(auth.businessId, number)) {
+      return json({ error: "This customer has opted out of Sophie calls." }, 409);
     }
     if (!await consumeRateLimits([{ key: `sophie-callback:${auth.businessId}`, limit: 5, windowMs: 60_000 }])) {
       return json({ error: "Too many callback requests. Try again in a minute." }, 429);

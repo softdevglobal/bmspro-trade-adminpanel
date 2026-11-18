@@ -3,6 +3,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { createHash } from "node:crypto";
 import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "@/lib/ai/calls/invoice-call-history";
+import { getBusinessProfile } from "@/lib/onboarding/server";
 import {
   completeBookingForInvoicedQuotation,
   type InvoicedBookingAudit,
@@ -25,7 +26,6 @@ import {
   parseInvoicePaymentEntries,
 } from "@/lib/payments/types";
 import { resolveInvoicePayUrl } from "@/lib/payments/document-pay-link";
-import { getBusinessProfile } from "@/lib/onboarding/server";
 import { allocateInvoiceCode } from "@/lib/reference-codes.server";
 import { REQUESTS_COLLECTION } from "@/lib/inspection/types";
 import { resolveInvoiceCustomer } from "@/lib/invoices/customer";
@@ -404,10 +404,11 @@ export async function recordOverdueCustomerReminderSent(businessId: string, invo
   const ref = adminDb.collection(INVOICE_COLLECTION).doc(invoiceId);
   const id = createHash("sha256").update(JSON.stringify(["overdue-email", businessId, invoiceId, reminderDate])).digest("hex");
   const callRef = adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(id);
+  const profile = await getBusinessProfile(businessId);
+  const queueEnabled = process.env.AI_SOPHIE_INVOICE_CALLS_ENABLED === "true" && profile?.sophieInvoiceCallsEnabled === true;
   await adminDb.runTransaction(async transaction => {
     const invoice = await transaction.get(ref);
     if (invoice.get("businessId") !== businessId) return;
-    const queueEnabled = process.env.AI_SOPHIE_CALLBACK_ENABLED === "true";
     const attempt = queueEnabled ? await transaction.get(callRef) : null;
     transaction.update(ref, { overdueReminderCustomerSentAt: FieldValue.serverTimestamp(),
       ...(queueEnabled && { overdueReminderCallId: id }) });

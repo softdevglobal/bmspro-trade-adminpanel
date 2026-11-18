@@ -13,6 +13,7 @@ import { getBusinessProfile } from "@/lib/onboarding/server";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
+import { isCustomerCallOptedOut } from "@/lib/ai/calls/call-preferences";
 
 export const maxDuration = 60;
 const json = (body: object, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -42,6 +43,8 @@ export async function GET(request: Request) {
       unavailableReason = "This invoice must be issued, overdue, and have an outstanding balance.";
     } else if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true") {
       unavailableReason = "Enable AI_SOPHIE_CALLBACK_ENABLED in Trade and restart the app.";
+    } else if (!profile.sophieInvoiceCallsEnabled) {
+      unavailableReason = "The business owner has not enabled Sophie invoice calls in Settings.";
     } else if (!invoice.customer.fullName.trim() || !destination) {
       unavailableReason = "Add a customer name and a supported phone number to this invoice. Use +94 for a Sri Lankan mobile.";
     } else if (!callingRoutes.length) {
@@ -54,7 +57,8 @@ export async function GET(request: Request) {
       destination,
       history: recent.map(doc => {
         const call = transcripts.get(doc.id);
-        return { id: doc.id, attemptedAt: doc.get("attemptedAt"), status: doc.get("status"), reason: doc.get("reason") ?? null, callId: call?.id ?? null,
+        return { id: doc.id, attemptedAt: doc.get("attemptedAt"), scheduledAt: doc.get("scheduledAt") ?? null,
+          status: doc.get("status"), reason: doc.get("reason") ?? null, callId: call?.id ?? null,
           responses: call?.transcript.filter(turn => turn.speaker === "caller").map(turn => turn.text.slice(0, 500)).slice(-6) ?? [] };
       }),
     });
@@ -82,6 +86,7 @@ export async function POST(request: Request) {
       lookupVoiceDidRoute(did),
     ]);
     if (!invoice || !profile?.enabledModules.invoices) return json({ error: "Invoice unavailable." }, 404);
+    if (!profile.sophieInvoiceCallsEnabled) return json({ error: "Enable Sophie invoice calls in Business settings first." }, 403);
     if (!resolveInvoicePaymentDue(invoice, profile.timezone).isOverdue) return json({ error: "This invoice is no longer overdue." }, 409);
     if (route.state !== "active" || route.binding.businessId !== businessId || !route.callback) {
       return json({ error: "Choose a business number that has Sophie callbacks enabled." }, 403);
@@ -92,6 +97,7 @@ export async function POST(request: Request) {
     if (!number || !key || !customerName || number === did) {
       return json({ error: "The invoice needs a customer name and a supported phone number." }, 422);
     }
+    if (await isCustomerCallOptedOut(businessId, number)) return json({ error: "This customer has opted out of Sophie calls." }, 409);
     const id = createHash("sha256").update(JSON.stringify([businessId, invoiceId, requestId])).digest("hex");
     const ref = adminDb.collection(attempts).doc(id);
     const lease = callbackState(businessId, key);

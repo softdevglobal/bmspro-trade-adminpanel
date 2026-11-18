@@ -12,8 +12,9 @@ export function callbackState(businessId: string, callerKey: string) {
 
 const attemptSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/), did: z.string(), missedAt: z.number(), attemptedAt: z.number(),
-  source: z.enum(["automatic", "manual"]),
-  status: z.enum(["REQUESTED", "ANSWERED", "NO_ANSWER", "FAILED", "UNKNOWN", "DEFERRED"]),
+  scheduledAt: z.number().optional(),
+  source: z.enum(["automatic", "manual", "scheduled"]),
+  status: z.enum(["REQUESTED", "ANSWERED", "NO_ANSWER", "FAILED", "UNKNOWN", "DEFERRED", "SCHEDULED"]),
 });
 export type CallbackAttempt = z.infer<typeof attemptSchema>;
 
@@ -43,7 +44,7 @@ export function callbackResultStatus(value: unknown): CallbackAttempt["status"] 
 }
 
 export async function resolveCallback(businessId: string, callerKey: string, through: number,
-  resolution: "returned_call_answered" | "sophie_callback_answered" | "marked_complete" = "marked_complete") {
+  resolution: "returned_call_answered" | "sophie_callback_answered" | "marked_complete" | "customer_opt_out" | "automation_disabled" = "marked_complete") {
   const ref = callbackState(businessId, callerKey);
   await adminDb.runTransaction(async transaction => {
     const current = (await transaction.get(ref)).get("through") as number | undefined;

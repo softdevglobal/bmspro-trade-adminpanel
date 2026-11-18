@@ -10,10 +10,12 @@ import { callbackResultStatus, callbackState } from "./callback-state";
 import { normalizeInvoiceCallbackNumber } from "./callback-number";
 import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "./invoice-call-history";
 import { requestSophieCallback } from "./request-callback";
+import { isCustomerCallOptedOut } from "./call-preferences";
+import { isWithinSophieCallingHours } from "./calling-hours";
 
 export async function runOverdueInvoiceCalls() {
   const counts = { processed: 0, deferred: 0, errors: 0 };
-  if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true") return counts;
+  if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true" || process.env.AI_SOPHIE_INVOICE_CALLS_ENABLED !== "true") return counts;
   const deadline = Date.now() + 110_000;
   const queue = await adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).where("status", "==", "QUEUED").limit(20).get();
   for (const attempt of queue.docs.sort((a, b) => a.get("queuedAt") - b.get("queuedAt"))) {
@@ -33,6 +35,7 @@ export async function runOverdueInvoiceCalls() {
           .where("isActive", "==", true).get(),
       ]);
       if (!profile?.enabledModules.invoices) { await skip("Invoices are unavailable for this business."); continue; }
+      if (!profile.sophieInvoiceCallsEnabled) { await skip("The business owner has not enabled Sophie invoice calls."); continue; }
       const enabled = mappings.docs.filter(doc => doc.get("callback.callerId"));
       const preferred = enabled.filter(doc => doc.get("callback.automatic") === true);
       const selected = enabled.length === 1 ? enabled[0] : preferred.length === 1 ? preferred[0] : null;
@@ -63,6 +66,13 @@ export async function runOverdueInvoiceCalls() {
           tx.update(attempt.ref, { status: "SKIPPED", reason: "The invoice needs a customer name and supported phone number." });
           return null;
         }
+        if (await isCustomerCallOptedOut(businessId, number)) {
+          tx.update(attempt.ref, { status: "SKIPPED", reason: "Customer opted out of Sophie calls." });
+          return null;
+        }
+        if (!isWithinSophieCallingHours(Date.now(), profile.timezone ?? "Australia/Melbourne", profile.sophieCallingHours)) {
+          return null;
+        }
         const lease = callbackState(businessId, key);
         const state = await tx.get(lease);
         const now = Date.now();
@@ -73,19 +83,26 @@ export async function runOverdueInvoiceCalls() {
       });
       if (!call) continue;
       let status = "UNKNOWN";
+      let reason: string | null = null;
       try {
         const response = await requestSophieCallback({ id: attempt.id, did, businessId,
           number: call.number, customerName: call.customerName });
+        const result = response.ok ? await response.json() : null;
         status = response.status === 429 ? "QUEUED" : response.ok
-          ? callbackResultStatus((await response.json()).status) : response.status === 404 || response.status < 500 ? "FAILED" : "UNKNOWN";
+          ? callbackResultStatus(result?.status) : response.status < 500 ? "FAILED" : "UNKNOWN";
+        if (status === "FAILED" || status === "UNKNOWN") {
+          reason = typeof result?.code === "string" && /^[A-Z0-9_]{1,64}$/.test(result.code)
+            ? result.code : response.ok ? "Bridge did not confirm the call outcome." : `Bridge returned HTTP ${response.status}.`;
+        }
         if (status === "QUEUED") counts.deferred++;
         else counts.processed++;
       } catch {
+        reason = "Could not verify the voice bridge response.";
         counts.errors++;
       } finally {
         await adminDb.runTransaction(async tx => {
           const lease = await tx.get(call.lease);
-          tx.update(attempt.ref, { status });
+          tx.update(attempt.ref, { status, reason });
           if (lease.get("manualLeaseId") === attempt.id && status !== "UNKNOWN") tx.update(call.lease, { manualLeaseUntil: 0 });
         });
       }

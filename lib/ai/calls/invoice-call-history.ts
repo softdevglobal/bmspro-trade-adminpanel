@@ -9,7 +9,7 @@ export async function recentOverdueInvoiceCalls(businessId: string, invoiceIds: 
   if (!invoiceIds.length) return { calls: [], hasMore: false };
   const overdue = new Set(invoiceIds);
   const attempts = await adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).where("businessId", "==", businessId)
-    .select("invoiceId", "status", "attemptedAt").get();
+    .select("invoiceId", "status", "attemptedAt", "scheduledAt").get();
   const latest = new Map<string, typeof attempts.docs[number]>();
   const lastAnswered = new Map<string, typeof attempts.docs[number]>();
   for (const attempt of attempts.docs) {
@@ -40,6 +40,7 @@ export async function recentOverdueInvoiceCalls(businessId: string, invoiceIds: 
         .map(turn => turn.text.slice(0, 350)) ?? [];
       return {
         invoiceId, status: attempt.get("status") as string, attemptedAt: attempt.get("attemptedAt") as number,
+        scheduledAt: typeof attempt.get("scheduledAt") === "number" ? attempt.get("scheduledAt") as number : null,
         customerResponse: log && responses.length && answered ? {
           callId: log.id, at: log.startedAt ?? answered.get("attemptedAt") as number, excerpts: responses,
         } : null,

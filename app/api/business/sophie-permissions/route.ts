@@ -9,6 +9,13 @@ export const runtime = "nodejs";
 const permissions = z.object({
   sophieTalkEnabled: z.boolean().optional(),
   sophieLiveListenEnabled: z.boolean().optional(),
+  sophieMissedCallbacksEnabled: z.boolean().optional(),
+  sophieInvoiceCallsEnabled: z.boolean().optional(),
+  sophieCallingHours: z.object({
+    start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    weekdaysOnly: z.boolean(),
+  }).strict().refine(hours => hours.start < hours.end, "End time must be later than start time.").optional(),
 }).strict().refine(values => Object.keys(values).length > 0);
 
 const json = (body: unknown, status = 200) => Response.json(body, {
@@ -28,6 +35,9 @@ export async function PATCH(request: Request) {
           !isTenantAccessAllowed(data.status, data.isActive)) return false;
       transaction.update(business, {
         ...values.data, sophieVoicePermissionsUpdatedAt: FieldValue.serverTimestamp(),
+        ...(typeof values.data.sophieMissedCallbacksEnabled === "boolean" && {
+          sophieMissedCallbacksEnabledAt: values.data.sophieMissedCallbacksEnabled ? FieldValue.serverTimestamp() : null,
+        }),
       });
       return true;
     });

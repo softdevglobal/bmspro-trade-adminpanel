@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState, type FormEvent } from "react";
 import type { User } from "firebase/auth";
 import { useAuth } from "@/lib/auth/auth-context";
 import { AiCallsBoard } from "@/components/ai-calls-board";
+import { ScheduledCallbacksBoard } from "@/components/scheduled-callbacks-board";
 import { formatTenantDate } from "@/lib/onboarding/tenant-display";
 import { platformTodayIso } from "@/lib/platform/timezone";
 import { useMissedCallsCount } from "@/lib/notifications/missed-calls-context";
@@ -32,7 +33,7 @@ async function requestRecordings(user: User, path: string, options: RequestInit)
   return response;
 }
 
-type CallView = "recordings" | "missed" | "ai";
+type CallView = "recordings" | "missed" | "ai" | "scheduled";
 type InitialCallView = { initialView: CallView; initialDate?: string; initialCallId?: string; sophieCallbackEnabled?: boolean };
 
 export function CallRecordingsBoard(props: InitialCallView) {
@@ -51,6 +52,8 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
   const [savingCallback, setSavingCallback] = useState<string | null>(null);
   const [dialing, setDialing] = useState<string | null>(null);
   const [callbackResults, setCallbackResults] = useState<Record<string, string>>({});
+  const [callOptOuts, setCallOptOuts] = useState<Record<string, boolean>>({});
+  const [savingOptOut, setSavingOptOut] = useState<string | null>(null);
   const markReadOnLoad = useRef(initialView === "missed");
   const [selected, setSelected] = useState<Recording | null>(null);
   const [view, setView] = useState<CallView>(initialView);
@@ -64,7 +67,7 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
   const [draftDates, setDraftDates] = useState(dateRange);
 
   useEffect(() => {
-    if (view === "ai") return;
+    if (view !== "recordings" && view !== "missed") return;
     const controller = new AbortController();
     const params = new URLSearchParams({ page: String(page), view });
     if (view === "recordings" && direction === "outbound") params.set("direction", direction);
@@ -82,7 +85,21 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
           const rowKey = recording.rowKey || "legacy:" + JSON.stringify([recording.id, recording.did, recording.startedAt]);
           if (!rows.has(rowKey)) rows.set(rowKey, { ...recording, rowKey });
         }
-        setResult({ ...data, recordings: [...rows.values()] });
+        const uniqueRows = [...rows.values()];
+        setResult({ ...data, recordings: uniqueRows });
+        if (view === "missed") {
+          const preferenceRows = uniqueRows.filter(row => row.callerNumber && row.callerKey);
+          if (preferenceRows.length) {
+            const prefResponse = await fetch("/api/business/call-preferences", {
+              method: "POST", headers: { Authorization: "Bearer " + await user.getIdToken(), "Content-Type": "application/json" },
+              body: JSON.stringify({ numbers: preferenceRows.map(row => row.callerNumber) }), signal: controller.signal, cache: "no-store",
+            });
+            const prefData = await prefResponse.json();
+            if (!prefResponse.ok) throw new Error(prefData.error ?? "Could not load customer call preferences.");
+            if (!controller.signal.aborted) setCallOptOuts(current => ({ ...current,
+              ...Object.fromEntries(preferenceRows.map((row, index) => [row.callerKey!, prefData.optedOut[index] === true])) }));
+          }
+        }
         if (view !== "missed" || !markReadOnLoad.current) return;
         markReadOnLoad.current = false;
         try {
@@ -156,6 +173,27 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
     }
   }
 
+  async function setCustomerOptOut(recording: Recording) {
+    if (!recording.callerNumber || !recording.callerKey || savingOptOut) return;
+    const next = !callOptOuts[recording.callerKey];
+    if (!window.confirm(next
+      ? `Block Sophie from calling ${recording.customerName ?? recording.callerNumber}?`
+      : `Only clear this block if the customer asked to receive calls again. Clear it for ${recording.callerNumber}?`)) return;
+    setSavingOptOut(recording.callerKey);
+    setCallbackError("");
+    try {
+      const response = await fetch("/api/business/call-preferences", {
+        method: "PATCH", headers: { Authorization: "Bearer " + await user.getIdToken(), "Content-Type": "application/json" },
+        body: JSON.stringify({ number: recording.callerNumber, doNotCall: next }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Could not update this customer’s call preference.");
+      setCallOptOuts(current => ({ ...current, [recording.callerKey!]: next }));
+    } catch (reason) {
+      setCallbackError(reason instanceof Error ? reason.message : "Could not update this customer’s call preference.");
+    } finally { setSavingOptOut(null); }
+  }
+
   const result = view === "recordings" && loadedResult?.recordingDirection !== direction ? null : loadedResult;
   const groups = new Map<string, { recording: Recording; count: number }>();
   for (const recording of result?.recordings ?? []) {
@@ -174,6 +212,7 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
         { value: "recordings", label: "Recordings" },
         { value: "missed", label: "Missed calls" },
         { value: "ai", label: "AI calls" },
+        { value: "scheduled", label: "Scheduled calls" },
       ] as const).map(({ value: option, label }) => (
         <button key={option} type="button" aria-pressed={view === option}
           className={controlClass + (view === option ? " border-primary text-primary" : "")}
@@ -202,7 +241,7 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
         </button>
       ))}
     </div>}
-    {view === "ai" ? <AiCallsBoard initialCallId={initialCallId} /> : <>
+    {view === "scheduled" ? <ScheduledCallbacksBoard user={user} /> : view === "ai" ? <AiCallsBoard initialCallId={initialCallId} /> : <>
     {readError && <p role="alert" className="text-sm text-error">{readError}</p>}
     <div className="flex flex-wrap items-end justify-between gap-3">
       <form onSubmit={applyDates} onReset={(event) => {
@@ -274,6 +313,11 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
                       <td className="px-3 py-2.5 text-right">
                         {missed ? <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                           <span className="font-medium text-on-surface-variant">{recording.callbackComplete ? "Callback complete" : "No answer"}</span>
+                          {recording.callerNumber && recording.callerKey && <button type="button" className={controlClass}
+                            disabled={savingOptOut !== null || typeof callOptOuts[recording.callerKey] !== "boolean"} onClick={() => void setCustomerOptOut(recording)}>
+                            {savingOptOut === recording.callerKey ? "Saving…" : typeof callOptOuts[recording.callerKey] !== "boolean" ? "Checking…"
+                              : callOptOuts[recording.callerKey] ? "Allow Sophie calls" : "Block Sophie calls"}
+                          </button>}
                           {/^\+?\d{1,15}$/.test(callbackNumber) && <button type="button" className={controlClass}
                             aria-label={`Call back ${recording.customerName ?? callbackNumber}`}
                             onClick={() => window.dispatchEvent(new CustomEvent("trade:missed-call-callback", {
@@ -288,9 +332,10 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
                           </button>}
                           {sophieCallbackEnabled && !recording.callbackComplete && recording.callbackGrant &&
                             recording.callerNumber && (
-                              <button type="button" className={controlClass} disabled={dialing !== null || !!callbackResults[recording.rowKey]}
+                              <button type="button" className={controlClass} disabled={dialing !== null || !!callbackResults[recording.rowKey] || callOptOuts[recording.callerKey ?? ""] !== false}
                                 onClick={() => void callWithSophie(recording)}>
-                                {dialing === recording.rowKey ? "Calling…" : "Call back with Sophie"}
+                                {dialing === recording.rowKey ? "Calling…" : callOptOuts[recording.callerKey ?? ""] === true ? "Customer opted out"
+                                  : callOptOuts[recording.callerKey ?? ""] === false ? "Call back with Sophie" : "Checking preference…"}
                               </button>
                           )}
                           {callbackResults[recording.rowKey] && <span role="status">{callbackResults[recording.rowKey]}</span>}

@@ -21,7 +21,10 @@ export async function missedCallCallbackDetails(businessId: string, calls: Misse
         (activeEpisode && attempt.source === "automatic" && attempt.missedAt >= episode && attempt.missedAt <= call.startedAt)));
     const sameEpisode = activeEpisode || state?.episode === call.startedAt || history.some(attempt => attempt.id === state?.attemptId);
     const attempts = sameEpisode && typeof state?.attempts === "number" ? state.attempts : null;
-    const nextAt = !resolved && attempts !== null && attempts < 4 && typeof state?.nextAt === "number" ? state.nextAt : null;
+    const customerRequestedAt = history.filter(attempt => attempt.source === "scheduled" && attempt.status === "SCHEDULED" &&
+      typeof attempt.scheduledAt === "number" && attempt.scheduledAt > Date.now())
+      .sort((a, b) => a.scheduledAt! - b.scheduledAt!)[0]?.scheduledAt ?? null;
+    const nextAt = customerRequestedAt ?? (!resolved && attempts !== null && attempts < 4 && typeof state?.nextAt === "number" ? state.nextAt : null);
     const resolution = resolved && state?.through === call.startedAt ? state.resolution
       : resolved && state?.resolution === "returned_call_answered" && sameEpisode ? state.resolution : null;
     return { resolved, resolution, history, automaticAttempts: attempts, nextAt };
@@ -50,6 +53,7 @@ export async function missedCallCallbackDetails(businessId: string, calls: Misse
     retryLimitReached: !resolved && automaticAttempts !== null && automaticAttempts >= 4,
     callbackAttempts: history.map(attempt => ({
       when: local(attempt.attemptedAt), source: attempt.source, status: attempt.status,
+      scheduledFor: attempt.scheduledAt === undefined ? null : local(attempt.scheduledAt),
       callbackConversation: logs.get(attempt.id) ?? null,
     })),
   }));
