@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { adminDb } from "@/lib/firebase/admin";
+import { logFirestoreDocuments } from "@/lib/firebase/indexed-query";
 import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
 
 const COLLECTION = "ai_customer_call_preferences";
@@ -14,6 +15,7 @@ export async function isCustomerCallOptedOut(businessId: string, phone: string):
   const phoneKey = phoneComparisonKey(phone);
   if (!phoneKey) return true;
   const snapshot = await adminDb.collection(COLLECTION).doc(preferenceId(businessId, phoneKey)).get();
+  logFirestoreDocuments("call-opt-out-lookup", 1);
   return snapshot.get("doNotCall") === true;
 }
 

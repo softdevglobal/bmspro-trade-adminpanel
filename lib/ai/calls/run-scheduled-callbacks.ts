@@ -12,17 +12,14 @@ import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "./invoice-call-history";
 import { requestSophieCallback } from "./request-callback";
 import { isCustomerCallOptedOut } from "./call-preferences";
 import { isWithinSophieCallingHours } from "./calling-hours";
-
-const SCHEDULED_CALLBACKS = "ai_scheduled_callbacks";
+import { loadDueScheduledCallbacks } from "./due-scheduled-callbacks";
 
 export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } = {}) {
   const counts = { processed: 0, deferred: 0, skipped: 0, errors: 0 };
   if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true") return counts;
 
   const now = Date.now();
-  const scheduled = await adminDb.collection(SCHEDULED_CALLBACKS).where("status", "==", "SCHEDULED").limit(500).get();
-  const due = scheduled.docs.filter(doc => typeof doc.get("scheduledAt") === "number" && doc.get("scheduledAt") <= now)
-    .sort((a, b) => a.get("scheduledAt") - b.get("scheduledAt")).slice(0, 6);
+  const due = await loadDueScheduledCallbacks(adminDb, now);
   for (const doc of due) {
     const data = doc.data();
     if (typeof data.scheduledAt !== "number" || data.scheduledAt > now) continue;

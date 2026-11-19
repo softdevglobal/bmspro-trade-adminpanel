@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { adminDb } from "@/lib/firebase/admin";
+import { logFirestoreDocuments } from "@/lib/firebase/indexed-query";
 import { DID_MAPPINGS_COLLECTION, lookupVoiceDidRoute } from "@/lib/ai/data/did-mappings";
 import { callbackResultStatus, callbackState, resolveCallback, saveCallbackAttempt, type CallbackAttempt } from "@/lib/ai/calls/callback-state";
 import { normalizeCallbackMobile } from "@/lib/ai/calls/callback-number";
@@ -32,6 +33,7 @@ export async function runSophieCallbacks(localTest = false) {
   const counts = { dialled: 0, resolved: 0, errors: 0, deferred: 0 };
   const mappings = await adminDb.collection(DID_MAPPINGS_COLLECTION)
     .where("isActive", "==", true).where("callback.automatic", "==", true).get();
+  logFirestoreDocuments("missed-callback-mappings", mappings.size);
   const businesses = new Map<string, { did: string; since: number }[]>();
   for (const doc of mappings.docs) {
     const since = doc.get("autoCallbackSince")?.toMillis?.();
@@ -73,6 +75,12 @@ export async function runSophieCallbacks(localTest = false) {
       }
       for (const [callerKey, row] of [...callers].sort((a, b) => a[1].startedAt - b[1].startedAt)) {
         if (Date.now() - started > 220_000) break;
+        const ref = callbackState(businessId, callerKey);
+        const known = (await ref.get()).data();
+        logFirestoreDocuments("missed-callback-state-lookup", 1);
+        // Resolved episodes need no opt-out lookup or repeat resolution transaction.
+        // Read fresh each run so manual completion and new episodes remain visible.
+        if (row.startedAt <= (known?.through ?? 0)) continue;
         const answer = answered.get(callerKey) ?? 0;
         if (answer > row.startedAt) {
           await resolveCallback(businessId, callerKey, answer, "returned_call_answered");
@@ -81,15 +89,12 @@ export async function runSophieCallbacks(localTest = false) {
         }
         const number = normalizeCallbackMobile(row.callerNumber ?? "");
         if (!number || number === row.did) continue;
+        if (known?.episode > Math.max(answer, known?.through ?? 0) &&
+            (retryDueAt(known ?? {}) > Date.now() || known?.attempts >= maxAttempts)) continue;
         if (await isCustomerCallOptedOut(businessId, number)) {
           await resolveCallback(businessId, callerKey, row.startedAt, "customer_opt_out");
           continue;
         }
-        const ref = callbackState(businessId, callerKey);
-        const known = (await ref.get()).data();
-        if (row.startedAt <= (known?.through ?? 0) ||
-            (known?.episode > Math.max(answer, known?.through ?? 0) &&
-              (retryDueAt(known ?? {}) > Date.now() || known?.attempts >= maxAttempts))) continue;
         const route = await lookupVoiceDidRoute(row.did);
         if (route.state !== "active" || route.binding.businessId !== businessId) continue;
         if (route.business.sophieMissedCallbacksEnabled !== true) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePageVisible } from "@/lib/notifications/use-page-visible";
 
 type UsePollingFetchOptions<T> = {
   enabled: boolean;
@@ -24,6 +25,7 @@ export function usePollingFetch<T>({
   refresh: () => Promise<void>;
 } {
   const [data, setData] = useState<T | null>(null);
+  const visible = usePageVisible();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fetcherRef = useRef(fetcher);
@@ -47,13 +49,19 @@ export function usePollingFetch<T>({
 
   useEffect(() => {
     if (!enabled) {
-      setData(null);
-      setLoading(false);
-      setError(null);
-      return;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setData(null);
+        setLoading(false);
+        setError(null);
+      });
+      return () => { cancelled = true; };
     }
+    if (!visible) return;
 
-    void refresh();
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) void refresh(); });
 
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
@@ -61,10 +69,11 @@ export function usePollingFetch<T>({
     const interval = window.setInterval(() => void refresh(), intervalMs);
 
     return () => {
+      cancelled = true;
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);
     };
-  }, [enabled, intervalMs, refresh]);
+  }, [enabled, visible, intervalMs, refresh]);
 
   return { data, loading, error, refresh };
 }
