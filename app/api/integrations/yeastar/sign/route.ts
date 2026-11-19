@@ -12,6 +12,20 @@ function jsonError(error: string, status: number) {
 }
 
 /**
+ * Where the mobile Linkus SDK connects: YEASTAR_LINKUS_HOST / YEASTAR_LINKUS_PORT
+ * (PBX > Linkus Server > remote access), defaulting to the PBX host and the
+ * standard Linkus port 8111. The web softphone ignores this.
+ */
+function linkusServer(pbx: URL): { host: string; port: number } | null {
+  const host = (process.env.YEASTAR_LINKUS_HOST?.trim() || pbx.hostname).toLowerCase();
+  const port = Number.parseInt(process.env.YEASTAR_LINKUS_PORT?.trim() || "8111", 10);
+  if (!/^[a-z0-9.-]{1,253}$/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return null;
+  }
+  return { host, port };
+}
+
+/**
  * Creates a Yeastar Linkus SDK signature for the authenticated business member.
  * PBX API credentials never leave this server route; the client only receives
  * the short-lived API response containing the per-user SDK signature.
@@ -89,7 +103,14 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { ok: true, sign, pbxUrl: origin.origin },
+      {
+        ok: true,
+        sign,
+        pbxUrl: origin.origin,
+        // The mobile apps sign in to Linkus as this email with the signature.
+        account: email,
+        linkus: linkusServer(origin),
+      },
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch (error) {
