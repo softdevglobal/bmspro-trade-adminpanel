@@ -43,13 +43,15 @@ export function callbackResultStatus(value: unknown): CallbackAttempt["status"] 
   return value === "ANSWERED" || value === "NO_ANSWER" || value === "FAILED" ? value : "UNKNOWN";
 }
 
+/** Marks the caller's missed calls up to `through` as handled. Returns true
+ *  only when this changed anything (already-resolved callers return false). */
 export async function resolveCallback(businessId: string, callerKey: string, through: number,
   resolution: "returned_call_answered" | "sophie_callback_answered" | "marked_complete" | "customer_opt_out" | "automation_disabled" = "marked_complete") {
   const ref = callbackState(businessId, callerKey);
-  await adminDb.runTransaction(async transaction => {
+  return adminDb.runTransaction(async transaction => {
     const current = (await transaction.get(ref)).get("through") as number | undefined;
-    if ((current ?? -1) < through) {
-      transaction.set(ref, { through, resolution, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    }
+    if ((current ?? -1) >= through) return false;
+    transaction.set(ref, { through, resolution, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    return true;
   });
 }

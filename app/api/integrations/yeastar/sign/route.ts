@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { adminDb } from "@/lib/firebase/admin";
 import { requireBusinessMember } from "@/lib/onboarding/server";
 import { NextResponse } from "next/server";
 
@@ -9,6 +11,70 @@ function jsonError(error: string, status: number) {
     { ok: false, error },
     { status, headers: { "Cache-Control": "private, no-store" } },
   );
+}
+
+/**
+ * Yeastar allows each API application only 8 valid access tokens at once
+ * (error 60002 "MAX LIMITATION EXCEEDED" after that), each valid 30 minutes.
+ * So one token is reused for every signature until shortly before it
+ * expires: kept in memory and in Firestore (admin SDK only), so all server
+ * instances share it.
+ */
+let cachedToken: { key: string; token: string; expiresAt: number } | null = null;
+/** After get_token fails, wait before asking again (repeated requests keep a rate-limit block going). */
+let tokenFailure: { key: string; errcode: number | string; until: number } | null = null;
+
+async function pbxAccessToken(
+  pbxUrl: string,
+  accessId: string,
+  accessKey: string,
+  fresh = false,
+): Promise<{ token: string } | { errcode: number | string }> {
+  const key = `${pbxUrl}|${accessId}`;
+  if (!fresh && cachedToken?.key === key && cachedToken.expiresAt > Date.now()) {
+    return { token: cachedToken.token };
+  }
+  if (tokenFailure?.key === key && tokenFailure.until > Date.now()) {
+    return { errcode: tokenFailure.errcode };
+  }
+  const shared = adminDb.collection("integration_api_tokens")
+    .doc(`yeastar-${createHash("sha256").update(key).digest("hex").slice(0, 32)}`);
+  if (!fresh) {
+    try {
+      const stored = (await shared.get()).data();
+      if (typeof stored?.token === "string" && typeof stored.expiresAt === "number" && stored.expiresAt > Date.now()) {
+        cachedToken = { key, token: stored.token, expiresAt: stored.expiresAt };
+        return { token: stored.token };
+      }
+    } catch {
+      // Fall through to a new token.
+    }
+  }
+  const tokenResponse = await fetch(`${pbxUrl}/openapi/v1.0/get_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ username: accessId, password: accessKey }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!tokenResponse.ok) throw new Error("PBX token request failed");
+  const tokenData = (await tokenResponse.json()) as {
+    errcode?: number;
+    access_token?: string;
+    access_token_expire_time?: number;
+  };
+  if (tokenData.errcode !== 0 || !tokenData.access_token) {
+    cachedToken = null;
+    const errcode = tokenData.errcode ?? "unknown";
+    tokenFailure = { key, errcode, until: Date.now() + 60_000 };
+    return { errcode };
+  }
+  tokenFailure = null;
+  const lifetimeMs = Math.min((tokenData.access_token_expire_time ?? 1800) * 1000, 30 * 60_000);
+  cachedToken = { key, token: tokenData.access_token, expiresAt: Date.now() + lifetimeMs - 2 * 60_000 };
+  await shared.set({ token: cachedToken.token, expiresAt: cachedToken.expiresAt, updatedAt: Date.now() })
+    .catch(() => undefined);
+  return { token: tokenData.access_token };
 }
 
 /**
@@ -64,36 +130,35 @@ export async function POST(request: Request) {
   }
 
   try {
-    const tokenResponse = await fetch(`${pbxUrl}/openapi/v1.0/get_token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ username: accessId, password: accessKey }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!tokenResponse.ok) throw new Error("PBX token request failed");
-    const tokenData = (await tokenResponse.json()) as {
-      errcode?: number;
-      access_token?: string;
+    const createSign = async (fresh: boolean) => {
+      const access = await pbxAccessToken(pbxUrl, accessId, accessKey, fresh);
+      if (!("token" in access)) return { ok: false as const, authError: access.errcode };
+      const signUrl = new URL("/openapi/v1.0/sign/create", pbxUrl);
+      signUrl.searchParams.set("access_token", access.token);
+      const signResponse = await fetch(signUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ username: email, sign_type: "sdk", expire_time: 0 }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!signResponse.ok) throw new Error("PBX signature request failed");
+      return {
+        ok: true as const,
+        signData: (await signResponse.json()) as { errcode?: number; data?: { sign?: string } },
+      };
     };
-    if (tokenData.errcode !== 0 || !tokenData.access_token) {
-      return jsonError(`Yeastar authentication failed (code ${tokenData.errcode ?? "unknown"}). Check the SDK application's credentials and IP allowlist.`, 502);
-    }
 
-    const signUrl = new URL("/openapi/v1.0/sign/create", pbxUrl);
-    signUrl.searchParams.set("access_token", tokenData.access_token);
-    const signResponse = await fetch(signUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ username: email, sign_type: "sdk", expire_time: 0 }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!signResponse.ok) throw new Error("PBX signature request failed");
-    const signData = (await signResponse.json()) as {
-      errcode?: number;
-      data?: { sign?: string };
-    };
+    let result = await createSign(false);
+    // A cached token the PBX no longer accepts: fetch a fresh one once.
+    if (result.ok && result.signData.errcode !== 0 && cachedToken) {
+      cachedToken = null;
+      result = await createSign(true);
+    }
+    if (!result.ok) {
+      return jsonError(`Yeastar authentication failed (code ${result.authError}). Check the SDK application's credentials and IP allowlist, or wait a few minutes if requests were rate limited.`, 502);
+    }
+    const signData = result.signData;
     const sign = signData.data?.sign;
     if (signData.errcode !== 0) {
       return jsonError(`Yeastar could not create a Linkus signature for ${email} (code ${signData.errcode ?? "unknown"}). Confirm this email belongs to an enabled Linkus extension on the PBX.`, 422);

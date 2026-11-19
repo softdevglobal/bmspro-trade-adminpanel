@@ -75,8 +75,9 @@ export async function runSophieCallbacks(localTest = false) {
         if (Date.now() - started > 220_000) break;
         const answer = answered.get(callerKey) ?? 0;
         if (answer > row.startedAt) {
-          await resolveCallback(businessId, callerKey, answer, "returned_call_answered");
-          counts.resolved++;
+          // Count only real resolutions: the same answered caller stays in the
+          // 24h history window and would otherwise be "resolved" every poll.
+          if (await resolveCallback(businessId, callerKey, answer, "returned_call_answered")) counts.resolved++;
           continue;
         }
         const number = normalizeCallbackMobile(row.callerNumber ?? "");
@@ -107,8 +108,7 @@ export async function runSophieCallbacks(localTest = false) {
         const recentAnswer = (await history(businessId, "answered", started, Date.now()))
           .reduce((latest, call) => call.callerKey === callerKey ? Math.max(latest, call.startedAt) : latest, 0);
         if (recentAnswer > row.startedAt) {
-          await resolveCallback(businessId, callerKey, recentAnswer, "returned_call_answered");
-          counts.resolved++;
+          if (await resolveCallback(businessId, callerKey, recentAnswer, "returned_call_answered")) counts.resolved++;
           continue;
         }
         const attempt = await adminDb.runTransaction(async tx => {
