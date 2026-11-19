@@ -82,7 +82,9 @@ export async function GET(request: Request) {
       ...row, callbackComplete: row.startedAt <= (completed.get(row.callerKey ?? "") ?? -1),
     }));
     return json({ ...result, recordings, hasMore: result.hasMore && page < 200,
-      ...(view === "recordings" && { recordingDirection: "inbound" }) });
+      ...(view === "recordings" && { recordingDirection: "inbound" }),
+      // The mobile app shows "Call back with Sophie" only when it is switched on.
+      ...(view === "missed" && { sophieCallbackEnabled: process.env.AI_SOPHIE_CALLBACK_ENABLED === "true" }) });
   } catch (error) {
     if (error instanceof RecordingTokenLimitError) return json({ error: "Yeastar has reached its API token limit. Try again after an existing token expires." }, 503);
     if (error instanceof RecordingAccessError) return json({ error: "Yeastar denied access to call records. Ask your administrator to check the recording API permissions." }, 502);
