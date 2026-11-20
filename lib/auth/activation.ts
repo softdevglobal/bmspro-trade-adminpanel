@@ -63,9 +63,36 @@ export async function completeAccountActivation(uid: string) {
   await batch.commit();
 }
 
+export type ActivationPreview = { kind: "owner" | "customer" | "staff"; fullName: string; email: string; phone: string; businessName: string };
+
+/** Read-only lookup so the activation page can show who is activating. Never consumes the token. */
+export async function getActivationPreview(token: string): Promise<ActivationPreview | null> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  const digest = activationDigest(token);
+  const snap = await adminDb.collection("account_activations").doc(digest).get();
+  const data = snap.data();
+  if (!data || data.consumed || !(data.expiresAt instanceof Timestamp) || data.expiresAt.toMillis() <= Date.now()) return null;
+  if (data.kind !== "customer") return null;
+  const profile = (await adminDb.collection("customers").doc(data.uid).get()).data();
+  if (!profile || profile.activationDigest !== digest) return null;
+  return {
+    kind: "customer",
+    fullName: typeof profile.fullName === "string" ? profile.fullName : "",
+    email: typeof profile.email === "string" ? profile.email : "",
+    phone: typeof profile.phone === "string" ? profile.phone : "",
+    businessName: typeof profile.registeredBusinessName === "string" ? profile.registeredBusinessName : "",
+  };
+}
+
+export type ActivationResult = { loginPath: string; kind: string; email: string | null; slug: string | null };
+
 export async function activateAccount(token: string, password: string) {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token) || password.length < 12 || password.length > 128) {
-    throw new Error("Use a valid activation link and a password of 12–128 characters.");
+  return (await activateAccountDetailed(token, password)).loginPath;
+}
+
+export async function activateAccountDetailed(token: string, password: string): Promise<ActivationResult> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token) || password.length < 6 || password.length > 128) {
+    throw new Error("Use a valid activation link and a password of 6–128 characters.");
   }
   const digest = activationDigest(token);
   const ref = adminDb.collection("account_activations").doc(digest);
@@ -78,12 +105,21 @@ export async function activateAccount(token: string, password: string) {
     const profile = await tx.get(adminDb.collection(data.kind === "customer" ? "customers" : "users").doc(data.uid));
     if (profile.data()?.activationDigest !== digest) throw new Error("This activation link has been replaced.");
     tx.update(ref, { consumed: true, consumedAt: FieldValue.serverTimestamp() });
-    return { uid: data.uid as string, kind: data.kind as string, slug: profile.data()?.registeredBookingSlug as string | undefined };
+    return {
+      uid: data.uid as string, kind: data.kind as string,
+      slug: profile.data()?.registeredBookingSlug as string | undefined,
+      email: typeof profile.data()?.email === "string" ? (profile.data()?.email as string) : null,
+    };
   });
   // Consume before touching Auth: simultaneous submissions cannot change the password twice.
   // A failed Auth operation requires a fresh reset code; never reopen a consumed token.
   await adminAuth.updateUser(activation.uid, { password });
   await completeAccountActivation(activation.uid);
-  return activation.kind === "customer" && activation.slug
-    ? `/booknow/${encodeURIComponent(activation.slug)}/account` : "/login";
+  const isCustomer = activation.kind === "customer" && !!activation.slug;
+  return {
+    loginPath: isCustomer ? `/booknow/${encodeURIComponent(activation.slug!)}/account` : "/login",
+    kind: activation.kind,
+    email: isCustomer ? activation.email : null,
+    slug: isCustomer ? activation.slug! : null,
+  };
 }

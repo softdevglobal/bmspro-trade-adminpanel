@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { ownerBriefingTools } from "@/lib/ai/mcp/tools/owner-briefing.tools";
 import { MAX_LOOKBACK_DAYS } from "@/lib/ai/owner-call/day-activity";
+import {
+  createServiceArgs, OWNER_SERVICE_PARAMETERS, prepareServiceArgs,
+} from "@/lib/ai/owner-call/owner-service"; // shared rules (Step 1)
+import {
+  CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, OWNER_ACTION_DEFINITIONS, OWNER_ACTION_PREPARE_TOOLS, OWNER_ACTION_READ_TOOLS,
+} from "@/lib/ai/owner-call/owner-actions";
+import type { OwnerActionTools } from "@/lib/ai/mcp/tools/owner-actions.tools";
+
 
 type Briefing = ReturnType<typeof ownerBriefingTools>;
 
@@ -23,6 +31,10 @@ export type OwnerToolArgs = {
   invoiceSearch?: string; invoiceStatus?: z.infer<typeof invoiceStatus>;
   search?: string; visitType?: z.infer<typeof visitType>; durationMinutes?: number;
   question?: string;
+  name?: string; // prepare_service
+  durationMin?: number; // prepare_service
+  tasks?: { title: string; description?: string }[]; // prepare_service
+  confirmed?: boolean; // create_service
 };
 
 /** What a tool can read. businessId is already fixed to the owner's business in each. */
@@ -30,6 +42,10 @@ export type OwnerToolContext = {
   briefing: Briefing;
   /** Present only when owner knowledge is enabled. */
   knowledge?: { search(input: unknown): Promise<unknown> };
+  /** Present only for service tools, when the service flag is on. Built per request on the MCP route. */
+  services?: { prepare(args: unknown): Promise<unknown>; create(args: unknown): Promise<unknown> };
+  /** Present only for the MCP action tools (services, team, knowledge drafts). Built per request with the owner's login. */
+  actions?: OwnerActionTools;
 };
 
 type OwnerVoiceTool = {
@@ -39,6 +55,12 @@ type OwnerVoiceTool = {
   required?: string[];
   /** The route builds the knowledge search only for tools that use it. */
   usesKnowledge?: boolean;
+  /** The route builds the service tools only for tools that use them. */
+  usesServices?: boolean;
+  /** The route builds the MCP action tools only for tools that use them. */
+  usesActions?: boolean;
+  /** Ready-made JSON Schema for the realtime model, used instead of ownerToolParameters. */
+  parameters?: object;
   run: (context: OwnerToolContext, args: OwnerToolArgs) => Promise<unknown>;
 };
 
@@ -148,6 +170,85 @@ const knowledgeTool: OwnerVoiceTool = {
     : { status: "UNAVAILABLE" },
 };
 
+/** Voice service creation. These write, unlike the briefing tools; see lib/ai/owner-call/owner-service.ts. */
+const serviceTools: OwnerVoiceTool[] = [
+  {
+    name: "prepare_service",
+    description: "Store a proposed new service for the owner to confirm. Creates nothing. First ask for anything missing (name, how long, main steps), one short question at a time. Then read back the name, duration and steps and ask: Should I add this service? For changes, call it again. Never state prices.",
+    args: prepareServiceArgs, // zod shape, validated by the MCP server
+    parameters: OWNER_SERVICE_PARAMETERS.prepare_service, // JSON Schema for the realtime model
+    usesServices: true,
+    run: async ({ services }, args) => services ? services.prepare(args) : { status: "UNAVAILABLE" }, // UNAVAILABLE if flag off
+  },
+  {
+    name: "create_service",
+    description: "Create the prepared service as a live service. Call only after you read it back and the owner clearly said yes, with confirmed true.",
+    args: createServiceArgs,
+    parameters: OWNER_SERVICE_PARAMETERS.create_service,
+    usesServices: true,
+    run: async ({ services }, args) => services ? services.create(args) : { status: "UNAVAILABLE" },
+  },
+];
+
+/**
+ * MCP action tools: the server twins of the browser tools for services, team and knowledge drafts.
+ * Definitions and rules: lib/ai/owner-call/owner-actions.ts; server code: lib/ai/mcp/tools/owner-actions.tools.ts.
+ * Each tool validates its own arguments, so the MCP shape only names the fields.
+ */
+const ACTION_RUNNERS: Record<string, (actions: OwnerActionTools, args: unknown) => Promise<unknown>> = {
+  get_services: (a) => a.getServices(),
+  prepare_service_update: (a, args) => a.prepareServiceUpdate(args),
+  prepare_service_delete: (a, args) => a.prepareServiceDelete(args),
+  get_staff: (a) => a.getStaff(),
+  prepare_staff_create: (a, args) => a.prepareStaffCreate(args),
+  prepare_staff_update: (a, args) => a.prepareStaffUpdate(args),
+  prepare_staff_status: (a, args) => a.prepareStaffStatus(args),
+  prepare_staff_delete: (a, args) => a.prepareStaffDelete(args),
+  get_leave_requests: (a, args) => a.getLeaveRequests(args),
+  prepare_leave_decision: (a, args) => a.prepareLeaveDecision(args),
+  get_attendance: (a, args) => a.getAttendance(args),
+  get_customers: (a, args) => a.getCustomers(args),
+  prepare_customer_create: (a, args) => a.prepareCustomerCreate(args),
+  prepare_customer_update: (a, args) => a.prepareCustomerUpdate(args),
+  prepare_knowledge_entry: (a, args) => a.prepareKnowledgeEntry(args),
+  get_knowledge_entries: (a, args) => a.getKnowledgeEntries(args),
+  prepare_knowledge_update: (a, args) => a.prepareKnowledgeUpdate(args),
+  prepare_knowledge_publish: (a, args) => a.prepareKnowledgePublish(args),
+  prepare_knowledge_delete: (a, args) => a.prepareKnowledgeDelete(args),
+  get_items: (a, args) => a.getItems(args),
+  prepare_item_create: (a, args) => a.prepareItemCreate(args),
+  prepare_item_update: (a, args) => a.prepareItemUpdate(args),
+  prepare_item_delete: (a, args) => a.prepareItemDelete(args),
+  [CONFIRM_CHANGE_TOOL]: (a, args) => a.confirm(args),
+  [CANCEL_CHANGE_TOOL]: (a) => a.cancel(),
+};
+
+function actionTool(name: string): OwnerVoiceTool {
+  const definition = OWNER_ACTION_DEFINITIONS[name];
+  const properties = Object.keys((definition.parameters as { properties?: object }).properties ?? {});
+  return {
+    name, description: definition.description,
+    args: Object.fromEntries(properties.map((key) => [key, z.unknown().optional()])),
+    parameters: definition.parameters,
+    usesActions: true,
+    run: async ({ actions }, args) => actions ? ACTION_RUNNERS[name](actions, args) : { status: "UNAVAILABLE" },
+  };
+}
+
+/** The MCP action tools for the enabled areas, plus confirm and cancel when any change tool is included. */
+function actionTools({ services, team, drafts, customers, items }: {
+  services: boolean; team: boolean; drafts: boolean; customers: boolean; items: boolean;
+}): OwnerVoiceTool[] {
+  const names = [
+    ...(services ? [...OWNER_ACTION_READ_TOOLS.services, ...OWNER_ACTION_PREPARE_TOOLS.services] : []),
+    ...(team ? [...OWNER_ACTION_READ_TOOLS.team, ...OWNER_ACTION_PREPARE_TOOLS.team] : []),
+    ...(drafts ? [...OWNER_ACTION_READ_TOOLS.drafts, ...OWNER_ACTION_PREPARE_TOOLS.drafts] : []),
+    ...(customers ? [...OWNER_ACTION_READ_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.customers] : []),
+    ...(items ? [...OWNER_ACTION_READ_TOOLS.items, ...OWNER_ACTION_PREPARE_TOOLS.items] : []),
+  ];
+  return names.length ? [...names, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : [];
+}
+
 /** Both settings are needed: knowledgeSettings().enabled reads AI_VOICE_KNOWLEDGE_ENABLED. */
 export function ownerKnowledgeEnabled(env: Readonly<Record<string, string | undefined>> = process.env) {
   return env.AI_OWNER_VOICE_KNOWLEDGE_ENABLED === "true" && env.AI_VOICE_KNOWLEDGE_ENABLED === "true";
@@ -162,11 +263,22 @@ export function ownerVoiceDraftsEnabled(env: Readonly<Record<string, string | un
 }
 
 /**
- * The owner tools. Session start (offered to OpenAI) and the MCP route (served)
- * both build the list here with the same flag, so the two always match.
+ * The owner tools. Session start (offered to OpenAI) and the MCP route (served) both build the
+ * list here with the same flags. `actions` adds the MCP action tools for the enabled areas: the
+ * session start passes it in mcp mode only; the MCP route always serves them, so a session in
+ * either mode can call what it was offered.
  */
-export function ownerVoiceToolList({ knowledge }: { knowledge: boolean }): OwnerVoiceTool[] {
-  return knowledge ? [...briefingTools, knowledgeTool] : briefingTools;
+export function ownerVoiceToolList({
+  knowledge, services = false, team = false, drafts = false, customers = false, items = false, actions = false,
+}: {
+  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; actions?: boolean;
+}): OwnerVoiceTool[] {
+  return [
+    ...briefingTools, // always offered
+    ...(knowledge ? [knowledgeTool] : []), // when owner knowledge is on
+    ...(services ? serviceTools : []), // when voice service creation is on
+    ...(actions ? actionTools({ services, team, drafts, customers, items }) : []), // MCP twins of the browser tools
+  ];
 }
 
 /** Added to Sophie's instructions when the knowledge tool is offered. */

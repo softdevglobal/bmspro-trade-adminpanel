@@ -60,7 +60,7 @@ export const OWNER_VOICE_DRAFT_INSTRUCTIONS = [
   "3) Read the title and text back exactly, mention any warnings, and ask: Should I save this as a draft?",
   "4) Only after a clear yes, call save_knowledge_draft with confirmed true. For changes, prepare again; for no, call discard_knowledge_draft.",
   "Never put customer names, phone numbers, emails, passwords or card details in a note.",
-  "Say drafts are not used on calls until the owner reviews and publishes them on the AI knowledge page. You cannot publish, edit or delete entries.",
+  "Drafts are not used on calls until published. Edit, publish or delete entries only with the knowledge tools.",
 ].join(" ");
 
 /** Realtime tool definitions (JSON Schema). Offered only when voice drafts are enabled. */

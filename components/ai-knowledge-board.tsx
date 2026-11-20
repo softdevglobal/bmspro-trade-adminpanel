@@ -5,6 +5,10 @@ import type { KnowledgeKind, KnowledgeOrigin, KnowledgeSource, KnowledgeStatus }
 import { KNOWLEDGE_PURPOSES, PURPOSE_LABEL, PURPOSE_NOTE_MAX, describePurpose, purposeError,
   type KnowledgePurpose } from "@/lib/ai/data/knowledge-purpose";
 import { useVoiceDraft } from "@/lib/ai/owner-call/voice-draft-store";
+import {
+  knowledgeReadBack, registerKnowledgePageVoice, VOICE_KNOWLEDGE_TEXT_MAX, type KnowledgeManageAction,
+} from "@/lib/ai/owner-call/owner-knowledge";
+import { matchByName } from "@/lib/ai/owner-call/owner-team";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AiSearchActivity } from "./ai-search-activity";
 import { VoiceDraftCard } from "./voice-draft-card";
@@ -254,16 +258,23 @@ export function AiKnowledgeBoard() {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [anyPending, apply]);
 
-  /** Runs an action; if it resolves to a string, that replaces the default success message. */
-  async function run(action: () => Promise<unknown>, done: string) {
+  /**
+   * Runs an action; if it resolves to a string, that replaces the default success message.
+   * Returns what was shown, so Sophie (voice) can say the same.
+   */
+  async function run(action: () => Promise<unknown>, done: string): Promise<{ ok: boolean; text: string }> {
     setBusy(true);
     setNotice(null);
     try {
       const override = await action();
-      setNotice({ tone: "info", text: typeof override === "string" ? override : done });
+      const text = typeof override === "string" ? override : done;
+      setNotice({ tone: "info", text });
       await load();
+      return { ok: true, text };
     } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Something went wrong." });
+      const text = error instanceof Error ? error.message : "Something went wrong.";
+      setNotice({ tone: "error", text });
+      return { ok: false, text };
     } finally {
       setBusy(false);
     }
@@ -291,8 +302,9 @@ export function AiKnowledgeBoard() {
     editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  async function startEdit(listed: ListedSource) {
-    if (listed.generated) return;
+  /** Opens an entry in the editor. Returns the full entry it opened (null if it could not). */
+  async function startEdit(listed: ListedSource): Promise<KnowledgeSource | null> {
+    if (listed.generated) return null;
     let source: KnowledgeSource = listed;
     // The list only has a preview of long entries. Load the full text first,
     // otherwise saving would cut the entry down to the preview.
@@ -302,7 +314,7 @@ export function AiKnowledgeBoard() {
         source = (await authFetch(`/api/ai/knowledge/${listed.id}`)).source as KnowledgeSource;
       } catch (error) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not open the entry." });
-        return;
+        return null;
       } finally {
         setBusy(false);
       }
@@ -311,6 +323,7 @@ export function AiKnowledgeBoard() {
       purpose: source.purpose ?? null, purposeNote: source.purposeNote ?? "" });
     setHint(null);
     editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return source;
   }
 
   /** "Review and publish" on a saved voice draft: open it in the editor below. */
@@ -437,6 +450,124 @@ export function AiKnowledgeBoard() {
     if (editor.id === source.id) setEditor(EMPTY_EDITOR);
     void run(() => authFetch(`/api/ai/knowledge/${source.id}`, { method: "DELETE" }), "Deleted.");
   };
+
+  // ---- Sophie (voice): the editor and the entry actions, like the owner. See lib/ai/owner-call/owner-knowledge.ts ----
+  /** The entry Sophie asked to publish, unpublish or delete; outlined in the list until confirmed or cancelled. */
+  const [pendingManage, setPendingManage] = useState<{ source: ListedSource; action: KnowledgeManageAction } | null>(null);
+  const voice = useRef({ sources, editor, pendingManage, startEdit, save, run });
+  useEffect(() => {
+    voice.current = { sources, editor, pendingManage, startEdit, save, run };
+  });
+  useEffect(() => {
+    if (loading) return;
+    const typed = (kind: KnowledgeKind) => kind === "faq" || kind === "policy" || kind === "note";
+    const find = (entryTitle: string) => matchByName(voice.current.sources, (source) => source.title, entryTitle, "knowledge entry");
+    const outline = (element: Element | null | undefined) => {
+      if (!(element instanceof HTMLElement)) return;
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      element.classList.add("ring-2", "ring-primary", "ring-offset-2");
+      window.setTimeout(() => element.classList.remove("ring-2", "ring-primary", "ring-offset-2"), 2_000);
+    };
+    // The editor as it will look once React renders; picks up the owner's own typing between calls.
+    let liveEditor = voice.current.editor;
+    let seenEditor = liveEditor;
+    const sync = () => { if (voice.current.editor !== seenEditor) liveEditor = seenEditor = voice.current.editor; };
+
+    return registerKnowledgePageVoice({
+      async openEdit(entryTitle) {
+        const found = find(entryTitle);
+        if (!found.ok) return found.result;
+        const listed = found.item;
+        if (listed.generated || !typed(listed.kind)) {
+          return { status: "NOT_BY_VOICE", message: `"${listed.title}" is an imported file, a web page or built from settings. Edit it on this page by hand.` };
+        }
+        setFilter("all");
+        setPendingManage(null);
+        const source = await voice.current.startEdit(listed);
+        if (!source) return { status: "FAILED", message: "Could not open that entry." };
+        liveEditor = seenEditor = {
+          id: source.id, version: source.version, kind: source.kind as Editor["kind"], title: source.title, body: source.body,
+          purpose: source.purpose ?? null, purposeNote: source.purposeNote ?? "",
+        };
+        outline(editorRef.current);
+        return {
+          status: "OPENED",
+          message: `"${source.title}" (${source.status === "needs_review" ? "needs review" : source.status}) is open in the editor. It says: ` +
+            `${source.body.slice(0, 1_500)}. Ask what to change, then use knowledge_form_step.`,
+        };
+      },
+      async form(args) {
+        sync();
+        if (args.action === "show") {
+          outline(editorRef.current);
+          return { status: "OK", message: "The editor is on screen." };
+        }
+        if (!liveEditor.id) return { status: "NOT_OPEN", message: "No entry is open. Use open_knowledge_entry first; new notes use prepare_knowledge_draft." };
+        if (args.action === "fill") {
+          const title = args.title ?? liveEditor.title;
+          const body = args.text ?? liveEditor.body;
+          if (title.length < 2 || title.length > 120) return { status: "INVALID", message: "Use a title of 2-120 characters." };
+          if (body.length < 10 || body.length > VOICE_KNOWLEDGE_TEXT_MAX) {
+            return { status: "INVALID", message: `Use text of 10-${VOICE_KNOWLEDGE_TEXT_MAX} characters. Longer text belongs on this page.` };
+          }
+          liveEditor = { ...liveEditor, title, body };
+          setEditor(liveEditor);
+          outline(editorRef.current);
+          return { status: "OK", message: "Typed into the editor. When the owner is done, use review." };
+        }
+        if (args.action === "review") {
+          return {
+            status: "REVIEW",
+            message: `Read back: ${knowledgeReadBack(liveEditor.title.trim(), liveEditor.body.trim())} Then ask: Should I save this? Save only after a clear yes.`,
+          };
+        }
+        // save: same as the "Save as draft" button; a published entry stays published unless it now has warnings.
+        const result = await voice.current.save(false);
+        return result.ok ? { status: "SAVED", message: `${result.text} Tell the owner.` } : { status: "NOT_SAVED", message: result.text };
+      },
+      prepare(entryTitle, action) {
+        const found = find(entryTitle);
+        if (!found.ok) return found.result;
+        const source = found.item;
+        if (action === "publish" && source.status === "published") return { status: "ALREADY", message: `"${source.title}" is already published.` };
+        if (action === "unpublish" && source.status !== "published") return { status: "ALREADY", message: `"${source.title}" is not published.` };
+        if (action === "publish" && source.flags.length) {
+          return { status: "NEEDS_REVIEW", message: `"${source.title}" has warnings. The owner must review and publish it on this page.` };
+        }
+        if (action === "delete" && source.generated) return { status: "NOT_BY_VOICE", message: "This entry is built from business settings. Change those settings instead." };
+        setFilter("all");
+        setPendingManage({ source, action });
+        window.setTimeout(() => outline(document.querySelector(`[data-knowledge-id="${source.id}"]`)), 50);
+        return {
+          status: "CONFIRM",
+          message: action === "publish"
+            ? `"${source.title}" is highlighted. Nothing changed yet. Read back what Sophie would tell callers: ${source.body.slice(0, 600)}. Ask: Should I publish it?`
+            : action === "unpublish"
+              ? `"${source.title}" is highlighted. Nothing changed yet. Ask: Should I unpublish it, so Sophie stops using it on calls?`
+              : `"${source.title}" is highlighted. Nothing changed yet. Ask: Should I delete it? Sophie stops using it on calls.`,
+        };
+      },
+      async confirm() {
+        const pending = voice.current.pendingManage;
+        if (!pending) return { status: "NOTHING_TO_CONFIRM", message: "Nothing is waiting on this page." };
+        setPendingManage(null);
+        const { source, action } = pending;
+        // Same requests as the Publish / Unpublish / Delete buttons, without the browser's own confirm box:
+        // the owner already said yes to Sophie's read-back.
+        if (action === "delete" && voice.current.editor.id === source.id) setEditor(EMPTY_EDITOR);
+        const result = action === "delete"
+          ? await voice.current.run(() => authFetch(`/api/ai/knowledge/${source.id}`, { method: "DELETE" }), "Deleted.")
+          : await voice.current.run(() => authFetch(`/api/ai/knowledge/${source.id}`, {
+            method: "PATCH", body: JSON.stringify({ version: source.version, status: action === "publish" ? "published" : "draft" }),
+          }), action === "publish" ? "Published. Sophie can use it on new calls." : "Unpublished. Sophie will stop using it.");
+        return result.ok ? { status: "DONE", message: `${result.text} Tell the owner.` } : { status: "FAILED", message: result.text };
+      },
+      cancel() {
+        setPendingManage(null);
+        return { status: "CANCELLED", message: "Nothing was changed." };
+      },
+    });
+  }, [loading]);
 
   const refreshFacts = () => run(
     () => authFetch("/api/ai/knowledge/reindex", { method: "POST" }),
@@ -816,7 +947,9 @@ export function AiKnowledgeBoard() {
               const state = indexState(source, now);
               const status = STATUS_STYLE[source.status];
               return (
-                <li key={source.id} className={`rounded-xl border p-4 ${editor.id === source.id ? "border-primary" : "border-outline-variant"}`}>
+                <li key={source.id} data-knowledge-id={source.id}
+                  className={`rounded-xl border p-4 ${editor.id === source.id ? "border-primary" : "border-outline-variant"} ${
+                    pendingManage?.source.id === source.id ? "ring-2 ring-amber-400 ring-offset-2" : ""}`}>
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">

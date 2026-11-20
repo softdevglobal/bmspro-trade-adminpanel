@@ -117,6 +117,7 @@ export function ServiceTaskSortableList({
         return (
           <li
             key={task.clientKey}
+            data-task-number={index + 1}
             ref={(node) => {
               if (node) cardRefs.current.set(task.clientKey, node);
               else cardRefs.current.delete(task.clientKey);

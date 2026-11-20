@@ -10,7 +10,8 @@ import type {
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { useLeaveRequests } from "@/lib/leave/leave-requests-context";
 import type { StaffSummary } from "@/lib/team/staff-summary-cache";
-import { useEffect, useMemo, useState } from "react";
+import { leaveApprovalVoice, matchByName } from "@/lib/ai/owner-call/owner-team";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function formatDayShort(iso: string) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -102,7 +103,8 @@ export function LeaveApprovalDialog({
 
   const hasConflicts = (conflicts?.length ?? 0) > 0;
 
-  async function submit() {
+  /** Approves. Returns null when approved, otherwise the reason (also shown on the page). */
+  async function submit(): Promise<string | null> {
     const reassignments: LeaveReassignment[] = [];
     if (hasConflicts && conflicts) {
       for (const conflict of conflicts) {
@@ -110,11 +112,11 @@ export function LeaveApprovalDialog({
         const draft = drafts[key];
         if (!draft) {
           onError("Choose who should cover every conflicting job and visit.");
-          return;
+          return "Choose who should cover every conflicting job and visit.";
         }
         if (draft.assignTo === "staff" && !draft.staffId) {
           onError("Choose a team member for each reassignment.");
-          return;
+          return "Choose a team member for each reassignment.";
         }
         reassignments.push({
           kind: conflict.kind,
@@ -148,14 +150,70 @@ export function LeaveApprovalDialog({
         throw new Error(payload.error ?? "Could not approve leave.");
       }
       onApproved(payload.leaveRequest);
+      return null;
     } catch (err) {
-      onError(
-        err instanceof Error ? err.message : "Could not approve leave.",
-      );
+      const message = err instanceof Error ? err.message : "Could not approve leave.";
+      onError(message);
+      return message;
     } finally {
       setSubmitting(false);
     }
   }
+
+  // Sophie (voice): read the clashes, choose who covers each, approve. Registered once the
+  // schedule check is done. See lib/ai/owner-call/owner-team.ts.
+  const voice = useRef({ conflicts, drafts, staff, submit });
+  useEffect(() => {
+    voice.current = { conflicts, drafts, staff, submit };
+  });
+  useEffect(() => {
+    if (loadingConflicts || conflicts === null) return;
+    const eligible = () => voice.current.staff.filter((member) => member.id !== item.requesterUid);
+    const coverName = (draft: ReassignDraft | undefined) => draft?.assignTo === "staff"
+      ? eligible().find((member) => member.id === draft.staffId)?.fullName ?? "a staff member"
+      : "you (the owner)";
+    const dates = item.fromDate === item.toDate ? item.fromDate : `${item.fromDate} to ${item.toDate}`;
+    const readBack = (drafts: Record<string, ReassignDraft>) => {
+      const list = voice.current.conflicts ?? [];
+      if (!list.length) {
+        return `No jobs or visits clash with leave for ${item.requesterName}, ${dates}. Ask: Should I approve it?`;
+      }
+      const lines = list.map((conflict, index) =>
+        `${index + 1}. ${conflict.kind === "job" ? "Job" : "Visit"} ${conflict.label} on ${conflict.scheduledDate}` +
+        `${conflict.customerName ? ` for ${conflict.customerName}` : ""}: covered by ${coverName(drafts[`${conflict.kind}:${conflict.id}`])}`);
+      return `Leave for ${item.requesterName}, ${dates}, clashes with: ${lines.join("; ")}. ` +
+        "Ask if that cover is right (change one with cover), then ask: Should I approve it?";
+    };
+    return leaveApprovalVoice.register({
+      describe() {
+        return { status: "CONFIRM", message: readBack(voice.current.drafts) };
+      },
+      setCover(conflictNumber, coverBy) {
+        const list = voice.current.conflicts ?? [];
+        const conflict = list[conflictNumber - 1];
+        if (!conflict) return { status: "INVALID", message: `Choose a clash from 1 to ${list.length}.` };
+        const key = `${conflict.kind}:${conflict.id}`;
+        let draft: ReassignDraft;
+        if (/^(me|myself|owner|i|you)$/i.test(coverBy.trim())) {
+          draft = { assignTo: "owner", staffId: "" };
+        } else {
+          const found = matchByName(eligible(), (member) => member.fullName, coverBy);
+          if (!found.ok) return found.result;
+          draft = { assignTo: "staff", staffId: found.item.id };
+        }
+        const next = { ...voice.current.drafts, [key]: draft };
+        voice.current.drafts = next;
+        setDrafts(next);
+        return { status: "CONFIRM", message: `Changed. ${readBack(next)}` };
+      },
+      async submit() {
+        const failure = await voice.current.submit();
+        return failure
+          ? { status: "FAILED", message: `Not approved: ${failure}` }
+          : { status: "DONE", message: `Leave for ${item.requesterName} is approved.` };
+      },
+    });
+  }, [loadingConflicts, conflicts, item]);
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4">
