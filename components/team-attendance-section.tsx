@@ -20,7 +20,10 @@ import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  attendancePageVoice, matchByName, type AttendanceArgs, type VoiceResult,
+} from "@/lib/ai/owner-call/owner-team";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type AttendanceRecord = AttendanceDetailRecord;
 type AttendancePeriod = "day" | "week" | "biweekly" | "month";
@@ -478,6 +481,88 @@ export function TeamAttendanceSection() {
       setExporting(null);
     }
   }
+
+  // Sophie (voice): set the period, date, view and staff filter like the owner would, and report
+  // the hours. Read only. See lib/ai/owner-call/owner-team.ts.
+  const voice = useRef({
+    selectedDate, selectedPeriod, staffFilterOptions, isLoading, exporting, handleExportPdf, handleExportExcel,
+  });
+  useEffect(() => {
+    voice.current = { selectedDate, selectedPeriod, staffFilterOptions, isLoading, exporting, handleExportPdf, handleExportExcel };
+  });
+  useEffect(() => {
+    if (!user) return;
+    return attendancePageVoice.register({
+      async show(args: AttendanceArgs): Promise<VoiceResult> {
+        const v = voice.current;
+        const changing = args.period !== undefined || args.date !== undefined || args.view !== undefined || args.staffNames !== undefined;
+        if (args.export) {
+          if (changing) return { status: "REJECTED", message: "Set the view first, then send export on its own." };
+          if (v.isLoading || v.exporting) return { status: "BUSY", message: "Attendance is still loading. Try again in a moment." };
+          if (args.export === "pdf") await v.handleExportPdf(); else v.handleExportExcel();
+          return { status: "OK", message: `The ${args.export === "pdf" ? "PDF" : "spreadsheet (CSV)"} is downloading.` };
+        }
+
+        let date = v.selectedDate;
+        const spokenDate = args.date?.trim().toLowerCase();
+        if (spokenDate === "today") date = new Date();
+        else if (spokenDate === "yesterday") date = addDays(new Date(), -1);
+        else if (spokenDate) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(spokenDate)) return { status: "INVALID", message: "date must be today, yesterday or YYYY-MM-DD." };
+          if (spokenDate < attendanceMinDate() || spokenDate > formatDateKey(new Date())) {
+            return { status: "INVALID", message: "Attendance covers the last two years up to today." };
+          }
+          date = parseIsoDate(spokenDate);
+        }
+        const period = args.period ?? v.selectedPeriod;
+
+        let staffIds: string[] | null = null; // null = leave the filter as it is
+        if (args.staffNames) {
+          staffIds = [];
+          for (const spoken of args.staffNames) {
+            const found = matchByName(v.staffFilterOptions, (member) => member.fullName, spoken);
+            if (!found.ok) return found.result;
+            staffIds.push(found.item.id);
+          }
+        }
+
+        setSelectedRecord(null);
+        setSelectedDate(date);
+        setSelectedPeriod(period);
+        if (args.view) setSelectedView(args.view);
+        if (staffIds) setSelectedStaffIds(staffIds);
+
+        // Same range and API as the page, so the numbers match the screen.
+        const range = attendanceRangeForPeriod(date, period);
+        const params = new URLSearchParams({ start: formatDateKey(range.start), end: formatDateKey(range.end) });
+        const response = await fetch(`/api/team/attendance?${params}`, {
+          headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+        });
+        const payload = (await response.json().catch(() => null)) as { ok?: boolean; attendance?: AttendanceRecord[] } | null;
+        if (!response.ok || payload?.ok !== true) return { status: "UNAVAILABLE", message: "Could not load attendance." };
+        const filter = staffIds ?? null;
+        const records = (payload.attendance ?? []).filter((record) =>
+          !filter || filter.length === 0 || filter.includes(record.staffId || record.staffName));
+        const hours = (seconds: number) => Math.round((seconds / 3600) * 10) / 10;
+        const staff = buildStaffSummaries(records).map((summary) => ({
+          name: summary.staffName,
+          daysWorked: new Set(summary.records.map((record) => formatDateKey(new Date(record.checkInTime)))).size,
+          hours: hours(summary.workingSeconds),
+          breakHours: hours(summary.totalBreakSeconds),
+          checkedInNow: summary.activeCount > 0,
+        }));
+        return {
+          status: staff.length ? "OK" : "NONE",
+          period: formatRangeLabel(range, period),
+          totalHours: hours(records.reduce((sum, record) => sum + record.workingSeconds, 0)),
+          staff,
+          message: staff.length
+            ? "Attendance is on screen. Give the totals briefly; hours for open shifts count only until the last update."
+            : "Nobody clocked in during this period.",
+        };
+      },
+    });
+  }, [user]);
 
   return (
     <>

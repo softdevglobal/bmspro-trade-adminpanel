@@ -45,7 +45,11 @@ import {
   SERVICE_TEMPLATE_DEFAULTS,
   toServiceTaskInput,
 } from "@/lib/onboarding/services/types";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  consumeOpenAddService, matchServiceByName, OPEN_ADD_SERVICE_EVENT, OWNER_SERVICE_LIMITS as L, registerServicesPageVoice,
+  registerServiceSourceHandler, registerServiceStepHandler, SERVICE_FORM_SECTIONS, SERVICES_CHANGED_EVENT,
+} from "@/lib/ai/owner-call/owner-service";
 
 type ServiceFilter = "all" | "active" | "inactive";
 
@@ -448,11 +452,45 @@ function ServiceSetupWizard({
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /** The popup body scrolls on its own, so keep what changed in view. */
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** Where Sophie last worked: "top", a section (data-voice-section) or "task:N" (data-task-number). */
+  const [voiceScroll, setVoiceScroll] = useState<{ to: string; at: number } | null>(null);
 
   const progressPercent = Math.round((step / maxStep) * 100);
   const detailsStep: SetupStep = isServiceCreate ? 2 : 1;
   const templateTasksStep: SetupStep = 2;
   const reviewStep: SetupStep = maxStep as SetupStep;
+
+  // A new step (by hand or by Sophie) starts at its top, as does an error message.
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
+  useEffect(() => {
+    if (errorMessage) bodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [errorMessage]);
+  // Bring what Sophie is working on into view and outline it briefly: a section, or one job step.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!voiceScroll || !body) return;
+    if (voiceScroll.to === "top") {
+      body.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    const isTask = voiceScroll.to.startsWith("task:");
+    const target = isTask
+      ? body.querySelector(`[data-task-number="${voiceScroll.to.slice(5)}"]`)
+      : body.querySelector(`[data-voice-section="${voiceScroll.to}"]`);
+    if (!(target instanceof HTMLElement)) return;
+    target.scrollIntoView({ behavior: "smooth", block: isTask ? "center" : "start" });
+    const outline = ["ring-2", "ring-primary", "ring-offset-2"];
+    target.classList.add(...outline);
+    const timer = window.setTimeout(() => target.classList.remove(...outline), 2_000);
+    return () => {
+      window.clearTimeout(timer);
+      target.classList.remove(...outline);
+    };
+  }, [voiceScroll]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -469,6 +507,34 @@ function ServiceSetupWizard({
   function updateForm(patch: Partial<SetupForm>) {
     setForm((current) => ({ ...current, ...patch }));
   }
+
+  // Sophie (voice) applies the owner's choice: an existing template shown, or custom.
+  useEffect(() => {
+    if (!isServiceCreate) return;
+    return registerServiceSourceHandler(({ source, templateName }) => {
+      setErrorMessage(null);
+      if (source === "custom") {
+        setForm((current) => ({ ...current, source: "custom", templateId: null, tasks: [] }));
+        setStep(2);
+        return { status: "CHOSEN", message: "Custom service chosen and the details step is open. Ask for the name, how long it takes and the job steps, one short question at a time, then use service_form_step." };
+      }
+      const names = templates.map((template) => template.name);
+      if (names.length === 0) {
+        return { status: "NO_TEMPLATES", message: "There are no templates to use. Offer a custom service instead." };
+      }
+      const wanted = templateName?.trim().toLowerCase();
+      const match = wanted
+        ? templates.find((t) => t.name.toLowerCase() === wanted) ??
+          templates.find((t) => t.name.toLowerCase().includes(wanted))
+        : undefined;
+      if (!match) {
+        setForm((current) => ({ ...current, source: "template" }));
+        return { status: "PICK_TEMPLATE", templates: names, message: "Read out these template names and ask which one, then call choose_service_source again with templateName." };
+      }
+      setForm((current) => applyTemplateToForm(match, { ...current, source: "template" }));
+      return { status: "CHOSEN", message: `Template "${match.name}" is selected on screen. Ask if they want to continue, then use service_form_step with action continue.` };
+    });
+  }, [isServiceCreate, templates]);
 
   function updateTask(
     index: number,
@@ -578,16 +644,17 @@ function ServiceSetupWizard({
     };
   }
 
-  async function handleSave() {
-    if (isSubmitting) return;
-    if (step !== reviewStep) return;
+  /** Saves the service. Returns null when saved, otherwise the reason it was not (also shown in the popup). */
+  async function handleSave(): Promise<string | null> {
+    if (isSubmitting) return "Already saving.";
+    if (step !== reviewStep) return "The review step is not open.";
 
     setErrorMessage(null);
 
     const validationError = validateAllSteps();
     if (validationError) {
       setErrorMessage(validationError);
-      return;
+      return validationError;
     }
 
     setIsSubmitting(true);
@@ -629,17 +696,174 @@ function ServiceSetupWizard({
 
       if (!result.ok) {
         setErrorMessage(result.error);
-        return;
+        return result.error;
       }
 
       onClose();
       onSaved();
+      return null;
     } catch {
       setErrorMessage("Could not save. Please try again.");
+      return "Could not save. Please try again.";
     } finally {
       setIsSubmitting(false);
     }
   }
+
+  // Sophie (voice) can fill the form and press Continue / Back / Save, like the owner would.
+  const formRef = useRef(form);
+  const stepRef = useRef(step);
+  const saveRef = useRef(handleSave);
+  useEffect(() => {
+    formRef.current = form;
+    stepRef.current = step;
+    saveRef.current = handleSave;
+  });
+  useEffect(() => {
+    if (!isOwnerService) return; // owner services, create or edit (not super-admin templates)
+    return registerServiceStepHandler(async (args) => {
+      const { action, name, durationMin, isActive, tasks } = args;
+      // Scrolling only moves the popup's content, like the owner using the scroll wheel.
+      if (action === "scroll_down" || action === "scroll_up") {
+        const body = bodyRef.current;
+        if (!body) return { status: "NO_FORM", message: "The popup is not showing." };
+        const down = action === "scroll_down";
+        const atEdge = down
+          ? body.scrollTop + body.clientHeight >= body.scrollHeight - 4
+          : body.scrollTop <= 4;
+        if (atEdge) return { status: "OK", message: down ? "Already at the bottom of the popup." : "Already at the top of the popup." };
+        body.scrollBy({ top: (down ? 1 : -1) * Math.round(body.clientHeight * 0.8), behavior: "smooth" });
+        return { status: "OK", message: down ? "Scrolled down." : "Scrolled up." };
+      }
+      setErrorMessage(null);
+      const listSteps = (list: WizardTask[]) =>
+        list.length ? list.map((task, index) => `${index + 1}. ${task.title.trim() || "(no title)"}`).join("; ") : "none";
+      const reviewResult = () => {
+        const f = formRef.current;
+        return {
+          status: "REVIEW",
+          message: `Review step is open. Read back: name "${f.name.trim()}", ${f.defaultDurationMin} minutes, ` +
+            `${f.isActive ? "live" : "paused"}, steps: ${listSteps(f.tasks)}. Then ask: Should I save this service? Call save only after a clear yes.`,
+        };
+      };
+
+      // show and the task actions work on the details step; from the review step, go back to it first.
+      const onDetails = action === "show" || action.endsWith("_task");
+      if (onDetails && stepRef.current !== detailsStep) {
+        if (stepRef.current !== reviewStep) {
+          return { status: "NOT_ON_DETAILS", message: "Choose a template or custom first, then continue to the details step." };
+        }
+        stepRef.current = detailsStep;
+        setStep(detailsStep);
+      }
+
+      if (action === "show") {
+        const section = args.section;
+        if (!section || !(SERVICE_FORM_SECTIONS as readonly string[]).includes(section)) {
+          return { status: "REJECTED", message: `section must be one of: ${SERVICE_FORM_SECTIONS.join(", ")}.` };
+        }
+        setVoiceScroll({ to: section, at: Date.now() });
+        return { status: "OK", message: `The ${section} section is on screen.` };
+      }
+
+      if (action === "add_task" || action === "edit_task" || action === "remove_task" || action === "move_task") {
+        const list = [...formRef.current.tasks];
+        const inRange = (value: number | undefined, max: number): value is number =>
+          Number.isInteger(value) && (value as number) >= 1 && (value as number) <= max;
+        const title = args.title?.trim();
+        const description = args.description?.trim();
+        if (title && title.length > L.taskTitleMax) return { status: "INVALID", message: `A step title can be at most ${L.taskTitleMax} characters.` };
+        if (description && description.length > L.taskDescriptionMax) {
+          return { status: "INVALID", message: `A step description can be at most ${L.taskDescriptionMax} characters.` };
+        }
+        let focus: number; // step number to show afterwards; 0 shows the whole list
+        if (action === "add_task") {
+          if (!title) return { status: "INVALID", message: "Ask for the new step's title." };
+          if (list.length >= L.maxTasks) return { status: "INVALID", message: `A service can have at most ${L.maxTasks} steps.` };
+          const at = inRange(args.toNumber, list.length + 1) ? args.toNumber - 1 : list.length;
+          list.splice(at, 0, createWizardTask({ title, description: description ?? "" }));
+          focus = at + 1;
+        } else {
+          if (!inRange(args.taskNumber, list.length)) {
+            return { status: "INVALID", message: `There ${list.length === 1 ? "is 1 step" : `are ${list.length} steps`}: ${listSteps(list)}. Ask which number.` };
+          }
+          const index = args.taskNumber - 1;
+          if (action === "edit_task") {
+            if (!title && description === undefined) return { status: "INVALID", message: "Ask for the new title or description." };
+            list[index] = { ...list[index], ...(title ? { title } : {}), ...(description !== undefined ? { description } : {}) };
+            focus = index + 1;
+          } else if (action === "remove_task") {
+            list.splice(index, 1);
+            focus = Math.min(index + 1, list.length);
+          } else {
+            if (!inRange(args.toNumber, list.length)) return { status: "INVALID", message: `Ask which position, 1 to ${list.length}.` };
+            const [moved] = list.splice(index, 1);
+            list.splice(args.toNumber - 1, 0, moved);
+            focus = args.toNumber;
+          }
+        }
+        const next: SetupForm = { ...formRef.current, tasks: list };
+        formRef.current = next;
+        setForm(next);
+        setVoiceScroll({ to: focus > 0 ? `task:${focus}` : "tasks", at: Date.now() });
+        return { status: "OK", message: `Done. Steps now: ${listSteps(list)}.` };
+      }
+
+      if (name !== undefined || durationMin !== undefined || isActive !== undefined || tasks !== undefined) {
+        const next: SetupForm = {
+          ...formRef.current,
+          ...(name !== undefined ? { name } : {}),
+          ...(durationMin !== undefined ? { defaultDurationMin: durationMin } : {}),
+          ...(isActive !== undefined ? { isActive } : {}),
+          ...(tasks !== undefined
+            ? { tasks: tasks.map((task) => createWizardTask({ title: task.title, description: task.description ?? "" })) }
+            : {}),
+        };
+        formRef.current = next;
+        setForm(next);
+        // Show the field that changed (the last one in the form, if several did).
+        const changed = tasks !== undefined ? "tasks" : isActive !== undefined ? "live" : durationMin !== undefined ? "duration" : "name";
+        setVoiceScroll({ to: stepRef.current === detailsStep ? changed : "top", at: Date.now() });
+      }
+      const current = stepRef.current;
+      if (action === "fill") {
+        const f = formRef.current;
+        return {
+          status: "OK",
+          message: `Typed into the form. Now: name "${f.name.trim()}", ${f.defaultDurationMin} minutes, ${f.isActive ? "live" : "paused"}, ` +
+            `steps: ${listSteps(f.tasks)}. Ask for anything still missing, or ask if they want to continue.`,
+        };
+      }
+      if (action === "back") {
+        const target = Math.max(1, current - 1) as SetupStep;
+        stepRef.current = target;
+        setStep(target);
+        return { status: "OK", message: `Went back to step ${target} of ${maxStep}.` };
+      }
+      if (action === "continue") {
+        const problem = validateSetupStep(mode, current, formRef.current, isServiceCreate);
+        if (problem) return { status: "INVALID", message: problem };
+        // Already on review (for example after a change there): read it back again so the owner confirms what is shown.
+        if (current >= maxStep) return reviewResult();
+        const target = (current + 1) as SetupStep;
+        stepRef.current = target;
+        setStep(target);
+        if (target === reviewStep) return reviewResult();
+        return {
+          status: "OK",
+          message: `Step ${target} of ${maxStep} is open (details). Ask for or confirm the name, how long it takes and the job steps, one short question at a time, then continue.`,
+        };
+      }
+      // save
+      if (stepRef.current !== reviewStep) {
+        return { status: "NOT_AT_REVIEW", message: "Continue to the review step first." };
+      }
+      const failure = await saveRef.current();
+      return failure
+        ? { status: "NOT_SAVED", message: failure }
+        : { status: "SAVED", message: isEdit ? "The changes are saved. Tell the owner." : "The service was added. Tell the owner it is saved." };
+    });
+  }, [isOwnerService, isServiceCreate, isEdit, mode, maxStep, reviewStep, detailsStep]);
 
   function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -720,7 +944,7 @@ function ServiceSetupWizard({
           onSubmit={handleFormSubmit}
           className="min-h-0 overflow-hidden"
         >
-          <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
+          <div ref={bodyRef} className="h-full min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
             {errorMessage && (
               <div className="mb-5 flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
                 <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
@@ -1046,6 +1270,28 @@ export default function ServicesPage() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  // Reload when Sophie adds a service by voice (fired by components/owner-voice-session.tsx).
+  useEffect(() => {
+    const reload = () => { void load(); };
+    window.addEventListener(SERVICES_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(SERVICES_CHANGED_EVENT, reload);
+  }, [load]);
+
+  // Open the Add service popup when Sophie asks (before or after this page mounts).
+  useEffect(() => {
+    if (isSuperAdmin) return;
+    const open = () => {
+      if (consumeOpenAddService()) {
+        setEditTarget(null);
+        setSetupMode("service");
+        setSetupOpen(true);
+      }
+    };
+    open();
+    window.addEventListener(OPEN_ADD_SERVICE_EVENT, open);
+    return () => window.removeEventListener(OPEN_ADD_SERVICE_EVENT, open);
+  }, [isSuperAdmin]);
+
   const counts = useMemo(
     () => ({
       all: services.length,
@@ -1114,8 +1360,10 @@ export default function ServicesPage() {
     setDeleteTarget(null);
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget || isDeleting) return;
+  /** Deletes the target. Returns null when deleted, otherwise the reason it was not (also shown on the page). */
+  async function confirmDelete(): Promise<string | null> {
+    if (!deleteTarget) return "Nothing is selected to delete.";
+    if (isDeleting) return "Already deleting.";
 
     setIsDeleting(true);
     setErrorMessage(null);
@@ -1132,17 +1380,79 @@ export default function ServicesPage() {
 
       if (!result.ok) {
         setErrorMessage(result.error);
-        return;
+        return result.error;
       }
 
       setDeleteTarget(null);
       void load();
+      return null;
     } catch {
       setErrorMessage("Could not delete. Please try again.");
+      return "Could not delete. Please try again.";
     } finally {
       setIsDeleting(false);
     }
   }
+
+  // Sophie (voice) can open a service to edit or ask to delete one, like the owner using a card's buttons.
+  // Registered only once the list has loaded, so a name Sophie sends can always be matched.
+  const servicesRef = useRef(services);
+  const deleteTargetRef = useRef(deleteTarget);
+  const confirmDeleteRef = useRef(confirmDelete);
+  useEffect(() => {
+    servicesRef.current = services;
+    deleteTargetRef.current = deleteTarget;
+    confirmDeleteRef.current = confirmDelete;
+  });
+  useEffect(() => {
+    if (isSuperAdmin || isLoading) return;
+    return registerServicesPageVoice({
+      openEdit(serviceName) {
+        const found = matchServiceByName(servicesRef.current, serviceName);
+        if (!found.ok) return found.result;
+        const service = found.service;
+        setDeleteTarget(null);
+        setSelectedView(null);
+        setEditTarget({ type: "service", record: service });
+        setSetupMode("service");
+        setSetupOpen(true);
+        const steps = service.tasks.map((task) => task.title.trim()).filter(Boolean).join("; ") || "none";
+        return {
+          status: "OPENED",
+          message: `The Edit service popup is open for "${service.name}": ${service.defaultDurationMin} minutes, ` +
+            `${service.isActive ? "live" : "not live"}, steps: ${steps}. Ask what to change, then use service_form_step.`,
+        };
+      },
+      prepareDelete(serviceName) {
+        const found = matchServiceByName(servicesRef.current, serviceName);
+        if (!found.ok) return found.result;
+        const service = found.service;
+        setSetupOpen(false);
+        setEditTarget(null);
+        setSelectedView(null);
+        setDeleteTarget({ type: "service", id: service.id, name: service.name });
+        return {
+          status: "CONFIRM_DELETE",
+          message: `The delete confirmation for "${service.name}" is on screen. Nothing is deleted yet. ` +
+            `Ask: Should I delete ${service.name}? This cannot be undone. Use confirm only after a clear yes, otherwise cancel.`,
+        };
+      },
+      async confirmDelete() {
+        const target = deleteTargetRef.current;
+        if (!target || target.type !== "service") {
+          return { status: "NO_DELETE", message: "No delete is waiting on screen. Use delete_service with action prepare first." };
+        }
+        const failure = await confirmDeleteRef.current();
+        return failure
+          ? { status: "NOT_DELETED", message: `It was not deleted: ${failure}` }
+          : { status: "DELETED", message: `"${target.name}" is deleted. Tell the owner.` };
+      },
+      cancelDelete() {
+        setDeleteTarget(null);
+        return { status: "CANCELLED", message: "Nothing was deleted." };
+      },
+    });
+  }, [isSuperAdmin, isLoading]);
 
   function openSetup(mode: SetupMode) {
     setEditTarget(null);

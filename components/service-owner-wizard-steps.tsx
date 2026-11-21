@@ -32,15 +32,21 @@ function WizardSection({
   icon,
   title,
   subtitle,
+  voiceSection,
   children,
 }: {
   icon: string;
   title: string;
   subtitle?: string;
+  /** Lets Sophie (voice) scroll to this section: photo, name, duration or tasks. */
+  voiceSection?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-outline-variant/60 bg-surface-container-lowest shadow-sm">
+    <section
+      data-voice-section={voiceSection}
+      className="scroll-mt-2 overflow-hidden rounded-2xl border border-outline-variant/60 bg-surface-container-lowest shadow-sm"
+    >
       <div className="flex items-start gap-3 border-b border-outline-variant/50 bg-gradient-to-r from-primary-fixed/50 via-surface-container-low to-surface-container-lowest px-4 py-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-on-primary shadow-sm">
           <span className="material-symbols-outlined text-[20px]">{icon}</span>
@@ -379,6 +385,7 @@ export function ServiceOwnerDetailsStep({
       </div>
 
       <WizardSection
+        voiceSection="photo"
         icon="photo_camera"
         title="Service photo"
         subtitle="Shown to customers and staff in your service list"
@@ -438,6 +445,7 @@ export function ServiceOwnerDetailsStep({
       </WizardSection>
 
       <WizardSection
+        voiceSection="name"
         icon="badge"
         title="Service name"
         subtitle="How this service appears in your catalog"
@@ -468,6 +476,7 @@ export function ServiceOwnerDetailsStep({
       </WizardSection>
 
       <WizardSection
+        voiceSection="duration"
         icon="schedule"
         title="Default job duration"
         subtitle="How long bookings usually take — staff can adjust per job"
@@ -572,8 +581,9 @@ export function ServiceOwnerLiveToggle({ isActive, onChange }: LiveToggleProps) 
   return (
     <button
       type="button"
+      data-voice-section="live"
       onClick={() => onChange(!isActive)}
-      className={`flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition-all ${
+      className={`flex w-full scroll-mt-2 items-start gap-3 rounded-2xl border p-4 text-left transition-all ${
         isActive
           ? "border-2 border-primary bg-primary-fixed/35 shadow-sm"
           : "border-outline-variant bg-surface-container-lowest hover:border-primary/20"
@@ -623,6 +633,7 @@ export function ServiceOwnerChecklistSection({
 }: ChecklistSectionProps) {
   return (
     <WizardSection
+      voiceSection="tasks"
       icon="checklist"
       title="Checklist tasks"
       subtitle="Steps your team completes on site — drag to reorder"
