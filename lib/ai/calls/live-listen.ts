@@ -28,6 +28,7 @@ type Config = NonNullable<ReturnType<typeof liveListenConfig>>;
 const answered = (status: string) => status === "ANSWER" || status === "ANSWERED";
 
 export type LiveCallDiagnostic = {
+  pbxCallsSeen?: number;
   ownershipPeriods?: number;
   ownedDidSeen?: number;
   rejectedCallMetadata?: number;
@@ -48,6 +49,7 @@ export async function findLiveSophieCalls(config: Config, businessId: string, ca
     }
   }
   if (diagnostic) Object.assign(diagnostic, {
+    pbxCallsSeen: 0,
     ownershipPeriods: periods.size, ownedDidSeen: 0, rejectedCallMetadata: 0,
     matchingInbound: 0, answeredInbound: 0, bridgeLegFound: 0, eligibleCalls: 0,
   });
@@ -71,7 +73,9 @@ export async function findLiveSophieCalls(config: Config, businessId: string, ca
     }
     const bridge = members.flatMap(member => {
       const leg = extensionMember.safeParse(member.extension);
-      return leg.success && leg.data.number === config.bridgeExtension ? [leg.data] : [];
+      // Yeastar retains historical BYE legs after routing/transfer. They must
+      // not make one active Sophie channel appear ambiguous.
+      return leg.success && leg.data.number === config.bridgeExtension && answered(leg.data.member_status) ? [leg.data] : [];
     });
     const { to: did, from, trunk_name: trunk } = inbound.data;
     const period = periods.get(did);
@@ -99,6 +103,7 @@ export async function findLiveSophieCalls(config: Config, businessId: string, ca
     const result = await withToken(config, token => pbxQuery(config, "call/query", token, params));
     if (result.data == null) return [];
     if (!Array.isArray(result.data)) throw new Error("Invalid PBX live call list.");
+    if (diagnostic) diagnostic.pbxCallsSeen = (diagnostic.pbxCallsSeen ?? 0) + result.data.length;
     const matches = await Promise.all((result.data as unknown[]).map(matchCall));
     return matches.filter(call => call !== null);
   }
@@ -113,10 +118,11 @@ export async function findLiveSophieCalls(config: Config, businessId: string, ca
   return eligible;
 }
 
-export async function startSophieListening(config: Config, call: { monitor: string; channel: string }) {
+export async function startSophieListening(config: Config, call: { monitor: string; channel: string }, mode: "listen" | "barge" = "listen") {
+  if (mode !== "listen" && mode !== "barge") throw new Error("Invalid monitoring mode.");
   // A monitor request can ring a phone. Do not retry it after submission.
   const token = await withToken(config, async value => value);
   await pbxQuery(config, "call/listen", token, {}, {
-    monitor: call.monitor, channel_id: call.channel, type: "listen",
+    monitor: call.monitor, channel_id: call.channel, type: mode,
   });
 }

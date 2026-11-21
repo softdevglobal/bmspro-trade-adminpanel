@@ -1,5 +1,5 @@
 import { findLiveSophieCalls, liveCallId, liveListenConfig, startSophieListening, type LiveCallDiagnostic } from "@/lib/ai/calls/live-listen";
-import { bridgeLiveListenConfig, listBridgeCalls, listenToBridgeCall } from "@/lib/ai/calls/bridge-live-listen";
+import { bridgeLiveListenConfig, listBridgeCalls, listenToBridgeCall, joinBridgeCall } from "@/lib/ai/calls/bridge-live-listen";
 import { requireSophieOwner } from "@/lib/ai/owner-call/auth";
 import { consumeRateLimits } from "@/lib/security/rate-limit";
 
@@ -38,6 +38,8 @@ export async function POST(request: Request) {
     const auth = await requireSophieOwner(request);
     if (!auth.ok) return json({ error: auth.error }, auth.status);
     if (!auth.sophieLiveListenEnabled) return json({ error: "Enable Listen live in Business settings." }, 403);
+    const mode = request.headers.get("x-live-call-mode") ?? "listen";
+    if (mode !== "listen" && mode !== "barge") return json({ error: "Invalid monitoring mode." }, 400);
     const config = liveListenConfig();
     const bridge = bridgeLiveListenConfig();
     if (!config && !bridge) return json({ error: "Live listening is not configured." }, 503);
@@ -45,7 +47,15 @@ export async function POST(request: Request) {
     if (!await consumeRateLimits([{ key: "trade-live-listen:" + auth.businessId, limit: 10, windowMs: 60_000 }])) {
       return json({ error: "Too many listening requests. Try again in a minute." }, 429);
     }
-    if (bridge) {
+    if (bridge && mode === "barge") {
+      if (!await consumeRateLimits([{
+        key: "trade-live-join-call:" + auth.businessId + ":" + requestedId, limit: 1, windowMs: 15_000,
+      }])) return json({ error: "A join was just requested. Check your extension." }, 429);
+      const response = await joinBridgeCall(bridge, auth.businessId, requestedId);
+      response.headers.set("Cache-Control", "private, no-store");
+      return response;
+    }
+    if (bridge && mode === "listen") {
       try {
         return await listenToBridgeCall(bridge, auth.businessId, requestedId, request.signal)
           ?? json({ error: "This live call is no longer available." }, 404);
@@ -61,9 +71,9 @@ export async function POST(request: Request) {
     if (!await consumeRateLimits([{
       key: "trade-live-listen-call:" + auth.businessId + ":" + call.id, limit: 1, windowMs: 15_000,
     }])) return json({ error: "A listening request was just made for this call. Check your extension." }, 429);
-    await startSophieListening(config, call);
-    return json({ ok: true });
+    await startSophieListening(config, call, mode);
+    return json({ ok: true, mode });
   } catch {
-    return json({ error: "Yeastar could not confirm the listening request. Check your extension before retrying." }, 502);
+    return json({ error: "The monitoring request could not be confirmed. Check your extension before retrying." }, 502);
   }
 }
