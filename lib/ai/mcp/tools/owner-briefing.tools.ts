@@ -287,11 +287,6 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
         const [candidate] = matches;
         const [details] = await missedCallCallbackDetails(businessId, [candidate], timeZone);
         const lastFour = candidate.number.replace(/\D/g, "").slice(-4);
-        if (details.resolved || details.callbackAttempts.some(attempt => attempt.status !== "DEFERRED") ||
-            (details.automaticAttempts ?? 0) > 0) {
-          return { status: "FOLLOW_UP_STATUS", date: resolved.date,
-            calls: [{ customerName: candidate.name, callerLastFour: lastFour, ...details }] };
-        }
         if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true") return { status: "CALLBACK_DISABLED" };
         if (!normalizeCallbackMobile(candidate.number)) return { status: "UNSUPPORTED_NUMBER" };
         const state = await callbackState(businessId, candidate.callerKey).get();
@@ -299,7 +294,7 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
           return { status: "CALLBACK_IN_PROGRESS" };
         }
         return { status: "READY_TO_CONFIRM", date: resolved.date, name: candidate.name,
-          lastFour,
+          lastFour, calls: [{ customerName: candidate.name, callerLastFour: lastFour, ...details }],
           callbackConfirmation: { grant: candidate.grant, number: candidate.number } };
       }
       const result = await listCallRecordings(config, businessId, 1 + Math.floor(offset / 50), { start, end: endMinute + 60_000 }, "missed");

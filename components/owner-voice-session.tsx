@@ -69,7 +69,7 @@ export function OwnerVoiceSession() {
   const [showOverdueInvoices, setShowOverdueInvoices] = useState(false);
   const [showInvoices, setShowInvoices] = useState(false);
   const [callLinks, setCallLinks] = useState<{ callId: string; date: string }[]>([]);
-  const [callback, setCallback] = useState<{ grant: string; number: string; name?: string } | null>(null);
+  const [callback, setCallback] = useState<{ grant: string; number: string; name?: string; requestId: string } | null>(null);
   const [callbackBusy, setCallbackBusy] = useState(false);
   const [callbackStatus, setCallbackStatus] = useState("");
   const [lines, setLines] = useState<TranscriptLine[]>([]);
@@ -611,7 +611,7 @@ export function OwnerVoiceSession() {
                     const { callbackConfirmation, ...briefing } = report;
                     output = JSON.stringify(briefing);
                     if (report.status === "READY_TO_CONFIRM" && callbackConfirmation) {
-                      setCallback({ ...callbackConfirmation, name: report.name });
+                      setCallback({ ...callbackConfirmation, name: report.name, requestId: crypto.randomUUID() });
                       setCallbackStatus("");
                     }
                     if (report.status === "FOLLOW_UP_STATUS") setCallback(null);
@@ -736,7 +736,8 @@ export function OwnerVoiceSession() {
     try {
       const response = await fetch("/api/business/sophie-callback", {
         method: "POST", signal: controller.signal,
-        headers: { Authorization: `Bearer ${await user.getIdToken()}`, "x-callback-grant": selected.grant },
+        headers: { Authorization: `Bearer ${await user.getIdToken()}`, "x-callback-grant": selected.grant,
+          "x-owner-call-now": selected.requestId },
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Could not start the callback.");

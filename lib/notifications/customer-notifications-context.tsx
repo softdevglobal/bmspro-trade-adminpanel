@@ -9,6 +9,7 @@ import {
   markAllCustomerNotificationsReadApi,
 } from "@/lib/notifications/api-client";
 import type { NotificationRecord } from "@/lib/notifications/types";
+import { createCoalescedRefresh } from "@/lib/data/coalesced-refresh";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
 import {
@@ -60,9 +61,12 @@ export function CustomerNotificationsProvider({
     Boolean(user?.email) &&
     isCustomerBookingRoute(pathname);
 
+  const notificationCountRef = useRef(0);
+  useEffect(() => { notificationCountRef.current = notifications.length; }, [notifications.length]);
+
   const reload = useCallback(async () => {
     if (!enabled) return;
-    setLoading((current) => current || notifications.length === 0);
+    setLoading((current) => current || notificationCountRef.current === 0);
     setError(null);
     try {
       const token = await getIdToken();
@@ -80,7 +84,7 @@ export function CustomerNotificationsProvider({
     } finally {
       setLoading(false);
     }
-  }, [activeBookingSlug, enabled, getIdToken, notifications.length]);
+  }, [activeBookingSlug, enabled, getIdToken]);
 
   useEffect(() => {
     reloadRef.current = reload;
@@ -89,14 +93,20 @@ export function CustomerNotificationsProvider({
   useEffect(() => {
     if (!enabled || !pageVisible) {
       if (!enabled) {
-        setNotifications([]);
-        setLoading(false);
-        setError(null);
+        let cancelled = false;
+        queueMicrotask(() => {
+          if (cancelled) return;
+          setNotifications([]);
+          setLoading(false);
+          setError(null);
+        });
+        return () => { cancelled = true; };
       }
       return;
     }
 
-    void reload();
+    const refresh = createCoalescedRefresh(() => reloadRef.current());
+    refresh.request();
 
     let disconnectStream: (() => void) | undefined;
     let cancelled = false;
@@ -106,19 +116,20 @@ export function CustomerNotificationsProvider({
         const token = await getIdToken();
         if (!token || cancelled) return;
         disconnectStream = connectCustomerNotificationStream(token, () => {
-          void reloadRef.current();
+          refresh.request();
         });
       } catch {
         /* SSE optional */
       }
     })();
 
-    const onFocus = () => void reloadRef.current();
+    const onFocus = () => refresh.request();
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => void reloadRef.current(), 120_000);
+    const interval = window.setInterval(() => refresh.request(), 120_000);
 
     return () => {
       cancelled = true;
+      refresh.dispose();
       disconnectStream?.();
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);

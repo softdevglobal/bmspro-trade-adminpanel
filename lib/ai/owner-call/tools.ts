@@ -136,7 +136,7 @@ const briefingTools: OwnerVoiceTool[] = ([
   },
   {
     name: "list_missed_calls",
-    description: `List missed calls and their callback outcomes, retry status, and transcripts. For an explicit callback request use followUp=true and the customer name or full caller number as search. On FOLLOW_UP_STATUS, report what already happened, including what the customer said if saved, no answer if recorded, and any next retry. READY_TO_CONFIRM means the owner can press Confirm callback. ${dateHelp}`,
+    description: `List missed calls and their callback outcomes, retry status, and transcripts. For an explicit callback request use followUp=true and the customer name or full caller number as search. For an explicit call-now request, prior attempts, resolved calls and scheduled callbacks do not prevent a new call. READY_TO_CONFIRM means ask the owner to press Confirm callback to call now; do not stop at reporting prior outcomes. For history questions only, leave followUp=false. ${dateHelp}`,
     args: { date, offset, followUp, search },
     run: ({ briefing }, args) => briefing.missedCalls(args.date, args.offset, args.followUp, args.search),
   },

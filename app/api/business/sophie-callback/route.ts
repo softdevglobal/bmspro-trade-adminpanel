@@ -33,6 +33,12 @@ export async function POST(request: Request) {
     Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
   const auth = await requireBusinessOwner(request);
   if (!auth.ok) return json({ error: auth.error }, auth.status);
+  // A fresh owner-confirmed call is distinct from retrying the missed-call action.
+  // Keep the request ID stable for HTTP retries; never use the previous call's ID.
+  const callNowId = request.headers.get("x-owner-call-now");
+  if (callNowId !== null && !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(callNowId)) {
+    return json({ error: "Invalid owner call request." }, 400);
+  }
   const config = recordingConfig();
   const secret = process.env.AI_VOICE_BRIDGE_SECRET?.trim() ?? "";
   if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true" || !config || secret.length < 32) {
@@ -55,12 +61,14 @@ export async function POST(request: Request) {
     if (!await consumeRateLimits([{ key: `sophie-callback:${auth.businessId}`, limit: 5, windowMs: 60_000 }])) {
       return json({ error: "Too many callback requests. Try again in a minute." }, 429);
     }
-    const id = createHash("sha256").update(JSON.stringify([auth.businessId, claim.did, number, claim.startedAt])).digest("hex");
+    const id = createHash("sha256").update(JSON.stringify(callNowId
+      ? ["owner-call-now", auth.businessId, claim.did, number, claim.startedAt, callNowId]
+      : [auth.businessId, claim.did, number, claim.startedAt])).digest("hex");
     const ref = callbackState(auth.businessId, claim.callerKey);
     const manualLeaseId = randomUUID();
     const conflict = await adminDb.runTransaction(async tx => {
       const state = await tx.get(ref);
-      if (claim.startedAt <= (state.get("through") ?? -1)) return "This missed call is already resolved.";
+      if (!callNowId && claim.startedAt <= (state.get("through") ?? -1)) return "This missed call is already resolved.";
       const activeUntil = Math.max(state.get("leaseUntil") ?? 0, state.get("manualLeaseUntil") ?? 0);
       if (activeUntil > Date.now()) return "A callback is already in progress. Check Calls shortly.";
       tx.set(ref, { manualLeaseId, manualLeaseUntil: Date.now() + 60_000 }, { merge: true });

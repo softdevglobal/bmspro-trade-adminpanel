@@ -15,6 +15,7 @@ import {
   markAllBusinessNotificationsReadApi,
 } from "@/lib/notifications/api-client";
 import type { NotificationRecord } from "@/lib/notifications/types";
+import { createCoalescedRefresh } from "@/lib/data/coalesced-refresh";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { usePathname } from "next/navigation";
 import {
@@ -93,15 +94,21 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
   useEffect(() => {
     if (!enabled || !user || !pageVisible) {
       if (!enabled) {
-        setInspectionNotes([]);
-        setBroadcastNotes([]);
-        setLoading(false);
-        hasLoadedRef.current = false;
+        let cancelled = false;
+        queueMicrotask(() => {
+          if (cancelled) return;
+          setInspectionNotes([]);
+          setBroadcastNotes([]);
+          setLoading(false);
+          hasLoadedRef.current = false;
+        });
+        return () => { cancelled = true; };
       }
       return;
     }
 
-    void reload();
+    const refresh = createCoalescedRefresh(() => reloadRef.current());
+    refresh.request();
 
     let disconnectStream: (() => void) | undefined;
     let cancelled = false;
@@ -111,19 +118,20 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
         const token = await user.getIdToken();
         if (cancelled) return;
         disconnectStream = connectBusinessNotificationStream(token, () => {
-          void reloadRef.current();
+          refresh.request();
         });
       } catch {
         /* SSE optional; polling on focus still applies */
       }
     })();
 
-    const onFocus = () => void reloadRef.current();
+    const onFocus = () => refresh.request();
     window.addEventListener("focus", onFocus);
-    const interval = window.setInterval(() => void reloadRef.current(), 120_000);
+    const interval = window.setInterval(() => refresh.request(), 120_000);
 
     return () => {
       cancelled = true;
+      refresh.dispose();
       disconnectStream?.();
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);

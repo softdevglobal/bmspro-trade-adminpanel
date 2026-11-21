@@ -1,3 +1,6 @@
+import { platformTodayIso } from "@/lib/platform/timezone";
+import { zonedDateTimeToUtcMs } from "@/lib/platform/zoned-datetime";
+import { getIndexedQuery } from "@/lib/firebase/indexed-query";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 
@@ -13,10 +16,22 @@ const statuses = new Set(["SCHEDULED", "CALLING", "ANSWERED", "NO_ANSWER", "FAIL
 export async function GET(request: Request) {
   const auth = await requireBusinessOwner(request);
   if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const date = new URL(request.url).searchParams.get("date") ?? platformTodayIso();
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(date) ? zonedDateTimeToUtcMs(date, "00:00") : null;
+  const endMinute = start !== null ? zonedDateTimeToUtcMs(date, "23:59") : null;
+  if (start === null || endMinute === null || platformTodayIso(new Date(start)) !== date) {
+    return json({ error: "Choose a valid scheduled date." }, 400);
+  }
+  const end = endMinute + 60_000;
   try {
-    const snapshot = await adminDb.collection("ai_scheduled_callbacks")
-      .where("businessId", "==", auth.businessId).limit(100).get();
-    const calls = snapshot.docs.map(doc => {
+    const base = adminDb.collection("ai_scheduled_callbacks").where("businessId", "==", auth.businessId);
+    const snapshot = await getIndexedQuery("scheduled-call-history",
+      base.where("scheduledAt", ">=", start).where("scheduledAt", "<", end)
+        .orderBy("scheduledAt", "desc").limit(100), base.limit(100));
+    const calls = snapshot.docs.filter(doc => {
+      const at = doc.get("scheduledAt");
+      return typeof at === "number" && at >= start && at < end;
+    }).map(doc => {
       const data = doc.data();
       const digits = typeof data.number === "string" ? data.number.replace(/\D/g, "") : "";
       const status = typeof data.status === "string" && statuses.has(data.status) ? data.status : "FAILED";

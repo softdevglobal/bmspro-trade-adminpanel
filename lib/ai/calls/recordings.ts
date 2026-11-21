@@ -4,6 +4,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
+import { logFirestoreDocuments } from "@/lib/firebase/indexed-query";
 import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
 import { DID_MAPPINGS_COLLECTION, DID_RECORDING_PERIODS_COLLECTION } from "../data/did-mappings";
 import { CALL_LOGS_COLLECTION } from "../data/call-logs";
@@ -166,6 +167,7 @@ const cdr = z.object({
 export async function listCallRecordings(config: Config, businessId: string, page: number, range: { start?: number; end?: number; readThrough?: number } = {}, view: "recordings" | "missed" | "answered" = "recordings", includeCustomerNames = true) {
   const cutoff = Date.now() - 30 * 86400_000;
   const snapshots = await adminDb.collection(DID_RECORDING_PERIODS_COLLECTION).where("businessId", "==", businessId).get();
+  logFirestoreDocuments("recording-ownership-periods", snapshots.size);
   const periods = snapshots.docs.flatMap(doc => {
     const { did, startedAt, endedAt } = doc.data();
     if (typeof did !== "string" || !/^\d{6,15}$/.test(did) || !(startedAt instanceof Timestamp) ||
@@ -220,6 +222,7 @@ export async function listCallRecordings(config: Config, businessId: string, pag
   if (includeCustomerNames && callerKeys.some(Boolean)) {
     const customers = await adminDb.collection("customers").where("registeredBusinessId", "==", businessId)
       .select("phone", "fullName").get();
+    logFirestoreDocuments("recording-customer-names", customers.size);
     const wantedKeys = new Set(callerKeys);
     for (const doc of customers.docs) {
       const { phone, fullName } = doc.data();
