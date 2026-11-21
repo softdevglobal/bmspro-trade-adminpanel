@@ -1,3 +1,5 @@
+import { INSPECTION_CREATE_TOOL, JOB_CREATE_TOOL, VISIT_PREPARE_TOOLS } from "./owner-visits";
+import { OWNER_CALL_PREPARE_TOOL } from "./owner-scheduled-calls";
 /**
  * Owner voice actions as MCP (server) tools: the server-side twin of the browser tools for
  * services (owner-service.ts), the team (owner-team.ts) and AI knowledge drafts (voice-draft.ts).
@@ -35,7 +37,7 @@ export type PendingKind =
   | "staff_create" | "staff_update" | "staff_status" | "staff_delete"
   | "customer_create" | "customer_update"
   | "leave_decision" | "knowledge_entry" | "knowledge_update" | "knowledge_status" | "knowledge_delete"
-  | "item_create" | "item_update" | "item_delete";
+  | "item_create" | "item_update" | "item_delete" | "visit_change" | "job_create" | "inspection_create" | "owner_call_schedule";
 
 export type PendingDecision =
   | { ok: true }
@@ -76,7 +78,7 @@ export const CANCEL_CHANGE_TOOL = "cancel_owner_change";
 /** Prepare tools: a READY_TO_CONFIRM result starts the browser's yes check in Talk to Sophie. */
 export const OWNER_PREPARE_TOOL_NAMES: readonly string[] = [
   ...OWNER_ACTION_PREPARE_TOOLS.services, ...OWNER_ACTION_PREPARE_TOOLS.team, ...OWNER_ACTION_PREPARE_TOOLS.drafts,
-  ...OWNER_ACTION_PREPARE_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.items,
+  ...OWNER_ACTION_PREPARE_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.items, ...VISIT_PREPARE_TOOLS, JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, OWNER_CALL_PREPARE_TOOL,
 ];
 
 // ---- Attendance date ranges (same periods as the Attendance page) -----------------------------
@@ -131,7 +133,26 @@ const READY = "Changes nothing: read back the summary it returns, ask, and call 
 
 export type OwnerActionDefinition = { name: string; description: string; parameters: object };
 
+const VISIT_READY = "Changes nothing until the owner confirms the exact read-back. Use a job/inspection reference returned by get_work_visits or lookup_customer_jobs; never invent one. Ask which record when ambiguous. Recurring, multi-day, linked inspections and started work need the Trade editor.";
+const visitDefinitions: Record<string, OwnerActionDefinition> = Object.fromEntries(VISIT_PREPARE_TOOLS.map(name => {
+  const schedule = name.endsWith("_schedule"), assignment = name.endsWith("_assignment");
+  return [name, {name, description: `${schedule ? "Prepare scheduling or rescheduling an EXISTING visit. Ask for date, exact start and end times. Keeps the current assignee; assign separately if needed." : assignment ? "Prepare assigning or reassigning an existing visit to an exact staff full name, or the business owner. Keeps the current date/time." : "Prepare cancelling one existing visit. Preserve history; never delete it."} ${VISIT_READY}`,
+    parameters: obj({reference: str("Exact job or inspection reference"),
+      ...(schedule ? {date: str("YYYY-MM-DD in business timezone"), startTime: str("HH:mm"), endTime: str("HH:mm")} : {}),
+      ...(assignment ? {staffName: str("Exact staff full name"), assignTo: {type: "string", enum: ["owner", "staff"]}} : {}),
+    }, schedule ? ["reference", "date", "startTime", "endTime"] : ["reference"])}];
+}));
+
 export const OWNER_ACTION_DEFINITIONS: Record<string, OwnerActionDefinition> = {
+  find_call_customers:{name:"find_call_customers",description:"Find saved customers by name/email for an owner-requested scheduled call. Ask which full name/email if ambiguous; never invent or change the saved phone number.",parameters:obj({search:str()},["search"])},
+  [OWNER_CALL_PREPARE_TOOL]:{name:OWNER_CALL_PREPARE_TOOL,description:`Prepare an owner-requested future Sophie call to ONE saved customer. Ask the exact customer (find_call_customers), date/time, category and what questions/reason the owner wants discussed. Never dial immediately or use missed-call followUp for this. Schedule within 30 days and business calling hours. Read the ENTIRE summary and wait for yes. The conversation/caller response is saved for review; invoice/payment statements are unverified claims. ${READY}`,parameters:obj({customerName:str("Exact saved full name"),customerEmail:str("Saved email to disambiguate"),date:str("YYYY-MM-DD in business timezone"),time:str("HH:mm"),category:{type:"string",enum:["service","complaint","quotation","invoice","other"]},instructions:str("Owner's specific purpose and questions, 10–1000 characters"),businessNumber:str("Assigned business DID if several exist")},["customerName","date","time","category","instructions"])},
+  [INSPECTION_CREATE_TOOL]: {name:INSPECTION_CREATE_TOOL,description:`Prepare ONE new scheduled inspection via Add inspection. Ask for/verify customer name/email/phone, type, future date/start/end, optional address/notes, and either exact service name (get_services) or an advice title/details. For advice use custom_quote without a service. Do not guess contacts or times. The visit is created UNASSIGNED: read this back and assign separately after creation. No accepted quotation/invoice is created. Read the whole summary including customer account/notification effects. ${READY}`,parameters:obj({customerFullName:str(),customerEmail:str(),customerPhone:str(),requestType:{type:"string",enum:["existing_service","custom_quote"]},serviceName:str("Exact service name; existing_service only"),adviceTitle:str("Advice request title; custom_quote only"),adviceDescription:str("Advice details; custom_quote only"),date:str("YYYY-MM-DD in business timezone"),startTime:str("HH:mm"),endTime:str("HH:mm"),address:obj({street:str(),suburb:str(),state:str(),postcode:str()},["street","suburb","state","postcode"]),notes:str()},["customerFullName","customerEmail","customerPhone","requestType","date","startTime","endTime"])},
+  [JOB_CREATE_TOOL]: {name:JOB_CREATE_TOOL, description:`Prepare ONE new scheduled job for already agreed work using the real Add job flow. Ask for or verify all customer contact details, exact service name (get_services), date/start/end, agreed AUD price (zero only if explicitly free), assignee (get_staff), address and notes. Never guess missing values. No custom, recurring or multi-day work. Read back the ENTIRE summary, including linked quotation/invoice/customer effects. ${READY}`, parameters:obj({
+    customerFullName:str(),customerEmail:str(),customerPhone:str(),serviceName:str(),date:str("YYYY-MM-DD in business timezone"),startTime:str("HH:mm"),endTime:str("HH:mm"),priceAud:{type:"number",minimum:0,maximum:10000000},assignTo:{type:"string",enum:["owner","staff"]},staffName:str("Exact full name when assigning staff"),
+    address:obj({street:str(),suburb:str(),state:str(),postcode:str()},["street","suburb","state","postcode"]),notes:str(),
+  },["customerFullName","customerEmail","customerPhone","serviceName","date","startTime","endTime","priceAud","assignTo"])},
+  ...visitDefinitions,
+  get_work_visits: {name: "get_work_visits", description: "List this business's jobs/inspections with references, status, dates, times and assignees. For scheduled jobs use kind=job and status=scheduled; omit date unless the owner specified one. No date means all dates, not today. Use this instead of the daily summary for general scheduled-work questions. Results may be partial; never claim none exist outside the selected date or returned page.", parameters: obj({kind: {type: "string", enum: ["job", "inspection"]}, status: {type: "string", enum: ["scheduled", "awaiting", "pending", "owner_proposed", "ongoing", "completed", "cancelled", "missed"]}, search: str(), date: str("Only when the owner specifies a scheduled date; YYYY-MM-DD")})},
   get_services: {
     name: "get_services",
     description: "Read the business's services: name, duration, live or paused, steps. Read only.",

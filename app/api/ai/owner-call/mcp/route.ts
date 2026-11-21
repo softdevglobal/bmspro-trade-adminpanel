@@ -1,3 +1,5 @@
+import {ownerVisitsEnabled} from "@/lib/ai/owner-call/owner-visits";
+import {ownerScheduledCallsEnabled} from "@/lib/ai/owner-call/owner-scheduled-calls";
 import { ownerCustomersEnabled } from "@/lib/ai/owner-call/owner-customer";
 import { ownerItemsEnabled } from "@/lib/ai/owner-call/owner-item";
 import { ownerBriefingTools } from "@/lib/ai/mcp/tools/owner-briefing.tools";
@@ -62,11 +64,19 @@ export async function POST(request: Request) {
   // Serves the MCP action tools in both tool modes, so whichever set the session offered works.
   const toolList = ownerVoiceToolList({
     knowledge: ownerKnowledgeEnabled(), services: ownerServiceEnabled(), team: ownerTeamEnabled(), drafts: ownerVoiceDraftsEnabled(),
-    customers: ownerCustomersEnabled(), items: ownerItemsEnabled(), actions: true,
+    customers: ownerCustomersEnabled(), items: ownerItemsEnabled(), actions: true, visits: ownerVisitsEnabled(), scheduledCalls:ownerScheduledCallsEnabled(),
   });
   for (const tool of toolList) {
     server.tool(tool.name, tool.description, tool.args, async (args) => {
       try {
+        // This read-only lookup does not need the mutation routes imported by ownerActions.
+        if (tool.name === "find_call_customers") {
+          const { findOwnerCallCustomers } = await import("@/lib/ai/mcp/tools/owner-scheduled-calls.tools");
+          return output(await findOwnerCallCustomers({
+            businessId: auth.businessId, uid: auth.uid, timezone: auth.timezone ?? null,
+            authorization: request.headers.get("authorization") ?? "",
+          }, args));
+        }
         // Briefing-only requests never load the RAG, service or action code.
         const knowledge = tool.usesKnowledge ? await ownerKnowledge(auth.businessId) : undefined;
         const services = tool.usesServices
@@ -79,7 +89,13 @@ export async function POST(request: Request) {
           })
           : undefined;
         return output((await tool.run({ briefing, knowledge, services, actions }, args as OwnerToolArgs)) as object);
-      } catch {
+      } catch (error) {
+        // Never log customer arguments, credentials or upstream error messages.
+        const code = (error as { code?: unknown } | null)?.code;
+        console.error("[owner-voice] Tool failed", {
+          tool: tool.name,
+          code: typeof code === "number" || (typeof code === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(code)) ? code : "unknown",
+        });
         return { isError: true, ...output({ status: "UNAVAILABLE" }) }; // never leak server errors to the model
       }
     });

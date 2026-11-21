@@ -38,8 +38,11 @@ export async function POST(request: Request) {
 
     let missedAt: number | undefined;
     if (callDirection === "outbound" && callbackAttemptId) {
-      const invoiceAttempt = await adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(callbackAttemptId).get();
-      if (invoiceAttempt.exists) {
+      const [invoiceAttempt,scheduledAttempt] = await Promise.all([adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(callbackAttemptId).get(),adminDb.collection("ai_scheduled_callbacks").doc(callbackAttemptId).get()]);
+      if(scheduledAttempt.exists&&scheduledAttempt.get("purpose")==="owner_requested"){
+        const data=scheduledAttempt.data()!;
+        if(data.businessId!==auth.binding.businessId||data.did!==auth.binding.did||data.numberKey!==phoneKey||!["CALLING","ANSWERED","UNKNOWN"].includes(data.status))return json({status:"REJECTED",code:"ATTEMPT_MISMATCH"},403);
+      }else if (invoiceAttempt.exists) {
         const data = invoiceAttempt.data()!;
         if (data.businessId !== auth.binding.businessId || data.did !== auth.binding.did ||
             !["REQUESTED", "ANSWERED", "UNKNOWN", "SCHEDULED", "CALLING"].includes(data.status)) {

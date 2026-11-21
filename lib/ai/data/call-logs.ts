@@ -22,6 +22,7 @@ export const callLogInput = z.object({
   endReason: z.string().trim().min(1).max(120),
   callerNumber: z.string().regex(/^\d{6,15}$/).nullable(),
   callbackAttemptId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  ownerScheduledCall: z.literal(true).optional(),
   tools: z.array(z.object({ name: code, status: code, durationMs: z.number().int().min(0).max(600_000) }).strict()).max(100),
   outcomes: z.array(z.object({
     tool: code, status: code, reference: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).nullable(),

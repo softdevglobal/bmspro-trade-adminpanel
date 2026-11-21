@@ -13,6 +13,9 @@ const knowledgeCalls: KnowledgeCall[] = [];
 
 const folder = mkdtempSync(join(tmpdir(), "trade-owner-voice-"));
 const fixtures: Record<string, string> = {
+  "lib/ai/mcp/tools/owner-scheduled-calls.tools": `
+    exports.findOwnerCallCustomers = async (owner, args) => ({ status: "OK", businessId: owner.businessId, search: args.search });
+  `,
   "lib/firebase/admin": `
     exports.adminDb = { collection: () => ({ doc: () => ({
       get: async () => ({ data: () => ({ ownerUid: "owner-a", isActive: true, sophieTalkEnabled: true }) }),
@@ -169,6 +172,16 @@ test("knowledge search is offered to owner Sophie only when both flags are on", 
     // The bridge rejects instructions over 4,000 characters.
     assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
   });
+});
+
+test("scheduled customer lookup uses authenticated scope without loading mutation actions", async (t) => {
+  setEnv(t, { AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED: "true" });
+  const { POST } = await import("../app/api/ai/owner-call/mcp/route");
+  const response = await POST(mcpRequest("owner", "find_call_customers", { search: "Lakshan", businessId: "foreign" }));
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(JSON.parse(payload.result.content[0].text), { status: "OK", businessId: "business-a", search: "Lakshan" });
+  assert.equal((await POST(mcpRequest("staff", "find_call_customers", { search: "Lakshan" }))).status, 403);
 });
 
 test("briefing MCP reads only the authenticated owner's business", async (t) => {
@@ -467,4 +480,44 @@ test("save_knowledge_draft needs a draft from this session, an owner reply and n
   assert.equal(ownerDeclined("Hold on"), true);
   assert.equal(ownerDeclined("cancel that"), true);
   assert.equal(ownerDeclined(""), false);
+});
+
+test('visits are offered in both tool modes only when enabled, with one confirmation pair', async (t) => {
+  setEnv(t, {AI_OWNER_VOICE_VISITS_ENABLED: 'true', AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED:'true', AI_OWNER_VOICE_TOOL_MODE: undefined, AI_OWNER_VOICE_BRIDGE_URL: 'http://127.0.0.1:18787', AI_VOICE_BRIDGE_SECRET: secret});
+  for (const mode of ['browser', 'mcp']) {
+    process.env.AI_OWNER_VOICE_TOOL_MODE = mode;
+    const session = await startSession(t);
+    const names = session.tools.map(tool => tool.name);
+    assert.ok(names.includes('get_work_visits'));
+    assert.ok(names.includes('prepare_job_schedule'));
+    assert.ok(names.includes('prepare_job_create'));
+    assert.ok(names.includes('prepare_customer_scheduled_call'));
+    assert.ok(names.includes('find_call_customers'));
+    assert.ok(names.includes('prepare_inspection_create'));
+    assert.ok(names.includes('get_services'));
+    assert.ok(names.includes('get_staff'));
+    assert.ok(names.includes('prepare_inspection_assignment'));
+    assert.equal(names.filter(name => name === 'confirm_owner_change').length, 1);
+    assert.equal(names.filter(name => name === 'cancel_owner_change').length, 1);
+    assert.ok(session.instructions.length <= 4000);
+    t.mock.restoreAll();
+  }
+});
+
+test('bridge startup failures identify tool mismatch, instructions, authorization and upstream rejection', async(t)=>{
+ setEnv(t,{AI_OWNER_VOICE_BRIDGE_URL:'http://127.0.0.1:18787',AI_VOICE_BRIDGE_SECRET:secret});
+ const {POST}=await import('../app/api/ai/owner-call/route');
+ const cases=[
+  {status:400,code:'tool_whitelist',message:/does not support Trade's enabled tools/},
+  {status:400,code:'instructions_limit',message:/exceed the voice bridge limit/},
+  {status:401,code:'bridge_authorization',message:/same bridge secret/},
+  {status:502,code:'realtime_rejected',message:/OpenAI voice connection/},
+  {status:400,code:'',message:/Update trade-owner-voice.mjs/},
+ ];
+ t.mock.method(console,'error',()=>undefined);
+ for(const fixture of cases){
+  t.mock.method(globalThis,'fetch',async()=>new Response(null,{status:fixture.status,headers:fixture.code?{'x-bms-voice-error':fixture.code}:{}}));
+  const response=await POST(offer('owner'));
+  assert.equal(response.status,502);const data=await response.json();assert.match(data.error,fixture.message);assert.ok(!data.error.includes(secret));
+ }
 });
