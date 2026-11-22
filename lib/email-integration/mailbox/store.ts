@@ -137,26 +137,37 @@ export async function markMessagesDeleted(
   }
 }
 
-/** Messages already stored, and threads linked to a customer or the platform. */
-export async function loadKnownMessages(
+/** Checks only the provider IDs in the current batch, including hidden messages. */
+export async function loadKnownMessageIds(
   connectionId: string,
-): Promise<{ messages: Set<string>; linkedThreads: Set<string> }> {
-  const snap = await adminDb
-    .collection(EMAIL_MESSAGES_COLLECTION)
-    .where("connectionId", "==", connectionId)
-    .select("threadId", "providerMessageId", "matchMethod")
-    .get();
-  const messages = new Set<string>();
-  const linkedThreads = new Set<string>();
-  for (const doc of snap.docs) {
-    const messageId = doc.get("providerMessageId");
-    const threadId = doc.get("threadId");
-    if (typeof messageId === "string") messages.add(messageId);
-    if (typeof threadId === "string" && doc.get("matchMethod") !== "none") {
-      linkedThreads.add(threadId);
+  providerMessageIds: string[],
+): Promise<Set<string>> {
+  const collection = adminDb.collection(EMAIL_MESSAGES_COLLECTION);
+  const known = new Set<string>();
+  for (let start = 0; start < providerMessageIds.length; start += 100) {
+    const ids = providerMessageIds.slice(start, start + 100);
+    const refs = ids.map((id) => collection.doc(messageDocId(connectionId, id)));
+    const snapshots = await adminDb.getAll(...refs, { fieldMask: ["connectionId", "providerMessageId"] });
+    const requested = new Set(ids);
+    for (const snapshot of snapshots) {
+      const id = snapshot.get("providerMessageId");
+      if (snapshot.get("connectionId") === connectionId && requested.has(id)) known.add(id);
     }
   }
-  return { messages, linkedThreads };
+  return known;
+}
+
+/** A single linked message is enough to classify a continuation of this thread. */
+export async function isStoredThreadLinked(connectionId: string, threadId: string): Promise<boolean> {
+  const snapshot = await adminDb
+    .collection(EMAIL_MESSAGES_COLLECTION)
+    .where("connectionId", "==", connectionId)
+    .where("threadId", "==", threadId)
+    .where("linked", "==", true)
+    .limit(1)
+    .select()
+    .get();
+  return !snapshot.empty;
 }
 
 /** Deletes every stored message for a mailbox (used before a re-import). */
