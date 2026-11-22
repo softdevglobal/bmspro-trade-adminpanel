@@ -4,6 +4,7 @@
  * search runs across the whole mailbox.
  */
 
+import { encryptJson, decryptJson } from "@/lib/email-integration/crypto";
 import { emailError } from "@/lib/email-integration/auth";
 import { importMessages } from "@/lib/email-integration/mailbox/sync";
 import { requireMailbox } from "@/lib/email-integration/mailbox/access";
@@ -28,14 +29,28 @@ export async function GET(request: Request) {
 
   const status = await getSyncStatus(gate.connection.id);
 
+  const pageSize = 5;
   if (q) {
+    let token: string | null = null;
+    const cursor = searchParams.get("cursor");
+    if (cursor) {
+      try {
+        const saved = decryptJson<{ connection: string; query: string; token: string }>(cursor);
+        if (saved.connection !== gate.connection.id || saved.query !== q || typeof saved.token !== "string") {
+          return emailError(400, "Invalid search cursor.");
+        }
+        token = saved.token;
+      } catch {
+        return emailError(400, "Invalid search cursor.");
+      }
+    }
     try {
-      const page = await gate.adapter.searchPage(gate.credentials!, { kind: "text", text: q }, null);
-      const ids = page.ids.slice(0, 50);
+      const page = await gate.adapter.searchPage(gate.credentials!, { kind: "text", text: q }, token, pageSize);
+      const ids = page.ids;
       // Hits the background import hasn't reached yet are imported now.
       await importMessages(gate.connection, gate.credentials!, ids, page.prefetched);
       const items = await getStoredMessagesByProviderIds(gate.connection.id, ids);
-      return NextResponse.json({ ok: true, items, nextCursor: null, status });
+      return NextResponse.json({ ok: true, items, nextCursor: page.nextPageToken ? encryptJson({ connection: gate.connection.id, query: q, token: page.nextPageToken }) : null, status });
     } catch {
       return emailError(502, "Search isn't available right now. Try again.");
     }
@@ -46,6 +61,7 @@ export async function GET(request: Request) {
   const page = await listMailboxMessages({
     connectionId: gate.connection.id,
     view,
+    limit: pageSize,
     linkedOnly: searchParams.get("linked") === "1",
     cursor: searchParams.get("cursor")?.trim() || null,
   });

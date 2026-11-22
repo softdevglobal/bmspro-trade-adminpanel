@@ -206,6 +206,10 @@ function Mailbox({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MailboxMessageSummary | null>(null);
   const mounted = useRef(true);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const generation = useRef(0);
+  const paging = useRef(false);
+  const expanded = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -228,7 +232,8 @@ function Mailbox({
     [view, linkedOnly, activeSearch],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
+    const version = generation.current;
     if (!user) return null;
     try {
       const page = await emailApi<{
@@ -236,8 +241,11 @@ function Mailbox({
         nextCursor: string | null;
         status: MailboxSyncStatus;
       }>(user, listPath(null));
-      setItems(page.items);
-      setNextCursor(page.nextCursor);
+      if (!mounted.current || version !== generation.current) return null;
+      if (!refresh || (!expanded.current && !paging.current)) {
+        setItems(page.items);
+        setNextCursor(page.nextCursor);
+      }
       setStatus(page.status);
       setError(null);
       return page.status;
@@ -267,14 +275,14 @@ function Mailbox({
           { method: "POST", body: JSON.stringify({ continue: !manual }) },
         );
         setStatus(result.status);
-        await load();
+        await load(true);
       } catch (err) {
         // Busy, too soon and "slow down" from the provider are normal while
         // importing; the status bar explains them, so no red error.
         const quiet =
           err instanceof EmailApiError &&
           (err.code === "busy" || err.code === "too_soon" || err.code === "rate_limited");
-        if (quiet) await load();
+        if (quiet) await load(true);
         else setError(err instanceof Error ? err.message : "Could not sync the mailbox.");
       } finally {
         setSyncing(false);
@@ -284,7 +292,13 @@ function Mailbox({
   );
 
   useEffect(() => {
+    const version = ++generation.current;
+    paging.current = false;
+    expanded.current = false;
     queueMicrotask(async () => {
+      if (version !== generation.current) return;
+      setNextCursor(null);
+      setLoadingMore(false);
       setLoading(true);
       setItems([]);
       await load();
@@ -299,7 +313,7 @@ function Mailbox({
     const pause = status.pausedUntil ? Math.max(0, status.pausedUntil - Date.now()) + 1000 : 0;
     const delay = importing ? Math.max(pause, 2000) : 60_000;
     const timer = window.setTimeout(() => {
-      if (mounted.current) void (importing ? syncNow(false) : load());
+      if (mounted.current) void (importing ? syncNow(false) : load(true));
     }, delay);
     return () => window.clearTimeout(timer);
   }, [status, importing, syncing, syncNow, load]);
@@ -307,26 +321,43 @@ function Mailbox({
   // After sending, the copy lands in Sent within a few seconds.
   useEffect(() => {
     if (sentCount === 0) return;
-    const timers = [4000, 12_000].map((delay) => window.setTimeout(() => void load(), delay));
+    const timers = [4000, 12_000].map((delay) => window.setTimeout(() => void load(true), delay));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [sentCount, load]);
 
-  async function loadMore() {
-    if (!user || !nextCursor) return;
+  const loadMore = useCallback(async () => {
+    if (!user || !nextCursor || paging.current || loading) return;
+    const version = generation.current;
+    paging.current = true;
     setLoadingMore(true);
     try {
       const page = await emailApi<{ items: MailboxMessageSummary[]; nextCursor: string | null }>(
         user,
         listPath(nextCursor),
       );
+      if (!mounted.current || version !== generation.current) return;
+      expanded.current = true;
       setItems((current) => [...current, ...page.items]);
       setNextCursor(page.nextCursor);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load more messages.");
     } finally {
-      setLoadingMore(false);
+      if (version === generation.current) {
+        paging.current = false;
+        setLoadingMore(false);
+      }
     }
-  }
+  }, [user, nextCursor, loading, listPath]);
+
+  useEffect(() => {
+    if (!nextCursor || loading || loadingMore) return;
+    function onScroll() {
+      const rect = moreButton.current?.getBoundingClientRect();
+      if (rect && rect.top <= window.innerHeight && rect.bottom >= 0) void loadMore();
+    }
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, [nextCursor, loading, loadingMore, loadMore]);
 
   const runAction = useCallback(
     async (threadId: string, action: MailboxAction) => {
@@ -443,7 +474,7 @@ function Mailbox({
       )}
       {nextCursor && !loading ? (
         <div className="mt-3 flex justify-center">
-          <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className={BUTTON_OUTLINE}>
+          <button ref={moreButton} type="button" onClick={() => void loadMore()} disabled={loadingMore} className={BUTTON_OUTLINE}>
             {loadingMore ? "Loading…" : "Load more"}
           </button>
         </div>

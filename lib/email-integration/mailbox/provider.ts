@@ -86,6 +86,7 @@ export interface MailboxAdapter {
     credentials: ProviderCredentials,
     search: MailboxSearch,
     pageToken: string | null,
+    pageSize?: number,
   ): Promise<{ ids: string[]; nextPageToken: string | null; prefetched?: MailboxMetadata[] }>;
   threadMessageIds(credentials: ProviderCredentials, threadId: string): Promise<string[]>;
   /** Null when the message no longer exists. */

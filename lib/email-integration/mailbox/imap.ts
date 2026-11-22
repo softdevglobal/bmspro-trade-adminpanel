@@ -346,7 +346,7 @@ export function createImapMailbox(server: ImapServerConfig | null): MailboxAdapt
       });
     },
 
-    async searchPage(credentials, search, pageToken) {
+    async searchPage(credentials, search, pageToken, pageSize) {
       return withImap(server, credentials, async (context) => {
         const folders = await context.folders();
         let token = decodePageToken(pageToken);
@@ -364,7 +364,7 @@ export function createImapMailbox(server: ImapServerConfig | null): MailboxAdapt
             const uidValidity = String(mailbox.uidValidity);
             const bound = savedValidity === uidValidity ? before : null;
             const uids = await searchUids(context.client, searchQuery(search));
-            const { page: slice, next } = pageOfUids(uids, bound, PAGE_SIZE);
+            const { page: slice, next } = pageOfUids(uids, bound, pageSize ?? PAGE_SIZE);
             const result = await fetchMetadata(context.client, folder, uidValidity, slice);
             return { uidValidity, next, messages: result.messages, count: slice.length };
           });

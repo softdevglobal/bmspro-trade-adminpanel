@@ -203,13 +203,13 @@ export function outlookCustomerSearch(addresses: string[]): string {
   return addresses.map((address) => `participants:${address.replace(/["\\]/g, "")}`).join(" OR ");
 }
 
-function searchPath(search: MailboxSearch): string {
+function searchPath(search: MailboxSearch, pageSize = PAGE_SIZE): string {
   if (search.kind === "all") {
-    return `/me/messages?$select=${SELECT}&$top=${PAGE_SIZE}&$orderby=receivedDateTime desc`;
+    return `/me/messages?$select=${SELECT}&$top=${pageSize}&$orderby=receivedDateTime desc`;
   }
   const kql =
     search.kind === "customers" ? outlookCustomerSearch(search.addresses) : search.text.replace(/["\\]/g, " ");
-  return `/me/messages?$select=${SELECT}&$top=${PAGE_SIZE}&$search=${encodeURIComponent(`"${kql}"`)}`;
+  return `/me/messages?$select=${SELECT}&$top=${pageSize}&$search=${encodeURIComponent(`"${kql}"`)}`;
 }
 
 function isIsoTime(value: string): boolean {
@@ -263,8 +263,8 @@ export const microsoftMailbox: MailboxAdapter = {
     };
   },
 
-  async searchPage(credentials, search, pageToken) {
-    const page = await messagePage(credentials, pageToken ?? searchPath(search));
+  async searchPage(credentials, search, pageToken, pageSize) {
+    const page = await messagePage(credentials, pageToken ?? searchPath(search, pageSize));
     return {
       ids: page.messages.map((message) => message.id),
       nextPageToken: page.nextLink,
