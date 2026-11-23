@@ -1,85 +1,24 @@
 "use client";
 
+import { composerVoice, EMAIL_VOICE_HEADER, type ComposerSnapshot } from "@/lib/ai/owner-call/owner-email";
 import { useAuth } from "@/lib/auth/auth-context";
 import { emailApi } from "@/lib/email-integration/client";
 import {
-  extractAddresses,
-  forwardBlock,
-  forwardSubject,
-  quoteForReply,
-  replySubject,
-} from "@/lib/email-integration/mailbox/parse";
-import type { MailboxContact, MailboxThreadMessage } from "@/lib/email-integration/types";
+  composerInitialFields,
+  EMAIL_ADDRESS_PATTERN as ADDRESS,
+  type ComposerDraft,
+} from "@/lib/email-integration/mailbox/compose";
+import type { MailboxContact } from "@/lib/email-integration/types";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-export type ComposerDraft =
-  | { intent: "new"; to?: string[] }
-  | { intent: "reply"; replyAll: boolean; source: MailboxThreadMessage }
-  | { intent: "forward"; source: MailboxThreadMessage };
+export type { ComposerDraft };
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
-const ADDRESS = /^[^\s@<>(),;:"[\]\\]+@[^\s@<>(),;:"[\]\\]+\.[^\s@<>(),;:"[\]\\]+$/;
 const INPUT =
   "w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 font-body text-[13px] text-on-surface outline-none focus:border-primary";
 
-function formatDate(timestamp: number | null): string {
-  return timestamp
-    ? new Date(timestamp).toLocaleString("en-AU", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })
-    : "";
-}
-
-function sender(message: MailboxThreadMessage): string {
-  return message.fromName ? `${message.fromName} <${message.fromAddress}>` : message.fromAddress;
-}
-
-/** Prefilled recipients, subject and body for a new email, reply or forward. */
-function initialFields(draft: ComposerDraft, ownAddress: string) {
-  const own = ownAddress.toLowerCase();
-  if (draft.intent === "new") {
-    return { to: draft.to ?? [], cc: [] as string[], subject: "", body: "" };
-  }
-  const source = draft.source;
-  const text = source.bodyText ?? "";
-  if (draft.intent === "forward") {
-    return {
-      to: [] as string[],
-      cc: [] as string[],
-      subject: forwardSubject(source.subject),
-      body: forwardBlock({
-        from: sender(source),
-        date: formatDate(source.date),
-        subject: source.subject.trim(),
-        to: source.to,
-        cc: source.cc,
-        bodyText: text,
-      }),
-    };
-  }
-  // Replying to our own sent message goes back to its recipients.
-  const fromSelf = source.fromAddress.toLowerCase() === own;
-  const primary = (fromSelf ? extractAddresses(source.to) : [source.fromAddress.toLowerCase()]).filter(
-    (address) => address !== own,
-  );
-  const others = draft.replyAll
-    ? extractAddresses(source.to, source.cc).filter(
-        (address) => address !== own && !primary.includes(address),
-      )
-    : [];
-  return {
-    to: primary,
-    cc: others,
-    subject: replySubject(source.subject),
-    body: quoteForReply({ from: sender(source), date: formatDate(source.date), bodyText: text }),
-  };
-}
+type SendResult = { ok: true } | { ok: false; error: string };
 
 function RecipientField({
   label,
@@ -211,7 +150,7 @@ export function MailComposer({
   const titleId = useId();
   // The page behind the composer must not scroll while it is open.
   useBodyScrollLock(true);
-  const initial = useMemo(() => initialFields(draft, fromAddress), [draft, fromAddress]);
+  const initial = useMemo(() => composerInitialFields(draft, fromAddress), [draft, fromAddress]);
   const [to, setTo] = useState<string[]>(initial.to);
   const [cc, setCc] = useState<string[]>(initial.cc);
   const [bcc, setBcc] = useState<string[]>([]);
@@ -280,11 +219,15 @@ export function MailComposer({
   const canSend =
     to.length > 0 && invalid.length === 0 && subject.trim().length > 0 && body.trim().length > 0 && !sending;
 
-  async function send() {
-    if (!user || !canSend) return;
+  /** The Send button, and Sophie after her read-back and the owner's yes (`voice` applies the voice send limit). */
+  async function send(voice = false): Promise<SendResult> {
+    if (!user || !canSend) {
+      return { ok: false, error: sending ? "It is already sending." : "The email is not ready: it needs To, a subject and a message, with valid addresses." };
+    }
     if (uploadBytes > MAX_UPLOAD_BYTES) {
-      setError("Attachments from your computer can be up to 4 MB in total.");
-      return;
+      const message = "Attachments from your computer can be up to 4 MB in total.";
+      setError(message);
+      return { ok: false, error: message };
     }
     setSending(true);
     setError(null);
@@ -312,19 +255,67 @@ export function MailComposer({
       const token = await user.getIdToken();
       const response = await fetch("/api/email/mailbox/send", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": key },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": key,
+          ...(voice ? { [EMAIL_VOICE_HEADER]: "1" } : {}),
+        },
         body: form,
       });
       const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!response.ok || !result.ok) throw new Error(result.error ?? "Could not send the email.");
       setSent(true);
       window.setTimeout(onSent, 1200);
+      return { ok: true };
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the email.");
+      const message = err instanceof Error ? err.message : "Could not send the email.";
+      setError(message);
+      return { ok: false, error: message };
     } finally {
       setSending(false);
     }
   }
+
+  // Talk to Sophie drives this popup through composerVoice (lib/ai/owner-call/owner-email.ts). The refs hold
+  // the latest fields; `set` also updates them at once, so the next voice step reads what it just changed.
+  const scrollBox = useRef<HTMLDivElement>(null);
+  const live = useRef<ComposerSnapshot | null>(null);
+  const latest = useRef({ send, onClose });
+  useEffect(() => {
+    live.current = {
+      intent: draft.intent,
+      replyAll: draft.intent === "reply" && draft.replyAll,
+      fromAddress,
+      to, cc, bcc, subject, body,
+      files: files.map((file) => file.name),
+      originalAttachments: originalAttachments.map((item) => item.name),
+      canForwardAttachments,
+      includeOriginals,
+      contacts,
+      sending,
+      sent,
+    };
+    latest.current = { send, onClose };
+  });
+  useEffect(() => composerVoice.register({
+    snapshot: () => live.current!,
+    set(fields) {
+      if (live.current) live.current = { ...live.current, ...fields };
+      if (fields.to) setTo(fields.to);
+      if (fields.cc) setCc(fields.cc);
+      if (fields.bcc) setBcc(fields.bcc);
+      if (fields.cc?.length || fields.bcc?.length) setShowCopies(true);
+      if (fields.subject !== undefined) setSubject(fields.subject);
+      if (fields.body !== undefined) setBody(fields.body);
+      if (fields.includeOriginals !== undefined) setIncludeOriginals(fields.includeOriginals);
+    },
+    send: () => latest.current.send(true),
+    discard: () => latest.current.onClose(),
+    scroll(down) {
+      const box = scrollBox.current;
+      box?.scrollBy({ top: (down ? 1 : -1) * Math.round(box.clientHeight * 0.8), behavior: "smooth" });
+    },
+  }), []);
 
   const title =
     draft.intent === "new" ? "New email" : draft.intent === "forward" ? "Forward" : draft.replyAll ? "Reply all" : "Reply";
@@ -361,7 +352,7 @@ export function MailComposer({
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+        <div ref={scrollBox} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
           <RecipientField label="To" value={to} onChange={setTo} contacts={contacts} autoFocus={draft.intent !== "reply"} />
           {showCopies ? (
             <>

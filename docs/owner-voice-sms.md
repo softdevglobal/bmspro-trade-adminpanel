@@ -191,9 +191,11 @@ session.
 
 ## 6. Things to know before building
 
-1. **The customer list comes from inspection requests.** Both `GET` and `POST` on
+1. **The customer list has the same people as the Customers page.** Both `GET` and `POST` on
    `/api/business/custom-messages` read **every** inspection request of the business
-   (`listInspectionRequests`) to build the list of phone numbers. Voice adds more of these reads,
+   (`listInspectionRequests`) **and** the customers saved on the Customers page (`listBusinessCustomers`),
+   deduped by email, then phone (`lib/sms/custom-message-contacts.ts`). Before this fix only inspection
+   requests were read, so customers added by hand or by voice did not appear. Voice adds more of these reads,
    because each search and the confirm step reload the list. Plan: one read per voice step, kept in
    the page for browser tools. Later, switch the route to the Customers collection or a cached
    contacts list; see [firestore-read-reductions.md](firestore-read-reductions.md).

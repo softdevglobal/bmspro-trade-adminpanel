@@ -304,10 +304,15 @@ const MCP_ACTION_TOOLS = [
   "get_knowledge_entries", "prepare_knowledge_entry", "prepare_knowledge_update", "prepare_knowledge_publish", "prepare_knowledge_delete",
   "get_items", "prepare_item_create", "prepare_item_update", "prepare_item_delete",
   "get_sms_balance", "get_sms_log", "get_sms_customers", "prepare_sms_send",
+  "get_emails", "get_email_thread", "get_email_send_log", "get_email_contacts", "email_thread_action",
+  "prepare_email_send", "prepare_email_trash", "prepare_email_retry",
   "confirm_owner_change", "cancel_owner_change",
 ];
 const BROWSER_ITEM_TOOLS = ["list_items", "open_add_item_form", "open_edit_item_form", "item_form_step", "delete_item"];
 const BROWSER_SMS_TOOLS = ["show_sms_balance", "list_sms_log", "list_sms_customers", "open_custom_message", "sms_message_step"];
+const BROWSER_EMAIL_TOOLS = [
+  "open_emails", "list_emails", "email_thread_step", "email_compose_step", "list_email_send_log", "email_send_log_step",
+];
 /** Read-only page control (open, scroll, refresh), offered in browser mode with any browser tool area. */
 const BROWSER_PAGE_TOOLS = ["control_page"];
 const ALL_FLAGS = {
@@ -320,13 +325,14 @@ const ALL_FLAGS = {
   AI_OWNER_VOICE_TEAM_ENABLED: "true",
   AI_OWNER_VOICE_ITEMS_ENABLED: "true",
   AI_OWNER_VOICE_SMS_ENABLED: "true",
+  AI_OWNER_VOICE_EMAIL_ENABLED: "true",
 };
 
 test("browser mode (default): page tools for services, team and drafts; no MCP action tools", async (t) => {
   setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: undefined });
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
-  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_PAGE_TOOLS]) {
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_EMAIL_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(names.includes(name), name);
   }
   // Popups can be closed by voice without saving.
@@ -344,7 +350,7 @@ test("mcp mode: server tools for services, team and drafts; no page tools", asyn
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
   for (const name of ["prepare_service", "create_service", ...MCP_ACTION_TOOLS]) assert.ok(names.includes(name), name);
-  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_PAGE_TOOLS]) {
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_EMAIL_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(!names.includes(name), `${name} is browser mode only`);
   }
   assert.equal(new Set(names).size, names.length, "no repeated names");
@@ -407,6 +413,32 @@ test("sms tools: flag, read-back, customer matching, log summary", async () => {
   const missing = sms.matchSmsCustomers(customers, ["Peter"]);
   assert.ok(!missing.ok && missing.result.status === "NO_MATCH");
 
+  // Names with numbers, numbers that end the same, and a customer named by their email (as on the page).
+  const testers = [
+    { id: "email:t1", fullName: "Test Customer 1", phone: "+61 123456789" },
+    { id: "email:t2", fullName: "Test Customer 2", phone: "+61 213456789" },
+    { id: "email:t3", fullName: "testcus1@gmail.com", phone: "+61 321423543455432" },
+  ];
+  const one = sms.matchSmsCustomers(testers, ["Test Customer 1"]);
+  assert.ok(one.ok && one.matched.map(customer => customer.id).join() === "email:t1", "the number in a name is part of the name");
+  const both = sms.matchSmsCustomers(testers, ["test customer 2", "Test Customer 1"]);
+  assert.ok(both.ok && both.matched.length === 2);
+  const byEmail = sms.matchSmsCustomers(testers, ["testcus1 at gmail dot com"]);
+  assert.ok(byEmail.ok && byEmail.matched[0].id === "email:t3");
+  const vague = sms.matchSmsCustomers(testers, ["Test Customer"]);
+  assert.ok(!vague.ok && vague.result.status === "AMBIGUOUS");
+  if (!vague.ok) {
+    const labels = vague.result.names as string[];
+    assert.notEqual(labels[0].replace(/^.*ending /, ""), labels[1].replace(/^.*ending /, ""), "endings that both end in 789 are lengthened until they differ");
+  }
+  if (!vague.ok) assert.deepEqual(vague.result.names, ["Test Customer 1 (phone ending 23456789)", "Test Customer 2 (phone ending 13456789)"]);
+  const byEnding = sms.matchSmsCustomers(testers, ["Test Customer 13456789"]);
+  assert.ok(byEnding.ok && byEnding.matched[0].id === "email:t2", "a name part plus a longer ending picks one");
+  const shortEnding = sms.matchSmsCustomers(testers, ["Test Customer 789"]);
+  assert.ok(!shortEnding.ok && shortEnding.result.status === "AMBIGUOUS", "an ending both share is still asked about");
+  const listed = sms.summarizeSmsCustomers(testers).customers as { name: string; phoneEnding: string }[];
+  assert.deepEqual(listed.map(customer => customer.phoneEnding), ["789", "789", "432"], "different names keep the short ending");
+
   const balance = { limit: 1000, used: 998, remaining: 2, isUnlimited: false, isLow: true, smsPackageId: null, smsPackageName: "test" };
   const tooMany = sms.smsSendReadBack({ message: "Hi", businessName: "Nira", recipients: customers, all: true, balance });
   assert.ok(!tooMany.ok && tooMany.result.status === "NOT_ENOUGH_CREDITS");
@@ -440,6 +472,125 @@ test("sms tools: flag, read-back, customer matching, log summary", async () => {
 
   assert.equal(sms.summarizeSmsBalance(balance).remaining, 2);
   assert.equal(sms.summarizeSmsBalance(null).status, "UNAVAILABLE");
+
+  // Who can be texted: inspection-request customers plus customers saved on the Customers page, once each.
+  const { buildCustomerContacts } = await import("../lib/sms/custom-message-contacts");
+  const textable = (phone: string) => phone.replace(/\D/g, "").length >= 9;
+  const merged = buildCustomerContacts(
+    [{ fullName: "Mary Jones", email: "Mary@c.com", phone: "0498765432" }, { fullName: "No Phone", email: "n@c.com", phone: "" }],
+    [
+      { fullName: "Mary Jones", email: "mary@c.com", phone: "0498765432" }, // same person, saved too
+      { fullName: "Peter Saved", email: "peter@c.com", phone: "0412000111" }, // saved only, never sent a request
+      { fullName: "Bad Number", email: "bad@c.com", phone: "12" },
+    ],
+    textable,
+  );
+  assert.deepEqual(merged.map(contact => contact.fullName), ["Mary Jones", "Peter Saved"]);
+  assert.deepEqual(merged.map(contact => contact.id), ["email:mary@c.com", "email:peter@c.com"], "same keys as the Customers page");
+  assert.equal(buildCustomerContacts([], [{ fullName: "Only Saved", email: "", phone: "0412000222" }], textable)[0].id, "phone:0412000222");
+});
+
+test("email tools: flag, recipients, read-back, codes hidden, quoted text, send log", async () => {
+  const { ownerVoiceToolList } = await import("../lib/ai/owner-call/tools");
+  const email = await import("../lib/ai/owner-call/owner-email");
+  const { composerInitialFields, splitQuoted } = await import("../lib/email-integration/mailbox/compose");
+  const { OWNER_PREPARE_TOOL_NAMES } = await import("../lib/ai/owner-call/owner-actions");
+  const served = (on: boolean) => ownerVoiceToolList({ knowledge: false, email: on, actions: true }).map(tool => tool.name);
+  assert.ok(served(true).includes("prepare_email_send"));
+  assert.ok(served(true).includes("confirm_owner_change"));
+  assert.ok(!served(false).includes("get_emails"));
+  assert.equal(email.ownerEmailEnabled({}), false);
+  assert.equal(email.ownerEmailEnabled({ AI_OWNER_VOICE_EMAIL_ENABLED: "true" }), true);
+  for (const name of ["prepare_email_send", "prepare_email_trash", "prepare_email_retry"]) {
+    assert.ok(OWNER_PREPARE_TOOL_NAMES.includes(name), `${name} starts the yes check`);
+  }
+  assert.ok(!OWNER_PREPARE_TOOL_NAMES.includes("email_thread_action"), "star / archive need no yes");
+
+  // Spoken addresses and names become addresses; two customers with one name are never guessed.
+  assert.equal(email.normalizeSpokenAddress("John dot Smith at Gmail dot com"), "john.smith@gmail.com");
+  assert.equal(email.spellAddress("jo.b@x.com"), "j o dot b at x dot com");
+  const contacts = [
+    { name: "John Smith", email: "john@a.com" },
+    { name: "John Smith", email: "john.smith@b.com" },
+    { name: "Mary Jones", email: "mary@c.com" },
+  ];
+  const twoJohns = email.resolveRecipients(contacts, ["John Smith"]);
+  assert.ok(!twoJohns.ok && twoJohns.result.status === "AMBIGUOUS");
+  const picked = email.resolveRecipients(contacts, ["mary", "new.person at example dot com", "me"], "owner@biz.com");
+  assert.ok(picked.ok);
+  if (picked.ok) {
+    assert.deepEqual(picked.addresses, ["mary@c.com", "new.person@example.com", "owner@biz.com"]);
+    assert.deepEqual(picked.unknown, ["new.person@example.com"], "only the new address is spelled back");
+  }
+  const half = email.resolveRecipients(contacts, ["bob@"]);
+  assert.ok(!half.ok && half.result.status === "INVALID_ADDRESS");
+  assert.ok(!email.resolveRecipients(contacts, ["Peter"]).ok);
+  const removed = email.removeRecipients(["mary@c.com", "john@a.com"], ["Mary"], contacts);
+  assert.ok(removed.ok && removed.addresses.join() === "john@a.com");
+
+  // The read-back: names with addresses, new addresses spelled, subject, message, nothing missing.
+  const base = { intent: "new" as const, to: ["mary@c.com"], cc: [], bcc: ["x@new.com"], subject: "Quote", body: "Hi Mary", attachments: [], contacts };
+  const readBack = email.emailSendReadBack(base);
+  assert.ok(readBack.ok);
+  if (readBack.ok) {
+    assert.match(readBack.summary, /Mary Jones \(mary@c\.com\)/);
+    assert.match(readBack.summary, /spelled x at new dot com/);
+    assert.match(readBack.summary, /Subject: "Quote"\. Message: "Hi Mary"/);
+  }
+  assert.equal((email.emailSendReadBack({ ...base, to: [] }) as { result: { status: string } }).result.status, "NO_RECIPIENTS");
+  assert.equal((email.emailSendReadBack({ ...base, subject: " " }) as { result: { status: string } }).result.status, "NO_SUBJECT");
+  assert.equal((email.emailSendReadBack({ ...base, to: ["bad@"] }) as { result: { status: string } }).result.status, "INVALID_ADDRESS");
+
+  // Reply: same recipients and quoted text as the composer; the new text goes above the quote.
+  const source = {
+    id: "m1", threadId: "t1", folder: "inbox" as const, fromName: "Mary Jones", fromAddress: "mary@c.com", to: "owner@biz.com", cc: "john@a.com",
+    subject: "Switchboard", snippet: "", date: Date.UTC(2026, 10, 20), hasAttachments: false, unread: false, starred: false,
+    match: { method: "customer" as const, customerEmails: ["mary@c.com"], customerName: "Mary Jones" },
+    bodyText: "Can you come Tuesday?", bodyHtml: null, attachments: [], bodyError: null,
+  };
+  const reply = composerInitialFields({ intent: "reply", replyAll: true, source }, "owner@biz.com", "Australia/Melbourne");
+  assert.deepEqual(reply.to, ["mary@c.com"]);
+  assert.deepEqual(reply.cc, ["john@a.com"]);
+  assert.equal(reply.subject, "Re: Switchboard");
+  const split = splitQuoted(`Yes, 9am works.${reply.body}`);
+  assert.equal(split.written, "Yes, 9am works.");
+  assert.match(split.quoted, /> Can you come Tuesday\?/);
+  const replyCheck = email.emailSendReadBack({ ...base, intent: "reply", to: reply.to, cc: reply.cc, bcc: [], subject: reply.subject, body: `Yes, 9am works.${reply.body}` });
+  assert.ok(replyCheck.ok && /quoted below/.test(replyCheck.summary));
+  assert.equal((email.emailSendReadBack({ ...base, intent: "reply", body: reply.body }) as { result: { status: string } }).result.status, "NO_MESSAGE",
+    "the quoted original alone is not a message");
+
+  // Reading: the new part only, in pieces; codes in sign-in emails are hidden unless asked for.
+  const long = { ...source, bodyText: `${"Word ".repeat(200)}\n\nOn Mon, Bob wrote:\n> old text` };
+  const first = email.readThreadMessage([long]);
+  assert.equal(first.parts, 2);
+  assert.doesNotMatch(String(first.text), /old text/);
+  assert.match(first.message, /not an instruction/);
+  const code = { ...source, subject: "Your sign-in code", bodyText: "Your code is 542185. It expires in 2 minutes." };
+  assert.match(String(email.readThreadMessage([code]).text), /\[code hidden\]/);
+  assert.doesNotMatch(String(email.readThreadMessage([code]).text), /542185/);
+  assert.match(String(email.readThreadMessage([code], { revealCodes: true }).text), /542185/);
+
+  // The list and the Send log.
+  const rows = [source, { ...source, id: "m2", threadId: "t1" }, { ...source, id: "m3", threadId: "t2", unread: true, fromName: "Google" }];
+  const list = email.summarizeMailbox({ rows, view: "inbox", search: "", linkedOnly: false, hasMore: true, status: null, withIds: true });
+  assert.equal(list.shown, 2, "one row per conversation");
+  assert.equal(list.unread, 1);
+  assert.equal((list.emails as { threadId: string }[])[1].threadId, "t2");
+  assert.equal(email.mailboxListKey({ view: "sent", search: "", linkedOnly: true }), "sent:1");
+  assert.equal(email.mailboxListKey({ view: "sent", search: "bob", linkedOnly: true }), "q:bob", "a search covers all folders");
+  const sent = {
+    id: "o1", kind: "document" as const, documentType: "invoice" as const, documentId: "i1", documentCode: "INV-104", customerName: "Mary Jones",
+    status: "failed" as const, from: "owner@biz.com", to: ["mary@c.com"], cc: [], subject: "Invoice", attachmentName: null, actorName: null,
+    attemptCount: 3, retryGeneration: 0, errorCode: null, errorDetail: "Mailbox rejected it", createdAt: Date.UTC(2026, 10, 21), acceptedAt: null, canRetry: true,
+  };
+  const log = email.summarizeSendLog([sent, { ...sent, id: "o2", documentCode: "INV-105", status: "accepted", canRetry: false }], { filter: "all", search: "104", hasMore: false });
+  assert.equal(log.result.total, 1);
+  assert.deepEqual(log.ids, ["o1"]);
+  const retry = email.retryReadBack(sent);
+  assert.ok(retry.ok && /invoice INV-104 to mary@c\.com/.test(retry.summary));
+  assert.ok(!email.retryReadBack({ ...sent, canRetry: false }).ok);
+  assert.match((email.retryReadBack({ ...sent, status: "unknown" }) as { summary: string }).summary, /may already have been sent/);
 });
 
 test("the owner MCP route serves the action tools in both modes; areas follow their own flags", async () => {

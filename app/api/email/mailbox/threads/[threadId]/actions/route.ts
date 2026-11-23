@@ -5,6 +5,8 @@
  * away so every view updates.
  */
 
+import { EMAIL_LIMITS, EMAIL_VOICE_HEADER } from "@/lib/ai/owner-call/owner-email";
+import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { emailError } from "@/lib/email-integration/auth";
 import { recordEmailEvent } from "@/lib/email-integration/events";
 import { providerIdParam, requireMailbox } from "@/lib/email-integration/mailbox/access";
@@ -41,6 +43,21 @@ export async function POST(
 
   const gate = await requireMailbox(request, { capability: "modify", credentials: true });
   if (!gate.ok) return gate.response;
+
+  // Deletes asked for through Sophie (browser or MCP) have their own hourly limit; the owner's own buttons do not.
+  if (
+    action === "trash" &&
+    request.headers.get(EMAIL_VOICE_HEADER) === "1" &&
+    !(await consumeRateLimits([
+      { key: `owner-voice:email-trash:${gate.uid}`, limit: EMAIL_LIMITS.voiceTrashPerHour, windowMs: 3_600_000 },
+    ]))
+  ) {
+    return emailError(
+      429,
+      `Sophie can delete at most ${EMAIL_LIMITS.voiceTrashPerHour} conversations an hour. Use the Delete button.`,
+      "voice_limit",
+    );
+  }
 
   // Only conversations already shown on the platform can be changed from here.
   const stored = await listThreadMessages({

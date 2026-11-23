@@ -189,6 +189,42 @@ export function summarizeSmsLog(logs: SmsLogEntry[], filters: SmsLogFilters = {}
 
 export type SmsCustomer = { id: string; fullName: string; phone: string };
 
+const normName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+/** "testcus1 at gmail dot com" and "testcus1@gmail.com" compare equal. */
+const compactName = (value: string) => normName(value).replace(/\s+at\s+/g, "@").replace(/\s+dot\s+/g, ".").replace(/\s+/g, "");
+const digitsOf = (value: string) => value.replace(/\D/g, "");
+/** A spoken number or ending matches the phone: "218", "3456789", or a local number like 0412 345 678. */
+const phoneEndsWith = (phone: string, digits: string) =>
+  digitsOf(phone).endsWith(digits) || (digits.startsWith("0") && digits.length >= 8 && digitsOf(phone).endsWith(digits.slice(1)));
+
+/**
+ * The shortest phone ending (at least 3 digits) that tells each customer apart from the others given, so two
+ * numbers that both end in 789 are read as "…3456789" and "…2456789" rather than both as "789".
+ */
+export function distinctPhoneEndings(customers: SmsCustomer[]): Map<string, string> {
+  const endings = new Map<string, string>();
+  for (const customer of customers) {
+    const digits = digitsOf(customer.phone);
+    let length = Math.min(3, digits.length);
+    while (length < digits.length &&
+      customers.some((other) => other.id !== customer.id && digitsOf(other.phone).slice(-length) === digits.slice(-length))) length += 1;
+    endings.set(customer.id, digits.slice(-length));
+  }
+  return endings;
+}
+
+/** Phone endings for a list: 3 digits, longer only where two customers with the same name need telling apart. */
+function endingsFor(customers: SmsCustomer[]): Map<string, string> {
+  const groups = new Map<string, SmsCustomer[]>();
+  for (const customer of customers) groups.set(normName(customer.fullName), [...(groups.get(normName(customer.fullName)) ?? []), customer]);
+  const endings = new Map<string, string>();
+  for (const group of groups.values()) {
+    if (group.length === 1) endings.set(group[0].id, phoneEnding(group[0].phone));
+    else for (const [id, ending] of distinctPhoneEndings(group)) endings.set(id, ending);
+  }
+  return endings;
+}
+
 /** Customers who can get a text, filtered like the page's search (name or phone). */
 export function summarizeSmsCustomers(customers: SmsCustomer[], search = ""): VoiceResult {
   const q = search.trim().toLowerCase();
@@ -196,22 +232,54 @@ export function summarizeSmsCustomers(customers: SmsCustomer[], search = ""): Vo
   const visible = q
     ? customers.filter((customer) => customer.fullName.toLowerCase().includes(q) || (digits.length >= 3 && customer.phone.replace(/\D/g, "").includes(digits)))
     : customers;
+  const shown = visible.slice(0, SMS_LIMITS.customersMax);
+  const endings = endingsFor(shown);
   return {
     status: visible.length ? "OK" : customers.length ? "NO_MATCH" : "NO_CUSTOMERS",
-    total: customers.length, shown: Math.min(visible.length, SMS_LIMITS.customersMax),
-    customers: visible.slice(0, SMS_LIMITS.customersMax).map((customer) => ({ name: customer.fullName, phoneEnding: phoneEnding(customer.phone) })),
+    total: customers.length, shown: shown.length,
+    customers: shown.map((customer) => ({ name: customer.fullName, phoneEnding: endings.get(customer.id) ?? phoneEnding(customer.phone) })),
     complete: visible.length <= SMS_LIMITS.customersMax,
     message: customers.length
-      ? "Read the names, or the count. Use the phone ending only to tell two customers with the same name apart."
+      ? "Read the names, or the count. To tick someone, send their name exactly as listed (numbers in a name are part of it). " +
+        "Use the phone ending only to tell two customers with the same name apart."
       : "No customers have a phone number yet, so there is nobody to text.",
   };
 }
 
-const labelOf = (customer: SmsCustomer) => `${customer.fullName} (phone ending ${phoneEnding(customer.phone)})`;
+/** Customers whose name matches what was said: the whole name first, then part of it. */
+function byName(customers: SmsCustomer[], said: string): SmsCustomer[] {
+  const whole = normName(said);
+  const compact = compactName(said);
+  if (!whole) return customers;
+  const exact = customers.filter((customer) => normName(customer.fullName) === whole || compactName(customer.fullName) === compact);
+  if (exact.length) return exact;
+  return customers.filter((customer) => {
+    const name = normName(customer.fullName);
+    return name.includes(whole) || name.split(" ").includes(whole) || (compact.length >= 3 && compactName(customer.fullName).includes(compact));
+  });
+}
 
 /**
- * Finds each customer the owner named. A name with a phone ending ("John 218") or digits picks one of
- * several customers with the same name. Every name must match exactly one customer.
+ * The customers that fit what the owner said. The whole name counts first, digits and all ("Test Customer 1",
+ * "testcus1@gmail.com"). Then a name followed by a phone ending ("John Smith 218"), or a number alone.
+ */
+function findSmsCustomers(customers: SmsCustomer[], said: string): SmsCustomer[] {
+  const whole = byName(customers, said);
+  const exact = whole.filter((customer) => normName(customer.fullName) === normName(said) || compactName(customer.fullName) === compactName(said));
+  if (exact.length) return exact;
+  const tail = /^(.*?)[\s,]*(?:(?:phone|number|mobile)\s*)?(?:ending(?:\s+in)?\s*)?([+\d][\d\s()-]{2,})$/i.exec(said.trim());
+  const digits = tail ? digitsOf(tail[2]) : "";
+  if (tail && digits.length >= 3) {
+    const named = tail[1].trim() ? byName(customers, tail[1]) : customers;
+    const withEnding = named.filter((customer) => phoneEndsWith(customer.phone, digits));
+    if (withEnding.length) return withEnding;
+  }
+  return whole;
+}
+
+/**
+ * Finds each customer the owner named. Every name must match exactly one customer; when several match (two
+ * customers with the same name), their distinct phone endings are returned to ask with.
  */
 export function matchSmsCustomers(customers: SmsCustomer[], spoken: string[]):
   { ok: true; matched: SmsCustomer[] } | { ok: false; result: VoiceResult } {
@@ -219,22 +287,15 @@ export function matchSmsCustomers(customers: SmsCustomer[], spoken: string[]):
   for (const raw of spoken) {
     const said = raw.trim();
     if (!said) continue;
-    const digits = said.replace(/\D/g, "");
-    const words = said.replace(/[\d+()-]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-    let found = customers;
-    if (words) {
-      const exact = found.filter((customer) => customer.fullName.trim().toLowerCase() === words);
-      found = exact.length ? exact : found.filter((customer) => {
-        const name = customer.fullName.trim().toLowerCase();
-        return name.includes(words) || name.split(/\s+/).includes(words);
-      });
-    }
-    if (digits.length >= 3) found = found.filter((customer) => customer.phone.replace(/\D/g, "").endsWith(digits));
+    const found = findSmsCustomers(customers, said);
     if (found.length === 1) { matched.push(found[0]); continue; }
     if (found.length > 1) {
+      const endings = distinctPhoneEndings(found);
       return { ok: false, result: {
-        status: "AMBIGUOUS", said, names: found.slice(0, 20).map(labelOf),
-        message: `Several customers match "${said}". Read out these names with the phone endings and ask which one; then send the name with the ending.`,
+        status: "AMBIGUOUS", said,
+        names: found.slice(0, 20).map((customer) => `${customer.fullName} (phone ending ${endings.get(customer.id)})`),
+        message: `Several customers match "${said}". Read out these names and ask which one. Then send the full name exactly as listed, ` +
+          "adding the phone ending only if two have the same name.",
       } };
     }
     return { ok: false, result: {
@@ -351,8 +412,9 @@ export function ownerSmsSessionTools() {
     {
       type: "function", name: SMS_MESSAGE_STEP_TOOL,
       description: "Drive the Custom messages page like the owner. write types message (your tidy wording of what the owner said; the business " +
-        "name is added in front automatically). template picks a quick template. recipients_all sends to every customer; recipients_select " +
-        "ticks add and unticks remove (customer names; add a phone ending when two share a name). search types in the customer search; " +
+        "name is added in front automatically). template picks a quick template. recipients_all switches to All customers; recipients_select " +
+        "switches to Select customers, ticks add and unticks remove (full names exactly as listed, numbers included, e.g. \"Test Customer 1\"; " +
+        "add the phone ending only when two share a name). search types in the customer search; " +
         "select_all_shown ticks everyone the search shows; clear_selection unticks all. scroll_down / scroll_up scroll. review returns the " +
         "read-back: read the exact text, who gets it (say the number when it is everyone) and the credits, then ask: Should I send it? " +
         "send only after review and a clear yes; it cannot be undone. Any change after review needs a new review. cancel drops the yes and sends nothing.",

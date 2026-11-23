@@ -4,6 +4,10 @@ import { EmailHtmlFrame } from "@/components/email-html-frame";
 import { AttachmentGallery, useInlineImages } from "@/components/mail-attachments";
 import { MailComposer, type ComposerDraft } from "@/components/mail-composer";
 import { MailCustomerPanel, MatchChip } from "@/components/mail-customer-panel";
+import {
+  EMAIL_VOICE_HEADER, emailPanelVoice, mailboxListKey, mailboxVoice, threadVoice,
+  type EmailPanelVoice, type MailboxSnapshot, type ThreadSnapshot,
+} from "@/lib/ai/owner-call/owner-email";
 import { useAuth } from "@/lib/auth/auth-context";
 import { emailApi, EmailApiError, providerInfo, useEmailSending } from "@/lib/email-integration/client";
 import type {
@@ -116,6 +120,16 @@ export function MailboxPanel() {
       setEnabling(false);
     }
   }, [user, connection]);
+
+  // Talk to Sophie: whether a mailbox is connected, and New email (lib/ai/owner-call/owner-email.ts).
+  const panelLive = useRef<ReturnType<EmailPanelVoice["state"]>>({ loading: true, connection: null, composerOpen: false });
+  useEffect(() => {
+    panelLive.current = { loading, connection, composerOpen: draft !== null };
+  });
+  useEffect(() => emailPanelVoice.register({
+    state: () => panelLive.current,
+    compose: (to) => setDraft({ intent: "new", to }),
+  }), []);
 
   if (loading) return null;
 
@@ -249,6 +263,11 @@ function Mailbox({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MailboxMessageSummary | null>(null);
+  // For Talk to Sophie: which list last finished loading, and a count of finished loads.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [loadSeq, setLoadSeq] = useState(0);
+  const actionError = useRef<string | null>(null);
+  const listKey = mailboxListKey({ view, search: activeSearch, linkedOnly });
   const mounted = useRef(true);
   const moreButton = useRef<HTMLButtonElement>(null);
   const generation = useRef(0);
@@ -299,8 +318,12 @@ function Mailbox({
       return null;
     } finally {
       setLoading(false);
+      if (version === generation.current) {
+        setLoadedKey(listKey);
+        setLoadSeq((value) => value + 1);
+      }
     }
-  }, [user, listPath, onNeedsReconnect]);
+  }, [user, listPath, listKey, onNeedsReconnect]);
 
   /**
    * One sync step. Importing past mail runs in steps of ~40 seconds; while this
@@ -389,6 +412,7 @@ function Mailbox({
       if (version === generation.current) {
         paging.current = false;
         setLoadingMore(false);
+        setLoadSeq((value) => value + 1);
       }
     }
   }, [user, nextCursor, loading, listPath]);
@@ -403,18 +427,23 @@ function Mailbox({
     return () => document.removeEventListener("scroll", onScroll, true);
   }, [nextCursor, loading, loadingMore, loadMore]);
 
+  /** `voice`: asked for through Talk to Sophie, so the route applies the voice limits. */
   const runAction = useCallback(
-    async (threadId: string, action: MailboxAction) => {
+    async (threadId: string, action: MailboxAction, voice = false) => {
       if (!user) return false;
+      actionError.current = null;
       try {
         await emailApi(user, `/api/email/mailbox/threads/${encodeURIComponent(threadId)}/actions`, {
           method: "POST",
           body: JSON.stringify({ action }),
+          ...(voice ? { headers: { [EMAIL_VOICE_HEADER]: "1" } } : {}),
         });
         await load();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "That action didn't work. Try again.");
+        const message = err instanceof Error ? err.message : "That action didn't work. Try again.";
+        actionError.current = message;
+        setError(message);
         return false;
       }
     },
@@ -430,6 +459,54 @@ function Mailbox({
       return true;
     });
   }, [items]);
+
+  // Talk to Sophie drives the list through mailboxVoice (lib/ai/owner-call/owner-email.ts), like the buttons.
+  const live = useRef<MailboxSnapshot | null>(null);
+  const latest = useRef({ loadMore, syncNow });
+  useEffect(() => {
+    live.current = {
+      view, search: activeSearch, linkedOnly, listKey, loadedKey, loading, loadingMore, loadSeq, rows,
+      hasMore: Boolean(nextCursor), status, error, actionError: actionError.current, canModify,
+      selectedThreadId: selected?.threadId ?? null,
+    };
+    latest.current = { loadMore, syncNow };
+  });
+  useEffect(() => mailboxVoice.register({
+    snapshot: () => ({ ...live.current!, actionError: actionError.current }),
+    show(change) {
+      const current = live.current!;
+      const next = {
+        view: change.view ?? current.view,
+        search: change.search !== undefined ? change.search : change.view ? "" : current.search,
+        linkedOnly: change.linkedOnly ?? current.linkedOnly,
+      };
+      if (change.view) {
+        setView(change.view);
+        setActiveSearch("");
+        setSearch("");
+      }
+      if (change.search !== undefined) {
+        setSearch(change.search);
+        setActiveSearch(change.search);
+      }
+      if (change.linkedOnly !== undefined) setLinkedOnly(change.linkedOnly);
+      setSelected(null);
+      return mailboxListKey(next);
+    },
+    more() {
+      if (!live.current?.hasMore) return false;
+      void latest.current.loadMore();
+      return true;
+    },
+    sync: () => void latest.current.syncNow(true),
+    open(threadId) {
+      const row = live.current?.rows.find((item) => item.threadId === threadId);
+      if (!row) return false;
+      setSelected(row);
+      return true;
+    },
+    back: () => setSelected(null),
+  }), []);
 
   const listPane = (
     <div className="flex min-h-0 flex-col">
@@ -648,8 +725,8 @@ function Mailbox({
             canModify={canModify}
             onBack={() => setSelected(null)}
             onCompose={onCompose}
-            onAction={async (action) => {
-              const ok = await runAction(selected.threadId, action);
+            onAction={async (action, voice) => {
+              const ok = await runAction(selected.threadId, action, voice);
               if (ok && (action === "archive" || action === "trash" || action === "untrash" || action === "move_to_inbox")) {
                 setSelected(null);
               }
@@ -675,7 +752,7 @@ function ThreadView({
   canModify: boolean;
   onBack: () => void;
   onCompose: (draft: ComposerDraft) => void;
-  onAction: (action: MailboxAction) => Promise<boolean>;
+  onAction: (action: MailboxAction, voice?: boolean) => Promise<boolean>;
 }) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<MailboxThreadMessage[] | null>(null);
@@ -725,9 +802,10 @@ function ThreadView({
     messages?.find((message) => message.match.method !== "none")?.match ??
     summary.match;
 
-  async function act(action: MailboxAction) {
+  /** A toolbar button; `voice` when Talk to Sophie pressed it. */
+  async function act(action: MailboxAction, voice = false) {
     setBusy(true);
-    const ok = await onAction(action);
+    const ok = await onAction(action, voice);
     if (ok && messages && (action === "star" || action === "unstar" || action === "mark_unread")) {
       setMessages(
         messages.map((message) => ({
@@ -739,6 +817,7 @@ function ThreadView({
       if (action === "mark_unread") onBack();
     }
     setBusy(false);
+    return ok;
   }
 
   function compose(intent: "reply" | "reply_all" | "forward", message: MailboxThreadMessage) {
@@ -748,6 +827,24 @@ function ThreadView({
         : { intent: "reply", replyAll: intent === "reply_all", source: message },
     );
   }
+
+  // Talk to Sophie reads and works on this conversation through threadVoice (lib/ai/owner-call/owner-email.ts).
+  const live = useRef<ThreadSnapshot | null>(null);
+  const latestHandlers = useRef({ act, compose });
+  useEffect(() => {
+    live.current = { threadId: summary.threadId, summary, messages, error, folder, starred, match };
+    latestHandlers.current = { act, compose };
+  });
+  useEffect(() => threadVoice.register({
+    snapshot: () => live.current!,
+    act: (action) => latestHandlers.current.act(action, true),
+    compose(intent) {
+      const newest = live.current?.messages?.[live.current.messages.length - 1];
+      if (!newest) return false;
+      latestHandlers.current.compose(intent, newest);
+      return true;
+    },
+  }), []);
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">

@@ -1,5 +1,7 @@
+import { listBusinessCustomers } from "@/lib/customer/server";
+import type { CustomerProfile } from "@/lib/customer/types";
 import { listInspectionRequests } from "@/lib/inspection/server";
-import type { InspectionRequestDetail } from "@/lib/inspection/types";
+import { buildCustomerContacts, type CustomerContact } from "@/lib/sms/custom-message-contacts";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { getBusinessSmsBalance } from "@/lib/sms-packages/server";
@@ -28,50 +30,19 @@ function withBusinessName(message: string, businessName: string | null): {
   return { text: `${name}: ${message}`, businessName: name };
 }
 
-type CustomerContact = {
-  id: string;
-  fullName: string;
-  phone: string;
-};
-
-/** Stable key for a customer, matching the customers board grouping. */
-function customerKey(request: InspectionRequestDetail): string {
-  const email = request.customer.email?.trim().toLowerCase();
-  if (email) return `email:${email}`;
-  const phone = request.customer.phone?.replace(/\D/g, "");
-  if (phone) return `phone:${phone}`;
-  return `name:${request.customer.fullName.trim().toLowerCase()}`;
-}
-
-/** Builds the deduped list of customers that have a usable phone number. */
-function buildCustomerContacts(
-  requests: InspectionRequestDetail[],
-): CustomerContact[] {
-  const map = new Map<string, CustomerContact>();
-
-  for (const request of requests) {
-    const phone = request.customer.phone?.trim();
-    if (!phone || !toE164(phone)) continue;
-
-    const key = customerKey(request);
-    const existing = map.get(key);
-    if (existing) {
-      if (!existing.fullName && request.customer.fullName) {
-        existing.fullName = request.customer.fullName.trim();
-      }
-      continue;
-    }
-
-    map.set(key, {
-      id: key,
-      fullName: request.customer.fullName?.trim() || "Unknown customer",
-      phone,
-    });
-  }
-
-  return Array.from(map.values()).sort((a, b) =>
-    a.fullName.localeCompare(b.fullName),
-  );
+/**
+ * Customers with a usable phone number: the same people as the Customers page (inspection requests plus the
+ * customers saved on that page). A failed customers read keeps the request list working.
+ */
+async function loadCustomerContacts(businessId: string): Promise<CustomerContact[]> {
+  const [requests, savedCustomers] = await Promise.all([
+    listInspectionRequests(businessId),
+    listBusinessCustomers(businessId).catch((error) => {
+      console.error("[custom-messages] saved customers could not be read:", error);
+      return [] as CustomerProfile[];
+    }),
+  ]);
+  return buildCustomerContacts(requests.map((request) => request.customer), savedCustomers, (phone) => Boolean(toE164(phone)));
 }
 
 /** Business owner — customers reachable by SMS + current credit balance. */
@@ -84,14 +55,14 @@ export async function GET(request: Request) {
     );
   }
 
-  const [requests, balance] = await Promise.all([
-    listInspectionRequests(auth.businessId),
+  const [customers, balance] = await Promise.all([
+    loadCustomerContacts(auth.businessId),
     getBusinessSmsBalance(auth.businessId),
   ]);
 
   return NextResponse.json({
     ok: true,
-    customers: buildCustomerContacts(requests),
+    customers,
     balance,
   });
 }
@@ -147,8 +118,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const requests = await listInspectionRequests(auth.businessId);
-  const contacts = buildCustomerContacts(requests);
+  const contacts = await loadCustomerContacts(auth.businessId);
 
   let selected: CustomerContact[];
   if (payload.recipients === "all") {

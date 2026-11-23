@@ -265,6 +265,9 @@ export function OwnerCustomMessagesBoard() {
         : state.customers.filter((customer) => state.selectedIds.has(customer.id)).length;
       const ok = (message: string, extra: Record<string, unknown> = {}) =>
         ({ status: "OK", recipients: pickedCount(), ...extra, message });
+      /** Brings the Send to box into view so the owner sees the change. */
+      const showRecipients = () =>
+        document.querySelector<HTMLElement>("[data-voice-section='recipients']")?.scrollIntoView({ behavior: "smooth", block: "center" });
 
       switch (args.action) {
         case "write": {
@@ -285,9 +288,16 @@ export function OwnerCustomMessagesBoard() {
           return ok(`The ${template.label} template is in the message box.`, { outbound: previewOutboundMessage(state.message, state.businessName) });
         }
         case "recipients_all":
+          if (!state.customers.length) {
+            return { status: "NO_CUSTOMERS", message: "No customers have a phone number yet, so there is nobody to text." };
+          }
+          // Like pressing All customers: the ticks and the customer search no longer apply.
           state.mode = "all";
           setMode("all");
-          return ok(`Set to all ${state.customers.length} customers.`);
+          state.query = "";
+          setQuery("");
+          showRecipients();
+          return ok(`All customers is selected: ${state.customers.length} customers.`);
         case "recipients_select": {
           const add = matchSmsCustomers(state.customers, args.add ?? []);
           if (!add.ok) return add.result;
@@ -299,8 +309,14 @@ export function OwnerCustomMessagesBoard() {
           state.mode = "select";
           setMode("select");
           setPick(next);
+          // A search that hides a ticked customer would make the tick invisible: clear it.
+          if (state.query && add.matched.some((customer) => !filterCustomers([customer], state.query).length)) {
+            state.query = "";
+            setQuery("");
+          }
+          showRecipients();
           const picked = state.customers.filter((customer) => next.has(customer.id)).map((customer) => customer.fullName);
-          return ok(`Selected: ${picked.join(", ") || "nobody yet"}.`, { selected: picked.slice(0, 20) });
+          return ok(`Select customers is on. Ticked: ${picked.join(", ") || "nobody yet"}.`, { selected: picked.slice(0, 20) });
         }
         case "search":
           state.query = args.query ?? "";
@@ -446,7 +462,7 @@ export function OwnerCustomMessagesBoard() {
           </div>
 
           {/* Recipients */}
-          <fieldset className="rounded-xl border border-outline-variant p-3">
+          <fieldset data-voice-section="recipients" className="rounded-xl border border-outline-variant p-3">
             <legend className="px-1 font-body text-[12px] font-semibold text-on-surface-variant">
               Send to
             </legend>

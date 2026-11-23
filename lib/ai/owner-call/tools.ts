@@ -232,6 +232,14 @@ const ACTION_RUNNERS: Record<string, (actions: OwnerActionTools, args: unknown) 
   get_sms_log: (a, args) => a.getSmsLog(args),
   get_sms_customers: (a, args) => a.getSmsCustomers(args),
   prepare_sms_send: (a, args) => a.prepareSmsSend(args),
+  get_emails: (a, args) => a.getEmails(args),
+  get_email_thread: (a, args) => a.getEmailThread(args),
+  get_email_send_log: (a, args) => a.getEmailSendLog(args),
+  get_email_contacts: (a, args) => a.getEmailContacts(args),
+  email_thread_action: (a, args) => a.emailThreadAction(args),
+  prepare_email_send: (a, args) => a.prepareEmailSend(args),
+  prepare_email_trash: (a, args) => a.prepareEmailTrash(args),
+  prepare_email_retry: (a, args) => a.prepareEmailRetry(args),
   [CONFIRM_CHANGE_TOOL]: (a, args) => a.confirm(args),
   [CANCEL_CHANGE_TOOL]: (a) => a.cancel(),
 };
@@ -249,8 +257,8 @@ function actionTool(name: string): OwnerVoiceTool {
 }
 
 /** The MCP action tools for the enabled areas, plus confirm and cancel when any change tool is included. */
-function actionTools({ services, team, drafts, customers, items, sms }: {
-  services: boolean; team: boolean; drafts: boolean; customers: boolean; items: boolean; sms: boolean;
+function actionTools({ services, team, drafts, customers, items, sms, email }: {
+  services: boolean; team: boolean; drafts: boolean; customers: boolean; items: boolean; sms: boolean; email: boolean;
 }): OwnerVoiceTool[] {
   const names = [
     ...(services ? [...OWNER_ACTION_READ_TOOLS.services, ...OWNER_ACTION_PREPARE_TOOLS.services] : []),
@@ -259,6 +267,7 @@ function actionTools({ services, team, drafts, customers, items, sms }: {
     ...(customers ? [...OWNER_ACTION_READ_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.customers] : []),
     ...(items ? [...OWNER_ACTION_READ_TOOLS.items, ...OWNER_ACTION_PREPARE_TOOLS.items] : []),
     ...(sms ? [...OWNER_ACTION_READ_TOOLS.sms, ...OWNER_ACTION_PREPARE_TOOLS.sms] : []),
+    ...(email ? [...OWNER_ACTION_READ_TOOLS.email, ...OWNER_ACTION_PREPARE_TOOLS.email] : []),
   ];
   return names.length ? [...names, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : [];
 }
@@ -283,16 +292,16 @@ export function ownerVoiceDraftsEnabled(env: Readonly<Record<string, string | un
  * either mode can call what it was offered.
  */
 export function ownerVoiceToolList({
-  knowledge, services = false, team = false, drafts = false, customers = false, items = false, sms = false, actions = false, visits = false, scheduledCalls = false,
+  knowledge, services = false, team = false, drafts = false, customers = false, items = false, sms = false, email = false, actions = false, visits = false, scheduledCalls = false,
 }: {
-  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; sms?: boolean; actions?: boolean; visits?: boolean; scheduledCalls?:boolean;
+  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; sms?: boolean; email?: boolean; actions?: boolean; visits?: boolean; scheduledCalls?:boolean;
 }): OwnerVoiceTool[] {
   return [
     ...briefingTools, // always offered
     ...(knowledge ? [knowledgeTool] : []), // when owner knowledge is on
     ...(services ? serviceTools : []), // when voice service creation is on
     ...(actions || visits || scheduledCalls ? [
-      ...(actions ? actionTools({ services, team, drafts, customers, items, sms }) : []),
+      ...(actions ? actionTools({ services, team, drafts, customers, items, sms, email }) : []),
       ...(visits ? ["get_work_visits", "get_services", "get_staff", JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, ...VISIT_PREPARE_TOOLS, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : []),
       ...(scheduledCalls?["find_call_customers",OWNER_CALL_PREPARE_TOOL,CONFIRM_CHANGE_TOOL,CANCEL_CHANGE_TOOL].map(actionTool):[]),
     ].filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index) : []), // MCP twins of the browser tools

@@ -53,6 +53,24 @@ import type { BusinessSmsBalance } from "@/lib/sms-packages/balance";
 import type { SmsLogEntry } from "@/lib/sms/sms-log-types";
 import { getBusinessProfile } from "@/lib/onboarding/server";
 import { resolvePlatformTimeZone } from "@/lib/platform/timezone";
+import { randomUUID } from "node:crypto";
+import * as emailConnectionsApi from "@/app/api/email/connections/route";
+import * as mailboxApi from "@/app/api/email/mailbox/route";
+import * as mailboxContactsApi from "@/app/api/email/mailbox/contacts/route";
+import * as mailboxSendApi from "@/app/api/email/mailbox/send/route";
+import * as mailboxThreadApi from "@/app/api/email/mailbox/threads/[threadId]/route";
+import * as mailboxThreadActionsApi from "@/app/api/email/mailbox/threads/[threadId]/actions/route";
+import * as outboxApi from "@/app/api/email/outbox/route";
+import * as outboxItemApi from "@/app/api/email/outbox/[id]/route";
+import * as outboxRetryApi from "@/app/api/email/outbox/[id]/retry/route";
+import {
+  EASY_THREAD_ACTIONS, EMAIL_ACTION_DONE, EMAIL_LIMITS, EMAIL_VOICE_HEADER, emailSendReadBack, MAILBOX_VIEWS, ownerEmailEnabled,
+  readThreadMessage, resolveRecipients, retryReadBack, SEND_LOG_FILTERS, summarizeEmailContacts, summarizeMailbox, summarizeSendLog,
+} from "@/lib/ai/owner-call/owner-email";
+import { composerInitialFields } from "@/lib/email-integration/mailbox/compose";
+import type {
+  EmailConnectionSummary, EmailSendHistoryItem, MailboxContact, MailboxMessageSummary, MailboxSyncStatus, MailboxThreadMessage, MailboxView,
+} from "@/lib/email-integration/types";
 
 type CatalogItem = { id: string; name: string; code: string | null; description: string | null; priceAud: number; documentUrl?: string | null };
 
@@ -62,7 +80,8 @@ const PENDING = "ai_owner_pending_changes";
 /** Who is acting. Always from the login on the MCP route, never from tool arguments. */
 export type ActionOwner = { businessId: string; uid: string; timezone: string | null; authorization: string };
 
-type Handler = (request: Request, context: { params: Promise<{ id: string }> }) => Promise<Response>;
+/** Any route handler; the params object is passed through as given (`{ id }` by default). */
+type Handler = (request: Request, context: { params: Promise<never> }) => Promise<Response>;
 type ApiResult = { ok: boolean; status: number; data: Record<string, unknown> };
 
 type Service = {
@@ -93,16 +112,18 @@ const dayLabel = (day: string) => day.charAt(0).toUpperCase() + day.slice(1);
 export function ownerActionTools(owner: ActionOwner) {
   const pendingRef = adminDb.collection(PENDING).doc(`${owner.businessId}_${owner.uid}`);
 
-  /** Calls a Trade route handler as the owner, exactly like the page does. */
+  /** Calls a Trade route handler as the owner, exactly like the page does. A FormData body is sent as multipart. */
   async function api(
     handler: Handler, method: string, path: string, body?: unknown, id?: string, headers: Record<string, string> = {},
+    params?: Record<string, string>,
   ): Promise<ApiResult> {
+    const form = body instanceof FormData;
     const request = new Request(new URL(path, "http://trade.internal"), {
       method,
-      headers: { ...headers, Authorization: owner.authorization, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...headers, Authorization: owner.authorization, ...(body === undefined || form ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : form ? body : JSON.stringify(body),
     });
-    const response = await handler(request, { params: Promise.resolve({ id: id ?? "" }) });
+    const response = await handler(request, { params: Promise.resolve(params ?? { id: id ?? "" }) as Promise<never> });
     const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     return { ok: response.ok && data.ok !== false, status: response.status, data };
   }
@@ -146,6 +167,22 @@ export function ownerActionTools(owner: ActionOwner) {
     if (!result.ok || !Array.isArray(result.data.customers)) return null;
     return { customers: result.data.customers as SmsCustomer[], balance: (result.data.balance ?? null) as BusinessSmsBalance | null };
   }
+  /** Customers with an email address: the same list the composer suggests from. */
+  async function emailContacts(): Promise<MailboxContact[] | null> {
+    const result = await api(mailboxContactsApi.GET as Handler, "GET", "/api/email/mailbox/contacts");
+    return result.ok && Array.isArray(result.data.contacts) ? result.data.contacts as MailboxContact[] : null;
+  }
+  /** One conversation with its bodies (read from the mailbox provider; never stored). */
+  async function emailThread(threadId: string): Promise<{ ok: true; messages: MailboxThreadMessage[] } | { ok: false; result: VoiceResult }> {
+    if (!threadId) return { ok: false, result: { status: "REJECTED", message: "Send the threadId from get_emails." } };
+    const result = await api(mailboxThreadApi.GET as Handler, "GET", `/api/email/mailbox/threads/${encodeURIComponent(threadId)}`,
+      undefined, undefined, {}, { threadId });
+    if (!result.ok || !Array.isArray(result.data.messages) || !result.data.messages.length) {
+      return { ok: false, result: failed(result, "Could not load that conversation. Read the list again with get_emails.") };
+    }
+    return { ok: true, messages: result.data.messages as MailboxThreadMessage[] };
+  }
+  const emailTimeZone = () => resolvePlatformTimeZone(owner.timezone);
   async function knowledgeEntries(): Promise<KnowledgeEntry[] | null> {
     const result = await api(knowledgeApi.GET as Handler, "GET", "/api/ai/knowledge");
     return result.ok && Array.isArray(result.data.sources) ? result.data.sources as KnowledgeEntry[] : null;
@@ -711,6 +748,157 @@ export function ownerActionTools(owner: ActionOwner) {
         check.summary, check.details);
     },
 
+    // ---------------------------------------------------------------- Emails section
+    async getEmails(args: unknown) {
+      const input = (args ?? {}) as { view?: unknown; search?: unknown; customersOnly?: unknown; cursor?: unknown };
+      const view = (text(input.view) || "inbox") as MailboxView;
+      if (!MAILBOX_VIEWS.includes(view)) return { status: "REJECTED", message: `view must be one of: ${MAILBOX_VIEWS.join(", ")}.` };
+      const search = text(input.search).slice(0, 200);
+      const linkedOnly = input.customersOnly === true;
+      const params = new URLSearchParams();
+      if (search) params.set("q", search);
+      else {
+        params.set("view", view);
+        if (linkedOnly) params.set("linked", "1");
+      }
+      if (text(input.cursor)) params.set("cursor", text(input.cursor));
+      const result = await api(mailboxApi.GET as Handler, "GET", `/api/email/mailbox?${params}`);
+      if (!result.ok || !Array.isArray(result.data.items)) return failed(result, "Could not load the mailbox.");
+      const nextCursor = typeof result.data.nextCursor === "string" ? result.data.nextCursor : null;
+      return {
+        ...summarizeMailbox({
+          rows: result.data.items as MailboxMessageSummary[], view, search, linkedOnly, hasMore: Boolean(nextCursor),
+          status: (result.data.status ?? null) as MailboxSyncStatus | null, withIds: true,
+        }, emailTimeZone()),
+        nextCursor,
+      };
+    },
+    async getEmailThread(args: unknown) {
+      const input = (args ?? {}) as { threadId?: unknown; message?: unknown; part?: unknown; whole?: unknown; revealCodes?: unknown };
+      const thread = await emailThread(text(input.threadId));
+      if (!thread.ok) return thread.result;
+      return readThreadMessage(thread.messages, {
+        message: typeof input.message === "number" ? input.message : undefined,
+        part: typeof input.part === "number" ? input.part : undefined,
+        whole: input.whole === true, revealCodes: input.revealCodes === true,
+      }, emailTimeZone());
+    },
+    async getEmailSendLog(args: unknown) {
+      const input = (args ?? {}) as { filter?: unknown; search?: unknown; cursor?: unknown };
+      const filter = text(input.filter) || "all";
+      if (!(SEND_LOG_FILTERS as readonly string[]).includes(filter)) return { status: "REJECTED", message: `filter must be one of: ${SEND_LOG_FILTERS.join(", ")}.` };
+      const search = text(input.search);
+      const items: EmailSendHistoryItem[] = [];
+      let cursor: string | null = text(input.cursor) || null;
+      let nextCursor: string | null = null;
+      // A search looks through up to 3 pages (75 emails), newest first.
+      for (let page = 0; page < (search ? 3 : 1); page += 1) {
+        const params = new URLSearchParams({ filter });
+        if (cursor) params.set("cursor", cursor);
+        const result = await api(outboxApi.GET as Handler, "GET", `/api/email/outbox?${params}`);
+        if (!result.ok || !Array.isArray(result.data.items)) return failed(result, "Could not load the Send log.");
+        items.push(...result.data.items as EmailSendHistoryItem[]);
+        nextCursor = typeof result.data.nextCursor === "string" ? result.data.nextCursor : null;
+        if (!nextCursor) break;
+        cursor = nextCursor;
+      }
+      const { result } = summarizeSendLog(items, { filter, search, hasMore: Boolean(nextCursor), withIds: true }, emailTimeZone());
+      return { ...result, nextCursor };
+    },
+    async getEmailContacts(args: unknown) {
+      const contacts = await emailContacts();
+      if (!contacts) return { status: "UNAVAILABLE", message: "Could not load the customers." };
+      return summarizeEmailContacts(contacts, text((args as { search?: unknown })?.search));
+    },
+    async emailThreadAction(args: unknown) {
+      const input = (args ?? {}) as { threadId?: unknown; action?: unknown };
+      const action = text(input.action) as (typeof EASY_THREAD_ACTIONS)[number];
+      if (!(EASY_THREAD_ACTIONS as readonly string[]).includes(action)) {
+        return { status: "REJECTED", message: `action must be one of: ${EASY_THREAD_ACTIONS.join(", ")}. To delete, use prepare_email_trash.` };
+      }
+      const threadId = text(input.threadId);
+      if (!threadId) return { status: "REJECTED", message: "Send the threadId from get_emails." };
+      const result = await api(mailboxThreadActionsApi.POST as Handler, "POST", `/api/email/mailbox/threads/${encodeURIComponent(threadId)}/actions`,
+        { action }, undefined, { [EMAIL_VOICE_HEADER]: "1" }, { threadId });
+      return result.ok ? { status: "DONE", message: EMAIL_ACTION_DONE[action] ?? "Done." } : failed(result, "That did not work. The owner can use the button.");
+    },
+    async prepareEmailTrash(args: unknown) {
+      const threadId = text((args as { threadId?: unknown })?.threadId);
+      const thread = await emailThread(threadId);
+      if (!thread.ok) return thread.result;
+      const latest = thread.messages[thread.messages.length - 1];
+      if (latest.folder === "trash") return { status: "ALREADY", message: "This conversation is already in Trash." };
+      const count = thread.messages.length;
+      return prepare("email_trash", { threadId },
+        `Delete the conversation "${latest.subject || "(no subject)"}" from ${latest.fromName || latest.fromAddress} ` +
+        `(${count} message${count === 1 ? "" : "s"}). It goes to Trash.`);
+    },
+    async prepareEmailSend(args: unknown) {
+      const input = (args ?? {}) as Record<string, unknown>;
+      const intent = text(input.intent);
+      if (intent !== "new" && intent !== "reply" && intent !== "forward") return { status: "REJECTED", message: "intent must be new, reply or forward." };
+      const [connections, contacts] = await Promise.all([
+        api(emailConnectionsApi.GET as Handler, "GET", "/api/email/connections"), emailContacts(),
+      ]);
+      if (!connections.ok) return failed(connections, "Could not check the mailbox.");
+      if (connections.data.enabled === false) return { status: "NOT_ENABLED", message: "Email sending is not switched on for this business." };
+      const connection = (connections.data.connection ?? null) as EmailConnectionSummary | null;
+      if (!connection) return { status: "NO_MAILBOX", message: "No mailbox is connected. The owner connects one on the Emails page; you cannot." };
+      if (connection.status === "needs_reconnect") {
+        return { status: "NEEDS_RECONNECT", message: "The mailbox sign-in has expired. The owner presses Reconnect mailbox on the Emails page." };
+      }
+      const known = contacts ?? [];
+      const replyAll = intent === "reply" && input.replyAll === true;
+      let initial = { to: [] as string[], cc: [] as string[], subject: "", body: "" };
+      let source: MailboxThreadMessage | null = null;
+      if (intent !== "new") {
+        const thread = await emailThread(text(input.threadId));
+        if (!thread.ok) return thread.result;
+        const number = typeof input.messageNumber === "number" ? Math.floor(input.messageNumber) : thread.messages.length;
+        source = thread.messages[Math.min(Math.max(1, number), thread.messages.length) - 1];
+        if (source.bodyError) return { status: "UNAVAILABLE", message: source.bodyError };
+        initial = composerInitialFields(intent === "reply" ? { intent, replyAll, source } : { intent, source }, connection.address, emailTimeZone());
+      }
+      const fields: Record<"to" | "cc" | "bcc", string[]> = { to: [], cc: [], bcc: [] };
+      for (const field of ["to", "cc", "bcc"] as const) {
+        const resolved = resolveRecipients(known, list(input[field]) ?? [], connection.address);
+        if (!resolved.ok) return resolved.result;
+        fields[field] = resolved.addresses;
+      }
+      const to = [...new Set([...initial.to, ...fields.to])];
+      const cc = [...new Set([...initial.cc, ...fields.cc])];
+      const bcc = fields.bcc;
+      const subject = (text(input.subject) || initial.subject).replace(/[\r\n]+/g, " ").trim();
+      if (subject.length > EMAIL_LIMITS.subjectMax) return { status: "TOO_LONG", message: `Keep the subject under ${EMAIL_LIMITS.subjectMax} characters.` };
+      const message = typeof input.message === "string" ? input.message.trim() : "";
+      const body = `${message}${initial.body}`;
+      const originals = intent === "forward" && source ? source.attachments.filter((item) => item.attachmentId).map((item) => item.name) : [];
+      const includeOriginals = originals.length > 0 && input.includeAttachments !== false;
+      const check = emailSendReadBack({
+        intent, replyAll, to, cc, bcc, subject, body, attachments: includeOriginals ? originals : [], contacts: known,
+      });
+      if (!check.ok) return check.result;
+      // The final addresses, subject and full body are stored: confirm sends exactly what was read back, once.
+      return prepare("email_send", {
+        idempotencyKey: randomUUID(),
+        payload: {
+          intent, to, cc, bcc, subject, body_text: body,
+          ...(intent === "reply" && source ? { reply_to_message_id: source.id } : {}),
+          ...(intent === "forward" && source ? { forward_message_id: source.id, include_original_attachments: includeOriginals } : {}),
+        },
+      }, check.summary, check.details);
+    },
+    async prepareEmailRetry(args: unknown) {
+      const id = text((args as { outboxId?: unknown })?.outboxId);
+      if (!id) return { status: "REJECTED", message: "Send the outboxId from get_email_send_log." };
+      const result = await api(outboxItemApi.GET as Handler, "GET", `/api/email/outbox/${encodeURIComponent(id)}`, undefined, id);
+      if (!result.ok || !result.data.item) return failed(result, "Could not find that email. Read the Send log again.");
+      const item = result.data.item as EmailSendHistoryItem;
+      const check = retryReadBack(item);
+      if (!check.ok) return check.result;
+      return prepare("email_retry", { id: item.id, confirmUnknown: item.status === "unknown", retryGeneration: item.retryGeneration ?? 0 }, check.summary);
+    },
+
     // ---------------------------------------------------------------- confirm / cancel
     async confirm(args: unknown) {
       const confirmed = (args as { confirmed?: unknown } | null)?.confirmed;
@@ -754,6 +942,31 @@ export function ownerActionTools(owner: ActionOwner) {
         const requested = typeof sent.data.requestedCount === "number" ? sent.data.requestedCount : sentCount;
         return { status: "DONE", kind, sentCount, requestedCount: requested,
           message: `Sent to ${sentCount} of ${requested} customers. Tell the owner.` };
+      }
+      if (kind === "email_send" || kind === "email_trash" || kind === "email_retry") {
+        if (!ownerEmailEnabled()) return { status: "UNAVAILABLE", message: "Voice email is disabled. Nothing was changed." };
+        const voice = { [EMAIL_VOICE_HEADER]: "1" };
+        if (kind === "email_send") {
+          // The same route as the composer's Send button, with the stored key so it can never send twice.
+          const form = new FormData();
+          form.set("payload", JSON.stringify(payload.payload));
+          const sent = await api(mailboxSendApi.POST as Handler, "POST", "/api/email/mailbox/send", form, undefined,
+            { ...voice, "Idempotency-Key": String(payload.idempotencyKey) });
+          if (!sent.ok) return failed(sent, "Nothing was sent. Prepare it again or use the Emails page.");
+          return { status: "DONE", kind, message: "Sending now. It will show in Sent shortly, and the Send log tracks it. Tell the owner." };
+        }
+        if (kind === "email_trash") {
+          const threadId = String(payload.threadId ?? "");
+          const trashed = await api(mailboxThreadActionsApi.POST as Handler, "POST",
+            `/api/email/mailbox/threads/${encodeURIComponent(threadId)}/actions`, { action: "trash" }, undefined, voice, { threadId });
+          if (!trashed.ok) return failed(trashed, "It was not deleted. The owner can use the Delete button.");
+          return { status: "DONE", kind, message: "Moved to Trash. It can be restored from Trash for a while. Tell the owner." };
+        }
+        const id = String(payload.id ?? "");
+        const retried = await api(outboxRetryApi.POST as Handler, "POST", `/api/email/outbox/${encodeURIComponent(id)}/retry`,
+          { confirm_unknown: payload.confirmUnknown === true, retry_generation: payload.retryGeneration }, id);
+        if (!retried.ok) return failed(retried, "It could not be resent. The owner can press Retry in the Send log.");
+        return { status: "DONE", kind, message: "Sending it again. The Send log shows how it goes. Tell the owner." };
       }
       const id = typeof payload.id === "string" ? payload.id : "";
       const result =
