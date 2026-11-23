@@ -19,6 +19,7 @@ import { isOwnerTeamTool } from "@/lib/ai/owner-call/owner-team";
 import { newTeamGate, runOwnerTeamTool } from "@/lib/ai/owner-call/owner-team-runner";
 import { isOwnerKnowledgeTool, runOwnerKnowledgeTool } from "@/lib/ai/owner-call/owner-knowledge";
 import { CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, OWNER_PREPARE_TOOL_NAMES } from "@/lib/ai/owner-call/owner-actions";
+import { CONTROL_PAGE_TOOL, runControlPageTool } from "@/lib/ai/owner-call/owner-page";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import Image from "next/image";
 import Link from "next/link";
@@ -396,7 +397,15 @@ export function OwnerVoiceSession() {
               latestOwnerReply: replyGate.latestReply,
             })
             : null;
-          if (call.name === OPEN_ADD_SERVICE_TOOL_NAME) {
+          if (call.name === CONTROL_PAGE_TOOL) {
+            // Browser-only, read only: open a page, scroll it, or press its Refresh button. See lib/ai/owner-call/owner-page.ts.
+            try {
+              output = JSON.stringify(await runControlPageTool(call.arguments, {
+                goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
+                currentPath: () => pathnameRef.current,
+              }));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (call.name === OPEN_ADD_SERVICE_TOOL_NAME) {
             // Browser-only: go to the Services page and open its Add service popup.
             if (pathnameRef.current !== SERVICES_PAGE) router.push(SERVICES_PAGE);
             requestOpenAddService();
@@ -430,7 +439,7 @@ export function OwnerVoiceSession() {
                   Object.assign(serviceConfirm, { prepared: true, turns: 0, latestReply: null });
                   serviceConfirm.replyItems.clear();
                 }
-                if (result.status === "SAVED") {
+                if (result.status === "SAVED" || result.status === "CANCELLED") {
                   serviceConfirm.prepared = false;
                   window.dispatchEvent(new Event(SERVICES_CHANGED_EVENT));
                 }

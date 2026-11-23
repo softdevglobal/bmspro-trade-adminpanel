@@ -539,12 +539,12 @@ export function TeamStaffForm() {
   const [voiceScroll, setVoiceScroll] = useState<{ to: string; at: number } | null>(null);
   const voice = useRef({
     staffMembers, atStaffLimit, staffLimitMessage, form, currentStep, setupMode, editTarget, serviceChoices,
-    statusTarget, deleteTarget, openSetup, openEditStaff, saveStaff, deleteStaff, updateStaffStatus,
+    statusTarget, deleteTarget, openSetup, openEditStaff, saveStaff, deleteStaff, updateStaffStatus, closeSetup,
   });
   useEffect(() => {
     voice.current = {
       staffMembers, atStaffLimit, staffLimitMessage, form, currentStep, setupMode, editTarget, serviceChoices,
-      statusTarget, deleteTarget, openSetup, openEditStaff, saveStaff, deleteStaff, updateStaffStatus,
+      statusTarget, deleteTarget, openSetup, openEditStaff, saveStaff, deleteStaff, updateStaffStatus, closeSetup,
     };
   });
 
@@ -685,6 +685,10 @@ export function TeamStaffForm() {
       async step(args: StaffFormArgs): Promise<VoiceResult> {
         const body = setupBodyRef.current;
         sync();
+        if (args.action === "cancel") {
+          voice.current.closeSetup();
+          return { status: "CANCELLED", message: "The popup is closed. Nothing was saved." };
+        }
         if (args.action === "scroll_down" || args.action === "scroll_up") {
           if (!body) return { status: "NOT_OPEN", message: "The popup is not showing." };
           const down = args.action === "scroll_down";

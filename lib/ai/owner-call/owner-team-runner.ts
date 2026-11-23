@@ -92,7 +92,7 @@ export async function runOwnerTeamTool(name: OwnerTeamToolName, rawArguments: st
     if (result.status === "REVIEW") ask(gate, "staff_save");
     // A change after the read-back means the earlier yes no longer covers what is on screen.
     if (["fill", "set_days", "services"].includes(action) && result.status === "OK" && gate.kind === "staff_save") clear(gate);
-    if (result.status === "SAVED") clear(gate);
+    if (result.status === "SAVED" || result.status === "CANCELLED") clear(gate);
     return result;
   }
 

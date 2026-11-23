@@ -263,7 +263,7 @@ test("voice draft tools are offered only with their own flag, within the bridge 
     setEnv(t, { AI_OWNER_VOICE_KNOWLEDGE_WRITE_ENABLED: "true" });
     const session = await startSession(t);
     const names = session.tools.map(tool => tool.name);
-    assert.deepEqual(names, [...BRIEFING_TOOLS, "search_business_knowledge", ...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS]);
+    assert.deepEqual(names, [...BRIEFING_TOOLS, "search_business_knowledge", ...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_PAGE_TOOLS]);
     const save = session.tools.find(tool => tool.name === "save_knowledge_draft")!;
     assert.deepEqual(save.parameters.required, ["confirmed"]);
     // Publishing and deleting by voice go through a highlighted entry and a separate confirm step.
@@ -279,7 +279,7 @@ test("voice draft tools are offered only with their own flag, within the bridge 
     const names = session.tools.map(tool => tool.name);
     assert.deepEqual(names, [
       ...BRIEFING_TOOLS, "search_business_knowledge", "prepare_service", "create_service", ...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS,
-      ...BROWSER_SERVICE_TOOLS,
+      ...BROWSER_SERVICE_TOOLS, ...BROWSER_PAGE_TOOLS,
     ]);
     const create = session.tools.find(tool => tool.name === "create_service")!;
     assert.deepEqual(create.parameters.required, ["confirmed"]);
@@ -306,6 +306,8 @@ const MCP_ACTION_TOOLS = [
   "confirm_owner_change", "cancel_owner_change",
 ];
 const BROWSER_ITEM_TOOLS = ["list_items", "open_add_item_form", "open_edit_item_form", "item_form_step", "delete_item"];
+/** Read-only page control (open, scroll, refresh), offered in browser mode with any browser tool area. */
+const BROWSER_PAGE_TOOLS = ["control_page"];
 const ALL_FLAGS = {
   AI_OWNER_VOICE_BRIDGE_URL: "http://127.0.0.1:18787",
   AI_VOICE_BRIDGE_SECRET: secret,
@@ -321,8 +323,13 @@ test("browser mode (default): page tools for services, team and drafts; no MCP a
   setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: undefined });
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
-  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS]) {
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(names.includes(name), name);
+  }
+  // Popups can be closed by voice without saving.
+  for (const tool of ["item_form_step", "staff_form_step", "service_form_step"]) {
+    const action = session.tools.find(entry => entry.name === tool)!.parameters.properties as { action: { enum: string[] } };
+    assert.ok(action.action.enum.includes("cancel"), `${tool} has cancel`);
   }
   for (const name of MCP_ACTION_TOOLS) assert.ok(!names.includes(name), `${name} is MCP mode only`);
   assert.equal(new Set(names).size, names.length, "no repeated names");
@@ -334,7 +341,7 @@ test("mcp mode: server tools for services, team and drafts; no page tools", asyn
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
   for (const name of ["prepare_service", "create_service", ...MCP_ACTION_TOOLS]) assert.ok(names.includes(name), name);
-  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS]) {
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(!names.includes(name), `${name} is browser mode only`);
   }
   assert.equal(new Set(names).size, names.length, "no repeated names");

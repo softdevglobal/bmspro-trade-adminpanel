@@ -32,7 +32,7 @@ export const OWNER_ITEM_TOOL_NAMES = [LIST_ITEMS_TOOL, OPEN_ADD_ITEM_TOOL, OPEN_
 export type OwnerItemToolName = (typeof OWNER_ITEM_TOOL_NAMES)[number];
 export const isOwnerItemTool = (name: string): name is OwnerItemToolName => (OWNER_ITEM_TOOL_NAMES as readonly string[]).includes(name);
 
-export const ITEM_FORM_ACTIONS = ["fill", "show", "scroll_down", "scroll_up", "continue", "back", "save"] as const;
+export const ITEM_FORM_ACTIONS = ["fill", "show", "scroll_down", "scroll_up", "continue", "back", "save", "cancel"] as const;
 export const ITEM_FORM_SECTIONS = ["photo", "code", "name", "description", "price", "document"] as const;
 export type ItemFormArgs = {
   action: (typeof ITEM_FORM_ACTIONS)[number];
@@ -129,8 +129,8 @@ export function ownerItemSessionTools() {
         "description (an empty string clears code or description). show scrolls to a section (photo, code, name, description, price, document); " +
         "scroll_down and scroll_up scroll. continue goes to the review step (it reports anything wrong, e.g. a code another item uses); back returns. " +
         "save only on the review step, only after you read back name, code, description and the price as dollars and cents and the owner clearly " +
-        "said yes. If the review says an item with this name exists, say it will update that item, not add a new one. A photo or PDF can only be " +
-        "uploaded by the owner.",
+        "said yes. If the review says an item with this name exists, say it will update that item, not add a new one. cancel closes the popup " +
+        "without saving (when the owner says cancel, close or never mind). A photo or PDF can only be uploaded by the owner.",
       parameters: {
         type: "object",
         properties: {
@@ -207,7 +207,7 @@ export async function runOwnerItemTool(name: OwnerItemToolName, rawArguments: st
     }), 3_000);
     if (result.status === "REVIEW") ask(gate, "item_save");
     if (action === "fill" && result.status === "OK" && gate.kind === "item_save") clear(gate); // changed after the read-back
-    if (result.status === "SAVED") clear(gate);
+    if (result.status === "SAVED" || result.status === "CANCELLED") clear(gate);
     return result;
   }
 
