@@ -1,5 +1,6 @@
 "use client";
 
+import { smsLogVoice } from "@/lib/ai/owner-call/owner-sms";
 import { formatTenantDate } from "@/lib/onboarding/tenant-display";
 import type { SmsLogEntry, SmsLogStatus } from "@/lib/sms/sms-log-types";
 import { useEffect, useMemo, useState } from "react";
@@ -80,6 +81,17 @@ export function SmsDeliveryLog({
   useEffect(() => {
     setPage((current) => Math.min(current, pagination.totalPages));
   }, [pagination.totalPages]);
+
+  // Sophie (owner's own log only): the search box and page follow list_sms_log. See lib/ai/owner-call/owner-sms.ts.
+  useEffect(() => {
+    if (variant !== "tenant") return;
+    return smsLogVoice.register({
+      show({ search, page: wanted }) {
+        setSearchQuery(search);
+        setPage(Math.max(1, wanted));
+      },
+    });
+  }, [variant]);
 
   const searchField = (
     <label className="block w-full sm:max-w-xs">

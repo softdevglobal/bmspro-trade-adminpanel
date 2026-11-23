@@ -1,50 +1,44 @@
 "use client";
 
+import {
+  matchSmsCustomers, previewOutboundMessage, SMS_LIMITS, SMS_TEMPLATES, SMS_VOICE_HEADER, smsMessageVoice, smsSendReadBack,
+  type SmsCustomer, type SmsMessageArgs,
+} from "@/lib/ai/owner-call/owner-sms";
+import type { VoiceResult } from "@/lib/ai/owner-call/owner-team";
+import { scrollTarget } from "@/lib/ai/owner-call/owner-page";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import { auth } from "@/lib/firebase/client";
 import { formatAuPhoneDisplay } from "@/lib/phone/au-phone";
 import type { BusinessSmsBalance } from "@/lib/sms-packages/balance";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 font-body text-[14px] text-on-surface placeholder:text-outline focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
-const MAX_MESSAGE_LENGTH = 480;
+const MAX_MESSAGE_LENGTH = SMS_LIMITS.messageMax;
 
-const QUICK_TEMPLATES: Array<{ label: string; text: string }> = [
-  {
-    label: "Season's greetings",
-    text: "Season's greetings from our team! Thank you for your support this year. We wish you a safe and happy holiday season.",
-  },
-  {
-    label: "Merry Christmas",
-    text: "Merry Christmas from all of us! We appreciate your business and look forward to working with you again soon.",
-  },
-  {
-    label: "Happy New Year",
-    text: "Happy New Year! Thank you for trusting us this year. Wishing you health and happiness in the year ahead.",
-  },
-];
+/** Quick templates; Sophie picks the same ones by id (lib/ai/owner-call/owner-sms.ts). */
+const QUICK_TEMPLATES = Object.values(SMS_TEMPLATES);
 
-/** Builds the SMS body customers receive, matching the API prefix. */
-function previewOutboundMessage(
-  message: string,
-  businessName: string | null | undefined,
-): string {
-  const trimmed = message.trim();
-  const name = businessName?.trim() || null;
-  if (!trimmed || !name) return trimmed;
-  if (trimmed.toLowerCase().startsWith(`${name.toLowerCase()}:`)) {
-    return trimmed;
-  }
-  return `${name}: ${trimmed}`;
+type CustomerContact = SmsCustomer;
+
+/** Filters customers like the search box: name or phone (as stored or as shown). */
+function filterCustomers(customers: CustomerContact[], query: string): CustomerContact[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return customers;
+  return customers.filter((customer) => {
+    const displayPhone = formatAuPhoneDisplay(customer.phone).toLowerCase();
+    return (
+      customer.fullName.toLowerCase().includes(q) ||
+      customer.phone.includes(q) ||
+      displayPhone.includes(q)
+    );
+  });
 }
 
-type CustomerContact = {
-  id: string;
-  fullName: string;
-  phone: string;
-};
+/** What a voice read-back covered: a send must match it exactly. */
+const sendSignature = (message: string, mode: "all" | "select", ids: Set<string>) =>
+  JSON.stringify([message.trim(), mode, mode === "all" ? [] : [...ids].sort()]);
 
 type FetchResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -136,18 +130,7 @@ export function OwnerCustomMessagesBoard() {
     void load();
   }, [load]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return customers;
-    return customers.filter((customer) => {
-      const displayPhone = formatAuPhoneDisplay(customer.phone).toLowerCase();
-      return (
-        customer.fullName.toLowerCase().includes(q) ||
-        customer.phone.includes(q) ||
-        displayPhone.includes(q)
-      );
-    });
-  }, [customers, query]);
+  const filtered = useMemo(() => filterCustomers(customers, query), [customers, query]);
 
   const recipientCount = useMemo(() => {
     if (mode === "all") return customers.length;
@@ -190,6 +173,42 @@ export function OwnerCustomMessagesBoard() {
     setSelectedIds(new Set());
   }
 
+  /** Sends what is on screen. Shared by the Send SMS button and Sophie (`voice` marks it for the voice send limit). */
+  async function sendMessage(
+    draft: { message: string; mode: "all" | "select"; selectedIds: Set<string> },
+    voice = false,
+  ): Promise<{ ok: true; sent: number; requested: number } | { ok: false; error: string }> {
+    setFormError(null);
+    setSuccessMessage(null);
+    setSending(true);
+    const result = await authFetch<{ sentCount: number; requestedCount: number }>(
+      "/api/business/custom-messages",
+      {
+        method: "POST",
+        headers: voice ? { [SMS_VOICE_HEADER]: "1" } : {},
+        body: JSON.stringify({
+          message: draft.message.trim(),
+          recipients: draft.mode === "all" ? "all" : Array.from(draft.selectedIds),
+        }),
+      },
+    );
+    setSending(false);
+
+    if (!result.ok) {
+      setFormError(result.error);
+      return { ok: false, error: result.error };
+    }
+
+    const sent = result.data.sentCount ?? 0;
+    setSuccessMessage(
+      `Message sent to ${sent} customer${sent === 1 ? "" : "s"}.`,
+    );
+    setMessage("");
+    setSelectedIds(new Set());
+    void load();
+    return { ok: true, sent, requested: result.data.requestedCount ?? sent };
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setFormError(null);
@@ -214,33 +233,133 @@ export function OwnerCustomMessagesBoard() {
       return;
     }
 
-    setSending(true);
-    const result = await authFetch<{ sentCount: number; requestedCount: number }>(
-      "/api/business/custom-messages",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          message: message.trim(),
-          recipients:
-            mode === "all" ? "all" : Array.from(selectedIds),
-        }),
-      },
-    );
-    setSending(false);
-
-    if (!result.ok) {
-      setFormError(result.error);
-      return;
-    }
-
-    const sent = result.data.sentCount ?? 0;
-    setSuccessMessage(
-      `Message sent to ${sent} customer${sent === 1 ? "" : "s"}.`,
-    );
-    setMessage("");
-    setSelectedIds(new Set());
-    void load();
+    await sendMessage({ message, mode, selectedIds });
   }
+
+  // ---- Sophie (voice and chat). See lib/ai/owner-call/owner-sms.ts. ----
+  // A mirror of the page state that voice steps read and update at once, so two steps in a row
+  // never see an old render. Every change also goes through the normal setters.
+  const live = useRef({ message, mode, selectedIds, query, customers, balance, businessName, sending });
+  /** What the last voice read-back covered; null when nothing was read back. */
+  const reviewed = useRef<string | null>(null);
+  const voice = useRef({ sendMessage });
+  useEffect(() => {
+    live.current = { message, mode, selectedIds, query, customers, balance, businessName, sending };
+    voice.current = { sendMessage };
+  });
+
+  // Registered once the customers have loaded, so Sophie never works on an empty list.
+  useEffect(() => loading ? undefined : smsMessageVoice.register({
+    customers(search) {
+      setQuery(search);
+      live.current.query = search;
+      return filterCustomers(live.current.customers, search);
+    },
+    async step(args: SmsMessageArgs): Promise<VoiceResult> {
+      const state = live.current;
+      const prefix = previewOutboundMessage("x", state.businessName).length - 1;
+      const writeText = (value: string) => { state.message = value; setMessage(value); };
+      const setPick = (next: Set<string>) => { state.selectedIds = next; setSelectedIds(next); };
+      const pickedCount = () => state.mode === "all"
+        ? state.customers.length
+        : state.customers.filter((customer) => state.selectedIds.has(customer.id)).length;
+      const ok = (message: string, extra: Record<string, unknown> = {}) =>
+        ({ status: "OK", recipients: pickedCount(), ...extra, message });
+
+      switch (args.action) {
+        case "write": {
+          const value = (args.message ?? "").trim();
+          if (!value) return { status: "REJECTED", message: "Send the message text." };
+          const outbound = previewOutboundMessage(value, state.businessName);
+          if (outbound.length > MAX_MESSAGE_LENGTH) {
+            return { status: "TOO_LONG", length: outbound.length, max: MAX_MESSAGE_LENGTH,
+              message: `That is ${outbound.length} characters with the business name; the limit is ${MAX_MESSAGE_LENGTH}. Offer a shorter version. Nothing was typed.` };
+          }
+          writeText(value);
+          return ok("Typed. Ask who should get it if not said yet, then review.", { outbound });
+        }
+        case "template": {
+          const template = args.template ? SMS_TEMPLATES[args.template] : null;
+          if (!template) return { status: "REJECTED", message: "Unknown template." };
+          writeText(template.text.slice(0, Math.max(0, MAX_MESSAGE_LENGTH - prefix)));
+          return ok(`The ${template.label} template is in the message box.`, { outbound: previewOutboundMessage(state.message, state.businessName) });
+        }
+        case "recipients_all":
+          state.mode = "all";
+          setMode("all");
+          return ok(`Set to all ${state.customers.length} customers.`);
+        case "recipients_select": {
+          const add = matchSmsCustomers(state.customers, args.add ?? []);
+          if (!add.ok) return add.result;
+          const remove = matchSmsCustomers(state.customers, args.remove ?? []);
+          if (!remove.ok) return remove.result;
+          const next = new Set(state.mode === "select" ? state.selectedIds : []);
+          for (const customer of add.matched) next.add(customer.id);
+          for (const customer of remove.matched) next.delete(customer.id);
+          state.mode = "select";
+          setMode("select");
+          setPick(next);
+          const picked = state.customers.filter((customer) => next.has(customer.id)).map((customer) => customer.fullName);
+          return ok(`Selected: ${picked.join(", ") || "nobody yet"}.`, { selected: picked.slice(0, 20) });
+        }
+        case "search":
+          state.query = args.query ?? "";
+          setQuery(state.query);
+          if (state.mode !== "select") { state.mode = "select"; setMode("select"); }
+          return { status: "SEARCHED", shown: filterCustomers(state.customers, state.query).length,
+            message: "The customer search shows the matches. Say who to tick, or select_all_shown to tick them all." };
+        case "select_all_shown": {
+          const next = new Set(state.mode === "select" ? state.selectedIds : []);
+          for (const customer of filterCustomers(state.customers, state.query)) next.add(customer.id);
+          state.mode = "select";
+          setMode("select");
+          setPick(next);
+          return ok(`Ticked everyone shown by the search${state.query ? ` "${state.query}"` : ""}.`);
+        }
+        case "clear_selection":
+          setPick(new Set());
+          return ok("Nobody is ticked now.");
+        case "scroll_down":
+        case "scroll_up": {
+          const target = scrollTarget();
+          target.scrollBy({ top: (args.action === "scroll_down" ? 1 : -1) * target.clientHeight * 0.7, behavior: "smooth" });
+          return { status: "SCROLLED", message: "Scrolled." };
+        }
+        case "review": {
+          const recipients = state.mode === "all"
+            ? state.customers
+            : state.customers.filter((customer) => state.selectedIds.has(customer.id));
+          const check = smsSendReadBack({
+            message: state.message, businessName: state.businessName, recipients, all: state.mode === "all", balance: state.balance,
+          });
+          if (!check.ok) { reviewed.current = null; return check.result; }
+          reviewed.current = sendSignature(state.message, state.mode, state.selectedIds);
+          document.querySelector<HTMLElement>("[data-voice-section='send']")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          return { status: "REVIEW", ...check.details, summary: check.summary,
+            message: `Read this back: ${check.summary} Then ask: Should I send it? It cannot be undone.` };
+        }
+        case "send": {
+          if (state.sending) return { status: "BUSY", message: "It is already sending." };
+          if (!reviewed.current || reviewed.current !== sendSignature(state.message, state.mode, state.selectedIds)) {
+            reviewed.current = null;
+            return { status: "NOT_REVIEWED", message: "The message or recipients changed since the read-back. Review again and ask." };
+          }
+          reviewed.current = null;
+          const result = await voice.current.sendMessage({ message: state.message, mode: state.mode, selectedIds: state.selectedIds }, true);
+          if (!result.ok) return { status: "FAILED", message: `${result.error} Nothing more was sent.` };
+          state.message = "";
+          state.selectedIds = new Set();
+          return { status: "SENT", sentCount: result.sent, requestedCount: result.requested,
+            message: `Sent to ${result.sent} of ${result.requested} customers. Tell the owner.` };
+        }
+        case "cancel":
+          reviewed.current = null;
+          return { status: "CANCELLED", message: "Nothing was sent. The message is still on the page." };
+        default:
+          return { status: "REJECTED", message: "Unknown action." };
+      }
+    },
+  }), [loading]);
 
   if (loading) {
     return (
@@ -437,7 +556,7 @@ export function OwnerCustomMessagesBoard() {
             </p>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div data-voice-section="send" className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-body text-[13px] text-on-surface-variant">
               {recipientCount} recipient{recipientCount === 1 ? "" : "s"}
               {recipientCount > 0

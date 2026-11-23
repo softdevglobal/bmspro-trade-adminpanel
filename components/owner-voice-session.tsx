@@ -15,6 +15,7 @@ import {
 } from "@/lib/ai/owner-call/owner-service";
 import { isOwnerCustomerTool, runOwnerCustomerTool } from "@/lib/ai/owner-call/owner-customer-runner";
 import { isOwnerItemTool, runOwnerItemTool } from "@/lib/ai/owner-call/owner-item";
+import { isOwnerSmsTool, runOwnerSmsTool } from "@/lib/ai/owner-call/owner-sms";
 import { isOwnerTeamTool } from "@/lib/ai/owner-call/owner-team";
 import { newTeamGate, runOwnerTeamTool } from "@/lib/ai/owner-call/owner-team-runner";
 import { isOwnerKnowledgeTool, runOwnerKnowledgeTool } from "@/lib/ai/owner-call/owner-knowledge";
@@ -134,8 +135,10 @@ export function OwnerVoiceSession() {
     const customerConfirm = newTeamGate();
     /** Same guardrail for the browser item tools (save an item; delete one). */
     const itemConfirm = newTeamGate();
+    /** Same guardrail for the browser SMS tools (send a custom message). */
+    const smsConfirm = newTeamGate();
     /** Every confirmation that counts the owner's replies. */
-    const replyGates = [serviceConfirm, deleteConfirm, teamConfirm, actionConfirm, knowledgeConfirm, customerConfirm, itemConfirm];
+    const replyGates = [serviceConfirm, deleteConfirm, teamConfirm, actionConfirm, knowledgeConfirm, customerConfirm, itemConfirm, smsConfirm];
     const session: SophieSession = {
       ask: () => false,
       close() {
@@ -463,6 +466,16 @@ export function OwnerVoiceSession() {
                 getToken: () => user.getIdToken(),
                 goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
                 gate: itemConfirm,
+                signal: controller.signal,
+              }));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (isOwnerSmsTool(call.name)) {
+            // Browser-only: the SMS pages (balance, log, customers, custom messages). See lib/ai/owner-call/owner-sms.ts.
+            try {
+              output = JSON.stringify(await runOwnerSmsTool(call.name, call.arguments, {
+                getToken: () => user.getIdToken(),
+                goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
+                gate: smsConfirm,
                 signal: controller.signal,
               }));
             } catch { /* reported as UNAVAILABLE */ }

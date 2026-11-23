@@ -42,6 +42,17 @@ import * as itemsApi from "@/app/api/items/route";
 import * as itemApi from "@/app/api/items/[id]/route";
 import { formatAud, ITEM_LIMITS, itemNameKey, summarizeItems } from "@/lib/ai/owner-call/owner-item";
 import { duplicateItemCodeError } from "@/lib/validation/data-quality";
+import * as smsApi from "@/app/api/business/sms/route";
+import * as smsLogApi from "@/app/api/business/sms-log/route";
+import * as customMessagesApi from "@/app/api/business/custom-messages/route";
+import {
+  matchSmsCustomers, ownerSmsEnabled, SMS_TEMPLATES, SMS_VOICE_HEADER, smsSendReadBack, summarizeSmsBalance, summarizeSmsCustomers,
+  summarizeSmsLog, type SmsCustomer, type SmsTemplateId,
+} from "@/lib/ai/owner-call/owner-sms";
+import type { BusinessSmsBalance } from "@/lib/sms-packages/balance";
+import type { SmsLogEntry } from "@/lib/sms/sms-log-types";
+import { getBusinessProfile } from "@/lib/onboarding/server";
+import { resolvePlatformTimeZone } from "@/lib/platform/timezone";
 
 type CatalogItem = { id: string; name: string; code: string | null; description: string | null; priceAud: number; documentUrl?: string | null };
 
@@ -83,10 +94,12 @@ export function ownerActionTools(owner: ActionOwner) {
   const pendingRef = adminDb.collection(PENDING).doc(`${owner.businessId}_${owner.uid}`);
 
   /** Calls a Trade route handler as the owner, exactly like the page does. */
-  async function api(handler: Handler, method: string, path: string, body?: unknown, id?: string): Promise<ApiResult> {
+  async function api(
+    handler: Handler, method: string, path: string, body?: unknown, id?: string, headers: Record<string, string> = {},
+  ): Promise<ApiResult> {
     const request = new Request(new URL(path, "http://trade.internal"), {
       method,
-      headers: { Authorization: owner.authorization, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { ...headers, Authorization: owner.authorization, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const response = await handler(request, { params: Promise.resolve({ id: id ?? "" }) });
@@ -126,6 +139,12 @@ export function ownerActionTools(owner: ActionOwner) {
       return { ok: false, result: { status: "INVALID", message: `Use a description of up to ${ITEM_LIMITS.descriptionMax} characters.` } };
     }
     return { ok: true, priceAud, code, description };
+  }
+  /** Customers who can get a text and the balance: the same list the Custom messages page shows. */
+  async function smsContacts(): Promise<{ customers: SmsCustomer[]; balance: BusinessSmsBalance | null } | null> {
+    const result = await api(customMessagesApi.GET as Handler, "GET", "/api/business/custom-messages");
+    if (!result.ok || !Array.isArray(result.data.customers)) return null;
+    return { customers: result.data.customers as SmsCustomer[], balance: (result.data.balance ?? null) as BusinessSmsBalance | null };
   }
   async function knowledgeEntries(): Promise<KnowledgeEntry[] | null> {
     const result = await api(knowledgeApi.GET as Handler, "GET", "/api/ai/knowledge");
@@ -646,6 +665,52 @@ export function ownerActionTools(owner: ActionOwner) {
         `Delete the item "${match.item.name}" (${formatAud(match.item.priceAud)}). This cannot be undone.`);
     },
 
+    // ---------------------------------------------------------------- SMS section
+    async getSmsBalance() {
+      const result = await api(smsApi.GET as Handler, "GET", "/api/business/sms");
+      if (!result.ok) return { status: "UNAVAILABLE", message: "Could not load the SMS balance." };
+      return summarizeSmsBalance((result.data.balance ?? null) as BusinessSmsBalance | null,
+        Array.isArray(result.data.packages) ? result.data.packages as Parameters<typeof summarizeSmsBalance>[1] : []);
+    },
+    async getSmsLog(args: unknown) {
+      const input = (args ?? {}) as { search?: unknown; status?: unknown; since?: unknown; page?: unknown };
+      const status = text(input.status);
+      if (status && !["sent", "failed", "skipped"].includes(status)) return { status: "REJECTED", message: "status must be sent, failed or skipped." };
+      const result = await api(smsLogApi.GET as Handler, "GET", "/api/business/sms-log");
+      if (!result.ok || !Array.isArray(result.data.logs)) return { status: "UNAVAILABLE", message: "Could not load the SMS log." };
+      return summarizeSmsLog(result.data.logs as SmsLogEntry[], {
+        search: text(input.search), status, since: text(input.since), page: typeof input.page === "number" ? input.page : 1,
+      }, resolvePlatformTimeZone(owner.timezone));
+    },
+    async getSmsCustomers(args: unknown) {
+      const contacts = await smsContacts();
+      if (!contacts) return { status: "UNAVAILABLE", message: "Could not load the customers." };
+      return summarizeSmsCustomers(contacts.customers, text((args as { search?: unknown })?.search));
+    },
+    async prepareSmsSend(args: unknown) {
+      const input = (args ?? {}) as { message?: unknown; template?: unknown; recipients?: unknown; customerNames?: unknown };
+      const template = text(input.template);
+      if (template && !(template in SMS_TEMPLATES)) return { status: "REJECTED", message: "Unknown template." };
+      const message = text(input.message) || (template ? SMS_TEMPLATES[template as SmsTemplateId].text : "");
+      const all = input.recipients === "all";
+      if (!all && input.recipients !== "selected") return { status: "REJECTED", message: "recipients must be all or selected." };
+      const [contacts, profile] = await Promise.all([smsContacts(), getBusinessProfile(owner.businessId)]);
+      if (!contacts) return { status: "UNAVAILABLE", message: "Could not load the customers." };
+      let recipients = contacts.customers;
+      if (!all) {
+        const wanted = list(input.customerNames) ?? [];
+        if (!wanted.length) return { status: "REJECTED", message: "Ask which customers, then send customerNames." };
+        const match = matchSmsCustomers(contacts.customers, wanted);
+        if (!match.ok) return match.result;
+        recipients = match.matched;
+      }
+      const check = smsSendReadBack({ message, businessName: profile?.businessName ?? null, recipients, all, balance: contacts.balance });
+      if (!check.ok) return check.result;
+      // The customer keys are stored, never "all": confirm sends to exactly the people read back.
+      return prepare("sms_send", { message, ids: recipients.map((customer) => customer.id), count: recipients.length },
+        check.summary, check.details);
+    },
+
     // ---------------------------------------------------------------- confirm / cancel
     async confirm(args: unknown) {
       const confirmed = (args as { confirmed?: unknown } | null)?.confirmed;
@@ -678,6 +743,17 @@ export function ownerActionTools(owner: ActionOwner) {
       if (kind === "visit_change") {
         if (!ownerVisitsEnabled()) return {status: "UNAVAILABLE", message: "Voice visit changes are disabled. Nothing was applied."};
         return confirmOwnerVisit(owner, payload as unknown as PreparedVisit);
+      }
+      if (kind === "sms_send") {
+        if (!ownerSmsEnabled()) return { status: "UNAVAILABLE", message: "Voice SMS is disabled. Nothing was sent." };
+        // The same route as the Send SMS button; the voice header applies the hourly voice send limit.
+        const sent = await api(customMessagesApi.POST as Handler, "POST", "/api/business/custom-messages",
+          { message: payload.message, recipients: payload.ids }, undefined, { [SMS_VOICE_HEADER]: "1" });
+        if (!sent.ok) return failed(sent, "Nothing was sent. Prepare it again or use the Custom messages page.");
+        const sentCount = typeof sent.data.sentCount === "number" ? sent.data.sentCount : 0;
+        const requested = typeof sent.data.requestedCount === "number" ? sent.data.requestedCount : sentCount;
+        return { status: "DONE", kind, sentCount, requestedCount: requested,
+          message: `Sent to ${sentCount} of ${requested} customers. Tell the owner.` };
       }
       const id = typeof payload.id === "string" ? payload.id : "";
       const result =

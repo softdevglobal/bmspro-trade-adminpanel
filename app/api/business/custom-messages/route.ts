@@ -4,6 +4,8 @@ import { getBusinessProfile } from "@/lib/onboarding/server";
 import { requireBusinessOwner } from "@/lib/onboarding/services/server";
 import { getBusinessSmsBalance } from "@/lib/sms-packages/server";
 import { sendBulkSms, toE164 } from "@/lib/sms/textbee";
+import { SMS_LIMITS, SMS_VOICE_HEADER } from "@/lib/ai/owner-call/owner-sms";
+import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -178,6 +180,22 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { ok: false, error: "No customers with a valid phone number selected." },
       { status: 400 },
+    );
+  }
+
+  // Sends asked for through Sophie (browser or MCP) have their own hourly limit: one send can reach every customer.
+  if (
+    request.headers.get(SMS_VOICE_HEADER) === "1" &&
+    !(await consumeRateLimits([
+      { key: `owner-voice:sms-send:${auth.uid}`, limit: SMS_LIMITS.voiceSendsPerHour, windowMs: 3_600_000 },
+    ]))
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Sophie can send at most ${SMS_LIMITS.voiceSendsPerHour} messages an hour. Use the Send SMS button on the Custom messages page.`,
+      },
+      { status: 429 },
     );
   }
 

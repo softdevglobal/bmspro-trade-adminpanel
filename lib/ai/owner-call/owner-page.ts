@@ -31,6 +31,9 @@ export const OWNER_PAGES = {
   ai_knowledge: "/dashboard/ai/knowledge",
   calls: "/dashboard/call-recordings",
   sms: "/dashboard/sms",
+  sms_credits: "/dashboard/sms",
+  sms_log: "/dashboard/sms/log",
+  custom_messages: "/dashboard/sms/custom-messages",
   subscription: "/dashboard/subscription",
   settings: "/dashboard/settings",
 } as const;
@@ -59,7 +62,8 @@ export function ownerPageSessionTools() {
 }
 
 /** The element that scrolls the page: the nearest scrollable ancestor of <main>, else the window. */
-function scrollTarget(): HTMLElement {
+/** The element that scrolls the current page: the nearest scrollable ancestor of <main>. Shared with owner-sms.ts. */
+export function scrollTarget(): HTMLElement {
   let node: HTMLElement | null = document.querySelector("main");
   while (node && node !== document.body) {
     const style = getComputedStyle(node);

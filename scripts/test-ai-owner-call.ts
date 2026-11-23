@@ -303,9 +303,11 @@ const MCP_ACTION_TOOLS = [
   "prepare_staff_create", "prepare_staff_update", "prepare_staff_status", "prepare_staff_delete", "prepare_leave_decision",
   "get_knowledge_entries", "prepare_knowledge_entry", "prepare_knowledge_update", "prepare_knowledge_publish", "prepare_knowledge_delete",
   "get_items", "prepare_item_create", "prepare_item_update", "prepare_item_delete",
+  "get_sms_balance", "get_sms_log", "get_sms_customers", "prepare_sms_send",
   "confirm_owner_change", "cancel_owner_change",
 ];
 const BROWSER_ITEM_TOOLS = ["list_items", "open_add_item_form", "open_edit_item_form", "item_form_step", "delete_item"];
+const BROWSER_SMS_TOOLS = ["show_sms_balance", "list_sms_log", "list_sms_customers", "open_custom_message", "sms_message_step"];
 /** Read-only page control (open, scroll, refresh), offered in browser mode with any browser tool area. */
 const BROWSER_PAGE_TOOLS = ["control_page"];
 const ALL_FLAGS = {
@@ -317,13 +319,14 @@ const ALL_FLAGS = {
   AI_OWNER_VOICE_SERVICE_ENABLED: "true",
   AI_OWNER_VOICE_TEAM_ENABLED: "true",
   AI_OWNER_VOICE_ITEMS_ENABLED: "true",
+  AI_OWNER_VOICE_SMS_ENABLED: "true",
 };
 
 test("browser mode (default): page tools for services, team and drafts; no MCP action tools", async (t) => {
   setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: undefined });
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
-  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_PAGE_TOOLS]) {
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(names.includes(name), name);
   }
   // Popups can be closed by voice without saving.
@@ -341,7 +344,7 @@ test("mcp mode: server tools for services, team and drafts; no page tools", asyn
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
   for (const name of ["prepare_service", "create_service", ...MCP_ACTION_TOOLS]) assert.ok(names.includes(name), name);
-  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_PAGE_TOOLS]) {
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(!names.includes(name), `${name} is browser mode only`);
   }
   assert.equal(new Set(names).size, names.length, "no repeated names");
@@ -374,6 +377,69 @@ test("item tools: only with the items flag; prices read back as dollars and cent
   assert.equal(summarizeItems(rows, "sa-001").items.length, 1, "search by code");
   assert.equal(summarizeItems(rows, "fit").items[0].name, "Smoke alarm install", "search by description");
   assert.equal(summarizeItems([], "").status, "NO_ITEMS");
+});
+
+test("sms tools: flag, read-back, customer matching, log summary", async () => {
+  const { ownerVoiceToolList } = await import("../lib/ai/owner-call/tools");
+  const sms = await import("../lib/ai/owner-call/owner-sms");
+  const served = (on: boolean) => ownerVoiceToolList({ knowledge: false, sms: on, actions: true }).map(tool => tool.name);
+  assert.ok(served(true).includes("prepare_sms_send"));
+  assert.ok(served(true).includes("confirm_owner_change"));
+  assert.ok(!served(false).includes("get_sms_balance"));
+  assert.equal(sms.ownerSmsEnabled({}), false);
+  assert.equal(sms.ownerSmsEnabled({ AI_OWNER_VOICE_SMS_ENABLED: "true" }), true);
+
+  // The business name goes in front once, like the route.
+  assert.equal(sms.previewOutboundMessage(" Hi ", "Nira"), "Nira: Hi");
+  assert.equal(sms.previewOutboundMessage("nira: Hi", "Nira"), "nira: Hi");
+
+  const customers = [
+    { id: "email:a", fullName: "John Smith", phone: "+61412345218" },
+    { id: "email:b", fullName: "John Smith", phone: "+61412345999" },
+    { id: "email:c", fullName: "Mary Jones", phone: "+61498765432" },
+  ];
+  const twoJohns = sms.matchSmsCustomers(customers, ["John Smith"]);
+  assert.equal(twoJohns.ok, false, "two customers with the same name are not guessed");
+  if (!twoJohns.ok) assert.equal(twoJohns.result.status, "AMBIGUOUS");
+  const picked = sms.matchSmsCustomers(customers, ["John Smith 218", "mary"]);
+  assert.ok(picked.ok);
+  if (picked.ok) assert.deepEqual(picked.matched.map(customer => customer.id), ["email:a", "email:c"]);
+  const missing = sms.matchSmsCustomers(customers, ["Peter"]);
+  assert.ok(!missing.ok && missing.result.status === "NO_MATCH");
+
+  const balance = { limit: 1000, used: 998, remaining: 2, isUnlimited: false, isLow: true, smsPackageId: null, smsPackageName: "test" };
+  const tooMany = sms.smsSendReadBack({ message: "Hi", businessName: "Nira", recipients: customers, all: true, balance });
+  assert.ok(!tooMany.ok && tooMany.result.status === "NOT_ENOUGH_CREDITS");
+  const readBack = sms.smsSendReadBack({ message: "Closed Friday", businessName: "Nira", recipients: customers.slice(0, 2), all: true, balance });
+  assert.ok(readBack.ok);
+  if (readBack.ok) {
+    assert.match(readBack.summary, /all 2 customers/, "everyone is said as a number");
+    assert.match(readBack.summary, /"Nira: Closed Friday"/, "the exact outbound text");
+    assert.match(readBack.summary, /0 left after/);
+  }
+  const long = sms.smsSendReadBack({ message: "x".repeat(480), businessName: "Nira", recipients: customers, all: true, balance: null });
+  assert.ok(!long.ok && long.result.status === "TOO_LONG");
+  const nobody = sms.smsSendReadBack({ message: "Hi", businessName: null, recipients: [], all: false, balance: null });
+  assert.ok(!nobody.ok && nobody.result.status === "NO_RECIPIENTS");
+
+  const logs = Array.from({ length: 12 }, (_, index) => ({
+    id: `l${index}`, businessId: "b", senderName: "Nira", receiverPhone: "+61412345678", receiverName: index === 0 ? "John" : null,
+    message: index % 2 ? "Your invoice is ready" : "Welcome", status: index === 3 ? "failed" as const : "sent" as const, statusDetail: null,
+    source: index % 2 ? "invoice_sent" : "customer_welcome", createdAt: Date.UTC(2026, 10, 1 + index),
+  }));
+  const first = sms.summarizeSmsLog(logs, {}, "Australia/Melbourne");
+  assert.equal(first.total, 12);
+  assert.equal(first.pages, 2);
+  assert.equal((first.entries as unknown[]).length, 10);
+  assert.deepEqual(first.byStatus, { sent: 11, failed: 1 });
+  assert.equal((first.entries as { to: string }[])[1].to, "number ending 678", "phone numbers are not read out");
+  assert.equal(sms.summarizeSmsLog(logs, { search: "invoice" }).total, 6);
+  assert.equal(sms.summarizeSmsLog(logs, { status: "failed" }).total, 1);
+  assert.equal(sms.summarizeSmsLog(logs, { page: 9 }).page, 2, "page is clamped");
+  assert.equal(sms.summarizeSmsLog([], {}).status, "NO_MESSAGES");
+
+  assert.equal(sms.summarizeSmsBalance(balance).remaining, 2);
+  assert.equal(sms.summarizeSmsBalance(null).status, "UNAVAILABLE");
 });
 
 test("the owner MCP route serves the action tools in both modes; areas follow their own flags", async () => {

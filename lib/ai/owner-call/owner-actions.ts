@@ -37,7 +37,7 @@ export type PendingKind =
   | "staff_create" | "staff_update" | "staff_status" | "staff_delete"
   | "customer_create" | "customer_update"
   | "leave_decision" | "knowledge_entry" | "knowledge_update" | "knowledge_status" | "knowledge_delete"
-  | "item_create" | "item_update" | "item_delete" | "visit_change" | "job_create" | "inspection_create" | "owner_call_schedule";
+  | "item_create" | "item_update" | "item_delete" | "sms_send" | "visit_change" | "job_create" | "inspection_create" | "owner_call_schedule";
 
 export type PendingDecision =
   | { ok: true }
@@ -64,6 +64,7 @@ export const OWNER_ACTION_READ_TOOLS = {
   drafts: ["get_knowledge_entries"],
   customers: ["get_customers"],
   items: ["get_items"],
+  sms: ["get_sms_balance", "get_sms_log", "get_sms_customers"],
 } as const;
 export const OWNER_ACTION_PREPARE_TOOLS = {
   services: ["prepare_service_update", "prepare_service_delete"],
@@ -71,6 +72,7 @@ export const OWNER_ACTION_PREPARE_TOOLS = {
   drafts: ["prepare_knowledge_entry", "prepare_knowledge_update", "prepare_knowledge_publish", "prepare_knowledge_delete"],
   customers: ["prepare_customer_create", "prepare_customer_update"],
   items: ["prepare_item_create", "prepare_item_update", "prepare_item_delete"],
+  sms: ["prepare_sms_send"],
 } as const;
 export const CONFIRM_CHANGE_TOOL = "confirm_owner_change";
 export const CANCEL_CHANGE_TOOL = "cancel_owner_change";
@@ -78,7 +80,7 @@ export const CANCEL_CHANGE_TOOL = "cancel_owner_change";
 /** Prepare tools: a READY_TO_CONFIRM result starts the browser's yes check in Talk to Sophie. */
 export const OWNER_PREPARE_TOOL_NAMES: readonly string[] = [
   ...OWNER_ACTION_PREPARE_TOOLS.services, ...OWNER_ACTION_PREPARE_TOOLS.team, ...OWNER_ACTION_PREPARE_TOOLS.drafts,
-  ...OWNER_ACTION_PREPARE_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.items, ...VISIT_PREPARE_TOOLS, JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, OWNER_CALL_PREPARE_TOOL,
+  ...OWNER_ACTION_PREPARE_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.items, ...OWNER_ACTION_PREPARE_TOOLS.sms, ...VISIT_PREPARE_TOOLS, JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, OWNER_CALL_PREPARE_TOOL,
 ];
 
 // ---- Attendance date ranges (same periods as the Attendance page) -----------------------------
@@ -308,6 +310,37 @@ export const OWNER_ACTION_DEFINITIONS: Record<string, OwnerActionDefinition> = {
     name: "prepare_item_delete",
     description: `Prepare deleting one item from the Item list. It cannot be undone. ${READY}`,
     parameters: obj({ itemName: str() }, ["itemName"]),
+  },
+  get_sms_balance: {
+    name: "get_sms_balance",
+    description: "Read the SMS balance: SMS left, used, total, the plan, and the top-up packages with prices. Read only. You can never buy " +
+      "a top-up: tell the owner to press Top up package on the SMS Credits page.",
+    parameters: obj({}),
+  },
+  get_sms_log: {
+    name: "get_sms_log",
+    description: "Read the SMS log (the last 100 texts): when, to whom, kind (invoice sent, customer welcome, custom message...), status, " +
+      "10 per page, with counts by kind and status. Optional search (receiver, message words, status, kind), status, since (YYYY-MM-DD), page. Read only.",
+    parameters: obj({
+      search: str(), status: { type: "string", enum: ["sent", "failed", "skipped"] }, since: str("YYYY-MM-DD"), page: { type: "integer", minimum: 1 },
+    }),
+  },
+  get_sms_customers: {
+    name: "get_sms_customers",
+    description: "List the customers who can get a text (they have a phone number): names, phone endings and the total. Optional search " +
+      "(name or phone). Read only.",
+    parameters: obj({ search: str("Part of a name or phone") }),
+  },
+  prepare_sms_send: {
+    name: "prepare_sms_send",
+    description: "Prepare texting customers: message (your tidy wording of what the owner said; the business name is added in front) or " +
+      "template (seasons_greetings, merry_christmas, happy_new_year), and recipients all, or customerNames (add a phone ending when two " +
+      "share a name). Checks the length and the credits. Read back the exact text, who gets it (say the number when it is everyone) and " +
+      `the credits. A sent text cannot be undone. ${READY}`,
+    parameters: obj({
+      message: str(), template: { type: "string", enum: ["seasons_greetings", "merry_christmas", "happy_new_year"] },
+      recipients: { type: "string", enum: ["all", "selected"] }, customerNames: strList("Customer names when recipients is selected"),
+    }, ["recipients"]),
   },
   confirm_owner_change: {
     name: "confirm_owner_change",
