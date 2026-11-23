@@ -11,6 +11,9 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { emailTypoWarning } from "@/lib/validation/data-quality";
+import {
+  matchByName, parseWeekdays, STAFF_FORM_SECTIONS, staffFormVoice, staffPageVoice, type StaffFormArgs, type VoiceResult,
+} from "@/lib/ai/owner-call/owner-team";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const STEPS = ["Details", "Role & schedule", "Review"] as const;
@@ -366,18 +369,17 @@ export function TeamStaffForm() {
     setCurrentStep((step) => Math.min(STEPS.length, step + 1));
   }
 
-  async function saveStaff() {
+  /** Saves the open popup. Returns whether it saved, for Sophie (voice); errors also show in the popup. */
+  async function saveStaff(): Promise<{ ok: true; welcomeEmailSent: boolean } | { ok: false; error: string }> {
     if (!user) {
       setError("Please sign in again before saving staff.");
-      return;
+      return { ok: false, error: "Please sign in again before saving staff." };
     }
 
     if (!canSubmit) {
-      setError(
-        staffFormValidationError(form) ??
-          "Could not validate this staff member.",
-      );
-      return;
+      const problem = staffFormValidationError(form) ?? "Could not validate this staff member.";
+      setError(problem);
+      return { ok: false, error: problem };
     }
 
     setIsSaving(true);
@@ -427,19 +429,20 @@ export function TeamStaffForm() {
       setSuccessMode(savedMode);
       setWelcomeEmailSent(Boolean(data.welcomeEmailSent));
       setSuccessName(savedName);
+      return { ok: true, welcomeEmailSent: Boolean(data.welcomeEmailSent) };
     } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "Could not save this staff member.",
-      );
+      const message = saveError instanceof Error ? saveError.message : "Could not save this staff member.";
+      setError(message);
+      return { ok: false, error: message };
     } finally {
       setIsSaving(false);
     }
   }
 
-  async function deleteStaff() {
-    if (!user || !deleteTarget || isDeleting) return;
+  /** Returns null when deleted, otherwise the reason (also shown on the page). */
+  async function deleteStaff(): Promise<string | null> {
+    if (!user || !deleteTarget) return "Nothing is selected to delete.";
+    if (isDeleting) return "Already deleting.";
 
     setIsDeleting(true);
     setStaffListError(null);
@@ -467,19 +470,20 @@ export function TeamStaffForm() {
       setDeleteTarget(null);
       await loadStaffMembers();
       notifyStaffChanged();
+      return null;
     } catch (deleteError) {
-      setStaffListError(
-        deleteError instanceof Error
-          ? deleteError.message
-          : "Could not delete this staff member.",
-      );
+      const message = deleteError instanceof Error ? deleteError.message : "Could not delete this staff member.";
+      setStaffListError(message);
+      return message;
     } finally {
       setIsDeleting(false);
     }
   }
 
-  async function updateStaffStatus(member: StaffMember) {
-    if (!user || isUpdatingStatus) return;
+  /** Returns null when the status changed, otherwise the reason (also shown on the page). */
+  async function updateStaffStatus(member: StaffMember): Promise<string | null> {
+    if (!user) return "Please sign in again.";
+    if (isUpdatingStatus) return "Already updating.";
 
     const nextStatus: StaffStatus =
       member.status === "suspended" ? "active" : "suspended";
@@ -519,16 +523,268 @@ export function TeamStaffForm() {
       setStatusTarget(null);
       void loadStaffMembers();
       notifyStaffChanged();
+      return null;
     } catch (statusError) {
-      setStaffListError(
-        statusError instanceof Error
-          ? statusError.message
-          : "Could not update staff status.",
-      );
+      const message = statusError instanceof Error ? statusError.message : "Could not update staff status.";
+      setStaffListError(message);
+      return message;
     } finally {
       setIsUpdatingStatus(false);
     }
   }
+
+  // ---- Sophie (voice): the same buttons, popups and dialogs as the owner, see lib/ai/owner-call/owner-team.ts ----
+  const setupBodyRef = useRef<HTMLDivElement>(null);
+  /** Where Sophie last worked: "top" or a section (data-voice-section). */
+  const [voiceScroll, setVoiceScroll] = useState<{ to: string; at: number } | null>(null);
+  const voice = useRef({
+    staffMembers, atStaffLimit, staffLimitMessage, form, currentStep, setupMode, editTarget, serviceChoices,
+    statusTarget, deleteTarget, openSetup, openEditStaff, saveStaff, deleteStaff, updateStaffStatus,
+  });
+  useEffect(() => {
+    voice.current = {
+      staffMembers, atStaffLimit, staffLimitMessage, form, currentStep, setupMode, editTarget, serviceChoices,
+      statusTarget, deleteTarget, openSetup, openEditStaff, saveStaff, deleteStaff, updateStaffStatus,
+    };
+  });
+
+  // Each step starts at its top; an error scrolls up so it is seen.
+  useEffect(() => {
+    setupBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentStep]);
+  useEffect(() => {
+    if (error) setupBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [error]);
+  // Bring what Sophie is working on into view and outline it briefly.
+  useEffect(() => {
+    const body = setupBodyRef.current;
+    if (!voiceScroll || !body) return;
+    if (voiceScroll.to === "top") {
+      body.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    const target = body.querySelector(`[data-voice-section="${voiceScroll.to}"]`);
+    if (!(target instanceof HTMLElement)) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    const outline = ["ring-2", "ring-primary", "ring-offset-2"];
+    target.classList.add(...outline);
+    const timer = window.setTimeout(() => target.classList.remove(...outline), 2_000);
+    return () => {
+      window.clearTimeout(timer);
+      target.classList.remove(...outline);
+    };
+  }, [voiceScroll]);
+
+  // The staff list: open Add / Edit, suspend, reactivate, delete. Registered once the list has loaded.
+  useEffect(() => {
+    if (!user || isLoadingStaff) return;
+    const find = (staffName: string) => matchByName(voice.current.staffMembers, (member) => member.fullName, staffName);
+    return staffPageVoice.register({
+      openAdd() {
+        const v = voice.current;
+        if (v.atStaffLimit) return { status: "LIMIT_REACHED", message: v.staffLimitMessage ?? "The plan's staff limit is reached." };
+        setViewTarget(null);
+        v.openSetup();
+        return { status: "OPENED", message: "The Add staff popup is open on step 1. Ask for their full name, mobile number and email, one at a time." };
+      },
+      openEdit(staffName) {
+        const found = find(staffName);
+        if (!found.ok) return found.result;
+        const member = found.item;
+        setViewTarget(null);
+        voice.current.openEditStaff(member);
+        return {
+          status: "OPENED",
+          message: `Editing ${member.fullName}: ${staffTypeLabel(member.staffType)}, ${member.status}, works ` +
+            `${member.availability.filter((day) => !day.isOff).map((day) => dayName(day.day)).join(", ") || "no days"}. Ask what to change.`,
+        };
+      },
+      prepareStatus(staffName, to) {
+        const found = find(staffName);
+        if (!found.ok) return found.result;
+        const member = found.item;
+        if (member.status === to) return { status: "ALREADY", message: `${member.fullName} is already ${to}.` };
+        setViewTarget(null);
+        setDeleteTarget(null);
+        setStatusTarget(member);
+        const verb = to === "suspended" ? "suspend" : "reactivate";
+        return { status: "CONFIRM", message: `The ${verb} confirmation for ${member.fullName} is on screen. Nothing changed yet. Ask: Should I ${verb} ${member.fullName}?` };
+      },
+      prepareDelete(staffName) {
+        const found = find(staffName);
+        if (!found.ok) return found.result;
+        const member = found.item;
+        setViewTarget(null);
+        setStatusTarget(null);
+        setDeleteTarget(member);
+        return {
+          status: "CONFIRM",
+          message: `The delete confirmation for ${member.fullName} is on screen. Nothing changed yet. ` +
+            `Ask: Should I delete ${member.fullName}? This removes them from the business.`,
+        };
+      },
+      async confirm() {
+        const v = voice.current;
+        if (v.deleteTarget) {
+          const name = v.deleteTarget.fullName;
+          const failure = await v.deleteStaff();
+          return failure ? { status: "FAILED", message: `Not deleted: ${failure}` } : { status: "DONE", message: `${name} is deleted.` };
+        }
+        if (v.statusTarget) {
+          const member = v.statusTarget;
+          const failure = await v.updateStaffStatus(member);
+          const now = member.status === "suspended" ? "active again" : "suspended";
+          return failure ? { status: "FAILED", message: `Not changed: ${failure}` } : { status: "DONE", message: `${member.fullName} is ${now}.` };
+        }
+        return { status: "NOTHING_TO_CONFIRM", message: "No confirmation is open on screen." };
+      },
+      cancel() {
+        setStatusTarget(null);
+        setDeleteTarget(null);
+        return { status: "CANCELLED", message: "Nothing was changed." };
+      },
+    });
+  }, [user, isLoadingStaff]);
+
+  // The open Add / Edit staff popup: fill fields, days, services, scroll, continue, back, save.
+  useEffect(() => {
+    if (!setupOpen) return;
+    const sectionStep: Record<string, number> = { details: 1, quotation: 1, role: 2, services: 2, schedule: 2 };
+    // What the popup will show once React renders. Picks up the owner's own edits between Sophie's steps:
+    // when the rendered form or step is no longer the one last seen, it was rendered or changed by hand.
+    let liveForm = voice.current.form;
+    let liveStep = voice.current.currentStep;
+    let seenForm = liveForm;
+    let seenStep = liveStep;
+    const sync = () => {
+      if (voice.current.form !== seenForm) liveForm = seenForm = voice.current.form;
+      if (voice.current.currentStep !== seenStep) liveStep = seenStep = voice.current.currentStep;
+    };
+    const goToStep = (step: number) => {
+      if (liveStep !== step) {
+        liveStep = step;
+        setCurrentStep(step);
+      }
+    };
+    const update = (next: StaffFormState, section: string) => {
+      liveForm = next;
+      setForm(next);
+      setError(null);
+      setShowDetailsErrors(false);
+      goToStep(sectionStep[section] ?? liveStep);
+      setVoiceScroll({ to: section, at: Date.now() });
+    };
+    const serviceName = (id: string) => voice.current.serviceChoices.find((service) => service.id === id)?.name ?? "a service";
+    const summary = (f: StaffFormState) =>
+      `name ${f.fullName.trim() || "(none)"}, email ${f.email.trim() || "(none)"}, phone ${phoneDigits(f.phone) ? `ending ${phoneDigits(f.phone).slice(-3)}` : "(none)"}, ` +
+      `role ${f.staffType.trim() || "(none)"}, can quote ${f.canget_qutaion ? "yes" : "no"}, works ` +
+      `${f.availability.filter((day) => !day.isOff).map((day) => dayName(day.day)).join(", ") || "no days"}, ` +
+      `services ${f.serviceIds.map(serviceName).join(", ") || "none"}`;
+
+    return staffFormVoice.register({
+      async step(args: StaffFormArgs): Promise<VoiceResult> {
+        const body = setupBodyRef.current;
+        sync();
+        if (args.action === "scroll_down" || args.action === "scroll_up") {
+          if (!body) return { status: "NOT_OPEN", message: "The popup is not showing." };
+          const down = args.action === "scroll_down";
+          const atEdge = down ? body.scrollTop + body.clientHeight >= body.scrollHeight - 4 : body.scrollTop <= 4;
+          if (atEdge) return { status: "OK", message: down ? "Already at the bottom." : "Already at the top." };
+          body.scrollBy({ top: (down ? 1 : -1) * Math.round(body.clientHeight * 0.8), behavior: "smooth" });
+          return { status: "OK", message: down ? "Scrolled down." : "Scrolled up." };
+        }
+        if (args.action === "show") {
+          if (!args.section || !(STAFF_FORM_SECTIONS as readonly string[]).includes(args.section)) {
+            return { status: "REJECTED", message: `section must be one of: ${STAFF_FORM_SECTIONS.join(", ")}.` };
+          }
+          goToStep(sectionStep[args.section]);
+          setVoiceScroll({ to: args.section, at: Date.now() });
+          return { status: "OK", message: `The ${args.section} section is on screen.` };
+        }
+        if (args.action === "fill") {
+          const next: StaffFormState = { ...liveForm };
+          let section = "";
+          if (args.fullName !== undefined) { next.fullName = args.fullName.trim(); section ||= "details"; }
+          if (args.phone !== undefined) { next.phone = toAuLocalPhoneDigits(args.phone); section ||= "details"; }
+          if (args.email !== undefined) { next.email = args.email.trim().replace(/\s+/g, ""); section ||= "details"; }
+          if (args.canQuote !== undefined) { next.canget_qutaion = args.canQuote; section ||= "quotation"; }
+          if (args.role !== undefined) { next.staffType = args.role.trim(); section ||= "role"; }
+          if (!section) return { status: "REJECTED", message: "Send at least one of fullName, phone, email, role or canQuote." };
+          update(next, section);
+          const warning = args.email !== undefined ? emailTypoWarning(next.email) : null;
+          return { status: "OK", message: `Typed in. Now: ${summary(next)}.${warning ? ` Email warning: ${warning}` : ""} Ask for anything missing, or continue.` };
+        }
+        if (args.action === "set_days") {
+          const working = parseWeekdays(args.workingDays);
+          const off = parseWeekdays(args.offDays);
+          const unknown = [...working.unknown, ...off.unknown];
+          if (unknown.length) return { status: "INVALID", message: `Could not read these days: ${unknown.join(", ")}.` };
+          if (!working.days.length && !off.days.length) return { status: "REJECTED", message: "Send workingDays and/or offDays." };
+          const availability = liveForm.availability.map((day) => {
+            let isOff = day.isOff;
+            if (working.days.length) isOff = !working.days.includes(day.day);
+            if (off.days.includes(day.day)) isOff = true;
+            return { ...day, isOff, serviceAreas: [] };
+          });
+          if (!availabilityIsValid(availability)) return { status: "INVALID", message: "At least one day must be a working day." };
+          const next = { ...liveForm, availability };
+          update(next, "schedule");
+          return { status: "OK", message: `Schedule set. Now: ${summary(next)}.` };
+        }
+        if (args.action === "services") {
+          const choices = voice.current.serviceChoices;
+          if (!choices.length) return { status: "INVALID", message: "There are no services to choose from yet, or they are still loading. Try again in a moment." };
+          const ids = new Set(liveForm.serviceIds);
+          for (const [names, add] of [[args.addServices ?? [], true], [args.removeServices ?? [], false]] as const) {
+            for (const spoken of names) {
+              const found = matchByName(choices, (service) => service.name, spoken, "service");
+              if (!found.ok) return found.result;
+              if (add) ids.add(found.item.id); else ids.delete(found.item.id);
+            }
+          }
+          const next = { ...liveForm, serviceIds: [...ids] };
+          update(next, "services");
+          return { status: "OK", message: `Services set. Now: ${summary(next)}.` };
+        }
+        if (args.action === "back") {
+          goToStep(Math.max(1, liveStep - 1));
+          setError(null);
+          return { status: "OK", message: `Went back to step ${liveStep} of ${STEPS.length}.` };
+        }
+        if (args.action === "continue") {
+          const problem = liveStep === 1
+            ? detailsStepError(liveForm)
+            : liveStep === 2
+              ? (!liveForm.staffType.trim() ? "Type a staff role, e.g. Plumber or Electrician." : !availabilityIsValid(liveForm.availability) ? "Mark at least one day as a working day." : null)
+              : null;
+          if (problem) {
+            setError(problem);
+            return { status: "INVALID", message: problem };
+          }
+          setError(null);
+          goToStep(Math.min(STEPS.length, liveStep + 1));
+          if (liveStep === STEPS.length) {
+            return {
+              status: "REVIEW",
+              message: `Review step is open. Read back: ${summary(liveForm)}. Spell the email. ` +
+                `Then ask: Should I save ${voice.current.setupMode === "edit" ? "these changes" : "this staff member"}? Save only after a clear yes.`,
+            };
+          }
+          return { status: "OK", message: `Step ${liveStep} of ${STEPS.length} (${STEPS[liveStep - 1]}) is open. Ask for what is missing, then continue.` };
+        }
+        // save
+        if (liveStep !== STEPS.length) return { status: "NOT_AT_REVIEW", message: "Continue to the review step first." };
+        const result = await voice.current.saveStaff();
+        if (!result.ok) return { status: "NOT_SAVED", message: result.error };
+        return {
+          status: "SAVED",
+          message: voice.current.setupMode === "edit"
+            ? "The changes are saved. Tell the owner."
+            : `The staff member is added.${result.welcomeEmailSent ? " An invitation email was sent to them." : ""} Tell the owner.`,
+        };
+      },
+    });
+  }, [setupOpen]);
 
   return (
     <>
@@ -552,6 +808,7 @@ export function TeamStaffForm() {
 
       {setupOpen && (
         <StaffSetupModal
+          bodyRef={setupBodyRef}
           currentStep={currentStep}
           mode={setupMode}
           onClose={closeSetup}
@@ -693,6 +950,7 @@ function StaffSetupStepContent({
         />
 
         <StaffWizardSection
+          voiceSection="details"
           icon="person"
           title="Personal information"
           subtitle="These details are saved to the users table."
@@ -743,7 +1001,10 @@ function StaffSetupStepContent({
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3">
+          <div
+            data-voice-section="quotation"
+            className="mt-4 flex scroll-mt-2 items-center justify-between gap-4 rounded-xl border border-outline-variant/60 bg-surface-container-low px-4 py-3"
+          >
             <div className="min-w-0">
               <p className="font-body text-[13px] font-semibold leading-snug text-on-surface">
                 Quotation
@@ -794,6 +1055,7 @@ function StaffSetupStepContent({
         />
 
         <StaffWizardSection
+          voiceSection="role"
           icon="home_repair_service"
           title="Role"
           subtitle="Enter a role such as Plumber, Electrician, HVAC Technician or Supervisor."
@@ -808,6 +1070,7 @@ function StaffSetupStepContent({
         </StaffWizardSection>
 
         <StaffWizardSection
+          voiceSection="services"
           icon="calendar_month"
           title="Services this staff member can perform"
           subtitle="Choose the services Sophie can assign to this person. Leave all unchecked to exclude them from automatic assignment."
@@ -820,6 +1083,7 @@ function StaffSetupStepContent({
         </StaffWizardSection>
 
         <StaffWizardSection
+          voiceSection="schedule"
           icon="calendar_month"
           title="Weekly schedule"
           subtitle="Mark each day as working or off."
@@ -888,15 +1152,21 @@ function StaffWizardSection({
   icon,
   title,
   subtitle,
+  voiceSection,
   children,
 }: {
   icon: string;
   title: string;
   subtitle?: string;
+  /** Lets Sophie (voice) scroll to this section. */
+  voiceSection?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-outline-variant/60 bg-surface-container-lowest shadow-sm">
+    <section
+      data-voice-section={voiceSection}
+      className="scroll-mt-2 overflow-hidden rounded-2xl border border-outline-variant/60 bg-surface-container-lowest shadow-sm"
+    >
       <div className="flex items-start gap-3 border-b border-outline-variant/50 bg-gradient-to-r from-primary-fixed/50 via-surface-container-low to-surface-container-lowest px-4 py-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-on-primary shadow-sm">
           <span className="material-symbols-outlined text-[20px]">{icon}</span>
@@ -918,6 +1188,7 @@ function StaffWizardSection({
 }
 
 function StaffSetupModal({
+  bodyRef,
   currentStep,
   mode,
   children,
@@ -928,6 +1199,8 @@ function StaffSetupModal({
   onContinue,
   onSave,
 }: {
+  /** The scrolling body, so Sophie (voice) can keep what changed in view. */
+  bodyRef: React.RefObject<HTMLDivElement | null>;
   currentStep: number;
   mode: SetupMode;
   children: React.ReactNode;
@@ -1001,7 +1274,7 @@ function StaffSetupModal({
           </button>
         </header>
 
-        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
           {error && (
             <div className="mb-5 flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
               <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">

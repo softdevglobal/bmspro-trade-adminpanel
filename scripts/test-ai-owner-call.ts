@@ -13,6 +13,9 @@ const knowledgeCalls: KnowledgeCall[] = [];
 
 const folder = mkdtempSync(join(tmpdir(), "trade-owner-voice-"));
 const fixtures: Record<string, string> = {
+  "lib/ai/mcp/tools/owner-scheduled-calls.tools": `
+    exports.findOwnerCallCustomers = async (owner, args) => ({ status: "OK", businessId: owner.businessId, search: args.search });
+  `,
   "lib/firebase/admin": `
     exports.adminDb = { collection: () => ({ doc: () => ({
       get: async () => ({ data: () => ({ ownerUid: "owner-a", isActive: true, sophieTalkEnabled: true }) }),
@@ -171,6 +174,16 @@ test("knowledge search is offered to owner Sophie only when both flags are on", 
   });
 });
 
+test("scheduled customer lookup uses authenticated scope without loading mutation actions", async (t) => {
+  setEnv(t, { AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED: "true" });
+  const { POST } = await import("../app/api/ai/owner-call/mcp/route");
+  const response = await POST(mcpRequest("owner", "find_call_customers", { search: "Lakshan", businessId: "foreign" }));
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(JSON.parse(payload.result.content[0].text), { status: "OK", businessId: "business-a", search: "Lakshan" });
+  assert.equal((await POST(mcpRequest("staff", "find_call_customers", { search: "Lakshan" }))).status, 403);
+});
+
 test("briefing MCP reads only the authenticated owner's business", async (t) => {
   setEnv(t, { AI_OWNER_VOICE_KNOWLEDGE_ENABLED: undefined, AI_VOICE_KNOWLEDGE_ENABLED: undefined });
   const { POST } = await import("../app/api/ai/owner-call/mcp/route");
@@ -250,16 +263,162 @@ test("voice draft tools are offered only with their own flag, within the bridge 
     setEnv(t, { AI_OWNER_VOICE_KNOWLEDGE_WRITE_ENABLED: "true" });
     const session = await startSession(t);
     const names = session.tools.map(tool => tool.name);
-    assert.deepEqual(names, [...BRIEFING_TOOLS, "search_business_knowledge", ...DRAFT_TOOLS]);
-    // The bridge allows at most its 17 known names (bmspro-voice-bridge/src/server/owner-voice.mjs).
-    assert.ok(names.length <= 17);
-    assert.ok(!names.some(name => /publish|delete|edit/.test(name)), "no publish, edit or delete tool");
+    assert.deepEqual(names, [...BRIEFING_TOOLS, "search_business_knowledge", ...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS]);
     const save = session.tools.find(tool => tool.name === "save_knowledge_draft")!;
     assert.deepEqual(save.parameters.required, ["confirmed"]);
+    // Publishing and deleting by voice go through a highlighted entry and a separate confirm step.
+    const manage = session.tools.find(tool => tool.name === "manage_knowledge_entry")!;
+    assert.deepEqual((manage.parameters.properties as { action: { enum: string[] } }).action.enum, ["publish", "unpublish", "delete", "confirm", "cancel"]);
     assert.match(session.instructions, /prepare_knowledge_draft/);
     assert.match(session.instructions, /clear yes/);
     assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
   });
+  await t.test("every flag on, including voice services: within the bridge limits", async (t) => {
+    setEnv(t, { AI_OWNER_VOICE_KNOWLEDGE_WRITE_ENABLED: "true", AI_OWNER_VOICE_SERVICE_ENABLED: "true", AI_OWNER_VOICE_TOOL_MODE: undefined });
+    const session = await startSession(t);
+    const names = session.tools.map(tool => tool.name);
+    assert.deepEqual(names, [
+      ...BRIEFING_TOOLS, "search_business_knowledge", "prepare_service", "create_service", ...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS,
+      ...BROWSER_SERVICE_TOOLS,
+    ]);
+    const create = session.tools.find(tool => tool.name === "create_service")!;
+    assert.deepEqual(create.parameters.required, ["confirmed"]);
+    assert.match(session.instructions, /open_add_service_form/);
+    assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
+  });
+});
+
+// ---- Browser and MCP tool modes (lib/ai/owner-call/owner-actions.ts) ----
+
+const BROWSER_SERVICE_TOOLS = [
+  "open_add_service_form", "choose_service_source", "service_form_step", "list_services", "open_edit_service_form", "delete_service",
+];
+const BROWSER_KNOWLEDGE_TOOLS = ["list_knowledge", "open_knowledge_entry", "knowledge_form_step", "manage_knowledge_entry"];
+const BROWSER_TEAM_TOOLS = [
+  "list_staff", "open_staff_form", "staff_form_step", "manage_staff_member", "list_leave_requests", "decide_leave_request", "show_attendance",
+];
+const MCP_ACTION_TOOLS = [
+  "get_services", "prepare_service_update", "prepare_service_delete",
+  "get_staff", "get_leave_requests", "get_attendance",
+  "prepare_staff_create", "prepare_staff_update", "prepare_staff_status", "prepare_staff_delete", "prepare_leave_decision",
+  "get_knowledge_entries", "prepare_knowledge_entry", "prepare_knowledge_update", "prepare_knowledge_publish", "prepare_knowledge_delete",
+  "get_items", "prepare_item_create", "prepare_item_update", "prepare_item_delete",
+  "confirm_owner_change", "cancel_owner_change",
+];
+const BROWSER_ITEM_TOOLS = ["list_items", "open_add_item_form", "open_edit_item_form", "item_form_step", "delete_item"];
+const ALL_FLAGS = {
+  AI_OWNER_VOICE_BRIDGE_URL: "http://127.0.0.1:18787",
+  AI_VOICE_BRIDGE_SECRET: secret,
+  AI_OWNER_VOICE_KNOWLEDGE_ENABLED: "true",
+  AI_VOICE_KNOWLEDGE_ENABLED: "true",
+  AI_OWNER_VOICE_KNOWLEDGE_WRITE_ENABLED: "true",
+  AI_OWNER_VOICE_SERVICE_ENABLED: "true",
+  AI_OWNER_VOICE_TEAM_ENABLED: "true",
+  AI_OWNER_VOICE_ITEMS_ENABLED: "true",
+};
+
+test("browser mode (default): page tools for services, team and drafts; no MCP action tools", async (t) => {
+  setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: undefined });
+  const session = await startSession(t);
+  const names = session.tools.map(tool => tool.name);
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS]) {
+    assert.ok(names.includes(name), name);
+  }
+  for (const name of MCP_ACTION_TOOLS) assert.ok(!names.includes(name), `${name} is MCP mode only`);
+  assert.equal(new Set(names).size, names.length, "no repeated names");
+  assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
+});
+
+test("mcp mode: server tools for services, team and drafts; no page tools", async (t) => {
+  setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: "mcp" });
+  const session = await startSession(t);
+  const names = session.tools.map(tool => tool.name);
+  for (const name of ["prepare_service", "create_service", ...MCP_ACTION_TOOLS]) assert.ok(names.includes(name), name);
+  for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS]) {
+    assert.ok(!names.includes(name), `${name} is browser mode only`);
+  }
+  assert.equal(new Set(names).size, names.length, "no repeated names");
+  assert.match(session.instructions, /prepare_knowledge_entry/);
+  assert.match(session.instructions, /prepare_service_update/);
+  assert.doesNotMatch(session.instructions, /open_add_service_form|prepare_knowledge_draft/);
+  assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
+  const confirm = session.tools.find(tool => tool.name === "confirm_owner_change")!;
+  assert.deepEqual(confirm.parameters.required, ["confirmed"]);
+});
+
+test("item tools: only with the items flag; prices read back as dollars and cents; same name means update", async () => {
+  const { ownerVoiceToolList } = await import("../lib/ai/owner-call/tools");
+  const { formatAud, itemNameKey, summarizeItems, ownerItemsEnabled } = await import("../lib/ai/owner-call/owner-item");
+  const served = (items: boolean) => ownerVoiceToolList({ knowledge: false, items, actions: true }).map(tool => tool.name);
+  assert.ok(served(true).includes("prepare_item_create"));
+  assert.ok(!served(false).includes("get_items"));
+  assert.equal(ownerItemsEnabled({}), false);
+  assert.equal(ownerItemsEnabled({ AI_OWNER_VOICE_ITEMS_ENABLED: "true" }), true);
+  assert.equal(formatAud(45), "$45.00");
+  assert.equal(formatAud(3000.5), "$3000.50");
+  assert.equal(itemNameKey("  Smoke   Alarm install "), itemNameKey("smoke alarm INSTALL"));
+  const rows = [
+    { name: "Smoke alarm install", code: "SA-001", priceAud: 45, description: "Supply and fit", documentUrl: null },
+    { name: "CCTV replacing", code: null, priceAud: 800, description: null, documentUrl: "https://x/doc.pdf" },
+  ];
+  const all = summarizeItems(rows);
+  assert.equal(all.total, 2);
+  assert.deepEqual(all.items[1], { name: "CCTV replacing", code: null, price: "$800.00", hasDocument: true });
+  assert.equal(summarizeItems(rows, "sa-001").items.length, 1, "search by code");
+  assert.equal(summarizeItems(rows, "fit").items[0].name, "Smoke alarm install", "search by description");
+  assert.equal(summarizeItems([], "").status, "NO_ITEMS");
+});
+
+test("the owner MCP route serves the action tools in both modes; areas follow their own flags", async () => {
+  const { ownerVoiceToolList } = await import("../lib/ai/owner-call/tools");
+  const served = (flags: { services?: boolean; team?: boolean; drafts?: boolean; items?: boolean }) =>
+    ownerVoiceToolList({ knowledge: false, ...flags, actions: true }).map(tool => tool.name);
+  assert.ok(!served({}).includes("confirm_owner_change"), "no action tools when every area is off");
+  assert.ok(served({ team: true }).includes("prepare_leave_decision"));
+  assert.ok(!served({ team: true }).includes("prepare_service_update"));
+  for (const name of ["get_knowledge_entries", "prepare_knowledge_entry", "prepare_knowledge_update", "prepare_knowledge_publish", "prepare_knowledge_delete"]) {
+    assert.ok(served({ drafts: true }).includes(name), name);
+    assert.ok(!served({ services: true, team: true }).includes(name), `${name} follows the knowledge write flag`);
+  }
+  for (const tool of ownerVoiceToolList({ knowledge: false, services: true, team: true, drafts: true, actions: true })) {
+    if (MCP_ACTION_TOOLS.includes(tool.name)) assert.ok(tool.usesActions, `${tool.name} needs the action tools`);
+  }
+});
+
+test("confirm_owner_change needs a pending change, a yes, and time to read it back", async () => {
+  const { checkPendingChange, PENDING_CHANGE_LIMITS } = await import("../lib/ai/owner-call/owner-actions");
+  const now = 1_000_000_000;
+  assert.equal(checkPendingChange(null, true, now).ok, false);
+  assert.deepEqual(checkPendingChange({ createdAt: now - 10_000 }, true, now), { ok: true });
+  assert.equal(checkPendingChange({ createdAt: now - 10_000 }, false, now).ok, false, "model must say confirmed");
+  assert.equal(checkPendingChange({ createdAt: now - 1_000 }, true, now).ok, false, "too fast to have heard a reply");
+  const old = checkPendingChange({ createdAt: now - PENDING_CHANGE_LIMITS.ttlMs - 1 }, true, now);
+  assert.equal(old.ok, false);
+  if (!old.ok) assert.equal(old.status, "EXPIRED");
+});
+
+test("attendance periods match the Attendance page (weeks start Monday)", async () => {
+  const { attendanceRangeIso } = await import("../lib/ai/owner-call/owner-actions");
+  assert.deepEqual(attendanceRangeIso("2026-11-19", "day"), { start: "2026-11-19", end: "2026-11-19" });
+  assert.deepEqual(attendanceRangeIso("2026-11-19", "week"), { start: "2026-11-16", end: "2026-11-22" }); // Thursday
+  assert.deepEqual(attendanceRangeIso("2026-11-16", "week"), { start: "2026-11-16", end: "2026-11-22" }); // Monday
+  assert.deepEqual(attendanceRangeIso("2026-11-22", "biweekly"), { start: "2026-11-16", end: "2026-11-29" }); // Sunday
+  assert.deepEqual(attendanceRangeIso("2026-02-10", "month"), { start: "2026-02-01", end: "2026-02-28" });
+  assert.deepEqual(attendanceRangeIso("2028-02-10", "month"), { start: "2028-02-01", end: "2028-02-29" });
+});
+
+test("spoken names and weekdays", async () => {
+  const { matchByName, parseWeekdays } = await import("../lib/ai/owner-call/owner-team");
+  const staff = [{ fullName: "Jordan Smith" }, { fullName: "Sam Lee" }, { fullName: "Sam Patel" }];
+  const name = (member: { fullName: string }) => member.fullName;
+  const jordan = matchByName(staff, name, "jordan");
+  assert.ok(jordan.ok && jordan.item.fullName === "Jordan Smith");
+  const sam = matchByName(staff, name, "Sam");
+  assert.ok(!sam.ok && sam.result.status === "AMBIGUOUS");
+  const nobody = matchByName(staff, name, "Alex");
+  assert.ok(!nobody.ok && nobody.result.status === "NO_MATCH");
+  assert.deepEqual(parseWeekdays(["Mon", "saturday", "monday"]), { days: ["monday", "saturday"], unknown: [] });
+  assert.deepEqual(parseWeekdays(["someday"]).unknown, ["someday"]);
 });
 
 test("voice draft tools are never served by the owner MCP route (they run in the browser)", async (t) => {
@@ -321,4 +480,44 @@ test("save_knowledge_draft needs a draft from this session, an owner reply and n
   assert.equal(ownerDeclined("Hold on"), true);
   assert.equal(ownerDeclined("cancel that"), true);
   assert.equal(ownerDeclined(""), false);
+});
+
+test('visits are offered in both tool modes only when enabled, with one confirmation pair', async (t) => {
+  setEnv(t, {AI_OWNER_VOICE_VISITS_ENABLED: 'true', AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED:'true', AI_OWNER_VOICE_TOOL_MODE: undefined, AI_OWNER_VOICE_BRIDGE_URL: 'http://127.0.0.1:18787', AI_VOICE_BRIDGE_SECRET: secret});
+  for (const mode of ['browser', 'mcp']) {
+    process.env.AI_OWNER_VOICE_TOOL_MODE = mode;
+    const session = await startSession(t);
+    const names = session.tools.map(tool => tool.name);
+    assert.ok(names.includes('get_work_visits'));
+    assert.ok(names.includes('prepare_job_schedule'));
+    assert.ok(names.includes('prepare_job_create'));
+    assert.ok(names.includes('prepare_customer_scheduled_call'));
+    assert.ok(names.includes('find_call_customers'));
+    assert.ok(names.includes('prepare_inspection_create'));
+    assert.ok(names.includes('get_services'));
+    assert.ok(names.includes('get_staff'));
+    assert.ok(names.includes('prepare_inspection_assignment'));
+    assert.equal(names.filter(name => name === 'confirm_owner_change').length, 1);
+    assert.equal(names.filter(name => name === 'cancel_owner_change').length, 1);
+    assert.ok(session.instructions.length <= 4000);
+    t.mock.restoreAll();
+  }
+});
+
+test('bridge startup failures identify tool mismatch, instructions, authorization and upstream rejection', async(t)=>{
+ setEnv(t,{AI_OWNER_VOICE_BRIDGE_URL:'http://127.0.0.1:18787',AI_VOICE_BRIDGE_SECRET:secret});
+ const {POST}=await import('../app/api/ai/owner-call/route');
+ const cases=[
+  {status:400,code:'tool_whitelist',message:/does not support Trade's enabled tools/},
+  {status:400,code:'instructions_limit',message:/exceed the voice bridge limit/},
+  {status:401,code:'bridge_authorization',message:/same bridge secret/},
+  {status:502,code:'realtime_rejected',message:/OpenAI voice connection/},
+  {status:400,code:'',message:/Update trade-owner-voice.mjs/},
+ ];
+ t.mock.method(console,'error',()=>undefined);
+ for(const fixture of cases){
+  t.mock.method(globalThis,'fetch',async()=>new Response(null,{status:fixture.status,headers:fixture.code?{'x-bms-voice-error':fixture.code}:{}}));
+  const response=await POST(offer('owner'));
+  assert.equal(response.status,502);const data=await response.json();assert.match(data.error,fixture.message);assert.ok(!data.error.includes(secret));
+ }
 });

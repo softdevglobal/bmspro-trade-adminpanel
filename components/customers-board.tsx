@@ -1,6 +1,13 @@
 "use client";
 
 import { CareplusCaptureShortcut } from "@/components/careplus-capture-shortcut";
+import { CustomerFormModal } from "@/components/customer-form-modal";
+import {
+  consumeOpenCustomerForm,
+  OPEN_CUSTOMER_FORM_EVENT,
+  type OpenCustomerRequest,
+} from "@/lib/ai/owner-call/owner-customer";
+import { CUSTOMERS_CHANGED_EVENT } from "@/lib/customer/form";
 import { InspectionRequestCode } from "@/components/inspection-request-code";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBookings } from "@/lib/bookings/use-bookings";
@@ -480,6 +487,51 @@ export function CustomersBoard() {
     [customers, selectedId],
   );
 
+  // Add / Edit customer popup. Sophie (voice) can also open it.
+  const [formTarget, setFormTarget] = useState<
+    { mode: "add" } | { mode: "edit"; customer: CustomerProfile } | null
+  >(null);
+  // A request made before this page mounted (Sophie navigated here) is picked up on first render.
+  const [openRequest, setOpenRequest] = useState<OpenCustomerRequest | null>(() => consumeOpenCustomerForm());
+
+  useEffect(() => {
+    const take = () => {
+      const request = consumeOpenCustomerForm();
+      if (request) setOpenRequest(request);
+    };
+    window.addEventListener(OPEN_CUSTOMER_FORM_EVENT, take);
+    return () => window.removeEventListener(OPEN_CUSTOMER_FORM_EVENT, take);
+  }, []);
+
+  // A popup Sophie asked for: Add opens at once; Edit waits until the customer list has loaded.
+  const requestedTarget = useMemo<typeof formTarget>(() => {
+    if (!openRequest) return null;
+    if (openRequest.mode === "add") return { mode: "add" };
+    const match = registeredCustomers.find((c) => c.uid === openRequest.customerId);
+    return match ? { mode: "edit", customer: match } : null;
+  }, [openRequest, registeredCustomers]);
+  const activeTarget = formTarget ?? requestedTarget;
+  const closeForm = () => {
+    setFormTarget(null);
+    setOpenRequest(null);
+  };
+
+  // Reload the list after a customer is added or changed (by hand or by Sophie).
+  useEffect(() => {
+    const reload = () => { void loadRegisteredCustomers(); };
+    window.addEventListener(CUSTOMERS_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(CUSTOMERS_CHANGED_EVENT, reload);
+  }, [loadRegisteredCustomers]);
+
+  /** The saved profile behind the open preview, if there is one (request-only customers cannot be edited). */
+  const selectedProfile = useMemo(
+    () =>
+      selected
+        ? registeredCustomers.find((c) => c.email.trim().toLowerCase() === selected.email.trim().toLowerCase()) ?? null
+        : null,
+    [selected, registeredCustomers],
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-[320px] items-center justify-center">
@@ -506,6 +558,17 @@ export function CustomersBoard() {
       <div className="w-full min-w-0 space-y-4">
         <CareplusCaptureShortcut context="Link a participant when known, or leave blank for anonymous feedback" />
         <div className="rounded-xl border border-outline-variant/60 bg-surface-container-lowest p-4 sm:rounded-2xl">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-display text-[18px] font-semibold text-on-surface">Customers</h2>
+            <button
+              type="button"
+              onClick={() => setFormTarget({ mode: "add" })}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 font-body text-[13px] font-semibold text-on-primary hover:opacity-90"
+            >
+              <span className="material-symbols-outlined text-[18px]">person_add</span>
+              Add customer
+            </button>
+          </div>
           <label className="sr-only" htmlFor="customer-search">
             Search customers
           </label>
@@ -537,8 +600,8 @@ export function CustomersBoard() {
               No customers yet
             </p>
             <p className="mt-1 font-body text-body-md text-on-surface-variant">
-              Customers appear here when they submit a request, or when you
-              import them from Settings.
+              Add a customer with the button above, or customers appear here
+              when they submit a request or you import them from Settings.
             </p>
           </div>
         ) : (
@@ -561,7 +624,25 @@ export function CustomersBoard() {
         bookingById={bookingById}
         invoiceByRequestId={invoiceByRequestId}
         onClose={() => setSelectedId(null)}
+        onEdit={
+          selectedProfile
+            ? () => {
+                setSelectedId(null);
+                setFormTarget({ mode: "edit", customer: selectedProfile });
+              }
+            : undefined
+        }
       />
+
+      {activeTarget ? (
+        <CustomerFormModal
+          key={activeTarget.mode === "edit" ? activeTarget.customer.uid : "add"}
+          customer={activeTarget.mode === "edit" ? activeTarget.customer : null}
+          existing={registeredCustomers}
+          onClose={closeForm}
+          onSaved={() => { void loadRegisteredCustomers(); }}
+        />
+      ) : null}
     </>
   );
 }
@@ -629,11 +710,13 @@ function CustomerPreviewDrawer({
   bookingById,
   invoiceByRequestId,
   onClose,
+  onEdit,
 }: {
   customer: CustomerSummary | null;
   bookingById: ReadonlyMap<string, BookingDetail>;
   invoiceByRequestId: ReadonlyMap<string, InvoiceDetail>;
   onClose: () => void;
+  onEdit?: () => void;
 }) {
   const open = customer !== null;
   useRegisterRightDrawer(open, "sm");
@@ -666,6 +749,7 @@ function CustomerPreviewDrawer({
               bookingById={bookingById}
               invoiceByRequestId={invoiceByRequestId}
               onClose={onClose}
+              onEdit={onEdit}
             />
           </motion.aside>
         </motion.div>
@@ -679,11 +763,13 @@ function CustomerPreviewContent({
   bookingById,
   invoiceByRequestId,
   onClose,
+  onEdit,
 }: {
   customer: CustomerSummary;
   bookingById: ReadonlyMap<string, BookingDetail>;
   invoiceByRequestId: ReadonlyMap<string, InvoiceDetail>;
   onClose: () => void;
+  onEdit?: () => void;
 }) {
   const profile = useBusinessProfile();
   const timeZone = profile?.timezone ?? null;
@@ -699,6 +785,16 @@ function CustomerPreviewContent({
         <p className="font-body text-[12px] font-bold uppercase tracking-wider text-on-surface-variant">
           Customer preview
         </p>
+        {onEdit ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="ml-auto mr-1 flex items-center gap-1.5 rounded-lg border border-outline-variant px-3 py-1.5 font-body text-[13px] font-semibold text-on-surface hover:bg-surface-container-high"
+          >
+            <span className="material-symbols-outlined text-[18px]">edit</span>
+            Edit
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onClose}

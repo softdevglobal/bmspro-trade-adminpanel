@@ -6,6 +6,20 @@ import {
   type VoiceDraftToolName,
 } from "@/lib/ai/owner-call/voice-draft";
 import { discardVoiceDraft, getVoiceDraft, saveVoiceDraft, showVoiceDraft, useVoiceDraft } from "@/lib/ai/owner-call/voice-draft-store";
+import {
+  checkOwnerReply, CHOOSE_SERVICE_SOURCE_TOOL_NAME, chooseServiceSource, DELETE_SERVICE_TOOL_NAME, LIST_SERVICES_TOOL_NAME,
+  summarizeServices, OPEN_ADD_SERVICE_TOOL_NAME,
+  OPEN_EDIT_SERVICE_TOOL_NAME, requestOpenAddService, runServiceFormStep, SERVICE_FORM_ACTIONS, SERVICE_FORM_STEP_TOOL_NAME,
+  type ServiceFormStepArgs,
+  SERVICES_CHANGED_EVENT, SERVICES_PAGE, withServicesPage,
+} from "@/lib/ai/owner-call/owner-service";
+import { isOwnerCustomerTool, runOwnerCustomerTool } from "@/lib/ai/owner-call/owner-customer-runner";
+import { isOwnerItemTool, runOwnerItemTool } from "@/lib/ai/owner-call/owner-item";
+import { isOwnerTeamTool } from "@/lib/ai/owner-call/owner-team";
+import { newTeamGate, runOwnerTeamTool } from "@/lib/ai/owner-call/owner-team-runner";
+import { isOwnerKnowledgeTool, runOwnerKnowledgeTool } from "@/lib/ai/owner-call/owner-knowledge";
+import { CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, OWNER_PREPARE_TOOL_NAMES } from "@/lib/ai/owner-call/owner-actions";
+import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -55,7 +69,7 @@ export function OwnerVoiceSession() {
   const [showOverdueInvoices, setShowOverdueInvoices] = useState(false);
   const [showInvoices, setShowInvoices] = useState(false);
   const [callLinks, setCallLinks] = useState<{ callId: string; date: string }[]>([]);
-  const [callback, setCallback] = useState<{ grant: string; number: string; name?: string } | null>(null);
+  const [callback, setCallback] = useState<{ grant: string; number: string; name?: string; requestId: string } | null>(null);
   const [callbackBusy, setCallbackBusy] = useState(false);
   const [callbackStatus, setCallbackStatus] = useState("");
   const [lines, setLines] = useState<TranscriptLine[]>([]);
@@ -95,6 +109,32 @@ export function OwnerVoiceSession() {
       draftId: null as string | null, turns: 0, replyItems: new Set<string>(),
       latestReply: null as string | null, saved: 0,
     };
+    /**
+     * Same guardrail for create_service (an owner MCP tool): the server never hears the
+     * owner, so the browser checks that the owner replied after the read-back and did
+     * not say no before the call is forwarded.
+     */
+    const serviceConfirm = {
+      prepared: false, turns: 0, replyItems: new Set<string>(), latestReply: null as string | null,
+    };
+    /** Same guardrail for delete_service confirm: the delete dialog is on screen and the owner answered it. */
+    const deleteConfirm = {
+      prepared: false, turns: 0, replyItems: new Set<string>(), latestReply: null as string | null,
+    };
+    /** Same guardrail for the team tools (staff save, suspend, delete; leave approve, reject). */
+    const teamConfirm = newTeamGate();
+    /** Same guardrail for confirm_owner_change (MCP mode): a prepare_ tool returned READY_TO_CONFIRM and the owner answered. */
+    const actionConfirm = {
+      prepared: false, turns: 0, replyItems: new Set<string>(), latestReply: null as string | null,
+    };
+    /** Same guardrail for the browser knowledge tools (save an edit; publish, unpublish, delete). */
+    const knowledgeConfirm = newTeamGate();
+    /** Same guardrail for the browser customer tools (save an added or edited customer). */
+    const customerConfirm = newTeamGate();
+    /** Same guardrail for the browser item tools (save an item; delete one). */
+    const itemConfirm = newTeamGate();
+    /** Every confirmation that counts the owner's replies. */
+    const replyGates = [serviceConfirm, deleteConfirm, teamConfirm, actionConfirm, knowledgeConfirm, customerConfirm, itemConfirm];
     const session: SophieSession = {
       ask: () => false,
       close() {
@@ -243,6 +283,12 @@ export function OwnerVoiceSession() {
         setMissedCallsDate(null);
         setCallback(null);
         setChat(messages => [...messages, { role: "owner", text }]);
+        // A typed message is an owner turn too: it can answer "Should I add / delete this service?"
+        for (const gate of replyGates) {
+          if (!gate.prepared) continue;
+          gate.turns += 1;
+          gate.latestReply = text;
+        }
         send({ type: "conversation.item.create", item: {
           type: "message", role: "user", content: [{ type: "input_text", text }],
         } });
@@ -288,6 +334,11 @@ export function OwnerVoiceSession() {
               confirm.turns += 1;
               confirm.replyItems.add(event.item_id);
             }
+            for (const gate of replyGates) {
+              if (!gate.prepared || !event.item_id) continue;
+              gate.turns += 1;
+              gate.replyItems.add(event.item_id);
+            }
             return;
           case "conversation.item.input_audio_transcription.delta":
             write(event.item_id, "owner", (text) => text + (event.delta ?? ""), false);
@@ -295,6 +346,9 @@ export function OwnerVoiceSession() {
           case "conversation.item.input_audio_transcription.completed":
             write(event.item_id, "owner", () => event.transcript ?? "", true);
             if (event.item_id && confirm.replyItems.has(event.item_id)) confirm.latestReply = event.transcript ?? null;
+            for (const gate of replyGates) {
+              if (event.item_id && gate.replyItems.has(event.item_id)) gate.latestReply = event.transcript ?? null;
+            }
             return;
           case "conversation.item.input_audio_transcription.failed":
             write(event.item_id, "owner", (text) => text || "(could not transcribe)", true);
@@ -332,8 +386,173 @@ export function OwnerVoiceSession() {
         for (const call of calls) {
           handled.add(call.call_id);
           let output = JSON.stringify({ status: "UNAVAILABLE" });
-          if (isVoiceDraftTool(call.name)) {
+          // create_service is held here unless the owner replied to the read-back and did not say no.
+          // confirm_owner_change (MCP mode) is held the same way, against the last prepare_ read-back.
+          const replyGate = call.name === "create_service" ? serviceConfirm : call.name === CONFIRM_CHANGE_TOOL ? actionConfirm : null;
+          const ownerReply = replyGate
+            ? checkOwnerReply({
+              prepared: replyGate.prepared,
+              ownerTurnsSinceShown: replyGate.turns,
+              latestOwnerReply: replyGate.latestReply,
+            })
+            : null;
+          if (call.name === OPEN_ADD_SERVICE_TOOL_NAME) {
+            // Browser-only: go to the Services page and open its Add service popup.
+            if (pathnameRef.current !== SERVICES_PAGE) router.push(SERVICES_PAGE);
+            requestOpenAddService();
+            output = JSON.stringify({ status: "OPENED", message: "The Add service popup is open. Ask: Do you want to create it from one of the existing templates shown, or as a custom service? Then call choose_service_source." });
+          } else if (call.name === SERVICE_FORM_STEP_TOOL_NAME) {
+            let args: Partial<ServiceFormStepArgs> = {};
+            try { args = JSON.parse(call.arguments || "{}"); } catch { /* handled below */ }
+            if (!(SERVICE_FORM_ACTIONS as readonly string[]).includes(args.action ?? "")) {
+              output = JSON.stringify({ status: "REJECTED", message: `action must be one of: ${SERVICE_FORM_ACTIONS.join(", ")}.` });
+            } else {
+              // Saving is held here unless the owner replied to the read-back and did not say no.
+              const gate = args.action === "save"
+                ? checkOwnerReply({
+                  prepared: serviceConfirm.prepared,
+                  ownerTurnsSinceShown: serviceConfirm.turns,
+                  latestOwnerReply: serviceConfirm.latestReply,
+                })
+                : null;
+              if (gate && !gate.ok) {
+                output = JSON.stringify(gate.status === "NO_DRAFT"
+                  ? { status: "NOT_REVIEWED", message: "Continue to the review step, read it back and wait for a clear yes before saving." }
+                  : { status: gate.status, message: gate.message });
+              } else {
+                const result = await runServiceFormStep(args as ServiceFormStepArgs);
+                // A change after the read-back means the owner's earlier yes no longer covers what is on screen.
+                if (["fill", "add_task", "edit_task", "remove_task", "move_task"].includes(args.action ?? "") && result.status === "OK") {
+                  serviceConfirm.prepared = false;
+                }
+                if (result.status === "REVIEW") {
+                  // A new read-back starts: only replies after this point count.
+                  Object.assign(serviceConfirm, { prepared: true, turns: 0, latestReply: null });
+                  serviceConfirm.replyItems.clear();
+                }
+                if (result.status === "SAVED") {
+                  serviceConfirm.prepared = false;
+                  window.dispatchEvent(new Event(SERVICES_CHANGED_EVENT));
+                }
+                output = JSON.stringify(result);
+              }
+            }
+          } else if (isOwnerTeamTool(call.name)) {
+            // Browser-only: Team pages (staff, leave requests, attendance). See lib/ai/owner-call/owner-team.ts.
+            try {
+              output = JSON.stringify(await runOwnerTeamTool(call.name, call.arguments, {
+                getToken: () => user.getIdToken(),
+                goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
+                gate: teamConfirm,
+                signal: controller.signal,
+              }));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (isOwnerItemTool(call.name)) {
+            // Browser-only: the Item list page (list, add, edit, delete). See lib/ai/owner-call/owner-item.ts.
+            try {
+              output = JSON.stringify(await runOwnerItemTool(call.name, call.arguments, {
+                getToken: () => user.getIdToken(),
+                goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
+                gate: itemConfirm,
+                signal: controller.signal,
+              }));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (isOwnerCustomerTool(call.name)) {
+            // Browser-only: the Customers page (add, edit, search). See lib/ai/owner-call/owner-customer.ts.
+            try {
+              output = JSON.stringify(await runOwnerCustomerTool(call.name, call.arguments, {
+                getToken: () => user.getIdToken(),
+                goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
+                gate: customerConfirm,
+                signal: controller.signal,
+              }));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (isOwnerKnowledgeTool(call.name)) {
+            // Browser-only: the AI knowledge page (list, edit, publish, unpublish, delete). See lib/ai/owner-call/owner-knowledge.ts.
+            try {
+              output = JSON.stringify(await runOwnerKnowledgeTool(call.name, call.arguments, {
+                getToken: () => user.getIdToken(),
+                goTo: (path) => { if (pathnameRef.current !== path) router.push(path); },
+                gate: knowledgeConfirm,
+                signal: controller.signal,
+              }));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (call.name === LIST_SERVICES_TOOL_NAME) {
+            // Browser-only, read only: the same owner API the Services page loads its list from.
+            try {
+              const response = await fetch("/api/services", {
+                headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+              });
+              const data = await response.json().catch(() => null) as { services?: Parameters<typeof summarizeServices>[0] } | null;
+              if (response.ok && Array.isArray(data?.services)) output = JSON.stringify(summarizeServices(data.services));
+            } catch { /* reported as UNAVAILABLE */ }
+          } else if (call.name === OPEN_EDIT_SERVICE_TOOL_NAME) {
+            // Browser-only: go to the Services page and open the Edit popup for the named service.
+            let args: { serviceName?: unknown } = {};
+            try { args = JSON.parse(call.arguments || "{}"); } catch { /* handled below */ }
+            const serviceName = typeof args.serviceName === "string" ? args.serviceName.trim() : "";
+            if (!serviceName) {
+              output = JSON.stringify({ status: "REJECTED", message: "Ask which service to change, then send serviceName." });
+            } else {
+              if (pathnameRef.current !== SERVICES_PAGE) router.push(SERVICES_PAGE);
+              serviceConfirm.prepared = false; // a new edit: only a read-back after this point counts
+              output = JSON.stringify(await withServicesPage((page) => page.openEdit(serviceName)));
+            }
+          } else if (call.name === DELETE_SERVICE_TOOL_NAME) {
+            // Browser-only: uses the Services page's own delete dialog and the normal owner API.
+            let args: { action?: unknown; serviceName?: unknown } = {};
+            try { args = JSON.parse(call.arguments || "{}"); } catch { /* handled below */ }
+            const serviceName = typeof args.serviceName === "string" ? args.serviceName.trim() : "";
+            if (args.action === "prepare") {
+              if (!serviceName) {
+                output = JSON.stringify({ status: "REJECTED", message: "Ask which service to delete, then send serviceName." });
+              } else {
+                if (pathnameRef.current !== SERVICES_PAGE) router.push(SERVICES_PAGE);
+                deleteConfirm.prepared = false;
+                const result = await withServicesPage((page) => page.prepareDelete(serviceName));
+                if (result.status === "CONFIRM_DELETE") {
+                  // The question starts now: only replies after this point count.
+                  Object.assign(deleteConfirm, { prepared: true, turns: 0, latestReply: null });
+                  deleteConfirm.replyItems.clear();
+                }
+                output = JSON.stringify(result);
+              }
+            } else if (args.action === "confirm") {
+              // Held here unless the owner answered the delete question and did not say no.
+              const gate = checkOwnerReply({
+                prepared: deleteConfirm.prepared,
+                ownerTurnsSinceShown: deleteConfirm.turns,
+                latestOwnerReply: deleteConfirm.latestReply,
+              });
+              if (!gate.ok) {
+                output = JSON.stringify(gate.status === "NO_DRAFT"
+                  ? { status: "NO_DELETE", message: "Nothing is waiting to be deleted. Use action prepare first." }
+                  : { status: "NOT_CONFIRMED", message: "Ask: Should I delete it? This cannot be undone. Confirm only after a clear yes." });
+              } else {
+                const result = await withServicesPage((page) => page.confirmDelete());
+                if (result.status === "DELETED") deleteConfirm.prepared = false;
+                output = JSON.stringify(result);
+              }
+            } else if (args.action === "cancel") {
+              deleteConfirm.prepared = false;
+              output = JSON.stringify(await withServicesPage((page) => page.cancelDelete(), 1_000));
+            } else {
+              output = JSON.stringify({ status: "REJECTED", message: "action must be prepare, confirm or cancel." });
+            }
+          } else if (call.name === CHOOSE_SERVICE_SOURCE_TOOL_NAME) {
+            let args: { source?: unknown; templateName?: unknown } = {};
+            try { args = JSON.parse(call.arguments || "{}"); } catch { /* handled below */ }
+            output = JSON.stringify(args.source === "template" || args.source === "custom"
+              ? chooseServiceSource({
+                source: args.source,
+                templateName: typeof args.templateName === "string" ? args.templateName : undefined,
+              })
+              : { status: "REJECTED", message: "source must be template or custom." });
+          } else if (isVoiceDraftTool(call.name)) {
             try { output = JSON.stringify(await runDraftTool(call.name, call.arguments)); } catch { /* reported as UNAVAILABLE */ }
+          } else if (ownerReply && !ownerReply.ok) {
+            output = JSON.stringify({ status: ownerReply.status, message: ownerReply.message }); // never sent to the server
           } else {
             try {
               const response = await fetch("/api/ai/owner-call/mcp", {
@@ -356,8 +575,39 @@ export function OwnerVoiceSession() {
               if (response.ok) {
                 const result = await response.json();
                 const text = result.result?.content?.find((item: { type: string }) => item.type === "text")?.text;
+                if (result.error || result.result?.isError || typeof text !== "string") {
+                  const code = typeof result.error?.code === "number" ? `RPC ${result.error.code}` : result.result?.isError ? "TOOL_ERROR" : "EMPTY_RESULT";
+                  setMessage(`Sophie could not complete the request (${code}). Please share this code with support.`);
+                }
                 if (typeof text === "string" && !result.result?.isError) {
                   output = text;
+                  if ((call.name === "prepare_service" || call.name === "create_service") && !controller.signal.aborted) {
+                    const status = (JSON.parse(text) as { status?: string }).status;
+                    if (call.name === "prepare_service" && status === "READY_TO_CONFIRM") {
+                      // A new read-back starts: only replies after this point count.
+                      Object.assign(serviceConfirm, { prepared: true, turns: 0, latestReply: null });
+                      serviceConfirm.replyItems.clear();
+                    }
+                    if (call.name === "create_service" && status === "CREATED") {
+                      serviceConfirm.prepared = false; // the stored draft is used up
+                      window.dispatchEvent(new Event(SERVICES_CHANGED_EVENT)); // an open Services page reloads
+                    }
+                  }
+                  // MCP action tools: a prepare_ read-back starts the yes check; confirm or cancel ends it.
+                  if (!controller.signal.aborted && (OWNER_PREPARE_TOOL_NAMES.includes(call.name) ||
+                      call.name === CONFIRM_CHANGE_TOOL || call.name === CANCEL_CHANGE_TOOL)) {
+                    const result = JSON.parse(text) as { status?: string; kind?: string };
+                    if (OWNER_PREPARE_TOOL_NAMES.includes(call.name)) {
+                      if (result.status === "READY_TO_CONFIRM") {
+                        Object.assign(actionConfirm, { prepared: true, turns: 0, latestReply: null });
+                        actionConfirm.replyItems.clear();
+                      }
+                    } else if (call.name === CANCEL_CHANGE_TOOL || result.status === "DONE") {
+                      actionConfirm.prepared = false;
+                      if (result.kind?.startsWith("service_")) window.dispatchEvent(new Event(SERVICES_CHANGED_EVENT));
+                      if (result.kind?.startsWith("staff_")) notifyStaffChanged();
+                    }
+                  }
                   if (call.name === "list_missed_calls" && !controller.signal.aborted) {
                     const report = JSON.parse(text) as { status?: string; date?: string; calls?: {
                       callbackAttempts?: { callbackConversation?: { callId: string; date: string } | null }[]
@@ -365,7 +615,7 @@ export function OwnerVoiceSession() {
                     const { callbackConfirmation, ...briefing } = report;
                     output = JSON.stringify(briefing);
                     if (report.status === "READY_TO_CONFIRM" && callbackConfirmation) {
-                      setCallback({ ...callbackConfirmation, name: report.name });
+                      setCallback({ ...callbackConfirmation, name: report.name, requestId: crypto.randomUUID() });
                       setCallbackStatus("");
                     }
                     if (report.status === "FOLLOW_UP_STATUS") setCallback(null);
@@ -398,8 +648,16 @@ export function OwnerVoiceSession() {
                     setCallLinks(current => [...new Map([...transcripts, ...current].map(item => [item.callId, item])).values()].slice(0, 3));
                   }
                 }
+              } else {
+                setMessage(response.status === 429
+                  ? "Sophie has reached the request limit. Wait one minute before trying again (HTTP 429)."
+                  : `Sophie could not complete the request (HTTP ${response.status}). Please share this code with support.`);
               }
-            } catch {
+            } catch (error) {
+              if (!controller.signal.aborted) {
+                const code = error instanceof Error && error.name === "TimeoutError" ? "TIMEOUT" : error instanceof SyntaxError ? "INVALID_RESPONSE" : "CONNECTION_ERROR";
+                setMessage(`Sophie could not complete the request (${code}). Please share this code with support.`);
+              }
               // Report a tool failure to Sophie so it can answer without guessing.
             }
           }
@@ -490,7 +748,8 @@ export function OwnerVoiceSession() {
     try {
       const response = await fetch("/api/business/sophie-callback", {
         method: "POST", signal: controller.signal,
-        headers: { Authorization: `Bearer ${await user.getIdToken()}`, "x-callback-grant": selected.grant },
+        headers: { Authorization: `Bearer ${await user.getIdToken()}`, "x-callback-grant": selected.grant,
+          "x-owner-call-now": selected.requestId },
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Could not start the callback.");

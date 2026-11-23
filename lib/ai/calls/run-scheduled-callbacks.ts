@@ -12,23 +12,21 @@ import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "./invoice-call-history";
 import { requestSophieCallback } from "./request-callback";
 import { isCustomerCallOptedOut } from "./call-preferences";
 import { isWithinSophieCallingHours } from "./calling-hours";
-
-const SCHEDULED_CALLBACKS = "ai_scheduled_callbacks";
+import { loadDueScheduledCallbacks } from "./due-scheduled-callbacks";
+import {ownerCallRecordInput,ownerScheduledCallsEnabled} from "@/lib/ai/owner-call/owner-scheduled-calls";
 
 export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } = {}) {
   const counts = { processed: 0, deferred: 0, skipped: 0, errors: 0 };
   if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true") return counts;
 
   const now = Date.now();
-  const scheduled = await adminDb.collection(SCHEDULED_CALLBACKS).where("status", "==", "SCHEDULED").limit(500).get();
-  const due = scheduled.docs.filter(doc => typeof doc.get("scheduledAt") === "number" && doc.get("scheduledAt") <= now)
-    .sort((a, b) => a.get("scheduledAt") - b.get("scheduledAt")).slice(0, 6);
+  const due = await loadDueScheduledCallbacks(adminDb, now);
   for (const doc of due) {
     const data = doc.data();
     if (typeof data.scheduledAt !== "number" || data.scheduledAt > now) continue;
     const { businessId, did, number, numberKey, purpose, invoiceId, customerName } = data;
     if (typeof businessId !== "string" || typeof did !== "string" || typeof number !== "string" ||
-        typeof numberKey !== "string" || !["missed_call", "overdue_invoice"].includes(purpose)) {
+        typeof numberKey !== "string" || !["missed_call", "overdue_invoice", "owner_requested"].includes(purpose)) {
       await doc.ref.update({ status: "FAILED", reason: "Invalid scheduled callback." });
       counts.errors++;
       continue;
@@ -51,6 +49,14 @@ export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } =
         .set({ status: "CANCELLED", reason: "Customer opted out of Sophie calls." }, { merge: true });
       counts.skipped++;
       continue;
+    }
+    if(purpose==="owner_requested"){
+      const details=ownerCallRecordInput.safeParse(data);
+      const customer=details.success?(await adminDb.collection("customers").doc(details.data.customerId).get()).data():null;
+      const expired=Date.now()>(typeof data.expiresAt==="number"?data.expiresAt:(data.originalScheduledAt??data.scheduledAt)+2*3600000);
+      if(!details.success||!ownerScheduledCallsEnabled()||route.business.ownerUid!==data.requestedBy||process.env.AI_VOICE_CALL_LOGS_ENABLED==="false"||!customer||customer.registeredBusinessId!==businessId||normalizeInvoiceCallbackNumber(String(customer.phone??""))!==number||customer.fullName!==customerName||expired){
+        await doc.ref.update({status:"CANCELLED",reason:expired?"Scheduled call window expired.":"Owner calls disabled or customer contact changed.",updatedAt:Date.now()});counts.skipped++;continue;
+      }
     }
     if (purpose === "overdue_invoice" &&
         (process.env.AI_SOPHIE_INVOICE_CALLS_ENABLED !== "true" || !profile.sophieInvoiceCallsEnabled)) {
@@ -108,7 +114,8 @@ export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } =
     let reason: string | undefined;
     try {
       const response = await requestSophieCallback({ id: doc.id, did, businessId, number,
-        ...(purpose === "overdue_invoice" && typeof customerName === "string" ? { customerName } : {}) });
+        ...((purpose === "overdue_invoice"||purpose==="owner_requested") && typeof customerName === "string" ? { customerName } : {}),
+        ...(purpose==="owner_requested"?{ownerRequest:{category:data.category,instructions:data.instructions}}:{}) });
       if (response.status === 429) {
         const retryAt = Date.now() + busyRetryMs;
         await doc.ref.update({ status: "SCHEDULED", scheduledAt: retryAt, updatedAt: Date.now(), reason: "Bridge is busy; retrying shortly." });

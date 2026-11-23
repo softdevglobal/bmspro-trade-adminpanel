@@ -118,9 +118,21 @@ function mapCustomerDoc(uid: string, data: Record<string, unknown>): CustomerPro
     registeredBusinessId,
     registeredBookingSlug,
     registeredBusinessName,
+    company: typeof data.company === "string" ? data.company : undefined,
+    notes: typeof data.notes === "string" ? data.notes : undefined,
+    address: mapAddress(data.address),
+    source: typeof data.source === "string" ? data.source : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
+}
+
+function mapAddress(value: unknown): CustomerProfile["address"] {
+  if (!value || typeof value !== "object") return null;
+  const a = value as Record<string, unknown>;
+  const text = (key: string) => (typeof a[key] === "string" ? (a[key] as string) : "");
+  const address = { street: text("street"), suburb: text("suburb"), state: text("state"), postcode: text("postcode") };
+  return address.street || address.suburb || address.state || address.postcode ? address : null;
 }
 
 async function resolveBusinessByBookingSlug(slug: string): Promise<{

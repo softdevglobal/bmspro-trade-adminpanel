@@ -5,6 +5,7 @@ import { PERSONAL_EVENTS_COLLECTION } from "@/lib/calendar/personal-events/types
 import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
 import { JOBS_COLLECTION } from "@/lib/bookings/types";
 import { adminDb } from "@/lib/firebase/admin";
+import { getIndexedQuery } from "@/lib/firebase/indexed-query";
 import { mapInspectionDoc } from "@/lib/inspection/map-inspection-doc";
 import {
   REQUESTS_COLLECTION,
@@ -138,10 +139,12 @@ async function collectJobCandidates(dates: string[]): Promise<ReminderCandidate[
   const seen = new Set<string>();
 
   for (const date of dates) {
-    const snap = await adminDb
+    // Legacy jobs without a status map to "scheduled". Keep this query broad
+    // until those records are explicitly migrated; a status filter would miss them.
+    const query = adminDb
       .collection(JOBS_COLLECTION)
-      .where("scheduledSlot.date", "==", date)
-      .get();
+      .where("scheduledSlot.date", "==", date);
+    const snap = await getIndexedQuery("job-reminders", query, query);
 
     for (const doc of snap.docs) {
       const booking = mapBookingDoc(doc.id, doc.data() ?? {});
@@ -179,10 +182,12 @@ async function collectInspectionCandidates(
   const seen = new Set<string>();
 
   for (const date of dates) {
-    const snap = await adminDb
+    const query = adminDb
       .collection(REQUESTS_COLLECTION)
-      .where("scheduledSlot.date", "==", date)
-      .get();
+      .where("scheduledSlot.date", "==", date);
+    const snap = await getIndexedQuery(
+      "inspection-reminders", query.where("status", "==", "scheduled"), query,
+    );
 
     for (const doc of snap.docs) {
       const request = mapInspectionDoc(doc.id, doc.data() ?? {});
@@ -220,10 +225,10 @@ async function collectPersonalEventCandidates(
   const seen = new Set<string>();
 
   for (const date of dates) {
-    const snap = await adminDb
+    const query = adminDb
       .collection(PERSONAL_EVENTS_COLLECTION)
-      .where("date", "==", date)
-      .get();
+      .where("date", "==", date);
+    const snap = await getIndexedQuery("personal-event-reminders", query, query);
 
     for (const doc of snap.docs) {
       const data = doc.data() ?? {};

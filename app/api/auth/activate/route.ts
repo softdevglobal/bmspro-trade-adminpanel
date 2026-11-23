@@ -1,4 +1,4 @@
-import { activateAccount } from "@/lib/auth/activation";
+import { activateAccountDetailed } from "@/lib/auth/activation";
 import { allowResetCodeRequest } from "@/lib/auth/reset-codes";
 import { NextResponse } from "next/server";
 
@@ -13,8 +13,8 @@ export async function POST(request: Request) {
     if (!(await allowResetCodeRequest("activation", token, request))) {
       return NextResponse.json({ error: "Please wait before trying again." }, { status: 429 });
     }
-    const loginPath = await activateAccount(token, password);
-    return NextResponse.json({ ok: true, loginPath });
+    const result = await activateAccountDetailed(token, password);
+    return NextResponse.json({ ok: true, ...result });
   } catch {
     return NextResponse.json({ error: "Activation failed. The link may be expired or already used. Reset your password to continue." }, { status: 400 });
   }

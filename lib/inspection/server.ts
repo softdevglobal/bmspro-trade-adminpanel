@@ -1,3 +1,4 @@
+import {updateVisitVersioned, visitVersion} from "@/lib/scheduling/visit-version";
 import "server-only";
 import { createAiAssignedInspection, commitAiInspectionApproval } from "@/lib/team/ai-assignment-server";
 
@@ -345,6 +346,7 @@ export async function applyOwnerAction(
   businessId: string,
   action: OwnerAction,
   audit: InspectionActionActor = SYSTEM_ACTOR,
+  expectedVersion?: string,
 ): Promise<
   | { ok: true; request: InspectionRequestDetail }
   | { ok: false; status: number; error: string }
@@ -358,6 +360,8 @@ export async function applyOwnerAction(
   if (!current || current.businessId !== businessId) {
     return { ok: false, status: 404, error: "Request not found." };
   }
+
+  if (expectedVersion && visitVersion(snap) !== expectedVersion) return { ok: false, status: 409, error: "This inspection changed. Prepare it again before confirming." };
 
   const updates: Record<string, unknown> = {
     updatedAt: FieldValue.serverTimestamp(),
@@ -436,7 +440,7 @@ export async function applyOwnerAction(
     }
     if (typeof action.note === "string") updates.ownerNote = action.note;
   } else if (action.type === "assign") {
-    if (current.status !== "scheduled") {
+    if (current.status !== "scheduled" && !(expectedVersion && ["pending", "owner_proposed"].includes(current.status))) {
       return {
         ok: false,
         status: 400,
@@ -563,7 +567,7 @@ export async function applyOwnerAction(
     const saved = await commitAiInspectionApproval(adminDb, ref, snap.updateTime!, updates);
     if (!saved) return { ok: false, status: 409, error: "The assigned inspector's availability or this request changed. Review staff and visit time before confirming." };
   } else {
-    await ref.update(updates);
+    if (!await updateVisitVersioned(ref, snap, updates, expectedVersion)) return { ok: false, status: 409, error: "This inspection changed. Prepare it again before confirming." };
   }
 
   if (action.type === "mark_awaiting_decision") {

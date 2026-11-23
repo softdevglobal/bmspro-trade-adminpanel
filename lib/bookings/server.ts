@@ -1,3 +1,4 @@
+import {updateVisitVersioned} from "@/lib/scheduling/visit-version";
 import "server-only";
 
 import { mapBookingDoc } from "@/lib/bookings/map-booking-doc";
@@ -378,6 +379,7 @@ export async function assignBusinessBooking(
   businessId: string,
   bookingId: string,
   assignment: InspectionAssignment,
+  expectedVersion?: string,
 ): Promise<
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
@@ -393,7 +395,7 @@ export async function assignBusinessBooking(
     return { ok: false, status: 403, error: "Job not found." };
   }
 
-  if (current.status !== "scheduled") {
+  if (current.status !== "scheduled" && !(expectedVersion && current.status === "awaiting")) {
     return {
       ok: false,
       status: 400,
@@ -401,10 +403,10 @@ export async function assignBusinessBooking(
     };
   }
 
-  await ref.update({
+  if (!await updateVisitVersioned(ref, snap, {
     assignedTo: assignment,
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  }, expectedVersion)) return { ok: false, status: 409, error: "This job changed. Prepare it again before confirming." };
 
   const updated = await ref.get();
   const booking = mapBookingDoc(updated.id, updated.data() ?? {});
@@ -436,6 +438,7 @@ export async function updateBusinessBookingSchedule(
     endTime: string;
     notifyCustomer?: boolean;
     skipCareplus?: boolean;
+    expectedVersion?: string;
   },
 ): Promise<
   | { ok: true; booking: BookingDetail }
@@ -487,12 +490,13 @@ export async function updateBusinessBookingSchedule(
     };
   }
 
-  await ref.update({
+  if (!await updateVisitVersioned(ref, snap, {
+    ...(input.expectedVersion && current.status === "awaiting" ? { status: "scheduled" } : {}),
     scheduledSlot: input.slot,
     scheduledStartTime: input.startTime,
     scheduledEndTime: input.endTime,
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  }, input.expectedVersion)) return { ok: false, status: 409, error: "This job changed. Prepare it again before confirming." };
 
   const updated = await ref.get();
   const booking = mapBookingDoc(updated.id, updated.data() ?? {});
@@ -1975,6 +1979,7 @@ export async function deleteBusinessBooking(
 export async function cancelBusinessBooking(
   businessId: string,
   bookingId: string,
+  expectedVersion?: string,
 ): Promise<
   | { ok: true; booking: BookingDetail }
   | { ok: false; status: number; error: string }
@@ -2009,13 +2014,13 @@ export async function cancelBusinessBooking(
     };
   }
 
-  await ref.update({
+  if (!await updateVisitVersioned(ref, snap, {
     status: "cancelled",
     // Remember the pre-cancellation status so it can be restored on undo.
     cancelledFromStatus: current.status,
     cancelledAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  }, expectedVersion)) return { ok: false, status: 409, error: "This job changed. Prepare it again before confirming." };
 
   if (current.inspectionRequestId) {
     await Promise.all([

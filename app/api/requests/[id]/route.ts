@@ -269,6 +269,7 @@ export async function PATCH(
 
   const payload = body as Record<string, unknown>;
   const action = typeof payload.action === "string" ? payload.action : "";
+  const expectedVersion = typeof payload.expectedVersion === "string" ? payload.expectedVersion : undefined;
 
   if (action === "start") {
     const inspectorAuth = await requireAssignedInspector(request, id);
@@ -373,6 +374,7 @@ export async function PATCH(
         note,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -400,6 +402,7 @@ export async function PATCH(
         endTime: window.endTime,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -432,6 +435,7 @@ export async function PATCH(
         note,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -504,6 +508,7 @@ export async function PATCH(
         assignment,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -523,6 +528,7 @@ export async function PATCH(
         note,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -539,6 +545,7 @@ export async function PATCH(
       auth.businessId,
       { type: "undo_cancel" },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -558,6 +565,7 @@ export async function PATCH(
         note,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -654,6 +662,7 @@ export async function PATCH(
         assignedTo,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -673,6 +682,7 @@ export async function PATCH(
         note,
       },
       ownerAudit,
+      expectedVersion,
     );
     if (!result.ok) {
       

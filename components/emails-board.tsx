@@ -4,6 +4,7 @@ import { EmailConnectionSettings } from "@/components/email-connection-settings"
 import { EmailSendRow } from "@/components/email-send-row";
 import { MailboxPanel } from "@/components/mailbox-panel";
 import { useAuth } from "@/lib/auth/auth-context";
+import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import {
   emailApi,
   PENDING_EMAIL_STATUSES,
@@ -37,6 +38,7 @@ const EMPTY_MESSAGES: Record<EmailFilter, string> = {
 /** Every quote, invoice and test email sent from the business's mailbox. */
 export function EmailsBoard() {
   const { user } = useAuth();
+  const visible = usePageVisible();
   const { loading: settingsLoading, enabled } = useEmailSending();
   const [tab, setTab] = useState<EmailTab>("mailbox");
   const [filter, setFilter] = useState<EmailFilter>("all");
@@ -74,20 +76,20 @@ export function EmailsBoard() {
   }, [fetchPage]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !visible) return;
     queueMicrotask(() => {
       setLoading(true);
       void reload();
     });
-  }, [enabled, reload]);
+  }, [enabled, visible, reload]);
 
   // Refresh while anything on screen is still sending.
   const hasPending = items.some((item) => PENDING_EMAIL_STATUSES.includes(item.status));
   useEffect(() => {
-    if (!hasPending) return;
+    if (!enabled || !visible || !hasPending) return;
     const timer = window.setInterval(() => void reload(), 5000);
     return () => window.clearInterval(timer);
-  }, [hasPending, reload]);
+  }, [enabled, visible, hasPending, reload]);
 
   async function loadMore() {
     if (!nextCursor) return;

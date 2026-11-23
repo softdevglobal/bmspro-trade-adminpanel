@@ -11,8 +11,11 @@ let started = false;
 export function startDevScheduleReminderPoller(): void {
   if (started) return;
   started = true;
+  let running = false;
 
   const tick = async () => {
+    if (running) return;
+    running = true;
     try {
       const result = await runScheduleReminders();
       if (result.due > 0 || result.sent > 0) {
@@ -20,6 +23,8 @@ export function startDevScheduleReminderPoller(): void {
       }
     } catch (error) {
       console.error("[schedule-reminders] Dev poll failed:", error);
+    } finally {
+      running = false;
     }
   };
 

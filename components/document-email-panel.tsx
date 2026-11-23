@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth/auth-context";
+import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import { EmailSendRow } from "@/components/email-send-row";
 import {
   EmailApiError,
@@ -407,6 +408,7 @@ function DocumentEmailHistory({
   version: number;
 }) {
   const { user } = useAuth();
+  const visible = usePageVisible();
   const [items, setItems] = useState<EmailSendHistoryItem[]>([]);
 
   const load = useCallback(async () => {
@@ -423,15 +425,16 @@ function DocumentEmailHistory({
   }, [user, documentType, documentId]);
 
   useEffect(() => {
+    if (!visible) return;
     queueMicrotask(() => void load());
-  }, [load, version]);
+  }, [load, version, visible]);
 
   const hasPending = items.some((item) => PENDING_EMAIL_STATUSES.includes(item.status));
   useEffect(() => {
-    if (!hasPending) return;
+    if (!hasPending || !visible) return;
     const timer = window.setInterval(() => void load(), 4000);
     return () => window.clearInterval(timer);
-  }, [hasPending, load]);
+  }, [hasPending, load, visible]);
 
   if (items.length === 0) return null;
 

@@ -239,16 +239,20 @@ test("live listening uses only a verified business call and its mapped extension
   const members = [
     { inbound: { to: input.did, from: "0412345678", trunk_name: "Main", member_status: "ANSWERED" } },
     { extension: { number: "2000", channel_id: "PJSIP/2000-00000001", member_status: "ANSWER" } },
+    { extension: { number: "2000", channel_id: "PJSIP/2000-00000000", member_status: "BYE" } },
     { extension: { number: "3101", member_status: "RING" } },
   ];
   let submitted = 0;
+  let expectedMode = "listen";
+  let failSubmission = false;
   t.mock.method(globalThis, "fetch", async (target: string | URL, init?: RequestInit) => {
     const url = new URL(target);
     if (url.pathname.endsWith("/get_token")) return Response.json({ errcode: 0, access_token: "test" });
     if (url.pathname.endsWith("/call/listen")) {
       submitted++;
       assert.equal(init?.method, "POST");
-      assert.deepEqual(JSON.parse(String(init?.body)), { monitor: "3101", channel_id: "PJSIP/2000-00000001", type: "listen" });
+      assert.deepEqual(JSON.parse(String(init?.body)), { monitor: "3101", channel_id: "PJSIP/2000-00000001", type: expectedMode });
+      if (failSubmission) throw new Error("PBX response lost");
       return Response.json({ errcode: 0 });
     }
     if (url.searchParams.get("type") === "inbound") return Response.json({ errcode: 0, data: [] });
@@ -260,6 +264,14 @@ test("live listening uses only a verified business call and its mapped extension
   const [call] = await findLiveSophieCalls(config, "business-a", id);
   await startSophieListening(config, call);
   assert.equal(submitted, 1);
+  expectedMode = "barge";
+  await startSophieListening(config, call, "barge");
+  assert.equal(submitted, 2, "join sends one barge request using the verified monitor/channel");
+  failSubmission = true;
+  await assert.rejects(startSophieListening(config, call, "barge"), /PBX response lost/);
+  assert.equal(submitted, 3, "an uncertain join must never automatically retry");
+  await assert.rejects(startSophieListening(config, call, "invalid" as "barge"), /Invalid monitoring mode/);
+  assert.equal(submitted, 3);
   state.docs.set(`ai_did_mappings:${input.did}`, { ...mapping, version: 8, recordingPeriodVersion: 8, forwardingExtension: "3101" });
   assert.deepEqual(await findLiveSophieCalls(config, "business-a", id), []);
 });
@@ -317,4 +329,35 @@ test("bridge uses live dashboard mapping, rejects stale call bindings and denies
   assert.equal(unavailable.ok, false);
   if (!unavailable.ok) assert.equal(unavailable.status, 503);
   assert.equal((await authenticateVoiceBridge(bridgeRequest(), env, async () => null)).ok, false);
+});
+
+
+test("bridge joins use verified UUID calls, never guessed PBX channels, and reject stale owners", async t => {
+  const { joinBridgeCall } = await import("../lib/ai/calls/bridge-live-listen");
+  const config = { origin: "https://join-bridge.example.test", secret: "test-bridge-secret-0000000000000000" };
+  const id = "a5d18f15-490c-4ac8-a814-a16dba45fb9d";
+  state.docs.set(`ai_did_mappings:${input.did}`, { ...mapping, isActive: true, version: 7, recordingPeriodVersion: 7, forwardingExtension: "3101" });
+  let posts = 0;
+  let canJoin = true;
+  t.mock.method(globalThis, "fetch", async (target: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(target));
+    assert.equal(new Headers(init?.headers).get("X-BMSPro-Trade-Business"), "business-a");
+    if (url.pathname === "/live-listen/calls") return Response.json([{id, did: input.did, startedAt: Date.now(), canJoin}]);
+    assert.equal(url.pathname, "/live-listen/join");
+    assert.equal(url.searchParams.get("id"), id);
+    assert.equal(init?.method, "POST");
+    assert.equal(init?.body, undefined, "browser-controlled channels or destinations must not be forwarded");
+    posts++;
+    return Response.json({ok: true, status: "REQUESTED"});
+  });
+  assert.equal((await joinBridgeCall(config, "business-a", id)).status, 200);
+  assert.equal(posts, 1);
+  canJoin = false;
+  assert.equal((await joinBridgeCall(config, "business-a", id)).status, 409);
+  assert.equal(posts, 1);
+  canJoin = true;
+  state.docs.set(`ai_did_mappings:${input.did}`, { ...mapping, businessId: "business-b", version: 8 });
+  assert.equal((await joinBridgeCall(config, "business-a", id)).status, 404);
+  assert.equal(posts, 1);
+  assert.equal((await joinBridgeCall(config, "business-a", "PJSIP/2000-anything")).status, 400);
 });

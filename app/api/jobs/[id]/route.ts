@@ -242,6 +242,7 @@ export async function PATCH(
   }
 
   const action = typeof payload.action === "string" ? payload.action : "";
+  const expectedVersion = typeof payload.expectedVersion === "string" ? payload.expectedVersion : undefined;
   const { id } = await context.params;
 
   if (action === "start") {
@@ -557,6 +558,7 @@ export async function PATCH(
       auth.businessId,
       id,
       assignment,
+      expectedVersion,
     );
     if (!result.ok) {
       return NextResponse.json(
@@ -625,6 +627,7 @@ export async function PATCH(
     }
 
     const result = await updateBusinessBookingSchedule(auth.businessId, id, {
+      expectedVersion,
       slot: { date, timeRange },
       startTime,
       endTime,
@@ -1088,7 +1091,7 @@ export async function PATCH(
   }
 
   if (action === "cancel") {
-    const result = await cancelBusinessBooking(auth.businessId, id);
+    const result = await cancelBusinessBooking(auth.businessId, id, expectedVersion);
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },

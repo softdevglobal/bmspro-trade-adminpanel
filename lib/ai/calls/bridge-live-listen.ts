@@ -7,6 +7,9 @@ const bridgeCall = z.object({
   id: z.string().uuid(),
   did: z.string().regex(/^\d{6,15}$/),
   startedAt: z.number().int().positive(),
+  canJoin: z.boolean().optional().default(false),
+  joinStatus: z.enum(["READY", "ALREADY_REQUESTED", "NOT_TRADE_ROUTE", "NOT_MAPPED", "INVALID_EXTENSION",
+    "NOT_CONFIGURED", "MISSING_CALLER_CHANNEL", "INVALID_CALLER_CHANNEL"]).optional(),
 });
 
 export function bridgeLiveListenConfig() {
@@ -19,6 +22,26 @@ export function bridgeLiveListenConfig() {
       url.username || url.password || url.pathname !== "/" || url.search || url.hash ||
       secret.length < 32 || /[\r\n]|YOUR_|REPLACE_/.test(secret)) throw new Error("Invalid live listening configuration.");
   return { origin: url.origin, secret };
+}
+
+export async function joinBridgeCall(config: Config, businessId: string, id: string) {
+  if (!bridgeCall.shape.id.safeParse(id).success) return Response.json({ error: "Invalid live call." }, { status: 400 });
+  const calls = await listBridgeCalls(config, businessId);
+  const call = calls.find(call => call.id === id);
+  if (!call) return Response.json({ error: "This live call is no longer available." }, { status: 404 });
+  if (!call.canJoin) return Response.json({ error: "Joining is unavailable or already requested for this bridge call." }, { status: 409 });
+  const response = await fetch(new URL("/live-listen/join?" + new URLSearchParams({ id }), config.origin), {
+    method: "POST", headers: { Authorization: "Bearer " + config.secret, "X-BMSPro-Trade-Business": businessId },
+    redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
+  });
+  const result = await response.json().catch(() => null);
+  if (response.ok && result?.ok === true && result?.status === "REQUESTED") {
+    return Response.json({ ok: true, status: "REQUESTED" });
+  }
+  return Response.json({ error: typeof result?.error === "string" ? result.error
+    : "Bridge joining could not be confirmed. Check your extension before retrying." }, {
+    status: [400, 403, 404, 409, 429, 503].includes(response.status) ? response.status : 502,
+  });
 }
 
 type Config = NonNullable<ReturnType<typeof bridgeLiveListenConfig>>;

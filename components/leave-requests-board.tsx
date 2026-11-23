@@ -6,7 +6,8 @@ import { useAuth } from "@/lib/auth/auth-context";
 import type { LeaveRequestRecord, LeaveStatus } from "@/lib/leave/types";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { leavePageVoice, matchByName, type VoiceResult } from "@/lib/ai/owner-call/owner-team";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Filter = "pending" | "approved" | "rejected" | "all";
 
@@ -111,12 +112,13 @@ export function LeaveRequestsBoard() {
     [items, selectedId],
   );
 
+  /** Returns null when decided, otherwise the reason (also shown on the page). */
   async function decide(
     id: string,
     action: "approve" | "reject",
     reason?: string,
-  ) {
-    if (!user) return;
+  ): Promise<string | null> {
+    if (!user) return "Please sign in again.";
     setBusyId(id);
     try {
       const token = await user.getIdToken();
@@ -143,14 +145,89 @@ export function LeaveRequestsBoard() {
         current.map((item) => (item.id === id ? updated : item)),
       );
       setSelectedId(null);
+      return null;
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not update the request.",
-      );
+      const message = err instanceof Error ? err.message : "Could not update the request.";
+      setError(message);
+      return message;
     } finally {
       setBusyId(null);
     }
   }
+
+  // Sophie (voice): open the approve or decline dialog for a pending request, like the owner would.
+  // See lib/ai/owner-call/owner-team.ts. Registered once the list has loaded.
+  const voice = useRef({ items, rejectTarget, rejectReason, decide });
+  useEffect(() => {
+    voice.current = { items, rejectTarget, rejectReason, decide };
+  });
+  useEffect(() => {
+    if (!user || loading) return;
+    /** One pending request by the staff member's name (and start date, if they have several). */
+    const pick = (staffName: string, fromDate?: string):
+      { ok: true; item: LeaveRequestRecord } | { ok: false; result: VoiceResult } => {
+      const pending = voice.current.items.filter((item) => item.status === "pending");
+      const people = [...new Set(pending.map((item) => item.requesterName))];
+      const person = matchByName(people, (name) => name, staffName, "person with a pending request");
+      if (!person.ok) return person;
+      let theirs = pending.filter((item) => item.requesterName === person.item);
+      if (fromDate) theirs = theirs.filter((item) => item.fromDate === fromDate);
+      if (theirs.length === 1) return { ok: true, item: theirs[0] };
+      if (theirs.length === 0) return { ok: false, result: { status: "NO_MATCH", message: `${person.item} has no pending request starting ${fromDate}.` } };
+      return { ok: false, result: {
+        status: "WHICH_DATE", dates: theirs.map((item) => `${item.fromDate} to ${item.toDate}`),
+        message: `${person.item} has several pending requests. Ask which one, then send fromDate.`,
+      } };
+    };
+    const describe = (item: LeaveRequestRecord) =>
+      `${item.requesterName}, ${item.fromDate === item.toDate ? item.fromDate : `${item.fromDate} to ${item.toDate}`}, ` +
+      `${item.isFullDay ? "full day" : `${item.startTime ?? "?"} to ${item.endTime ?? "?"}`}`;
+    return leavePageVoice.register({
+      setFilter(next) {
+        setFilter(next);
+        setSelectedId(null);
+        return { status: "OK", message: `Showing ${next} requests.` };
+      },
+      prepareApprove(staffName, fromDate) {
+        const found = pick(staffName, fromDate);
+        if (!found.ok) return found.result;
+        setFilter("pending");
+        setRejectTarget(null);
+        setSelectedId(found.item.id);
+        setApproveTarget(found.item);
+        return { status: "OPENED", message: `The approve dialog for ${describe(found.item)} is open.` };
+      },
+      prepareReject(staffName, reason, fromDate) {
+        const found = pick(staffName, fromDate);
+        if (!found.ok) return found.result;
+        setFilter("pending");
+        setApproveTarget(null);
+        setSelectedId(found.item.id);
+        setRejectTarget(found.item);
+        setRejectReason(reason);
+        return {
+          status: "CONFIRM",
+          message: `The decline dialog for ${describe(found.item)} is on screen with the reason "${reason}". Nothing changed yet. ` +
+            "Read the reason back and ask: Should I reject this request? The staff member will see the reason.",
+        };
+      },
+      async confirmReject() {
+        const { rejectTarget: target, rejectReason: reason } = voice.current;
+        if (!target) return { status: "NOTHING_TO_CONFIRM", message: "The decline dialog is not open." };
+        if (reason.trim().length < 2) return { status: "INVALID", message: "The reason is empty. Ask for one." };
+        setRejectTarget(null);
+        const failure = await voice.current.decide(target.id, "reject", reason.trim());
+        return failure
+          ? { status: "FAILED", message: `Not rejected: ${failure}` }
+          : { status: "DONE", message: `${target.requesterName}'s request is rejected. They will see the reason in the app.` };
+      },
+      cancel() {
+        setApproveTarget(null);
+        setRejectTarget(null);
+        return { status: "CANCELLED", message: "Nothing was changed." };
+      },
+    });
+  }, [user, loading]);
 
   function openReject(item: LeaveRequestRecord) {
     setRejectTarget(item);

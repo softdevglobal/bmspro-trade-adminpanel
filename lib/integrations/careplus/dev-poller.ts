@@ -10,8 +10,11 @@ let started = false;
 export function startDevCareplusOutboxPoller(): void {
   if (started) return;
   started = true;
+  let running = false;
 
   const tick = async () => {
+    if (running) return;
+    running = true;
     try {
       const result = await processCareplusOutbox();
       if (result.sent > 0 || result.failed > 0 || result.retried > 0) {
@@ -19,6 +22,8 @@ export function startDevCareplusOutboxPoller(): void {
       }
     } catch (error) {
       console.error("[careplus-outbox] Dev poll failed", error);
+    } finally {
+      running = false;
     }
   };
 

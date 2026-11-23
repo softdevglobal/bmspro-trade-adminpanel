@@ -4,7 +4,11 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { QuotationPdfViewerModal } from "@/components/quotation-pdf-viewer-modal";
 import { auth } from "@/lib/firebase/client";
 import { fetchAdminItemDocumentBytes } from "@/lib/pdf/fetch-admin-document-pdf";
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import {
+  formatAud, ITEM_FORM_SECTIONS, ITEM_LIMITS, itemFormVoice, itemNameKey, itemsPageVoice, type ItemFormArgs,
+} from "@/lib/ai/owner-call/owner-item";
+import { matchByName, type VoiceResult } from "@/lib/ai/owner-call/owner-team";
 
 import {
   duplicateItemCodeError,
@@ -222,8 +226,10 @@ export function ItemListBoard() {
     setEditorOpen(true);
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget || isDeleting) return;
+  /** Returns null when deleted, otherwise the reason (also shown on the page). */
+  async function confirmDelete(): Promise<string | null> {
+    if (!deleteTarget) return "Nothing is selected to delete.";
+    if (isDeleting) return "Already deleting.";
     setIsDeleting(true);
     setErrorMessage(null);
     const result = await authFetch<{ ok: true }>(
@@ -233,11 +239,69 @@ export function ItemListBoard() {
     setIsDeleting(false);
     if (!result.ok) {
       setErrorMessage(result.error);
-      return;
+      return result.error;
     }
     setDeleteTarget(null);
     void load();
+    return null;
   }
+
+  // Sophie (voice): search, open Add / Edit, and delete through the same dialog as the owner.
+  // See lib/ai/owner-call/owner-item.ts. Registered once the list has loaded.
+  const voice = useRef({ items, deleteTarget, confirmDelete });
+  useEffect(() => {
+    voice.current = { items, deleteTarget, confirmDelete };
+  });
+  useEffect(() => {
+    if (isLoading) return;
+    const find = (itemName: string) => matchByName(voice.current.items, (item) => item.name, itemName, "item");
+    return itemsPageVoice.register({
+      setSearch(next) {
+        setSearch(next);
+      },
+      openAdd() {
+        setDeleteTarget(null);
+        setSearch("");
+        setEditTarget(null);
+        setEditorOpen(true);
+        return { status: "OPENED", message: "The Add item popup is open. Ask for the item name and price, then use item_form_step." };
+      },
+      openEdit(itemName) {
+        const found = find(itemName);
+        if (!found.ok) return found.result;
+        const item = found.item;
+        setDeleteTarget(null);
+        setEditTarget(item);
+        setEditorOpen(true);
+        return {
+          status: "OPENED",
+          message: `Edit item is open for "${item.name}": ${item.code ? `code ${item.code}, ` : ""}price ${formatAud(item.priceAud)}` +
+            `${item.description ? `, description: ${item.description}` : ""}. Ask what to change, then use item_form_step.`,
+        };
+      },
+      prepareDelete(itemName) {
+        const found = find(itemName);
+        if (!found.ok) return found.result;
+        setEditorOpen(false);
+        setDeleteTarget(found.item);
+        return {
+          status: "CONFIRM",
+          message: `The delete dialog for "${found.item.name}" (${formatAud(found.item.priceAud)}) is on screen. Nothing is deleted yet. ` +
+            `Ask: Should I delete ${found.item.name}? This cannot be undone.`,
+        };
+      },
+      async confirmDelete() {
+        const target = voice.current.deleteTarget;
+        if (!target) return { status: "NOTHING_TO_CONFIRM", message: "The delete dialog is not open." };
+        const failure = await voice.current.confirmDelete();
+        return failure ? { status: "FAILED", message: `Not deleted: ${failure}` } : { status: "DONE", message: `"${target.name}" is deleted.` };
+      },
+      cancel() {
+        setDeleteTarget(null);
+        return { status: "CANCELLED", message: "Nothing was deleted." };
+      },
+    });
+  }, [isLoading]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -405,6 +469,8 @@ export function ItemListBoard() {
 
       {editorOpen ? (
         <ItemEditorModal
+          // A fresh popup per item, so switching items (e.g. by voice) never keeps the old values.
+          key={editTarget?.id ?? "new"}
           item={editTarget}
           existingItems={items}
           onClose={() => setEditorOpen(false)}
@@ -508,28 +574,18 @@ function ItemEditorModal({
     };
   }, [onClose]);
 
+  /** What is wrong with these values, or null. Shared by the buttons and Sophie (voice). */
+  function formError(values: { name: string; price: string; code: string }): string | null {
+    const parsedPrice = Number.parseFloat(values.price.trim());
+    if (values.name.trim().length < 1) return "Item name is required.";
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) return "Enter a valid price.";
+    return duplicateItemCodeError(values.code, existingItems, item?.id ?? null);
+  }
+
   function validateForm(): boolean {
-    const trimmedName = name.trim();
-    const parsedPrice = Number.parseFloat(price.trim());
-    if (trimmedName.length < 1) {
-      setLocalError("Item name is required.");
-      return false;
-    }
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      setLocalError("Enter a valid price.");
-      return false;
-    }
-    const duplicateCode = duplicateItemCodeError(
-      code,
-      existingItems,
-      item?.id ?? null,
-    );
-    if (duplicateCode) {
-      setLocalError(duplicateCode);
-      return false;
-    }
-    setLocalError(null);
-    return true;
+    const problem = formError({ name, price, code });
+    setLocalError(problem);
+    return problem === null;
   }
 
   // Advisory only — a sloppy-looking name never blocks saving.
@@ -545,8 +601,10 @@ function ItemEditorModal({
     setCurrentStep(1);
   }
 
-  async function handleSave() {
-    if (isSaving || !validateForm()) return;
+  /** Saves. Returns null when saved, otherwise the reason (also shown in the popup). */
+  async function handleSave(): Promise<string | null> {
+    if (isSaving) return "Already saving.";
+    if (!validateForm()) return formError({ name, price, code }) ?? "Check the item details.";
 
     const trimmedName = name.trim();
     const parsedPrice = Number.parseFloat(price.trim());
@@ -573,10 +631,136 @@ function ItemEditorModal({
     setIsSaving(false);
     if (!result.ok) {
       setLocalError(result.error);
-      return;
+      return result.error;
     }
     onSaved();
+    return null;
   }
+
+  // ---- Sophie (voice): fill, show, scroll, continue, back, save. See lib/ai/owner-call/owner-item.ts ----
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [voiceScroll, setVoiceScroll] = useState<{ to: string; at: number } | null>(null);
+  const voice = useRef({ name, code, description, price, currentStep, imageUrl, documentName, handleSave, formError });
+  useEffect(() => {
+    voice.current = { name, code, description, price, currentStep, imageUrl, documentName, handleSave, formError };
+  });
+  // Each step starts at its top; an error scrolls up so it is seen.
+  useEffect(() => { bodyRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [currentStep]);
+  useEffect(() => { if (localError) bodyRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [localError]);
+  // Bring what Sophie is working on into view and outline it briefly.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!voiceScroll || !body) return;
+    const target = body.querySelector(`[data-voice-section="${voiceScroll.to}"]`);
+    if (!(target instanceof HTMLElement)) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    const outline = ["ring-2", "ring-primary", "ring-offset-2", "rounded-lg"];
+    target.classList.add(...outline);
+    const timer = window.setTimeout(() => target.classList.remove(...outline), 2_000);
+    return () => { window.clearTimeout(timer); target.classList.remove(...outline); };
+  }, [voiceScroll]);
+  useEffect(() => {
+    // The values as the popup will show them once React renders; picks up the owner's own typing between calls.
+    let live = voice.current;
+    let seen = voice.current;
+    const sync = () => { if (voice.current !== seen) live = seen = voice.current; };
+    const sameName = (value: string) => !item
+      ? existingItems.find((existing) => itemNameKey(existing.name) === itemNameKey(value)) ?? null
+      : null;
+    const goToStep = (step: number) => { if (live.currentStep !== step) { live = { ...live, currentStep: step }; setCurrentStep(step); } };
+    const readBack = () => {
+      const priceValue = Number.parseFloat(live.price.trim());
+      const existing = sameName(live.name);
+      return `name "${live.name.trim()}", ${live.code.trim() ? `code ${live.code.trim()}` : "no code"}, ` +
+        `${live.description.trim() ? `description: ${live.description.trim()}` : "no description"}, price ${formatAud(priceValue)}, ` +
+        `${live.imageUrl ? "with a photo" : "no photo"}, ${live.documentName ? `document ${live.documentName}` : "no document"}.` +
+        (existing ? ` An item named "${existing.name}" already exists at ${formatAud(existing.priceAud)}: saving UPDATES that item, it does not add a new one.` : "");
+    };
+
+    return itemFormVoice.register({
+      async step(args: ItemFormArgs): Promise<VoiceResult> {
+        sync();
+        const body = bodyRef.current;
+        if (args.action === "scroll_down" || args.action === "scroll_up") {
+          if (!body) return { status: "NOT_OPEN", message: "The popup is not showing." };
+          const down = args.action === "scroll_down";
+          const atEdge = down ? body.scrollTop + body.clientHeight >= body.scrollHeight - 4 : body.scrollTop <= 4;
+          if (atEdge) return { status: "OK", message: down ? "Already at the bottom." : "Already at the top." };
+          body.scrollBy({ top: (down ? 1 : -1) * Math.round(body.clientHeight * 0.8), behavior: "smooth" });
+          return { status: "OK", message: down ? "Scrolled down." : "Scrolled up." };
+        }
+        if (args.action === "show") {
+          if (!args.section || !(ITEM_FORM_SECTIONS as readonly string[]).includes(args.section)) {
+            return { status: "REJECTED", message: `section must be one of: ${ITEM_FORM_SECTIONS.join(", ")}.` };
+          }
+          goToStep(1);
+          setVoiceScroll({ to: args.section, at: Date.now() });
+          return { status: "OK", message: `The ${args.section} field is on screen.` };
+        }
+        if (args.action === "fill") {
+          let section = "";
+          const next = { ...live };
+          if (args.name !== undefined) {
+            if (!args.name || args.name.length > ITEM_LIMITS.nameMax) return { status: "INVALID", message: `Use a name of 1-${ITEM_LIMITS.nameMax} characters.` };
+            next.name = args.name; section ||= "name";
+          }
+          if (args.code !== undefined) {
+            if (args.code.length > ITEM_LIMITS.codeMax) return { status: "INVALID", message: `Use a code of up to ${ITEM_LIMITS.codeMax} characters.` };
+            next.code = args.code; section ||= "code";
+          }
+          if (args.description !== undefined) {
+            if (args.description.length > ITEM_LIMITS.descriptionMax) return { status: "INVALID", message: `Use a description of up to ${ITEM_LIMITS.descriptionMax} characters.` };
+            next.description = args.description; section ||= "description";
+          }
+          if (args.priceAud !== undefined) { next.price = args.priceAud.toFixed(2); section ||= "price"; }
+          if (!section) return { status: "REJECTED", message: "Send at least one of name, priceAud, code or description." };
+          live = next;
+          if (args.name !== undefined) setName(next.name);
+          if (args.code !== undefined) setCode(next.code);
+          if (args.description !== undefined) setDescription(next.description);
+          if (args.priceAud !== undefined) setPrice(next.price);
+          setLocalError(null);
+          goToStep(1);
+          setVoiceScroll({ to: section, at: Date.now() });
+          const codeClash = args.code ? duplicateItemCodeError(next.code, existingItems, item?.id ?? null) : null;
+          return {
+            status: "OK",
+            message: `Typed in. Now: ${readBack()}${codeClash ? ` Warning: ${codeClash}` : ""} Ask for anything missing, or continue.`,
+          };
+        }
+        if (args.action === "back") {
+          goToStep(1);
+          setLocalError(null);
+          return { status: "OK", message: "Back on step 1 (item details)." };
+        }
+        if (args.action === "continue") {
+          const problem = live.formError({ name: live.name, price: live.price, code: live.code });
+          if (problem) {
+            setLocalError(problem);
+            return { status: "INVALID", message: problem };
+          }
+          setLocalError(null);
+          goToStep(2);
+          return {
+            status: "REVIEW",
+            message: `Review step is open. Read back: ${readBack()} Say the price as dollars and cents. ` +
+              `Then ask: Should I ${item ? "save these changes" : "add this item"}? Save only after a clear yes.`,
+          };
+        }
+        // save
+        if (live.currentStep !== 2) return { status: "NOT_AT_REVIEW", message: "Continue to the review step first." };
+        const updatesExisting = sameName(live.name);
+        const failure = await live.handleSave();
+        if (failure) return { status: "NOT_SAVED", message: failure };
+        return {
+          status: "SAVED",
+          message: item ? "The changes are saved. Tell the owner."
+            : updatesExisting ? `The existing item "${updatesExisting.name}" was updated (not a new one). Tell the owner.`
+              : "The item is added. Tell the owner.",
+        };
+      },
+    });
+  }, [item, existingItems]);
 
   async function handlePhotoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -684,7 +868,7 @@ function ItemEditorModal({
           </button>
         </header>
 
-        <div className="min-h-0 overflow-y-auto px-5 py-5">
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto px-5 py-5">
           {localError ? (
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
               <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
@@ -703,7 +887,7 @@ function ItemEditorModal({
                 icon="inventory_2"
               />
 
-              <label className="flex flex-col gap-2">
+              <label data-voice-section="photo" className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Photo
                 </span>
@@ -766,7 +950,7 @@ function ItemEditorModal({
                 </div>
               </label>
 
-              <label className="flex flex-col gap-2">
+              <label data-voice-section="code" className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Item code
                 </span>
@@ -780,7 +964,7 @@ function ItemEditorModal({
                 />
               </label>
 
-              <label className="flex flex-col gap-2">
+              <label data-voice-section="name" className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Name <span className="text-error">*</span>
                 </span>
@@ -801,7 +985,7 @@ function ItemEditorModal({
                 ) : null}
               </label>
 
-              <label className="flex flex-col gap-2">
+              <label data-voice-section="description" className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Description
                 </span>
@@ -815,7 +999,7 @@ function ItemEditorModal({
                 />
               </label>
 
-              <label className="flex flex-col gap-2">
+              <label data-voice-section="price" className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Price (AUD) <span className="text-error">*</span>
                 </span>
@@ -831,7 +1015,7 @@ function ItemEditorModal({
                 />
               </label>
 
-              <div className="flex flex-col gap-2">
+              <div data-voice-section="document" className="flex flex-col gap-2">
                 <span className="font-body text-[13px] font-semibold tracking-wide text-on-surface-variant">
                   Document{" "}
                   <span className="font-normal text-on-surface-variant/80">

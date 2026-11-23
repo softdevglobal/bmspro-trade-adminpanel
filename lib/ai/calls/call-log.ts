@@ -13,6 +13,7 @@ import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
 export async function saveCallLog(binding: VoiceBusiness, input: CallLogInput): Promise<boolean> {
   const endedAt = new Date(input.endedAt);
   const firstCaller = input.transcript.find(turn => turn.speaker === "caller")?.text.trim() ?? null;
+  let created = true;
   try {
     await adminDb.collection(CALL_LOGS_COLLECTION).doc(input.callId).create({
       businessId: binding.businessId,
@@ -41,9 +42,23 @@ export async function saveCallLog(binding: VoiceBusiness, input: CallLogInput): 
       // Firestore's TTL policy on expireAt deletes the log after the retention period.
       expireAt: Timestamp.fromMillis(endedAt.getTime() + callLogRetentionDays() * 86_400_000),
     });
-    return true;
   } catch (error) {
-    if ((error as { code?: number })?.code === 6) return false; // ALREADY_EXISTS: a retry of a saved call
-    throw error;
+    if ((error as { code?: number })?.code === 6) created = false;
+    else throw error;
   }
+  // Link the existing transcript instead of copying customer speech into a second,
+  // longer-lived record. A retry can repair this link if its first write failed.
+  if(input.ownerScheduledCall && input.callbackAttemptId){
+    if(!created){
+      const saved=(await adminDb.collection(CALL_LOGS_COLLECTION).doc(input.callId).get()).data();
+      if(saved?.businessId!==binding.businessId||saved.did!==binding.did||saved.callerKey!==phoneComparisonKey(input.callerNumber)||saved.callbackAttemptId!==input.callbackAttemptId)return false;
+    }
+    const ref=adminDb.collection("ai_scheduled_callbacks").doc(input.callbackAttemptId);
+    await adminDb.runTransaction(async tx=>{
+      const snap=await tx.get(ref);const data=snap.data();
+      if(data?.purpose!=="owner_requested"||data.businessId!==binding.businessId||data.did!==binding.did||data.numberKey!==phoneComparisonKey(input.callerNumber)||data.callLogId&&data.callLogId!==input.callId)return;
+      tx.update(ref,{callLogId:input.callId,conversationEndedAt:endedAt.getTime(),updatedAt:Date.now()});
+    });
+  }
+  return created;
 }

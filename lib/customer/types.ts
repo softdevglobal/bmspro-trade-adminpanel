@@ -20,6 +20,12 @@ export type CustomerProfile = {
   registeredBusinessId: string | null;
   registeredBookingSlug: string | null;
   registeredBusinessName: string | null;
+  /** Optional details the owner adds by hand (Add / Edit customer). */
+  company?: string;
+  notes?: string;
+  address?: { street: string; suburb: string; state: string; postcode: string } | null;
+  /** How the customer was added: manual, voice, mcp (or csv from the settings import). */
+  source?: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 };
