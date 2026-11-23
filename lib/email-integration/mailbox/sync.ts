@@ -31,7 +31,8 @@ import { getMailboxAdapter } from "@/lib/email-integration/providers";
 import { classifyMessage } from "@/lib/email-integration/mailbox/match";
 import {
   deleteStoredMessages,
-  loadKnownMessages,
+  isStoredThreadLinked,
+  loadKnownMessageIds,
   markMessagesDeleted,
   updateMessageLabels,
   updateMessageMatch,
@@ -68,6 +69,8 @@ type IngestContext = {
   mail: BusinessMailContext;
   linkedThreads: Set<string>;
   knownMessages: Set<string>;
+  checkedMessageIds: Set<string>;
+  checkedThreadIds: Set<string>;
   /** Threads already expanded in this run. */
   expanded: Set<string>;
 };
@@ -100,7 +103,13 @@ async function ingest(
   const newlyLinked: string[] = [];
   // Providers that list full details with the ids (Outlook) skip a fetch per message.
   const prefetched = new Map((options.prefetched ?? []).map((message) => [message.id, message]));
-  const todo = ids.filter(
+  const uniqueIds = [...new Set(ids)];
+  const uncheckedIds = uniqueIds.filter((id) => !context.checkedMessageIds.has(id));
+  const known = await loadKnownMessageIds(context.connection.id, uncheckedIds);
+  for (const id of uncheckedIds) context.checkedMessageIds.add(id);
+  for (const id of known) context.knownMessages.add(id);
+
+  const todo = uniqueIds.filter(
     (id) => options.refresh || options.relink || !context.knownMessages.has(id),
   );
   for (let i = 0; i < todo.length; i += FETCH_CONCURRENCY) {
@@ -109,6 +118,19 @@ async function ingest(
         .slice(i, i + FETCH_CONCURRENCY)
         .map((id) => prefetched.get(id) ?? context.adapter.getMetadata(context.credentials, id)),
     );
+    const threadIds = new Set<string>();
+    for (const message of batch) {
+      if (message && !context.checkedThreadIds.has(message.threadId)) {
+        threadIds.add(message.threadId);
+      }
+    }
+    await Promise.all([...threadIds].map(async (threadId) => {
+      if (await isStoredThreadLinked(context.connection.id, threadId)) {
+        context.linkedThreads.add(threadId);
+      }
+      context.checkedThreadIds.add(threadId);
+    }));
+
     // Classify in order (it updates the linked-thread set), then write the
     // whole batch in parallel.
     const writes: Promise<void>[] = [];
@@ -262,17 +284,16 @@ export async function syncMailbox(
     // Mail stored under an older rule set is cleared first.
     if (claimed.outdated) await deleteStoredMessages(connection.id);
 
-    const [mail, known] = await Promise.all([
-      loadBusinessMailContext(connection.businessId),
-      loadKnownMessages(connection.id),
-    ]);
+    const mail = await loadBusinessMailContext(connection.businessId);
     const context: IngestContext = {
       adapter,
       credentials: credentials.credentials,
       connection,
       mail,
-      linkedThreads: known.linkedThreads,
-      knownMessages: known.messages,
+      linkedThreads: new Set(),
+      knownMessages: new Set(),
+      checkedMessageIds: new Set(),
+      checkedThreadIds: new Set(),
       expanded: new Set(),
     };
 
@@ -365,20 +386,20 @@ export async function importMessages(
 ): Promise<void> {
   const adapter = getMailboxAdapter(connection.provider);
   if (!adapter) return;
-  const [mail, known] = await Promise.all([
-    loadBusinessMailContext(connection.businessId),
-    loadKnownMessages(connection.id),
-  ]);
-  const missing = providerMessageIds.filter((id) => !known.messages.has(id));
+  const ids = [...new Set(providerMessageIds)];
+  const knownMessages = await loadKnownMessageIds(connection.id, ids);
+  const missing = ids.filter((id) => !knownMessages.has(id));
   if (missing.length === 0) return;
   await ingest(
     {
       adapter,
       credentials,
       connection,
-      mail,
-      linkedThreads: known.linkedThreads,
-      knownMessages: known.messages,
+      mail: await loadBusinessMailContext(connection.businessId),
+      linkedThreads: new Set(),
+      knownMessages,
+      checkedMessageIds: new Set(ids),
+      checkedThreadIds: new Set(),
       expanded: new Set(),
     },
     missing,

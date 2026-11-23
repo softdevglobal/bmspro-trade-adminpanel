@@ -113,10 +113,11 @@ export async function searchMessagePage(
   credentials: ProviderCredentials,
   query: string,
   pageToken: string | null,
+  pageSize = 100,
 ): Promise<{ ids: string[]; nextPageToken: string | null }> {
   const params: Array<[string, string]> = [
     ["q", query],
-    ["maxResults", "100"],
+    ["maxResults", String(pageSize)],
     ["includeSpamTrash", "true"],
   ];
   if (pageToken) params.push(["pageToken", pageToken]);
@@ -410,8 +411,8 @@ export const gmailMailbox: MailboxAdapter = {
     };
   },
 
-  searchPage(credentials, search, pageToken) {
-    return searchMessagePage(credentials, gmailQuery(search), pageToken);
+  searchPage(credentials, search, pageToken, pageSize) {
+    return searchMessagePage(credentials, gmailQuery(search), pageToken, pageSize);
   },
 
   threadMessageIds: getThreadMessageIds,

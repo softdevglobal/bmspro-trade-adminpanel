@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   EMAIL_BACKOFF_SECONDS,
+  EMAIL_CONNECTIONS_COLLECTION,
   EMAIL_LEASE_MS,
   EMAIL_MAX_ATTEMPTS,
   EMAIL_MAX_BODY_LENGTH,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/email-integration/config";
 import {
   getEmailConnectionById,
+  mapConnectionDoc,
   markConnectionNeedsReconnect,
   type EmailConnectionRecord,
 } from "@/lib/email-integration/connections";
@@ -224,6 +226,9 @@ async function createOutboxItem(
       payloadHash,
       status: "queued",
       attemptCount: 0,
+      attemptGeneration: 0,
+      retryGeneration: 0,
+      leaseOwner: null,
       nextAttemptAt: Timestamp.now(),
       leaseUntil: null,
       providerMessageId: null,
@@ -585,27 +590,35 @@ export async function enqueueMailboxMessage(input: {
 
 // ---- Worker ----------------------------------------------------------------
 
+type AttemptLease = { generation: number; owner: string };
+
+function ownsAttempt(data: DocumentData, attempt: AttemptLease): boolean {
+  return data.status === "sending" && data.attemptGeneration === attempt.generation &&
+    data.leaseOwner === attempt.owner;
+}
+
 async function settle(
   outboxId: string,
   businessId: string,
   connectionId: string | null,
+  attempt: AttemptLease,
   status: EmailOutboxStatus,
   eventType: EmailEventType,
   patch: Record<string, unknown> = {},
-): Promise<void> {
-  await adminDb.collection(EMAIL_OUTBOX_COLLECTION).doc(outboxId).update({
-    ...patch,
-    status,
-    leaseUntil: null,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-  await recordEmailEvent({
-    businessId,
-    eventType,
-    outboxId,
-    connectionId,
-    safeErrorDetail:
-      typeof patch.errorCode === "string" ? patch.errorCode : null,
+): Promise<EmailOutboxStatus | null> {
+  const ref = adminDb.collection(EMAIL_OUTBOX_COLLECTION).doc(outboxId);
+  return adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.data()?.businessId !== businessId || !ownsAttempt(snap.data() ?? {}, attempt)) return null;
+    tx.update(ref, {
+      ...patch, status, leaseUntil: null, leaseOwner: null,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    await recordEmailEvent({
+      businessId, eventType, outboxId, connectionId,
+      safeErrorDetail: typeof patch.errorCode === "string" ? patch.errorCode : null,
+    }, tx);
+    return status;
   });
 }
 
@@ -623,32 +636,38 @@ function backoffMs(attempt: number, retryAfterSeconds: number | null): number {
  */
 export async function processOutboxItem(outboxId: string): Promise<EmailOutboxStatus | null> {
   const ref = adminDb.collection(EMAIL_OUTBOX_COLLECTION).doc(outboxId);
+  const leaseOwner = randomBytes(16).toString("hex");
   const claimed = await adminDb.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return null;
     const data = snap.data() ?? {};
     if (data.status !== "queued" && data.status !== "retry_wait") return null;
     if ((toMillis(data.nextAttemptAt) ?? 0) > Date.now()) return null;
+    const attemptGeneration = (Number(data.attemptGeneration) || 0) + 1;
     tx.update(ref, {
       status: "sending",
+      attemptGeneration,
+      leaseOwner,
       leaseUntil: Timestamp.fromMillis(Date.now() + EMAIL_LEASE_MS),
       attemptCount: FieldValue.increment(1),
       updatedAt: FieldValue.serverTimestamp(),
     });
-    return { ...data, attemptCount: (Number(data.attemptCount) || 0) + 1 } as DocumentData;
+    return { ...data, attemptGeneration, leaseOwner, attemptCount: (Number(data.attemptCount) || 0) + 1 } as DocumentData;
   });
   if (!claimed) return null;
 
   const businessId = String(claimed.businessId);
   const connectionId = String(claimed.connectionId);
+  const attempt: AttemptLease = { generation: claimed.attemptGeneration, owner: claimed.leaseOwner };
+  const finish = (status: EmailOutboxStatus, event: EmailEventType, patch: Record<string, unknown>) =>
+    settle(outboxId, businessId, connectionId, attempt, status, event, patch);
 
   // Recheck the sender's permission and the mailbox at send time.
   if (!(await actorCanSend(String(claimed.actorId), businessId))) {
-    await settle(outboxId, businessId, connectionId, "held", "held", {
+    return finish("held", "held", {
       errorCode: "permission_revoked",
       safeErrorDetail: "The person who queued this email can no longer send email.",
     });
-    return "held";
   }
 
   const connection = await getEmailConnectionById(businessId, connectionId);
@@ -658,31 +677,29 @@ export async function processOutboxItem(outboxId: string): Promise<EmailOutboxSt
     connection.generation !== claimed.connectionGeneration ||
     connection.providerAccountId !== claimed.providerAccountId
   ) {
-    await settle(outboxId, businessId, connectionId, "held", "held", {
+    return finish("held", "held", {
       errorCode: "sender_changed",
       safeErrorDetail: "The sending mailbox changed after this email was queued.",
     });
-    return "held";
   }
   if (connection.status === "needs_reconnect") {
-    await settle(outboxId, businessId, connectionId, "blocked_auth", "blocked_auth", {
+    return finish("blocked_auth", "blocked_auth", {
       errorCode: connection.lastErrorCode ?? "needs_reconnect",
       safeErrorDetail: "Reconnect the mailbox, then resume this email.",
     });
-    return "blocked_auth";
   }
 
   const credentials = await freshCredentials(connection);
   if (!credentials.ok) {
     if (credentials.authFailure) {
-      await markConnectionNeedsReconnect(connection, credentials.code);
-      await settle(outboxId, businessId, connectionId, "blocked_auth", "blocked_auth", {
+      const status = await finish("blocked_auth", "blocked_auth", {
         errorCode: credentials.code,
         safeErrorDetail: "Reconnect the mailbox, then resume this email.",
       });
-      return "blocked_auth";
+      if (status) await markConnectionNeedsReconnect(connection, credentials.code);
+      return status;
     }
-    return scheduleRetry(outboxId, businessId, connectionId, claimed.attemptCount, {
+    return scheduleRetry(outboxId, businessId, connectionId, attempt, claimed.attemptCount, {
       code: credentials.code,
       detail: "Could not refresh the mailbox sign-in.",
       retryAfterSeconds: null,
@@ -719,7 +736,7 @@ export async function processOutboxItem(outboxId: string): Promise<EmailOutboxSt
         .download();
       attachments.push({ filename: file.name, contentType: file.contentType, content });
     } catch {
-      return scheduleRetry(outboxId, businessId, connectionId, claimed.attemptCount, {
+      return scheduleRetry(outboxId, businessId, connectionId, attempt, claimed.attemptCount, {
         code: "attachment_unavailable",
         detail: "A stored attachment could not be read.",
         retryAfterSeconds: null,
@@ -729,12 +746,26 @@ export async function processOutboxItem(outboxId: string): Promise<EmailOutboxSt
 
   const adapter = getEmailAdapter(connection.provider);
   if (!adapter) {
-    await settle(outboxId, businessId, connectionId, "failed", "failed", {
+    return finish("failed", "failed", {
       errorCode: "provider_unsupported",
       safeErrorDetail: "This email provider is not supported.",
     });
-    return "failed";
   }
+
+  const renewed = await adminDb.runTransaction(async (tx) => {
+    const [snap, mailbox] = await tx.getAll(ref, adminDb.collection(EMAIL_CONNECTIONS_COLLECTION).doc(connectionId));
+    const data = snap.data() ?? {};
+    if (!ownsAttempt(data, attempt) || (toMillis(data.leaseUntil) ?? 0) <= Date.now()) return null;
+    const current = mailbox.exists ? mapConnectionDoc(mailbox.id, mailbox.data() ?? {}) : null;
+    if (!current || current.status !== "active" || current.businessId !== businessId ||
+        current.generation !== connection.generation || current.providerAccountId !== connection.providerAccountId) return "sender_changed";
+    tx.update(ref, { leaseUntil: Timestamp.fromMillis(Date.now() + EMAIL_LEASE_MS) });
+    return "renewed";
+  });
+  if (renewed === "sender_changed") {
+    return finish("held", "held", { errorCode: "sender_changed", safeErrorDetail: "The mailbox changed before sending." });
+  }
+  if (!renewed) return null;
 
   const result = await adapter.send(credentials.credentials, {
     from: snapshot.from,
@@ -752,36 +783,33 @@ export async function processOutboxItem(outboxId: string): Promise<EmailOutboxSt
 
   switch (result.kind) {
     case "accepted":
-      await settle(outboxId, businessId, connectionId, "accepted", "accepted", {
+      return finish("accepted", "accepted", {
         providerMessageId: result.providerMessageId,
         providerThreadId: result.providerThreadId,
         acceptedAt: FieldValue.serverTimestamp(),
         errorCode: null,
         safeErrorDetail: null,
       });
-      return "accepted";
-    case "auth_failure":
-      await markConnectionNeedsReconnect(connection, result.code);
-      await settle(outboxId, businessId, connectionId, "blocked_auth", "blocked_auth", {
-        errorCode: result.code,
-        safeErrorDetail: result.detail,
+    case "auth_failure": {
+      const status = await finish("blocked_auth", "blocked_auth", {
+        errorCode: result.code, safeErrorDetail: result.detail,
       });
-      return "blocked_auth";
+      if (status) await markConnectionNeedsReconnect(connection, result.code);
+      return status;
+    }
     case "unknown":
-      await settle(outboxId, businessId, connectionId, "unknown", "unknown", {
+      return finish("unknown", "unknown", {
         errorCode: result.code,
         safeErrorDetail: result.detail,
       });
-      return "unknown";
     case "safe_failure":
       if (!result.retryable) {
-        await settle(outboxId, businessId, connectionId, "failed", "failed", {
+        return finish("failed", "failed", {
           errorCode: result.code,
           safeErrorDetail: result.detail,
         });
-        return "failed";
       }
-      return scheduleRetry(outboxId, businessId, connectionId, claimed.attemptCount, {
+      return scheduleRetry(outboxId, businessId, connectionId, attempt, claimed.attemptCount, {
         code: result.code,
         detail: result.detail,
         retryAfterSeconds: result.retryAfterSeconds,
@@ -793,24 +821,23 @@ async function scheduleRetry(
   outboxId: string,
   businessId: string,
   connectionId: string,
+  attempt: AttemptLease,
   attemptCount: number,
   failure: { code: string; detail: string; retryAfterSeconds: number | null },
-): Promise<EmailOutboxStatus> {
+): Promise<EmailOutboxStatus | null> {
   if (attemptCount >= EMAIL_MAX_ATTEMPTS) {
-    await settle(outboxId, businessId, connectionId, "failed", "failed", {
+    return settle(outboxId, businessId, connectionId, attempt, "failed", "failed", {
       errorCode: failure.code,
       safeErrorDetail: `${failure.detail} Gave up after ${attemptCount} attempts.`,
     });
-    return "failed";
   }
-  await settle(outboxId, businessId, connectionId, "retry_wait", "retry_scheduled", {
+  return settle(outboxId, businessId, connectionId, attempt, "retry_wait", "retry_scheduled", {
     errorCode: failure.code,
     safeErrorDetail: failure.detail,
     nextAttemptAt: Timestamp.fromMillis(
       Date.now() + backoffMs(attemptCount, failure.retryAfterSeconds),
     ),
   });
-  return "retry_wait";
 }
 
 /**
@@ -841,22 +868,22 @@ export async function processEmailOutbox(): Promise<{
       tx.update(doc.ref, {
         status: "unknown",
         leaseUntil: null,
+        leaseOwner: null,
         errorCode: "worker_interrupted",
         safeErrorDetail: "Sending was interrupted. Check your Sent folder before resending.",
         updatedAt: FieldValue.serverTimestamp(),
       });
-      return true;
-    });
-    if (moved) {
-      markedUnknown += 1;
-      const data = doc.data();
       await recordEmailEvent({
         businessId: String(data.businessId),
         eventType: "unknown",
         outboxId: doc.id,
         connectionId: String(data.connectionId),
         safeErrorDetail: "worker_interrupted",
-      });
+      }, tx);
+      return true;
+    });
+    if (moved) {
+      markedUnknown += 1;
     }
   }
 
@@ -904,6 +931,7 @@ export function mapHistoryItem(id: string, data: DocumentData): EmailSendHistory
     attachmentName: snapshot.attachmentName ?? null,
     actorName: typeof data.actorName === "string" ? data.actorName : null,
     attemptCount: Number(data.attemptCount) || 0,
+    retryGeneration: Number(data.retryGeneration) || 0,
     errorCode: typeof data.errorCode === "string" ? data.errorCode : null,
     errorDetail: typeof data.safeErrorDetail === "string" ? data.safeErrorDetail : null,
     createdAt: toMillis(data.createdAt),
@@ -999,6 +1027,7 @@ export async function retryOutboxItem(input: {
   actorId: string;
   outboxId: string;
   confirmUnknown: boolean;
+  expectedRetryGeneration?: number;
 }): Promise<{ ok: true; status: EmailOutboxStatus } | OutboxError> {
   if (!input.outboxId.trim() || input.outboxId.includes("/")) {
     return { ok: false, status: 404, error: "Email not found." };
@@ -1046,27 +1075,41 @@ export async function retryOutboxItem(input: {
   // Whoever resumes the email becomes responsible for it, so the worker's
   // permission recheck applies to them rather than the original sender.
   const actor = await readActor(input.actorId);
-  await ref.update({
-    status: "queued",
-    attemptCount: 0,
-    nextAttemptAt: Timestamp.now(),
-    leaseUntil: null,
-    actorId: input.actorId,
-    actorName: actor.name,
-    connectionGeneration: connection.generation,
-    errorCode: null,
-    safeErrorDetail: null,
-    updatedAt: FieldValue.serverTimestamp(),
+  return adminDb.runTransaction(async (tx) => {
+    const [current, mailbox] = await tx.getAll(
+      ref, adminDb.collection(EMAIL_CONNECTIONS_COLLECTION).doc(connection.id),
+    );
+    const latest = current.data();
+    if (!current.exists || !latest || latest.businessId !== input.businessId) {
+      return { ok: false, status: 404, error: "Email not found." };
+    }
+    if (!snap.updateTime!.isEqual(current.updateTime!) ||
+        !RETRYABLE_BY_STAFF.includes(latest.status) ||
+        (Number(latest.retryGeneration) || 0) !== (input.expectedRetryGeneration ?? 0)) {
+      return { ok: false, status: 409, error: "This email changed. Refresh its status before retrying." };
+    }
+    if (latest.status === "unknown" && !input.confirmUnknown) {
+      return { ok: false, status: 409, error: "Check your Sent folder first — this email may already have been sent.", code: "confirm_unknown" };
+    }
+    const sender = mailbox.exists ? mapConnectionDoc(mailbox.id, mailbox.data() ?? {}) : null;
+    if (!sender || sender.businessId !== input.businessId || sender.status !== "active" ||
+        sender.generation !== connection.generation || sender.providerAccountId !== latest.providerAccountId) {
+      return { ok: false, status: 409, error: "The mailbox changed. Refresh its connection before retrying.", code: "sender_changed" };
+    }
+    tx.update(ref, {
+      status: "queued", attemptCount: 0,
+      retryGeneration: (Number(latest.retryGeneration) || 0) + 1,
+      nextAttemptAt: Timestamp.now(), leaseUntil: null, leaseOwner: null,
+      actorId: input.actorId, actorName: actor.name,
+      connectionGeneration: connection.generation,
+      errorCode: null, safeErrorDetail: null, updatedAt: FieldValue.serverTimestamp(),
+    });
+    await recordEmailEvent({
+      businessId: input.businessId, eventType: "retry_requested", outboxId: current.id,
+      connectionId: connection.id, actorId: input.actorId, safeErrorDetail: latest.status,
+    }, tx);
+    return { ok: true, status: "queued" };
   });
-  await recordEmailEvent({
-    businessId: input.businessId,
-    eventType: "retry_requested",
-    outboxId: input.outboxId,
-    connectionId: connection.id,
-    actorId: input.actorId,
-    safeErrorDetail: status,
-  });
-  return { ok: true, status: "queued" };
 }
 
 /** Reads one item for status polling after a send. */
