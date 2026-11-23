@@ -1,3 +1,5 @@
+import { INSPECTION_CREATE_TOOL, JOB_CREATE_TOOL, VISIT_PREPARE_TOOLS } from "./owner-visits";
+import {OWNER_CALL_PREPARE_TOOL} from "./owner-scheduled-calls";
 import { z } from "zod";
 import { ownerBriefingTools } from "@/lib/ai/mcp/tools/owner-briefing.tools";
 import { MAX_LOOKBACK_DAYS } from "@/lib/ai/owner-call/day-activity";
@@ -196,6 +198,13 @@ const serviceTools: OwnerVoiceTool[] = [
  * Each tool validates its own arguments, so the MCP shape only names the fields.
  */
 const ACTION_RUNNERS: Record<string, (actions: OwnerActionTools, args: unknown) => Promise<unknown>> = {
+  find_call_customers:(a,args)=>a.findCallCustomers(args),
+  [OWNER_CALL_PREPARE_TOOL]:(a,args)=>a.prepareScheduledCall(args),
+  [JOB_CREATE_TOOL]: (a, args) => a.prepareJobCreate(args),
+  [INSPECTION_CREATE_TOOL]: (a, args) => a.prepareInspectionCreate(args),
+  get_work_visits: (a, args) => a.getWorkVisits(args),
+  ...Object.fromEntries(VISIT_PREPARE_TOOLS.map(name => [name, (a: OwnerActionTools, args: unknown) =>
+    a.prepareVisit(args, name.startsWith("prepare_job_") ? "job" : "inspection", name.endsWith("_schedule") ? "schedule" : name.endsWith("_assignment") ? "assignment" : "cancel")])),
   get_services: (a) => a.getServices(),
   prepare_service_update: (a, args) => a.prepareServiceUpdate(args),
   prepare_service_delete: (a, args) => a.prepareServiceDelete(args),
@@ -269,15 +278,19 @@ export function ownerVoiceDraftsEnabled(env: Readonly<Record<string, string | un
  * either mode can call what it was offered.
  */
 export function ownerVoiceToolList({
-  knowledge, services = false, team = false, drafts = false, customers = false, items = false, actions = false,
+  knowledge, services = false, team = false, drafts = false, customers = false, items = false, actions = false, visits = false, scheduledCalls = false,
 }: {
-  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; actions?: boolean;
+  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; actions?: boolean; visits?: boolean; scheduledCalls?:boolean;
 }): OwnerVoiceTool[] {
   return [
     ...briefingTools, // always offered
     ...(knowledge ? [knowledgeTool] : []), // when owner knowledge is on
     ...(services ? serviceTools : []), // when voice service creation is on
-    ...(actions ? actionTools({ services, team, drafts, customers, items }) : []), // MCP twins of the browser tools
+    ...(actions || visits || scheduledCalls ? [
+      ...(actions ? actionTools({ services, team, drafts, customers, items }) : []),
+      ...(visits ? ["get_work_visits", "get_services", "get_staff", JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, ...VISIT_PREPARE_TOOLS, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : []),
+      ...(scheduledCalls?["find_call_customers",OWNER_CALL_PREPARE_TOOL,CONFIRM_CHANGE_TOOL,CANCEL_CHANGE_TOOL].map(actionTool):[]),
+    ].filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index) : []), // MCP twins of the browser tools
   ];
 }
 

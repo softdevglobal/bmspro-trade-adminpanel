@@ -44,7 +44,10 @@ export async function GET(request: Request) {
         customerName: typeof data.customerName === "string" ? data.customerName : null,
         callerLastFour: digits.length >= 4 ? digits.slice(-4) : null,
         did: typeof data.did === "string" ? data.did : null,
-        purpose: data.purpose === "overdue_invoice" ? "Overdue invoice" : "Missed-call follow-up",
+        purpose: data.purpose === "owner_requested" ? "Owner-requested call" : data.purpose === "overdue_invoice" ? "Overdue invoice" : "Missed-call follow-up",
+        category:data.purpose==="owner_requested"&&typeof data.category==="string"?data.category:null,
+        instructions:data.purpose==="owner_requested"&&typeof data.instructions==="string"?data.instructions:null,
+        callLogId:typeof data.callLogId==="string"&&/^[a-f0-9-]{36}$/i.test(data.callLogId)?data.callLogId:null,
         reason: typeof data.reason === "string" ? data.reason : null,
       };
     }).sort((a, b) => (b.scheduledAt ?? 0) - (a.scheduledAt ?? 0));
@@ -52,4 +55,19 @@ export async function GET(request: Request) {
   } catch {
     return json({ error: "Could not load scheduled calls." }, 503);
   }
+}
+
+/** Cancellation races the worker claim in a transaction; a dial already claimed cannot be recalled. */
+export async function PATCH(request:Request){
+  const auth=await requireBusinessOwner(request);if(!auth.ok)return json({error:auth.error},auth.status);
+  const body=await request.json().catch(()=>null);
+  if(body?.action!=="cancel"||typeof body.id!=="string"||!/^[a-f0-9]{64}$/.test(body.id))return json({error:"Choose a scheduled owner call."},400);
+  const ref=adminDb.collection("ai_scheduled_callbacks").doc(body.id);
+  const result=await adminDb.runTransaction(async tx=>{
+    const snap=await tx.get(ref);const row=snap.data();
+    if(!row||row.businessId!==auth.businessId||row.purpose!=="owner_requested")return {status:404,error:"Scheduled owner call not found."};
+    if(row.status!=="SCHEDULED")return {status:409,error:"This call was already processed or has started dialing."};
+    tx.update(ref,{status:"CANCELLED",reason:"Cancelled by the business owner.",updatedAt:Date.now()});return {status:200};
+  });
+  return result.status===200?json({ok:true}):json({error:result.error},result.status);
 }

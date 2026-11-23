@@ -11,6 +11,7 @@ import { INVOICE_COLLECTION, mapInvoiceDoc } from "@/lib/invoices/server";
 import { resolveInvoicePaymentDue } from "@/lib/invoices/payment-due";
 import { isCustomerCallOptedOut } from "@/lib/ai/calls/call-preferences";
 import { isWithinSophieCallingHours } from "@/lib/ai/calls/calling-hours";
+import {ownerCallRecordInput,ownerScheduledCallsEnabled} from "@/lib/ai/owner-call/owner-scheduled-calls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,9 +46,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const [route, invoiceAttempt] = await Promise.all([
+    const [route, invoiceAttempt, ownerAttempt] = await Promise.all([
       lookupVoiceDidRoute(auth.did),
       adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(callbackAttemptId).get(),
+      adminDb.collection(SCHEDULED_CALLBACKS).doc(callbackAttemptId).get(),
     ]);
     const pinnedBusinessId = request.headers.get("x-bmspro-trade-business");
     if (route.state !== "active" || !route.callback?.callerId ||
@@ -58,7 +60,8 @@ export async function POST(request: Request) {
     const businessTimezone = typeof route.business.timezone === "string" && route.business.timezone
       ? route.business.timezone : "Australia/Melbourne";
 
-    let purpose: "overdue_invoice" | "missed_call";
+    let purpose: "overdue_invoice" | "missed_call" | "owner_requested";
+    let ownerDetails:Record<string,unknown>={};
     let invoiceId: string | undefined;
     let customerName: string | undefined;
     let missedAt: number | undefined;
@@ -71,7 +74,14 @@ export async function POST(request: Request) {
       return json({ status: "REJECTED", code: "OUTSIDE_CALLING_HOURS" }, 400);
     }
 
-    if (invoiceAttempt.exists) {
+    if(ownerAttempt.exists&&ownerAttempt.get("purpose")==="owner_requested"){
+      const parent=ownerAttempt.data()!;const details=ownerCallRecordInput.safeParse(parent);
+      if(!ownerScheduledCallsEnabled()||!details.success||parent.businessId!==businessId||parent.did!==auth.did||parent.numberKey!==numberKey||!["CALLING","ANSWERED","UNKNOWN"].includes(parent.status))return json({status:"REJECTED",code:"ATTEMPT_MISMATCH"},403);
+      const customer=(await adminDb.collection("customers").doc(details.data.customerId).get()).data();
+      if(!customer||customer.registeredBusinessId!==businessId||normalizeInvoiceCallbackNumber(String(customer.phone??""))!==number)return json({status:"REJECTED",code:"CUSTOMER_CHANGED"},409);
+      purpose="owner_requested";customerName=details.data.customerName;
+      ownerDetails={...details.data,requestedBy:parent.requestedBy,source:"customer_requested",expiresAt:when+2*3600000,originalScheduledAt:when};
+    }else if (invoiceAttempt.exists) {
       if (process.env.AI_SOPHIE_INVOICE_CALLS_ENABLED !== "true" || route.business.sophieInvoiceCallsEnabled !== true) {
         return json({ status: "REJECTED", code: "INVOICE_CALLS_DISABLED" }, 403);
       }
@@ -115,6 +125,7 @@ export async function POST(request: Request) {
         businessId, did: auth.did, number, numberKey, purpose,
         sourceAttemptId: callbackAttemptId, scheduledAt: when, timezone: businessTimezone,
         status: "SCHEDULED", createdAt: now, updatedAt: now,
+        ...ownerDetails,
         ...(invoiceId && { invoiceId }), ...(customerName && { customerName }), ...(missedAt && { missedAt }),
       };
       tx.create(scheduledRef, record);

@@ -1,3 +1,9 @@
+import {getOwnerVisits, prepareOwnerVisit, confirmOwnerVisit, type PreparedVisit} from "./owner-visits.tools";
+import {prepareOwnerJobCreate, confirmOwnerJobCreate, type PreparedJobCreate} from "./owner-job-create.tools";
+import {prepareOwnerInspectionCreate, confirmOwnerInspectionCreate, type PreparedInspectionCreate} from "./owner-inspection-create.tools";
+import {ownerVisitsEnabled, type VisitKind, type VisitOperation} from "@/lib/ai/owner-call/owner-visits";
+import {findOwnerCallCustomers,prepareOwnerScheduledCall,confirmOwnerScheduledCall,type PreparedOwnerCall} from "./owner-scheduled-calls.tools";
+import {ownerScheduledCallsEnabled} from "@/lib/ai/owner-call/owner-scheduled-calls";
 import "server-only"; // build error if this file is ever imported into browser code
 /**
  * Server side of the owner MCP action tools (see lib/ai/owner-call/owner-actions.ts).
@@ -198,6 +204,34 @@ export function ownerActionTools(owner: ActionOwner) {
     `services ${serviceNames.join(", ") || "none"}.`;
 
   return {
+    async prepareJobCreate(args: unknown) {
+      if (!ownerVisitsEnabled()) return {status: "UNAVAILABLE"};
+      await pendingRef.delete();
+      const result = await prepareOwnerJobCreate(owner, args);
+      return result.ok ? prepare("job_create", {...result.payload}, result.summary) : result.result;
+    },
+    async findCallCustomers(args:unknown) {return ownerScheduledCallsEnabled()?findOwnerCallCustomers(owner,args):{status:"UNAVAILABLE"};},
+    async prepareScheduledCall(args:unknown) {
+      if(!ownerScheduledCallsEnabled())return {status:"UNAVAILABLE"};
+      await pendingRef.delete();
+      const result=await prepareOwnerScheduledCall(owner,args);
+      return result.ok?prepare("owner_call_schedule",{...result.payload},result.summary):result.result;
+    },
+    async prepareInspectionCreate(args: unknown) {
+      if (!ownerVisitsEnabled()) return {status:"UNAVAILABLE"};
+      await pendingRef.delete();
+      const result = await prepareOwnerInspectionCreate(owner, args);
+      return result.ok ? prepare("inspection_create", {...result.payload}, result.summary) : result.result;
+    },
+    async getWorkVisits(args: unknown) {
+      return ownerVisitsEnabled() ? getOwnerVisits(owner, args) : {status: "UNAVAILABLE"};
+    },
+    async prepareVisit(args: unknown, kind: VisitKind, operation: VisitOperation) {
+      if (!ownerVisitsEnabled()) return {status: "UNAVAILABLE"};
+      await pendingRef.delete(); // A rejected replacement must never leave an older visit awaiting confirmation.
+      const result = await prepareOwnerVisit(owner, args, kind, operation);
+      return result.ok ? prepare("visit_change", {...result.payload}, result.summary) : result.result;
+    },
     // ---------------------------------------------------------------- reads
     async getServices() {
       const all = await services();
@@ -632,6 +666,19 @@ export function ownerActionTools(owner: ActionOwner) {
         return { status: "LIMIT_REACHED", message: "Too many changes by voice this hour. Ask the owner to use the Trade pages." };
       }
       const { kind, payload, summary } = claimed as { kind: PendingKind; payload: Record<string, unknown>; summary: string };
+      if(kind==="owner_call_schedule")return ownerScheduledCallsEnabled()?confirmOwnerScheduledCall(owner,payload as unknown as PreparedOwnerCall):{status:"UNAVAILABLE",message:"Owner scheduled calls are disabled."};
+      if (kind === "inspection_create") {
+        if (!ownerVisitsEnabled()) return {status:"UNAVAILABLE",message:"Voice inspection creation is disabled. Nothing was applied."};
+        return confirmOwnerInspectionCreate(owner, payload as unknown as PreparedInspectionCreate);
+      }
+      if (kind === "job_create") {
+        if (!ownerVisitsEnabled()) return {status:"UNAVAILABLE",message:"Voice job creation is disabled. Nothing was applied."};
+        return confirmOwnerJobCreate(owner, payload as unknown as PreparedJobCreate);
+      }
+      if (kind === "visit_change") {
+        if (!ownerVisitsEnabled()) return {status: "UNAVAILABLE", message: "Voice visit changes are disabled. Nothing was applied."};
+        return confirmOwnerVisit(owner, payload as unknown as PreparedVisit);
+      }
       const id = typeof payload.id === "string" ? payload.id : "";
       const result =
         kind === "service_update" ? await api(serviceApi.PATCH as Handler, "PATCH", `/api/services/${id}`, payload.body, id)

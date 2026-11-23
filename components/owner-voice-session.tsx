@@ -575,6 +575,10 @@ export function OwnerVoiceSession() {
               if (response.ok) {
                 const result = await response.json();
                 const text = result.result?.content?.find((item: { type: string }) => item.type === "text")?.text;
+                if (result.error || result.result?.isError || typeof text !== "string") {
+                  const code = typeof result.error?.code === "number" ? `RPC ${result.error.code}` : result.result?.isError ? "TOOL_ERROR" : "EMPTY_RESULT";
+                  setMessage(`Sophie could not complete the request (${code}). Please share this code with support.`);
+                }
                 if (typeof text === "string" && !result.result?.isError) {
                   output = text;
                   if ((call.name === "prepare_service" || call.name === "create_service") && !controller.signal.aborted) {
@@ -644,8 +648,16 @@ export function OwnerVoiceSession() {
                     setCallLinks(current => [...new Map([...transcripts, ...current].map(item => [item.callId, item])).values()].slice(0, 3));
                   }
                 }
+              } else {
+                setMessage(response.status === 429
+                  ? "Sophie has reached the request limit. Wait one minute before trying again (HTTP 429)."
+                  : `Sophie could not complete the request (HTTP ${response.status}). Please share this code with support.`);
               }
-            } catch {
+            } catch (error) {
+              if (!controller.signal.aborted) {
+                const code = error instanceof Error && error.name === "TimeoutError" ? "TIMEOUT" : error instanceof SyntaxError ? "INVALID_RESPONSE" : "CONNECTION_ERROR";
+                setMessage(`Sophie could not complete the request (${code}). Please share this code with support.`);
+              }
               // Report a tool failure to Sophie so it can answer without guessing.
             }
           }
