@@ -640,9 +640,9 @@ function ItemEditorModal({
   // ---- Sophie (voice): fill, show, scroll, continue, back, save. See lib/ai/owner-call/owner-item.ts ----
   const bodyRef = useRef<HTMLDivElement>(null);
   const [voiceScroll, setVoiceScroll] = useState<{ to: string; at: number } | null>(null);
-  const voice = useRef({ name, code, description, price, currentStep, imageUrl, documentName, handleSave, formError });
+  const voice = useRef({ name, code, description, price, currentStep, imageUrl, documentName, handleSave, formError, onClose });
   useEffect(() => {
-    voice.current = { name, code, description, price, currentStep, imageUrl, documentName, handleSave, formError };
+    voice.current = { name, code, description, price, currentStep, imageUrl, documentName, handleSave, formError, onClose };
   });
   // Each step starts at its top; an error scrolls up so it is seen.
   useEffect(() => { bodyRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [currentStep]);
@@ -681,6 +681,10 @@ function ItemEditorModal({
       async step(args: ItemFormArgs): Promise<VoiceResult> {
         sync();
         const body = bodyRef.current;
+        if (args.action === "cancel") {
+          voice.current.onClose();
+          return { status: "CANCELLED", message: "The popup is closed. Nothing was saved." };
+        }
         if (args.action === "scroll_down" || args.action === "scroll_up") {
           if (!body) return { status: "NOT_OPEN", message: "The popup is not showing." };
           const down = args.action === "scroll_down";

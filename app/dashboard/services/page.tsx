@@ -714,15 +714,21 @@ function ServiceSetupWizard({
   const formRef = useRef(form);
   const stepRef = useRef(step);
   const saveRef = useRef(handleSave);
+  const closeRef = useRef(onClose);
   useEffect(() => {
     formRef.current = form;
     stepRef.current = step;
     saveRef.current = handleSave;
+    closeRef.current = onClose;
   });
   useEffect(() => {
     if (!isOwnerService) return; // owner services, create or edit (not super-admin templates)
     return registerServiceStepHandler(async (args) => {
       const { action, name, durationMin, isActive, tasks } = args;
+      if (action === "cancel") {
+        closeRef.current();
+        return { status: "CANCELLED", message: "The popup is closed. Nothing was saved." };
+      }
       // Scrolling only moves the popup's content, like the owner using the scroll wheel.
       if (action === "scroll_down" || action === "scroll_up") {
         const body = bodyRef.current;

@@ -7,6 +7,7 @@ import { ownerTeamEnabled, ownerTeamSessionTools } from "@/lib/ai/owner-call/own
 import { ownerCustomerBrowserTools, ownerCustomersEnabled } from "@/lib/ai/owner-call/owner-customer";
 import { ownerItemSessionTools, ownerItemsEnabled } from "@/lib/ai/owner-call/owner-item";
 import { ownerKnowledgeSessionTools } from "@/lib/ai/owner-call/owner-knowledge";
+import { ownerPageSessionTools } from "@/lib/ai/owner-call/owner-page";
 import {
   OWNER_SERVICE_INSTRUCTIONS_MCP, OWNER_VOICE_DRAFT_INSTRUCTIONS_MCP, ownerToolMode,
 } from "@/lib/ai/owner-call/owner-actions";
@@ -136,6 +137,8 @@ export async function POST(request: Request) {
         ...(team && !mcpMode ? ownerTeamSessionTools() : []),
         ...(customers && !mcpMode ? ownerCustomerBrowserTools() : []),
         ...(items && !mcpMode ? ownerItemSessionTools() : []),
+        // Page control (open, scroll, refresh): read only, offered with any browser tool area.
+        ...(!mcpMode && (drafts || services || team || customers || items) ? ownerPageSessionTools() : []),
       ],
     };
 

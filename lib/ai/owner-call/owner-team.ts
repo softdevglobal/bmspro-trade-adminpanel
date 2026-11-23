@@ -42,7 +42,7 @@ export const WEEKDAY_IDS = ["monday", "tuesday", "wednesday", "thursday", "frida
 export type WeekdayId = (typeof WEEKDAY_IDS)[number];
 
 export const STAFF_FORM_ACTIONS = [
-  "fill", "set_days", "services", "show", "scroll_down", "scroll_up", "continue", "back", "save",
+  "fill", "set_days", "services", "show", "scroll_down", "scroll_up", "continue", "back", "save", "cancel",
 ] as const;
 /** Parts of the staff popup Sophie can scroll to. details and quotation are on step 1; the rest on step 2. */
 export const STAFF_FORM_SECTIONS = ["details", "quotation", "role", "services", "schedule"] as const;
@@ -248,6 +248,7 @@ export function ownerTeamSessionTools() {
         "services adds addServices and removes removeServices by name. show scrolls to a section (details, quotation, role, services, schedule); scroll_down and scroll_up scroll. " +
         "Changes scroll the screen to what changed. continue goes to the next step (it reports anything missing), back to the previous one. " +
         "save only on the review step, only after you read back name, email, phone ending, role, working days and services and the owner clearly said yes. " +
+        "cancel closes the popup without saving (when the owner says cancel, close or never mind). " +
         "Spell back email addresses. A photo can only be uploaded by the owner. Ask one short question at a time.",
       parameters: {
         type: "object",

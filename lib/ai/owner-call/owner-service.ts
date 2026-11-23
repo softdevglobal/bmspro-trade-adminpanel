@@ -110,7 +110,7 @@ export const SERVICE_FORM_STEP_TOOL_NAME = "service_form_step";
 /** Every action Sophie can take in the open Add / Edit service popup. */
 export const SERVICE_FORM_ACTIONS = [
   "fill", "continue", "back", "save", "scroll_down", "scroll_up", "show",
-  "add_task", "edit_task", "remove_task", "move_task",
+  "add_task", "edit_task", "remove_task", "move_task", "cancel",
 ] as const;
 /** Parts of the details step Sophie can scroll to with action show. */
 export const SERVICE_FORM_SECTIONS = ["photo", "name", "duration", "tasks", "live"] as const;
@@ -274,7 +274,7 @@ export function openAddServiceSessionTools() {
         "Steps are numbered from 1 as on screen; each task result lists them. show scrolls to a section (photo, name, duration, tasks, live) when you talk about it; " +
         "scroll_down and scroll_up move the popup when the owner asks to scroll. Changes scroll the screen to what changed. " +
         "continue goes to the next step, back to the previous one; save stores the service (only on the review step, only after you read the name, duration and steps back " +
-        "and the owner clearly said yes). A photo can only be uploaded by the owner. Ask one short question at a time for anything missing. " +
+        "and the owner clearly said yes). cancel closes the popup without saving. A photo can only be uploaded by the owner. Ask one short question at a time for anything missing. " +
         "If the result is INVALID, tell the owner why and ask for the fix. Never state prices.",
       parameters: {
         type: "object",
