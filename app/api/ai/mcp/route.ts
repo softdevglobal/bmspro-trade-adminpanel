@@ -45,6 +45,12 @@ export async function POST(request: Request) {
     const reads = await createTradeVoiceReads(auth.binding, (stage, task) => after(async () => {
       try { await task(); } catch { console.error("[trade-voice] Post-save task failed", { stage }); }
     }));
+    // The caller number comes only from the authenticated bridge transport,
+    // never tool arguments or a caller's spoken claim. Recognition grants no rights.
+    reads.callerAccess = async () => {
+      const { getPhoneCallerAccess } = await import("@/lib/ai/calls/caller-access");
+      return getPhoneCallerAccess(auth.binding.businessId, request.headers.get("x-bmspro-caller-number"));
+    };
     const response = await handleTradeVoiceMcp(request, reads);
     response.headers.set("Server-Timing", `trade;dur=${Math.round(performance.now() - started)}, auth;dur=${authMs}`);
     return response;

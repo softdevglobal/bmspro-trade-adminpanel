@@ -1,4 +1,5 @@
 import { commandCentreBackendUrl } from "@/lib/commandCentreBackendUrl";
+import { ownerAudioEndpoint } from "@/lib/ai/owner-call/audio-endpoint";
 
 const isDev = process.env.NODE_ENV === "development";
 const commandCentreOrigin = new URL(commandCentreBackendUrl(process.env.NEXT_PUBLIC_COMMAND_CENTRE_BACKEND_URL, isDev)).origin;
@@ -51,6 +52,8 @@ export function contentSecurityPolicy(nonce: string) { return [
     "https://*.stripe.com",
     "https://api.dicebear.com",
     ...yeastarConnectSources,
+    process.env.AI_OWNER_VOICE_DEEPGRAM_ENABLED === "true"
+      ? ownerAudioEndpoint(process.env.AI_OWNER_VOICE_PUBLIC_WS_URL, isDev)?.origin : "",
     "wss://*.firebaseio.com",
     // Turbopack HMR socket + dev asset fetches.
     isDev ? "ws://localhost:* http://localhost:*" : "",

@@ -56,8 +56,9 @@ export async function saveCallLog(binding: VoiceBusiness, input: CallLogInput): 
     const ref=adminDb.collection("ai_scheduled_callbacks").doc(input.callbackAttemptId);
     await adminDb.runTransaction(async tx=>{
       const snap=await tx.get(ref);const data=snap.data();
-      if(data?.purpose!=="owner_requested"||data.businessId!==binding.businessId||data.did!==binding.did||data.numberKey!==phoneComparisonKey(input.callerNumber)||data.callLogId&&data.callLogId!==input.callId)return;
+      if(!data||!["owner_requested","owner_notification"].includes(data.purpose)||data.businessId!==binding.businessId||data.did!==binding.did||data.numberKey!==phoneComparisonKey(input.callerNumber)||data.callLogId&&data.callLogId!==input.callId)return;
       tx.update(ref,{callLogId:input.callId,conversationEndedAt:endedAt.getTime(),updatedAt:Date.now()});
+      if(data.purpose==="owner_notification")tx.update(adminDb.collection(CALL_LOGS_COLLECTION).doc(input.callId),{recipientType:"owner",purpose:"owner_notification"});
     });
   }
   return created;

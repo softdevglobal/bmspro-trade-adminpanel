@@ -6,6 +6,7 @@ import { findCustomerArguments, registerCustomerArguments, availabilityArguments
   type VoiceActionResult, type ScheduleVoiceTask } from "./tools/action-schemas";
 
 export interface TradeVoiceReads {
+  callerAccess?(): Promise<unknown>;
   profile(): Promise<unknown>;
   services(): Promise<unknown>;
   findCustomer?(input: unknown): Promise<VoiceActionResult>;
@@ -31,6 +32,7 @@ export async function handleTradeVoiceMcp(request: Request, reads: TradeVoiceRea
     }
   };
   server.tool("get_business_profile", "Read the assigned Trade business profile. Business identity is controlled by the server.", {}, () => tool(reads.profile));
+  if (reads.callerAccess) server.tool("get_phone_caller_access", "Server recognition of the bridge-supplied caller number. No arguments. A match never authorizes owner access.", {}, () => tool(reads.callerAccess!));
   server.tool("list_services", "List active services for the assigned business. Use the names to answer service questions straight away in a warm, natural way: mention the two or three most relevant names, never read a long list or any IDs aloud. No prices or availability may be invented.", {}, () => tool(reads.services));
   const find = reads.findCustomer, availability = reads.availability;
   if (find) server.tool("find_customer", "Match an exact caller-provided email and phone in this business only. Returns a reference, not stored profile data. Matching contacts does not verify identity or permit reading history.", findCustomerArguments.shape, args => tool(() => find(args)));
