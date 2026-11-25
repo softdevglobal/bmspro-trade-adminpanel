@@ -177,7 +177,7 @@ export function ownerOperations(businessId: string, timeZone: string) {
       if (start === null || end === null) return { status: "UNAVAILABLE" };
       const query = owned(CALL_LOGS_COLLECTION).where("startedAt", ">=", Timestamp.fromMillis(start))
         .where("startedAt", "<", Timestamp.fromMillis(end)).orderBy("startedAt", "desc")
-        .select("startedAt", "durationMs", "answered", "endReason", "outcome", "outcomes", "transcript", "firstCallerLine");
+        .select("startedAt", "durationMs", "answered", "endReason", "outcome", "outcomes", "transcript", "firstCallerLine", "recipientType");
       const snapshot = await query.offset(offset).limit(pageSize + 1).get();
       const calls = snapshot.docs.slice(0, pageSize).flatMap(doc => {
         const call = toCallLogDetail(doc.id, doc.data());
@@ -189,6 +189,7 @@ export function ownerOperations(businessId: string, timeZone: string) {
           ...(callerTurns.length === 0 && call.firstCallerLine ? [call.firstCallerLine] : []),
         ])].map(line => line.slice(0, 240));
         return [{ callId: call.id, date: day, startedAt: call.startedAt, durationMs: call.durationMs, outcome: call.outcome,
+          ...(call.recipientType === "owner" ? { recipientType: "owner", purpose: "New inspection notification to the owner; not a customer enquiry" } : {}),
           verifiedToolOutcomes: call.outcomes, excerpts, endReason: call.endReason }];
       });
       return { status: "OK", date: day, timeZone, calls, nextOffset: snapshot.size > pageSize ? offset + pageSize : null };

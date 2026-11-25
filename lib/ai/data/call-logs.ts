@@ -37,6 +37,7 @@ export type CallLogInput = z.infer<typeof callLogInput>;
 
 export type CallOutcome = "booked" | "request_sent" | "needs_staff" | "no_booking";
 export type CallLogSummary = {
+  recipientType?: "owner";
   id: string;
   startedAt: number | null;
   durationMs: number;
@@ -70,6 +71,7 @@ const millis = (value: unknown) =>
 export function toCallLogSummary(id: string, data: Record<string, unknown>): CallLogSummary {
   return {
     id,
+    ...(data.recipientType === "owner" ? { recipientType: "owner" as const } : {}),
     startedAt: millis(data.startedAt),
     durationMs: Number(data.durationMs ?? 0),
     answered: data.answered === true,

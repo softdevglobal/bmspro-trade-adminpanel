@@ -61,7 +61,7 @@ export function ScheduledCallbacksBoard({ user }: { user: User }) {
   return <section className="min-w-0 space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-col items-start gap-2">
-      <p className="font-body text-[13px] text-on-surface-variant">Customer callbacks and calls scheduled by the owner.</p>
+      <p className="font-body text-[13px] text-on-surface-variant">Customer callbacks, owner-requested calls and notifications to the owner.</p>
       <label className="flex items-center gap-2 font-body text-[13px] text-on-surface-variant">
         Scheduled date
         <input type="date" value={date} onChange={event => {
@@ -85,7 +85,7 @@ export function ScheduledCallbacksBoard({ user }: { user: User }) {
         <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-lowest text-on-surface-variant">
           <tr>
             <th scope="col" className="px-3 py-2.5 font-semibold">Scheduled time</th>
-            <th scope="col" className="px-3 py-2.5 font-semibold">Customer</th>
+            <th scope="col" className="px-3 py-2.5 font-semibold">Recipient</th>
             <th scope="col" className="px-3 py-2.5 font-semibold">Business number</th>
             <th scope="col" className="px-3 py-2.5 font-semibold">Call type</th>
             <th scope="col" className="px-3 py-2.5 font-semibold">Status</th>

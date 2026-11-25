@@ -87,3 +87,14 @@ test("inspection query returns scheduled records only, with legacy fallback if i
   assert.equal(resultWithMissingIndex, result);
   assert.equal(fallbackCalls, 1);
 });
+
+test('owner pending calls are isolated from old workers and share the six-call batch limit',async()=>{
+  const previous=process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED;
+  try{
+    const rows:Row[]=[{id:'customer',status:'SCHEDULED',scheduledAt:9},...Array.from({length:8},(_,i)=>({id:`owner-${i}`,status:'OWNER_SCHEDULED',scheduledAt:i+1}))];
+    process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED='false';
+    assert.deepEqual((await loadDueScheduledCallbacks(fixture(rows).db,10)).map(d=>d.id),['customer']);
+    process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED='true';
+    const due=await loadDueScheduledCallbacks(fixture(rows).db,10);assert.equal(due.length,6);assert.deepEqual(due.map(d=>d.id),['owner-0','owner-1','owner-2','owner-3','owner-4','owner-5']);
+  }finally{if(previous===undefined)delete process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED;else process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED=previous;}
+});

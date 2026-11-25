@@ -3,6 +3,7 @@ import "server-only";
 export async function requestSophieCallback(input: {
   id: string; did: string; businessId: string; number: string; automatic?: boolean; customerName?: string;
   ownerRequest?:{category:string;instructions:string};
+  ownerNotification?:{requestCode:string};
 }) {
   const url = new URL(process.env.AI_OWNER_VOICE_BRIDGE_URL ?? "");
   const secret = process.env.AI_VOICE_BRIDGE_SECRET?.trim() ?? "";
@@ -10,7 +11,7 @@ export async function requestSophieCallback(input: {
       (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
     throw new Error("Sophie callback connection is unavailable.");
   }
-  url.pathname = input.ownerRequest ? "/sophie-owner-call" : input.customerName === undefined ? "/sophie-callback" : "/sophie-invoice-call";
+  url.pathname = input.ownerNotification ? "/sophie-owner-notification" : input.ownerRequest ? "/sophie-owner-call" : input.customerName === undefined ? "/sophie-callback" : "/sophie-invoice-call";
   return fetch(url, {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(55_000),
     headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },

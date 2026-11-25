@@ -166,7 +166,7 @@ export function AiCallsBoard({ initialCallId }: { initialCallId?: string } = {})
                       </span>
                     </span>
                     <span className="font-body text-[12px] text-on-surface-variant">
-                      {duration(call.durationMs)}{call.callerNumber ? ` · ${call.callerNumber}` : ""}
+                      {call.recipientType === "owner" ? "Owner notification · " : ""}{duration(call.durationMs)}{call.callerNumber ? ` · ${call.callerNumber}` : ""}
                     </span>
                     <span className="material-symbols-outlined text-on-surface-variant">{isOpen ? "expand_less" : "expand_more"}</span>
                   </button>
