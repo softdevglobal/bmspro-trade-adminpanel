@@ -3,6 +3,7 @@
 import { EmailConnectionSettings } from "@/components/email-connection-settings";
 import { EmailSendRow } from "@/components/email-send-row";
 import { MailboxPanel } from "@/components/mailbox-panel";
+import { emailsBoardVoice, type EmailsBoardState } from "@/lib/ai/owner-call/owner-email";
 import { useAuth } from "@/lib/auth/auth-context";
 import { usePageVisible } from "@/lib/notifications/use-page-visible";
 import {
@@ -11,7 +12,7 @@ import {
   useEmailSending,
 } from "@/lib/email-integration/client";
 import type { EmailSendHistoryItem } from "@/lib/email-integration/types";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type EmailFilter = "all" | "attention" | "in_progress" | "accepted";
 type EmailTab = "mailbox" | "log";
@@ -47,6 +48,9 @@ export function EmailsBoard() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // For Talk to Sophie: which filter last finished loading, and a count of finished loads.
+  const [loadedFilter, setLoadedFilter] = useState<EmailFilter | null>(null);
+  const [loadSeq, setLoadSeq] = useState(0);
 
   const fetchPage = useCallback(
     async (cursor: string | null) => {
@@ -72,8 +76,10 @@ export function EmailsBoard() {
       setError(err instanceof Error ? err.message : "Could not load emails.");
     } finally {
       setLoading(false);
+      setLoadedFilter(filter);
+      setLoadSeq((value) => value + 1);
     }
-  }, [fetchPage]);
+  }, [fetchPage, filter]);
 
   useEffect(() => {
     if (!enabled || !visible) return;
@@ -103,8 +109,37 @@ export function EmailsBoard() {
       setError(err instanceof Error ? err.message : "Could not load more emails.");
     } finally {
       setLoadingMore(false);
+      setLoadSeq((value) => value + 1);
     }
   }
+
+  // Talk to Sophie switches tabs and reads the Send log through emailsBoardVoice (lib/ai/owner-call/owner-email.ts).
+  const live = useRef<EmailsBoardState | null>(null);
+  const latest = useRef({ reload, loadMore });
+  useEffect(() => {
+    live.current = {
+      ready: !settingsLoading, enabled, tab,
+      log: { filter, loadedFilter, loading, loadingMore, loadSeq, items, hasMore: Boolean(nextCursor), error },
+    };
+    latest.current = { reload, loadMore };
+  });
+  useEffect(() => emailsBoardVoice.register({
+    state: () => live.current!,
+    setTab: (next) => setTab(next),
+    showLog(next) {
+      if (next === live.current?.log.filter) return false;
+      setFilter(next);
+      setItems([]);
+      setNextCursor(null);
+      return true;
+    },
+    moreLog() {
+      if (!live.current?.log.hasMore) return false;
+      void latest.current.loadMore();
+      return true;
+    },
+    reloadLog: () => void latest.current.reload(),
+  }), []);
 
   if (settingsLoading) {
     return (

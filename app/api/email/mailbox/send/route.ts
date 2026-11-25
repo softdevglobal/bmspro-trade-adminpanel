@@ -8,6 +8,8 @@
  * Header: Idempotency-Key. Returns 202 { outbox_id, status }.
  */
 
+import { EMAIL_LIMITS, EMAIL_VOICE_HEADER } from "@/lib/ai/owner-call/owner-email";
+import { consumeRateLimits } from "@/lib/security/rate-limit";
 import { emailError } from "@/lib/email-integration/auth";
 import {
   MAILBOX_ATTACHMENTS_MAX_BYTES,
@@ -47,6 +49,20 @@ export async function POST(request: Request) {
 
   const gate = await requireMailbox(request, { capability: "send" });
   if (!gate.ok) return gate.response;
+
+  // Sends asked for through Sophie (browser or MCP) have their own hourly limit; the owner's own Send button does not.
+  if (
+    request.headers.get(EMAIL_VOICE_HEADER) === "1" &&
+    !(await consumeRateLimits([
+      { key: `owner-voice:email-send:${gate.uid}`, limit: EMAIL_LIMITS.voiceSendsPerHour, windowMs: 3_600_000 },
+    ]))
+  ) {
+    return emailError(
+      429,
+      `Sophie can send at most ${EMAIL_LIMITS.voiceSendsPerHour} emails an hour. Use the Send button on the Emails page.`,
+      "voice_limit",
+    );
+  }
 
   let form: FormData;
   try {

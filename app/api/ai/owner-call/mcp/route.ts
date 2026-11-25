@@ -2,6 +2,8 @@ import {ownerVisitsEnabled} from "@/lib/ai/owner-call/owner-visits";
 import {ownerScheduledCallsEnabled} from "@/lib/ai/owner-call/owner-scheduled-calls";
 import { ownerCustomersEnabled } from "@/lib/ai/owner-call/owner-customer";
 import { ownerItemsEnabled } from "@/lib/ai/owner-call/owner-item";
+import { ownerSmsEnabled } from "@/lib/ai/owner-call/owner-sms";
+import { ownerEmailEnabled } from "@/lib/ai/owner-call/owner-email";
 import { ownerBriefingTools } from "@/lib/ai/mcp/tools/owner-briefing.tools";
 import { requireOwnerBriefing } from "@/lib/ai/owner-call/auth";
 import { ownerServiceEnabled } from "@/lib/ai/owner-call/owner-service"; // feature flag
@@ -64,7 +66,7 @@ export async function POST(request: Request) {
   // Serves the MCP action tools in both tool modes, so whichever set the session offered works.
   const toolList = ownerVoiceToolList({
     knowledge: ownerKnowledgeEnabled(), services: ownerServiceEnabled(), team: ownerTeamEnabled(), drafts: ownerVoiceDraftsEnabled(),
-    customers: ownerCustomersEnabled(), items: ownerItemsEnabled(), actions: true, visits: ownerVisitsEnabled(), scheduledCalls:ownerScheduledCallsEnabled(),
+    customers: ownerCustomersEnabled(), items: ownerItemsEnabled(), sms: ownerSmsEnabled(), email: ownerEmailEnabled(), actions: true, visits: ownerVisitsEnabled(), scheduledCalls:ownerScheduledCallsEnabled(),
   });
   for (const tool of toolList) {
     server.tool(tool.name, tool.description, tool.args, async (args) => {
