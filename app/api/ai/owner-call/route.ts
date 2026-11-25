@@ -105,7 +105,9 @@ export async function POST(request: Request) {
     const scheduledCalls=ownerScheduledCallsEnabled();
     // Services, team and knowledge drafts each exist twice: browser tools (drive the pages on screen)
     // and MCP tools (run on the server). AI_OWNER_VOICE_TOOL_MODE picks the set; see owner-actions.ts.
-    const mcpMode = ownerToolMode() === "mcp";
+    // The mobile app has no Trade pages for browser tools to drive, so its sessions always use
+    // the MCP tools (it sends X-Sophie-Client: app). The MCP route serves them in both modes.
+    const mcpMode = ownerToolMode() === "mcp" || request.headers.get("x-sophie-client") === "app";
     const session = {
       instructions: [
         "You are Sophie, Trade's voice assistant for the signed-in business owner.",
