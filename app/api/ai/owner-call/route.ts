@@ -27,6 +27,22 @@ function browserAudioEndpoint() {
   return ownerAudioEndpoint(process.env.AI_OWNER_VOICE_PUBLIC_WS_URL, process.env.NODE_ENV === "development")?.toString() ?? null;
 }
 
+/**
+ * The page's origin, which the bridge binds the audio ticket to (it must equal the Origin the browser
+ * sends when it opens the audio socket). Uses the browser's Origin header: behind a reverse proxy
+ * (self-hosted `next start`), request.url carries Next's own listen address (https://127.0.0.1:3001),
+ * not the public host, so the bridge refused the socket with 403.
+ */
+function pageOrigin(request: Request) {
+  const header = request.headers.get("origin");
+  if (header) {
+    try {
+      if (new URL(header).origin === header) return header;
+    } catch { /* not a URL: fall back */ }
+  }
+  return new URL(request.url).origin;
+}
+
 export async function GET(request: Request) {
   const auth = await requireOwnerBriefing(request);
   if (!auth.ok) return error(auth.error, auth.status);
@@ -177,7 +193,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         sdp: offer, session, safetyIdentifier: createHash("sha256").update(auth.uid).digest("hex"),
-        ...(deepgram ? { origin: new URL(request.url).origin } : {}),
+        ...(deepgram ? { origin: pageOrigin(request) } : {}),
       }),
       redirect: "error",
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(25_000)]),
