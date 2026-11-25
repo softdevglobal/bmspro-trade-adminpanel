@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/email-sync",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/email-digest",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

@@ -825,3 +825,20 @@ describe("Other email provider (own IMAP / SMTP servers)", () => {
     assert.equal(parseEmailProvider("imap"), "imap");
   });
 });
+
+describe("email digest push", () => { it("sends nothing when nothing is new, lists the newest three, cleans and clips text", async () => {
+  const { digestMessage } = await import("../lib/email-integration/mailbox/digest");
+  assert.equal(digestMessage(0, []), null);
+  const one = digestMessage(1, [{ from: "AliExpress", subject: "The gadget everyone wants" }])!;
+  assert.equal(one.title, "1 new unread email");
+  assert.equal(one.body, "AliExpress: The gadget everyone wants");
+  const many = digestMessage(7, [
+    { from: "A", subject: "one" }, { from: "B", subject: "two" }, { from: "C", subject: "three" }, { from: "D", subject: "four" },
+  ])!;
+  assert.equal(many.title, "7 new unread emails");
+  assert.equal(many.body, "A: one\nB: two\nC: three\nand 4 more");
+  const messy = digestMessage(1, [{ from: "X\u202e\n".repeat(20), subject: "s".repeat(200) }])!;
+  assert.doesNotMatch(messy.body, /[\u202e\n]/);
+  assert.ok(messy.body.length < 100, "sender and subject are clipped");
+});
+});

@@ -287,6 +287,27 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "connectionId", "order": "ASCENDING" },
+        { "fieldPath": "folder", "order": "ASCENDING" },
+        { "fieldPath": "unread", "order": "ASCENDING" },
+        { "fieldPath": "sentAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "email_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "connectionId", "order": "ASCENDING" },
+        { "fieldPath": "folder", "order": "ASCENDING" },
+        { "fieldPath": "linked", "order": "ASCENDING" },
+        { "fieldPath": "unread", "order": "ASCENDING" },
+        { "fieldPath": "sentAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "email_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "connectionId", "order": "ASCENDING" },
         { "fieldPath": "starred", "order": "ASCENDING" },
         { "fieldPath": "linked", "order": "ASCENDING" },
         { "fieldPath": "sentAt", "order": "DESCENDING" }
