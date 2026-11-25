@@ -50,6 +50,7 @@ The feature is switched on by `AI_OWNER_VOICE_EMAIL_ENABLED=true` and is off by 
 | Owner says | What happens |
 |---|---|
 | "Open my emails" / "Check my inbox" | The Emails page opens on Mailbox → Inbox. Sophie reads how many are unread and the newest few: who from, subject, when. |
+| "How many emails do I have?" / "How many unread today?" / "…from customers?" | `get_email_counts` (both modes): the folder's total and unread, plus the same for one day. No page opens and nothing is marked read. |
 | "Show starred" / "Sent" / "Archive" / "Trash" | Switches folder, like pressing it in the side list. |
 | "Only customer emails" | Turns on **Customers only**. "Show all" turns it off. |
 | "Search for Lynbrook" / "Any emails from John?" | Types in **Search all mail** and reads the matches. "Clear the search" clears it. |
@@ -144,6 +145,7 @@ The feature is switched on by `AI_OWNER_VOICE_EMAIL_ENABLED=true` and is off by 
 | Tool | What it does |
 |---|---|
 | `get_emails` | Read only. Same as `list_emails`: `view`, `search`, `customersOnly`, `cursor`. Calls the `GET /api/email/mailbox` route handler with the owner's token. |
+| `get_email_counts` | Read only, **offered in both modes** (a count has no page to drive). `view` (inbox, sent, archive, trash; default inbox), `date` (today, yesterday or YYYY-MM-DD; default today), `customersOnly`. Returns the folder's total and unread, the same two for that day, when mail was last checked, and whether the import is still running. Calls `GET /api/email/mailbox/counts`, which counts the stored copy of the mailbox with Firestore `count()`: no provider call, nothing opened or marked read. |
 | `get_email_thread` | Read only. A conversation by `threadId` (from `get_emails`): messages in plain text, shortened, plus attachments and the customer link. Does **not** mark it read. |
 | `get_email_send_log` | Read only. Same as `list_email_send_log`. |
 | `get_email_contacts` | Read only. Customer names and addresses for To, with search. |
@@ -202,6 +204,7 @@ Deleting is undoable from Trash for a while, but the provider empties Trash late
 
 | File | Change |
 |---|---|
+| `app/api/email/mailbox/counts/route.ts` (new), `lib/email-integration/mailbox/store.ts` (`countMailboxMessages`) | Folder and day counts for `get_email_counts`. |
 | `lib/email-integration/mailbox/compose.ts` (new) | The composer's prefill and address rule, shared by the popup and `prepare_email_send`; `splitQuoted` finds where the quoted original starts. |
 | `lib/ai/owner-call/owner-email.ts` (new) | Flag `ownerEmailEnabled()`, limits, tool names and schemas, page slots (`mailboxVoice`, `threadVoice`, `composerVoice`, `sendLogVoice`), read-back builder, contact matching, plain-text shortening, the browser runner. |
 | `lib/ai/owner-call/owner-actions.ts` | New `email` area: the 8 MCP tools. New pending kinds `email_send`, `email_trash`, `email_retry`. Add the 3 prepare tools to `OWNER_PREPARE_TOOL_NAMES`. |
@@ -224,7 +227,7 @@ Names to add to the bridge allow-list:
 ```
 open_emails, list_emails, email_thread_step, email_compose_step, list_email_send_log, email_send_log_step,
 get_emails, get_email_thread, get_email_send_log, get_email_contacts, email_thread_action,
-prepare_email_trash, prepare_email_send, prepare_email_retry
+prepare_email_trash, prepare_email_send, prepare_email_retry, get_email_counts
 ```
 
 No new Firestore collection. MCP changes use the shared `ai_owner_pending_changes`.
@@ -240,6 +243,7 @@ AI_OWNER_VOICE_TOOL_MODE=browser        # or mcp
 ```
 
 Restart the voice bridge (new tool names) and `next dev`, then start a new Talk to Sophie session.
+For the unread counts, deploy the indexes once: `firebase deploy --only firestore:indexes`.
 
 ---
 
@@ -247,8 +251,13 @@ Restart the voice bridge (new tool names) and `next dev`, then start a new Talk 
 
 1. **Pages are 5 rows.** The mailbox list loads 5 at a time. Sophie reads 5 and offers "more";
    `list_emails` can ask for up to 3 pages in one step when the owner asks "how many unread".
-2. **The unread count is only for loaded rows.** There is no count API. Sophie says "of the newest
-   N" unless a count route is added (optional: `GET /api/email/mailbox/counts`).
+2. **Totals come from `get_email_counts`.** The list tools' unread number covers only the loaded rows;
+   `GET /api/email/mailbox/counts` gives the folder's total and unread and one day's (business time
+   zone). It counts **emails, not conversations** (Gmail's own number counts conversations), as of
+   the last sync, and only mail imported so far while the import runs. Each count is a Firestore
+   `count()`, about 1 read per 1,000 emails. The unread counts need the two `email_messages` indexes
+   with `unread` in `firestore.indexes.json`; until they are built those counts come back empty and
+   Sophie says she could not count them.
 3. **Search uses the provider** (Gmail, Outlook, IMAP) and needs the mailbox credentials. It is
    slower than the folder list, so Sophie says "searching" first.
 4. **Message bodies are not stored.** Opening a conversation reads from the provider each time, so

@@ -56,6 +56,7 @@ import { resolvePlatformTimeZone } from "@/lib/platform/timezone";
 import { randomUUID } from "node:crypto";
 import * as emailConnectionsApi from "@/app/api/email/connections/route";
 import * as mailboxApi from "@/app/api/email/mailbox/route";
+import * as mailboxCountsApi from "@/app/api/email/mailbox/counts/route";
 import * as mailboxContactsApi from "@/app/api/email/mailbox/contacts/route";
 import * as mailboxSendApi from "@/app/api/email/mailbox/send/route";
 import * as mailboxThreadApi from "@/app/api/email/mailbox/threads/[threadId]/route";
@@ -64,8 +65,9 @@ import * as outboxApi from "@/app/api/email/outbox/route";
 import * as outboxItemApi from "@/app/api/email/outbox/[id]/route";
 import * as outboxRetryApi from "@/app/api/email/outbox/[id]/retry/route";
 import {
-  EASY_THREAD_ACTIONS, EMAIL_ACTION_DONE, EMAIL_LIMITS, EMAIL_VOICE_HEADER, emailSendReadBack, MAILBOX_VIEWS, ownerEmailEnabled,
-  readThreadMessage, resolveRecipients, retryReadBack, SEND_LOG_FILTERS, summarizeEmailContacts, summarizeMailbox, summarizeSendLog,
+  EASY_THREAD_ACTIONS, EMAIL_ACTION_DONE, EMAIL_COUNT_VIEWS, EMAIL_LIMITS, EMAIL_VOICE_HEADER, emailSendReadBack, MAILBOX_VIEWS,
+  ownerEmailEnabled, readThreadMessage, resolveEmailCountDate, resolveRecipients, retryReadBack, SEND_LOG_FILTERS,
+  summarizeEmailContacts, summarizeEmailCounts, summarizeMailbox, summarizeSendLog, type MailboxCountsResult,
 } from "@/lib/ai/owner-call/owner-email";
 import { composerInitialFields } from "@/lib/email-integration/mailbox/compose";
 import type {
@@ -772,6 +774,21 @@ export function ownerActionTools(owner: ActionOwner) {
         }, emailTimeZone()),
         nextCursor,
       };
+    },
+    async getEmailCounts(args: unknown) {
+      const input = (args ?? {}) as { view?: unknown; date?: unknown; customersOnly?: unknown };
+      const view = text(input.view) || "inbox";
+      if (!(EMAIL_COUNT_VIEWS as readonly string[]).includes(view)) {
+        return { status: "REJECTED", message: `view must be one of: ${EMAIL_COUNT_VIEWS.join(", ")}. Starred has no count.` };
+      }
+      const today = platformTodayIso(new Date(), emailTimeZone());
+      const date = resolveEmailCountDate(text(input.date), today);
+      if (!date) return { status: "REJECTED", message: "date must be today, yesterday or a YYYY-MM-DD that is not in the future." };
+      const params = new URLSearchParams({ view, date });
+      if (input.customersOnly === true) params.set("linked", "1");
+      const result = await api(mailboxCountsApi.GET as Handler, "GET", `/api/email/mailbox/counts?${params}`);
+      if (!result.ok || !result.data.day) return failed(result, "Could not count the emails.");
+      return summarizeEmailCounts(result.data as unknown as MailboxCountsResult, today, emailTimeZone());
     },
     async getEmailThread(args: unknown) {
       const input = (args ?? {}) as { threadId?: unknown; message?: unknown; part?: unknown; whole?: unknown; revealCodes?: unknown };

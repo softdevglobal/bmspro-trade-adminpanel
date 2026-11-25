@@ -7,7 +7,7 @@ import {
   createServiceArgs, OWNER_SERVICE_PARAMETERS, prepareServiceArgs,
 } from "@/lib/ai/owner-call/owner-service"; // shared rules (Step 1)
 import {
-  CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, OWNER_ACTION_DEFINITIONS, OWNER_ACTION_PREPARE_TOOLS, OWNER_ACTION_READ_TOOLS,
+  CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, EMAIL_COUNTS_TOOL, OWNER_ACTION_DEFINITIONS, OWNER_ACTION_PREPARE_TOOLS, OWNER_ACTION_READ_TOOLS,
 } from "@/lib/ai/owner-call/owner-actions";
 import type { OwnerActionTools } from "@/lib/ai/mcp/tools/owner-actions.tools";
 
@@ -233,6 +233,7 @@ const ACTION_RUNNERS: Record<string, (actions: OwnerActionTools, args: unknown) 
   get_sms_customers: (a, args) => a.getSmsCustomers(args),
   prepare_sms_send: (a, args) => a.prepareSmsSend(args),
   get_emails: (a, args) => a.getEmails(args),
+  [EMAIL_COUNTS_TOOL]: (a, args) => a.getEmailCounts(args),
   get_email_thread: (a, args) => a.getEmailThread(args),
   get_email_send_log: (a, args) => a.getEmailSendLog(args),
   get_email_contacts: (a, args) => a.getEmailContacts(args),
@@ -289,7 +290,8 @@ export function ownerVoiceDraftsEnabled(env: Readonly<Record<string, string | un
  * The owner tools. Session start (offered to OpenAI) and the MCP route (served) both build the
  * list here with the same flags. `actions` adds the MCP action tools for the enabled areas: the
  * session start passes it in mcp mode only; the MCP route always serves them, so a session in
- * either mode can call what it was offered.
+ * either mode can call what it was offered. get_email_counts comes with the email flag in both
+ * modes: it runs on the MCP route and has no page twin.
  */
 export function ownerVoiceToolList({
   knowledge, services = false, team = false, drafts = false, customers = false, items = false, sms = false, email = false, actions = false, visits = false, scheduledCalls = false,
@@ -305,6 +307,7 @@ export function ownerVoiceToolList({
       ...(visits ? ["get_work_visits", "get_services", "get_staff", JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, ...VISIT_PREPARE_TOOLS, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : []),
       ...(scheduledCalls?["find_call_customers",OWNER_CALL_PREPARE_TOOL,CONFIRM_CHANGE_TOOL,CANCEL_CHANGE_TOOL].map(actionTool):[]),
     ].filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index) : []), // MCP twins of the browser tools
+    ...(email ? [actionTool(EMAIL_COUNTS_TOOL)] : []), // read only, both modes: counts need no page
   ];
 }
 

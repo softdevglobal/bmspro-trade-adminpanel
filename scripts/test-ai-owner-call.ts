@@ -17,7 +17,13 @@ const fixtures: Record<string, string> = {
     exports.findOwnerCallCustomers = async (owner, args) => ({ status: "OK", businessId: owner.businessId, search: args.search });
   `,
   "lib/firebase/admin": `
-    exports.adminDb = { collection: () => ({ doc: () => ({
+    // A query records its filters; count() asks the running test for the number (globalThis.__countQuery).
+    const query = filters => ({
+      where: (field, op, value) => query([...filters, [field, op, value]]),
+      orderBy: (field, direction) => query([...filters, ["orderBy", field, direction]]),
+      count: () => ({ get: async () => ({ data: () => ({ count: globalThis.__countQuery(filters) }) }) }),
+    });
+    exports.adminDb = { collection: () => ({ ...query([]), doc: () => ({
       get: async () => ({ data: () => ({ ownerUid: "owner-a", isActive: true, sophieTalkEnabled: true }) }),
     }) }) };
   `,
@@ -341,6 +347,7 @@ test("browser mode (default): page tools for services, team and drafts; no MCP a
     assert.ok(action.action.enum.includes("cancel"), `${tool} has cancel`);
   }
   for (const name of MCP_ACTION_TOOLS) assert.ok(!names.includes(name), `${name} is MCP mode only`);
+  assert.ok(names.includes("get_email_counts"), "email counts need no page, so browser mode has them too");
   assert.equal(new Set(names).size, names.length, "no repeated names");
   assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
 });
@@ -349,7 +356,7 @@ test("mcp mode: server tools for services, team and drafts; no page tools", asyn
   setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: "mcp" });
   const session = await startSession(t);
   const names = session.tools.map(tool => tool.name);
-  for (const name of ["prepare_service", "create_service", ...MCP_ACTION_TOOLS]) assert.ok(names.includes(name), name);
+  for (const name of ["prepare_service", "create_service", "get_email_counts", ...MCP_ACTION_TOOLS]) assert.ok(names.includes(name), name);
   for (const name of [...DRAFT_TOOLS, ...BROWSER_KNOWLEDGE_TOOLS, ...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_SMS_TOOLS, ...BROWSER_EMAIL_TOOLS, ...BROWSER_PAGE_TOOLS]) {
     assert.ok(!names.includes(name), `${name} is browser mode only`);
   }
@@ -505,6 +512,14 @@ test("email tools: flag, recipients, read-back, codes hidden, quoted text, send 
     assert.ok(OWNER_PREPARE_TOOL_NAMES.includes(name), `${name} starts the yes check`);
   }
   assert.ok(!OWNER_PREPARE_TOOL_NAMES.includes("email_thread_action"), "star / archive need no yes");
+  // Counts come with the email flag in both modes (served by the MCP route), never with it off, and need no yes.
+  const offered = (actions: boolean) => ownerVoiceToolList({ knowledge: false, email: true, actions }).map(tool => tool.name);
+  assert.ok(offered(false).includes("get_email_counts") && !offered(false).includes("get_emails"), "browser mode: counts only");
+  assert.equal(offered(true).filter(name => name === "get_email_counts").length, 1, "mcp mode: offered once");
+  assert.ok(!served(false).includes("get_email_counts"));
+  assert.ok(!OWNER_PREPARE_TOOL_NAMES.includes("get_email_counts"));
+  const counts = ownerVoiceToolList({ knowledge: false, email: true }).find(tool => tool.name === "get_email_counts")!;
+  assert.ok(counts.usesActions, "runs with the owner's own token on the MCP route");
 
   // Spoken addresses and names become addresses; two customers with one name are never guessed.
   assert.equal(email.normalizeSpokenAddress("John dot Smith at Gmail dot com"), "john.smith@gmail.com");
@@ -591,6 +606,80 @@ test("email tools: flag, recipients, read-back, codes hidden, quoted text, send 
   assert.ok(retry.ok && /invoice INV-104 to mary@c\.com/.test(retry.summary));
   assert.ok(!email.retryReadBack({ ...sent, canRetry: false }).ok);
   assert.match((email.retryReadBack({ ...sent, status: "unknown" }) as { summary: string }).summary, /may already have been sent/);
+});
+
+test("email counts: the day, four count queries, a missing index, the read-back", async (t) => {
+  const email = await import("../lib/ai/owner-call/owner-email");
+  const { countMailboxMessages } = await import("../lib/email-integration/mailbox/store");
+
+  assert.equal(email.resolveEmailCountDate("", "2026-11-25"), "2026-11-25");
+  assert.equal(email.resolveEmailCountDate(" Today ", "2026-11-25"), "2026-11-25");
+  assert.equal(email.resolveEmailCountDate("yesterday", "2026-03-01"), "2026-02-28");
+  assert.equal(email.resolveEmailCountDate("2026-11-20", "2026-11-25"), "2026-11-20");
+  assert.equal(email.resolveEmailCountDate("2026-11-26", "2026-11-25"), null, "never a future day");
+  assert.equal(email.resolveEmailCountDate("2026-02-30", "2026-11-25"), null, "not a real day");
+  assert.equal(email.resolveEmailCountDate("last week", "2026-11-25"), null);
+
+  // The fake Firestore (fixture above) hands each count query's filters to this function.
+  const queries: string[] = [];
+  const numbers: Record<string, number> = { all: 120, unread: 7, day: 9, dayUnread: 4 };
+  let missingIndexFor: "unread" | null = null;
+  const global = globalThis as { __countQuery?: (filters: unknown[][]) => number };
+  global.__countQuery = (filters) => {
+    const key = filters.map(([field, op, value]) =>
+      `${field}${op}${(value as { toMillis?: () => number } | null)?.toMillis?.() ?? value}`).join(" ");
+    queries.push(key);
+    const unread = key.includes("unread==true"), day = key.includes("sentAt>=");
+    if (unread && missingIndexFor === "unread") {
+      throw Object.assign(new Error("The query requires an index. You can create it here: https://console.firebase.google.com/"), { code: 9 });
+    }
+    return numbers[day ? (unread ? "dayUnread" : "day") : unread ? "unread" : "all"];
+  };
+  t.after(() => { delete global.__countQuery; });
+
+  const input = { connectionId: "c1", folder: "inbox" as const, from: 1000, to: 2000 };
+  assert.deepEqual(await countMailboxMessages(input), { total: 120, unread: 7, dayTotal: 9, dayUnread: 4 });
+  assert.deepEqual(queries.sort(), [
+    "connectionId==c1 folder==inbox",
+    "connectionId==c1 folder==inbox sentAt>=1000 sentAt<2000 orderBysentAtdesc",
+    "connectionId==c1 folder==inbox unread==true",
+    "connectionId==c1 folder==inbox unread==true sentAt>=1000 sentAt<2000 orderBysentAtdesc",
+  ], "the folder, then unread, each for all time and for the day; the day range uses the sentAt DESC indexes");
+
+  queries.length = 0;
+  await countMailboxMessages({ ...input, linkedOnly: true });
+  assert.ok(queries.every(key => key.includes("linked==true")), "customers only on every count");
+
+  // An index that is not deployed yet leaves only those counts empty; any other error still fails.
+  missingIndexFor = "unread";
+  t.mock.method(console, "warn", () => {});
+  assert.deepEqual(await countMailboxMessages(input), { total: 120, unread: null, dayTotal: 9, dayUnread: null });
+  global.__countQuery = () => { throw new Error("unavailable"); };
+  await assert.rejects(countMailboxMessages(input), /unavailable/);
+
+  const status = { lastSuccessAt: Date.UTC(2026, 10, 25, 1, 30), lastErrorCode: null, syncing: false, historyComplete: true, imported: 300, pausedUntil: null };
+  const said = email.summarizeEmailCounts({
+    view: "inbox", linked: false, total: 120, unread: 7, day: { date: "2026-11-25", total: 9, unread: 4 }, status,
+  }, "2026-11-25", "Australia/Melbourne");
+  assert.deepEqual(
+    { status: said.status, folder: said.folder, total: said.total, unread: said.unread, day: said.day, dayTotal: said.dayTotal, dayUnread: said.dayUnread },
+    { status: "OK", folder: "Inbox", total: 120, unread: 7, day: "today", dayTotal: 9, dayUnread: 4 },
+  );
+  assert.match(String(said.lastChecked), /12:30/, "last sync in the business time zone (AEDT)");
+  assert.match(said.message, /not conversations/);
+  assert.match(said.message, /Nothing was opened or marked read/);
+  assert.doesNotMatch(said.message, /importing|never guess/);
+
+  const partial = email.summarizeEmailCounts({
+    view: "inbox", linked: true, total: 40, unread: null, day: { date: "2026-11-24", total: 3, unread: null },
+    status: { ...status, historyComplete: false },
+  }, "2026-11-25");
+  assert.equal(partial.folder, "Inbox (customers only)");
+  assert.equal(partial.day, "yesterday");
+  assert.equal(partial.importing, true);
+  assert.equal(partial.importedSoFar, 300);
+  assert.match(partial.message, /still importing/);
+  assert.match(partial.message, /never guess/);
 });
 
 test("the owner MCP route serves the action tools in both modes; areas follow their own flags", async () => {

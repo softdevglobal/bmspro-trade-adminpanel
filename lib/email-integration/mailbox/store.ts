@@ -9,7 +9,9 @@ import { parseSender } from "@/lib/email-integration/mailbox/parse";
 
 export { messageDocId };
 import type { MailboxMetadata } from "@/lib/email-integration/mailbox/provider";
+import { isMissingFirestoreIndex } from "@/lib/firebase/indexed-query";
 import type {
+  MailboxFolder,
   MailboxView,
   MailboxMatch,
   MailboxMessageSummary,
@@ -21,6 +23,7 @@ import {
   FieldValue,
   Timestamp,
   type DocumentData,
+  type Query,
 } from "firebase-admin/firestore";
 
 function clip(value: string, max: number): string {
@@ -293,6 +296,89 @@ export async function listMailboxMessages(input: {
     items: docs.map((doc) => mapMessageDoc(doc.id, doc.data())),
     nextCursor: snap.docs.length > limit ? (docs[docs.length - 1]?.id ?? null) : null,
   };
+}
+
+/** How many stored emails one folder has; null when that count's index is not deployed or still building. */
+export type MailboxCounts = {
+  total: number | null;
+  unread: number | null;
+  /** Emails sent at or after `from` and before `to`. */
+  dayTotal: number | null;
+  dayUnread: number | null;
+};
+
+/**
+ * Counts one folder's stored emails: all, unread, and between two instants (one day) by sentAt.
+ * Firestore count() aggregations: no documents are read, about one read per 1,000 matches.
+ * Counts emails, not conversations, and covers only mail imported so far.
+ */
+export async function countMailboxMessages(input: {
+  connectionId: string;
+  folder: MailboxFolder;
+  /** Only mail linked to a customer or the platform. */
+  linkedOnly?: boolean;
+  from: number;
+  to: number;
+}): Promise<MailboxCounts> {
+  let all: Query = adminDb
+    .collection(EMAIL_MESSAGES_COLLECTION)
+    .where("connectionId", "==", input.connectionId)
+    .where("folder", "==", input.folder);
+  if (input.linkedOnly) all = all.where("linked", "==", true);
+  const unread = all.where("unread", "==", true);
+  // orderBy desc so the range uses the (…, sentAt DESC) indexes the mailbox list already has.
+  const onDay = (query: Query) => query
+    .where("sentAt", ">=", Timestamp.fromMillis(input.from))
+    .where("sentAt", "<", Timestamp.fromMillis(input.to))
+    .orderBy("sentAt", "desc");
+  const count = async (query: Query): Promise<number | null> => {
+    try {
+      return (await query.count().get()).data().count;
+    } catch (error) {
+      if (!isMissingFirestoreIndex(error)) throw error;
+      console.warn("[firestore-reads] email counts: index unavailable. Deploy firestore indexes.");
+      return null;
+    }
+  };
+  const [total, unreadCount, dayTotal, dayUnread] = await Promise.all([
+    count(all), count(unread), count(onDay(all)), count(onDay(unread)),
+  ]);
+  return { total, unread: unreadCount, dayTotal, dayUnread };
+}
+
+/**
+ * Unread inbox mail sent after `since`: how many, and the newest few (sender and subject only, never the body).
+ * Returns null when its index is not deployed yet. Uses the same (…, unread, sentAt DESC) index as the counts.
+ */
+export async function newUnreadInbox(input: {
+  connectionId: string;
+  since: number;
+  top: number;
+}): Promise<{ count: number; latest: { from: string; subject: string }[] } | null> {
+  const query = adminDb
+    .collection(EMAIL_MESSAGES_COLLECTION)
+    .where("connectionId", "==", input.connectionId)
+    .where("folder", "==", "inbox")
+    .where("unread", "==", true)
+    .where("sentAt", ">", Timestamp.fromMillis(input.since))
+    .orderBy("sentAt", "desc");
+  try {
+    const [count, latest] = await Promise.all([
+      query.count().get().then((snap) => snap.data().count),
+      query.limit(input.top).select("fromName", "fromAddress", "subject").get(),
+    ]);
+    return {
+      count,
+      latest: latest.docs.map((doc) => ({
+        from: String(doc.get("fromName") || doc.get("fromAddress") || "Unknown sender"),
+        subject: String(doc.get("subject") || "(no subject)"),
+      })),
+    };
+  } catch (error) {
+    if (!isMissingFirestoreIndex(error)) throw error;
+    console.warn("[firestore-reads] email digest: index unavailable. Deploy firestore indexes.");
+    return null;
+  }
 }
 
 /** Stored messages matching Gmail ids (search results), newest first. */
