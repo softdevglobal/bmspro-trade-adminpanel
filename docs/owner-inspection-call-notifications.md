@@ -4,9 +4,9 @@ Implemented locally behind an off-by-default platform flag and explicit owner co
 
 ## Behaviour
 
-Business Settings → Sophie → Voice permissions → Calls to the owner lets the current business owner save a personal/direct contact number, choose a mapped outbound business DID and opt into automatic new-inspection notifications. A manual Queue owner call action accepts an exact inspection reference and requires an explicit confirmation checkbox showing the saved phone ending. Unsaved contact changes prevent manual calls. The manual action queues intent; it does not promise an immediate ring.
+Business Settings → Sophie → Voice permissions → Calls to the owner lets the current business owner save a personal/direct contact number, choose a mapped outbound business DID and opt into automatic new-inspection notifications. Manual inspection owner calls are removed; settings support automatic notifications only.
 
-New inspection creation queues one deterministic notification per request. Customer portal, call-centre and normal owner inspection requests are included. Direct job, quotation and invoice placeholders are excluded. Historical requests are not backfilled. Notification enqueue failure is logged without undoing an already saved inspection; the owner can use the manual action for that request. Existing customer/business notifications continue independently.
+New inspection creation queues one deterministic notification per request. Customer portal, call-centre and normal owner inspection requests are included. Direct job, quotation and invoice placeholders are excluded. Historical requests are not backfilled. Notification enqueue failure is logged without undoing an already saved inspection; staff must investigate the notification enqueue error. Existing customer/business notifications continue independently.
 
 Calls use the existing scheduled callback worker, batch size six, business calling hours/timezone and bridge capacity controls. Owner notifications are spaced at least five minutes apart per business. Alerts expire after 24 hours; no-answer, failed and unknown results are not automatically redialled. Only the existing explicit bridge-busy response defers a dial. Disabling consent, changing owner/number/DID/settings version, cancelling/completing the inspection or disabling the platform cancels/prevents the pending call. Customer do-not-call preferences remain separate from owner notification consent.
 
@@ -37,11 +37,11 @@ Results appear under Calls → Scheduled calls as Owner notification · New insp
 
 ## Test before production enablement
 
-- Use an owner-controlled test number. First save permission with automatic alerts off. Copy a pending inspection reference, confirm and queue a manual owner call during configured calling hours.
-- Check Scheduled calls for queue/dial/result; listen for correct business and intended owner. Test wrong-person and busy responses. Confirm private customer information is never disclosed and no inspection mutation is claimed.
-- Enable the new-inspection checkbox and create ONE authorized test inspection. Confirm exactly one notification. Do not recreate the same inspection to recover a notification error; use the manual action.
-- Create two test inspections close together and verify the five-minute spacing. Disable consent while another is pending and verify cancellation. Check cancelled/completed requests are skipped.
-- Test two tenants with their separate owner contact/DID settings. Check that the other tenant's reference cannot be used in a manual call.
+- Use an owner-controlled test number. Save the personal number, consent, business DID and automatic new-inspection preference.
+- Create ONE authorized new test inspection during calling hours. Confirm exactly one notification and check Scheduled calls for its outcome. Reprocessing the same request must not enqueue another automatic notification.
+- Listen for the personal owner greeting, inspection update and continued read-only business conversation. Test wrong-person and busy responses, and verify that no record changes or customer callbacks are initiated.
+- Create two test inspections close together and verify five-minute spacing. Disable consent while one is pending and verify cancellation. Check cancelled/completed requests are skipped.
+- Test two tenants with separate owner numbers/DIDs. The removed manual POST action must not be exposed; GET/PATCH settings remain available.
 - Verify the normal missed-call, customer scheduled-call and invoice callback flows remain operational.
 
 Offline tests use mocked Firestore and dialing; no real phone calls are placed. Live phone, voice quality and actual deployment have not been validated by the local implementation.

@@ -34,30 +34,28 @@ export async function saveOwnerNotificationSettings(businessId:string,uid:string
 }
 
 /** Persist intent only. The existing scheduled-call worker is the only dialler. */
-export async function queueOwnerInspectionCall(businessId:string,requestId:string,options:{automatic:boolean;uid?:string;idempotencyKey?:string}){
+export async function queueOwnerInspectionCall(businessId:string,requestId:string,options:{automatic:true}){
+ if(options.automatic!==true)return {status:"DISABLED"};
  if(!ownerNotificationsEnabled()||process.env.AI_SOPHIE_CALLBACK_ENABLED!=="true"||process.env.AI_VOICE_CALL_LOGS_ENABLED==="false")return {status:"DISABLED"};
  if(!requestId||requestId.includes('/'))throw Error("Choose an inspection request.");
  const [saved,inspection]=await Promise.all([adminDb.collection(OWNER_CALL_SETTINGS).doc(businessId).get(),adminDb.collection("requests").doc(requestId).get()]);
  const settings=saved.data() as OwnerNotificationSettings|undefined,row=inspection.data();
- if(!settings?.enabled||options.automatic&&!settings.newInspections)return {status:"DISABLED"};
+ if(!settings?.enabled||!settings.newInspections)return {status:"DISABLED"};
  if(!row||row.businessId!==businessId)throw Error("Inspection request not found for this business.");
  if(!["pending","scheduled","owner_proposed"].includes(row.status))throw Error("This inspection no longer needs a new-request alert.");
- if(options.automatic&&["job_direct","invoice_direct","quotation_direct"].includes(row.createdSource))return {status:"SKIPPED"};
- if(!options.automatic&&options.uid!==settings.ownerUid)throw Error("Only the current owner can request this call.");
+ if(["job_direct","invoice_direct","quotation_direct"].includes(row.createdSource))return {status:"SKIPPED"};
  const route=await lookupVoiceDidRoute(settings.did);
  if(route.state!=="active"||route.binding.businessId!==businessId||route.business.ownerUid!==settings.ownerUid||!route.callback?.callerId)throw Error("Owner outbound route is unavailable.");
  const number=normalizeInvoiceCallbackNumber(settings.phone);if(!number||phoneComparisonKey(number)===phoneComparisonKey(settings.did))throw Error("Owner contact number is invalid.");
  const originalCreatedAt=typeof row.createdAt?.toMillis==="function"?row.createdAt.toMillis():typeof row.createdAt==="number"?row.createdAt:Date.now();
- if(options.automatic&&Date.now()-originalCreatedAt>86400000)return {status:"EXPIRED"};
- const identity=options.automatic?"automatic":options.idempotencyKey;
- if(!identity||!options.automatic&&!/^[a-f0-9-]{36}$/i.test(identity))throw Error("A manual call request ID is required.");
- const id=createHash("sha256").update(`${businessId}:${requestId}:owner-notification:${identity}`).digest("hex");
+ if(Date.now()-originalCreatedAt>86400000)return {status:"EXPIRED"};
+ const id=createHash("sha256").update(`${businessId}:${requestId}:owner-notification:automatic`).digest("hex");
  const ref=adminDb.collection("ai_scheduled_callbacks").doc(id);
  const result=await adminDb.runTransaction(async tx=>{
    const [existing,currentBusiness,currentSettings,currentRequest]=await Promise.all([tx.get(ref),tx.get(adminDb.collection("businesses").doc(businessId)),tx.get(saved.ref),tx.get(inspection.ref)]);
    if(existing.exists)return "ALREADY_QUEUED";
    if(currentBusiness.get("ownerUid")!==settings.ownerUid||currentSettings.get("version")!==settings.version||currentRequest.get("businessId")!==businessId)throw Error("Owner settings changed. Review and retry.");
-   tx.create(ref,{businessId,did:settings.did,number,numberKey:phoneComparisonKey(number),customerName:settings.ownerName,purpose:"owner_notification",source:options.automatic?"new_inspection":"owner_manual",ownerUid:settings.ownerUid,settingsVersion:settings.version,requestId,requestCode:String(row.requestCode||requestId).slice(0,80),status:"OWNER_SCHEDULED",scheduledAt:Date.now(),originalScheduledAt:Date.now(),expiresAt:Date.now()+86400000,createdAt:Date.now(),updatedAt:Date.now()});return "SCHEDULED";
+   tx.create(ref,{businessId,did:settings.did,number,numberKey:phoneComparisonKey(number),customerName:settings.ownerName,purpose:"owner_notification",source:"new_inspection",ownerUid:settings.ownerUid,settingsVersion:settings.version,requestId,requestCode:String(row.requestCode||requestId).slice(0,80),status:"OWNER_SCHEDULED",scheduledAt:Date.now(),originalScheduledAt:Date.now(),expiresAt:Date.now()+86400000,createdAt:Date.now(),updatedAt:Date.now()});return "SCHEDULED";
  });
  return {status:result,id};
 }

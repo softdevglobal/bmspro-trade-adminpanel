@@ -177,15 +177,12 @@ test('owner alert worker cancels changed consent/contact, expired alerts and can
  state.rows.get('ai_owner_call_settings:business-a')!.phone='0412345678';row.status='OWNER_SCHEDULED';row.expiresAt=Date.now()-1;await runScheduledSophieCallbacks();assert.equal(row.status,'CANCELLED');
  row.status='OWNER_SCHEDULED';row.expiresAt=Date.now()+10000;state.rows.get('requests:request-a')!.status='cancelled';await runScheduledSophieCallbacks();assert.equal(row.status,'CANCELLED');assert.equal(state.dials.length,0);
 });
-test('manual owner call uses an exact tenant inspection reference and repeats safely after a lost response',async()=>{
- await ownerAlertSettings();inspectionFixture();
- const {POST}=await import('../app/api/business/owner-call-notifications/route');
- const request=(auth='Bearer owner',reference='INS-REQ TEST123')=>new Request('http://localhost',{method:'POST',headers:{Authorization:auth,'Content-Type':'application/json'},body:JSON.stringify({reference,idempotencyKey:'11111111-1111-4111-8111-111111111111'})});
- assert.equal((await POST(request('Bearer staff'))).status,403);
- assert.equal((await POST(request('Bearer owner','FOREIGN'))).status,404);
- const first=await POST(request());assert.equal(first.status,200);const a=await first.json();assert.equal(a.status,'SCHEDULED');
- const b=await(await POST(request())).json();assert.equal(b.status,'ALREADY_QUEUED');assert.equal(a.id,b.id);assert.equal(state.dials.length,0);
+test('manual owner notification API is removed while settings remain available',async()=>{
+ const route=await import('../app/api/business/owner-call-notifications/route');
+ assert.equal('POST' in route,false);assert.equal(typeof route.GET,'function');assert.equal(typeof route.PATCH,'function');
+ assert.equal(state.dials.length,0);
 });
+
 test('owner alerts respect calling hours, keep customer opt-outs separate and never retry an answered call',async()=>{
  await ownerAlertSettings();inspectionFixture();const {queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');const queued=await queueOwnerInspectionCall('business-a','request-a',{automatic:true});
  const row=state.rows.get('ai_scheduled_callbacks:'+queued.id)!;const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');
