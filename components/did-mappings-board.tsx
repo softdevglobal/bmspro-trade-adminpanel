@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { readJsonResponse } from "@/lib/api/read-json-response";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import type { DidBusinessOption, DidMappingInput, DidMappingRow } from "@/lib/ai/data/did-mapping-types";
 
 const emptyForm: DidMappingInput = { did: "", businessId: "", isActive: true, version: 0 };
@@ -20,6 +21,7 @@ export function DidMappingsBoard() {
   const [form, setForm] = useState<DidMappingInput>(emptyForm);
   const [editing, setEditing] = useState<DidMappingRow | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DidMappingRow | null>(null);
 
   const authHeaders = useCallback(async () => {
     if (!user || role !== "super_admin") throw new Error("Sign in as a super admin to manage phone numbers.");
@@ -102,6 +104,23 @@ export function DidMappingsBoard() {
     setForm({ did: mapping.did, businessId: mapping.businessId, isActive: mapping.isActive,
       version: mapping.version, callback: mapping.callback ?? null, forwardingExtension: mapping.forwardingExtension ?? null });
     setShowForm(true); setError(""); setMessage("");
+  }
+
+  async function remove(mapping: DidMappingRow) {
+    if (saving) return;
+    setSaving(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/admin/ai/did-mappings", {
+        method: "DELETE", headers: { ...await authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ did: mapping.did, version: mapping.version }),
+      });
+      const data = await readJsonResponse<{ ok: boolean; error?: string }>(response);
+      if (!response.ok || !data.ok) throw new Error(data.error || "Could not delete the mapping.");
+      if (editing?.did === mapping.did) { setShowForm(false); setEditing(null); setForm(emptyForm); }
+      setMessage(`Mapping for ${mapping.did} deleted.`);
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not delete the mapping."); }
+    finally { setSaving(false); setDeleteTarget(null); }
   }
 
   return (
@@ -205,12 +224,23 @@ export function DidMappingsBoard() {
               <td className="px-5 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${mapping.isActive && mapping.source === "dashboard" ? "bg-primary-fixed text-on-primary-fixed-variant" : "bg-surface-container-high text-on-surface-variant"}`}>{mapping.source === "setup" ? "Needs saving" : mapping.isActive ? "Enabled" : "Disabled"}</span></td>
               <td className="whitespace-nowrap px-5 py-4 text-right"><div className="inline-flex gap-1">
                 <button type="button" disabled={saving} onClick={() => edit(mapping)} aria-label={`Edit mapping for ${mapping.did}`} className="rounded-lg px-3 py-2 font-medium text-primary disabled:opacity-50">Edit</button>
+                <button type="button" disabled={saving} onClick={() => setDeleteTarget(mapping)} aria-label={`Delete mapping for ${mapping.did}`} className="rounded-lg px-3 py-2 font-medium text-error disabled:opacity-50">Delete</button>
                 <button type="button" disabled={saving || (!mapping.isActive && !mapping.businessActive)} onClick={() => void toggle(mapping)} aria-label={`${mapping.isActive ? "Disable" : "Enable"} ${mapping.did}`} className="rounded-lg px-3 py-2 font-medium text-on-surface-variant disabled:opacity-50">{mapping.isActive ? "Disable" : "Enable"}</button>
               </div></td>
             </tr>)}</tbody>
           </table></div>}
       </section>
       <p className="text-xs text-on-surface-variant">Route the number to the voice bridge in your phone system. The bridge discovers its Trade assignment from these saved mappings.</p>
+      <DeleteConfirmModal
+        open={deleteTarget !== null}
+        title="Delete DID mapping?"
+        description={deleteTarget ? `Remove ${deleteTarget.did} from ${deleteTarget.businessName}? Sophie will no longer route calls for this number. Existing call history will be kept.` : ""}
+        confirmLabel="Delete mapping"
+        cancelLabel="Keep mapping"
+        isLoading={saving}
+        onCancel={() => { if (!saving) setDeleteTarget(null); }}
+        onConfirm={() => { if (deleteTarget) void remove(deleteTarget); }}
+      />
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { logAuditEvent } from "@/lib/audit/server";
 import { isTenantAccessAllowed } from "@/lib/onboarding/business-status";
 import { parseVoiceBusinesses, type VoiceBusiness } from "../config";
-import { assertMappingVersion, didMappingInput, DidMappingError,
+import { assertMappingVersion, didMappingInput, didMappingDeleteInput, DidMappingError,
   type DidMappingRow, type StoredDidMapping, type DidBusinessOption } from "./did-mapping-types";
 
 export const DID_MAPPINGS_COLLECTION = "ai_did_mappings";
@@ -86,6 +86,7 @@ export async function listVoiceDidMappings(): Promise<{ mappings: DidMappingRow[
   });
   for (const binding of setupMappings()) mappings.set(binding.did, row({ ...binding, isActive: true, version: 0 }, "setup", null));
   for (const doc of saved.docs) {
+    if (doc.data().deleted === true) { mappings.delete(doc.id); continue; }
     const data = doc.data(), stored = parseStored(doc.id, data)!;
     const updatedAt = data.updatedAt?.toMillis?.();
     mappings.set(doc.id, row(stored, "dashboard", typeof updatedAt === "number" ? updatedAt : null));
@@ -102,13 +103,14 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
   const outcome = await adminDb.runTransaction(async tx => {
     const [existing, business] = await tx.getAll(ref, adminDb.collection("businesses").doc(input.businessId));
     const existingData = existing.data();
-    const current = parseStored(input.did, existingData);
+    const previous = parseStored(input.did, existingData);
+    const current = existingData?.deleted === true ? null : previous;
     assertMappingVersion(current, input.version);
     const businessData = business.data();
     if (input.isActive && (!businessData || !isTenantAccessAllowed(businessData.status, businessData.isActive))) {
       throw new DidMappingError(400, "Choose an active business before enabling this number.");
     }
-    const version = (current?.version ?? 0) + 1;
+    const version = (previous?.version ?? 0) + 1;
     const forwardingExtension = input.forwardingExtension === undefined && current?.businessId === input.businessId
       ? current.forwardingExtension ?? null
       : input.forwardingExtension ?? null;
@@ -144,4 +146,36 @@ export async function saveVoiceDidMapping(raw: unknown, actor: MappingActor) {
       version: outcome.version, forwardingExtension: outcome.forwardingExtension } });
   return { did: input.did, businessId: input.businessId, isActive: input.isActive,
     version: outcome.version, forwardingExtension: outcome.forwardingExtension, callback: outcome.callback };
+}
+
+/** Keep a disabled tombstone so recreation cannot reuse historical recording-period IDs. */
+export async function deleteVoiceDidMapping(raw: unknown, actor: MappingActor) {
+  const parsed = didMappingDeleteInput.safeParse(raw);
+  if (!parsed.success) throw new DidMappingError(400, "Choose a valid mapping and refresh its version.");
+  const { did, version } = parsed.data;
+  const ref = adminDb.collection(DID_MAPPINGS_COLLECTION).doc(did);
+  const outcome = await adminDb.runTransaction(async tx => {
+    const existing = await tx.get(ref);
+    const data = existing.data();
+    if (data?.deleted === true) throw new DidMappingError(404, "This mapping has already been deleted. Refresh the list.");
+    const current = parseStored(did, data);
+    assertMappingVersion(current, version);
+    const setup = !current ? setupMappings().find(mapping => mapping.did === did) : null;
+    const businessId = current?.businessId ?? setup?.businessId;
+    if (!businessId) throw new DidMappingError(404, "This mapping no longer exists. Refresh the list.");
+    if (data?.recordingPeriodVersion) {
+      tx.set(adminDb.collection(DID_RECORDING_PERIODS_COLLECTION).doc(`${did}-${data.recordingPeriodVersion}`),
+        { endedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    tx.set(ref, { did, businessId, isActive: false, deleted: true, version: (current?.version ?? 0) + 1,
+      forwardingExtension: null, callback: null, autoCallbackSince: null, recordingPeriodVersion: null,
+      createdAt: data?.createdAt ?? FieldValue.serverTimestamp(), createdBy: data?.createdBy ?? actor.uid,
+      updatedBy: actor.uid, updatedAt: FieldValue.serverTimestamp(), deletedAt: FieldValue.serverTimestamp() });
+    return { businessId };
+  });
+  clearVoiceDidRouteCache(did);
+  await logAuditEvent({ businessId: outcome.businessId, category: "integration", action: "voice.did_mapping.deleted",
+    actor: { uid: actor.uid, role: actor.role, email: actor.email ?? null, name: null }, source: "admin_panel",
+    summary: `Phone number ${did} removed from AI reception.`, targetId: did, targetLabel: did,
+    metadata: { did } });
 }

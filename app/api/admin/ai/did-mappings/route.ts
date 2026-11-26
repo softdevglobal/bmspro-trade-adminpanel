@@ -1,5 +1,5 @@
 import { requireSuperAdmin } from "@/lib/onboarding/server";
-import { listVoiceDidMappings, saveVoiceDidMapping } from "@/lib/ai/data/did-mappings";
+import { listVoiceDidMappings, saveVoiceDidMapping, deleteVoiceDidMapping } from "@/lib/ai/data/did-mappings";
 import { DidMappingError } from "@/lib/ai/data/did-mapping-types";
 
 export const runtime = "nodejs";
@@ -23,5 +23,19 @@ export async function PUT(request: Request) {
     return json({ ok: true, mapping });
   } catch (error) {
     return json({ ok: false, error: error instanceof DidMappingError ? error.message : "Could not save the phone mapping." }, error instanceof DidMappingError ? error.status : 503);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const auth = await requireSuperAdmin(request);
+  if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
+  let body: unknown;
+  try { body = await request.json(); }
+  catch { return json({ ok: false, error: "Invalid request body." }, 400); }
+  try {
+    await deleteVoiceDidMapping(body, { uid: auth.uid, email: auth.email, role: "super_admin" });
+    return json({ ok: true });
+  } catch (error) {
+    return json({ ok: false, error: error instanceof DidMappingError ? error.message : "Could not delete the phone mapping." }, error instanceof DidMappingError ? error.status : 503);
   }
 }
