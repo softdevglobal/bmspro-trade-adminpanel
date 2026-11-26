@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "quotations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sophieFollowUpStatus", "order": "ASCENDING" },
+        { "fieldPath": "sophieFollowUpDueAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "ai_scheduled_callbacks",
       "queryScope": "COLLECTION",
       "fields": [

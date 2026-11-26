@@ -249,6 +249,7 @@ export async function PATCH(
             },
           }
         : {}),
+      ...(typeof payload.sophieFollowUpEnabled === "boolean" ? {sophieFollowUpEnabled:payload.sophieFollowUpEnabled} : {}),
       send: payload.send === true,
     });
 

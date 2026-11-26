@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     }).map(doc => {
       const data = doc.data();
       const digits = typeof data.number === "string" ? data.number.replace(/\D/g, "") : "";
-      const status = data.status === "OWNER_SCHEDULED" ? "SCHEDULED" : typeof data.status === "string" && statuses.has(data.status) ? data.status : "FAILED";
+      const status = ["OWNER_SCHEDULED","OWNER_NUMBER_SCHEDULED"].includes(data.status) ? "SCHEDULED" : typeof data.status === "string" && statuses.has(data.status) ? data.status : "FAILED";
       return {
         id: doc.id,
         status,
@@ -66,7 +66,7 @@ export async function PATCH(request:Request){
   const result=await adminDb.runTransaction(async tx=>{
     const snap=await tx.get(ref);const row=snap.data();
     if(!row||row.businessId!==auth.businessId||!["owner_requested","owner_notification"].includes(row.purpose))return {status:404,error:"Scheduled owner call not found."};
-    if(!["SCHEDULED","OWNER_SCHEDULED"].includes(row.status))return {status:409,error:"This call was already processed or has started dialing."};
+    if(!["SCHEDULED","OWNER_SCHEDULED","OWNER_NUMBER_SCHEDULED"].includes(row.status))return {status:409,error:"This call was already processed or has started dialing."};
     tx.update(ref,{status:"CANCELLED",reason:"Cancelled by the business owner.",updatedAt:Date.now()});return {status:200};
   });
   return result.status===200?json({ok:true}):json({error:result.error},result.status);

@@ -290,6 +290,7 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
               <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-lowest text-on-surface-variant">
                 <tr>
                   <th scope="col" className="px-3 py-2.5 font-semibold">When</th>
+                  <th scope="col" className="px-3 py-2.5 font-semibold">Call ID</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">{!missed && direction === "outbound" ? "Customer called" : "Caller"}</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">Business number</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">Duration</th>
@@ -303,6 +304,10 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
                   return <Fragment key={recording.rowKey}>
                     <tr className="hover:bg-surface-container-lowest/80">
                       <td className="whitespace-nowrap px-3 py-2.5 text-on-surface-variant">{formatTenantDate(recording.startedAt)}</td>
+                      <td className="max-w-56 break-all px-3 py-2.5 font-mono text-[11px] text-on-surface-variant select-text" title={recording.id}>
+                        {recording.id || "—"}
+                        {count > 1 && <span className="mt-1 block font-body text-[10px]">Latest call in this group</span>}
+                      </td>
                       <td className="px-3 py-2.5 text-on-surface">
                         {recording.customerName && <p className="font-semibold">{recording.customerName}</p>}
                         <p className="whitespace-nowrap tabular-nums text-on-surface-variant">{recording.callerNumber ?? "Number unavailable"}</p>
@@ -347,7 +352,7 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
                       </td>
                     </tr>
                     {expanded && recording.grant && <tr className="bg-surface-container-lowest">
-                      <td colSpan={5} className="px-3 py-3"><Player key={recording.grant} user={user} grant={recording.grant} /></td>
+                      <td colSpan={6} className="px-3 py-3"><Player key={recording.grant} user={user} grant={recording.grant} /></td>
                     </tr>}
                   </Fragment>;
                 })}

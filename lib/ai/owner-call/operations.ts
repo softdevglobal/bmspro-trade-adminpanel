@@ -151,20 +151,9 @@ export function ownerOperations(businessId: string, timeZone: string) {
         reserved: false, suggestions, reasons: [...new Set(plans.filter(plan => !plan.assignedTo).map(plan => plan.aiAssignment.reason))] };
     },
 
-    async quoteFollowUps(search?: string, offset = 0) {
-      const term = normalize(search);
-      const snapshot = await owned(QUOTATION_COLLECTION).where("status", "==", "sent").get();
-      const quotes = snapshot.docs.map(doc => mapQuotationDoc(doc.id, doc.data()))
-        .filter(quote => quote.customerDecision === null && (!term || normalize(quote.quotationCode) === term ||
-          normalize(quote.customer.fullName).includes(term)))
-        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-      return {
-        status: "OK", total: quotes.length, nextOffset: offset + pageSize < quotes.length ? offset + pageSize : null,
-        quotes: quotes.slice(offset, offset + pageSize).map(quote => ({
-          reference: quote.quotationCode, customer: quote.customer.fullName, service: quote.serviceTitle,
-          valueAud: quote.finalPriceAud, createdAt: quote.createdAt, validUntil: quote.validUntil,
-        })),
-      };
+    async quoteFollowUps(search?: string, offset = 0, includeDecided = false) {
+      const {quotationFollowUpReport}=await import("./quotation-follow-up-report");
+      return quotationFollowUpReport(adminDb,businessId,search,offset,includeDecided);
     },
 
     async sophieCallSummaries(date?: string, offset = 0) {

@@ -13,4 +13,5 @@ test("owner phone read tools cover calls and invoices without mutations or callb
   assert.equal(parseOwnerPhoneTool("list_invoices",{invoiceStatus:"invented"}),null);
   assert.ok(parseOwnerPhoneTool("list_missed_calls",{date:"today"}));
   assert.ok(parseOwnerPhoneTool("list_invoices",{invoiceStatus:"sent",invoiceSearch:"INV 123"}));
+  assert.ok(parseOwnerPhoneTool("list_quote_follow_ups",{includeDecided:true,search:"QT TEST123"}));
 });

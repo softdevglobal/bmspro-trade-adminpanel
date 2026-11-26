@@ -164,6 +164,7 @@ export function AiCallsBoard({ initialCallId }: { initialCallId?: string } = {})
                       <span className="mt-1 block truncate font-body text-[12px] text-on-surface-variant">
                         {call.firstCallerLine ? `“${call.firstCallerLine}”` : call.answered ? "No caller speech recorded" : "Not answered"}
                       </span>
+                      <span className="mt-1 block break-all font-mono text-[11px] text-on-surface-variant select-text" title={call.id}>Call ID: {call.id}</span>
                     </span>
                     <span className="font-body text-[12px] text-on-surface-variant">
                       {call.recipientType === "owner" ? "Owner notification · " : ""}{duration(call.durationMs)}{call.callerNumber ? ` · ${call.callerNumber}` : ""}

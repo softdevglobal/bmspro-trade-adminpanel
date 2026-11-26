@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
     let missedAt: number | undefined;
     if (callDirection === "outbound" && callbackAttemptId) {
-      const [invoiceAttempt,scheduledAttempt] = await Promise.all([adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(callbackAttemptId).get(),adminDb.collection("ai_scheduled_callbacks").doc(callbackAttemptId).get()]);
+      const [invoiceAttempt,scheduledAttempt,quotationAttempt] = await Promise.all([adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(callbackAttemptId).get(),adminDb.collection("ai_scheduled_callbacks").doc(callbackAttemptId).get(),adminDb.collection("ai_quotation_followup_calls").doc(callbackAttemptId).get()]);
       if(scheduledAttempt.exists&&scheduledAttempt.get("purpose")==="owner_requested"){
         const data=scheduledAttempt.data()!;
         if(data.businessId!==auth.binding.businessId||data.did!==auth.binding.did||data.numberKey!==phoneKey||!["CALLING","ANSWERED","UNKNOWN"].includes(data.status))return json({status:"REJECTED",code:"ATTEMPT_MISMATCH"},403);
@@ -56,6 +56,9 @@ export async function POST(request: Request) {
         if (!storedNumber || phoneComparisonKey(storedNumber) !== phoneKey) {
           return json({ status: "REJECTED", code: "ATTEMPT_MISMATCH" }, 403);
         }
+      } else if(quotationAttempt.exists){
+        const data=quotationAttempt.data()!;
+        if(data.businessId!==auth.binding.businessId||data.did!==auth.binding.did||data.numberKey!==phoneKey||!["REQUESTED","ANSWERED","UNKNOWN"].includes(data.status)||data.callLogId||typeof data.attemptedAt!=="number"||Date.now()-data.attemptedAt>15*60000)return json({status:"REJECTED",code:"ATTEMPT_MISMATCH"},403);
       } else {
         const stateRef = callbackState(auth.binding.businessId, phoneKey);
         const state = (await stateRef.get()).data();

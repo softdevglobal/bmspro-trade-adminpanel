@@ -38,7 +38,8 @@ const fixtures: Record<string, string> = {
   "lib/onboarding/business-status": `exports.isTenantAccessAllowed = () => true;`,
   "lib/security/rate-limit": `exports.consumeRateLimits = async () => true;`,
   "lib/ai/mcp/tools/owner-briefing.tools": `
-    exports.ownerBriefingTools = businessId => ({ dailySummary: async offset => ({ businessId, offset }) });
+    exports.ownerBriefingTools = businessId => ({ dailySummary: async offset => ({ businessId, offset }),
+      quoteFollowUps: async (search,offset,includeDecided) => ({businessId,search,offset,includeDecided}) });
   `,
   // Records how the owner route builds the knowledge search; no Firestore or OpenAI.
   "lib/ai/mcp/tools/knowledge.tools": `
@@ -200,6 +201,14 @@ test("briefing MCP reads only the authenticated owner's business", async (t) => 
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(JSON.parse(payload.result.content[0].text), { businessId: "business-a", offset: 2 });
+});
+
+test("owner quotation responses include decided quotes without accepting a model business scope", async () => {
+  const {POST}=await import("../app/api/ai/owner-call/mcp/route");
+  assert.equal((await POST(mcpRequest("staff","list_quote_follow_ups",{includeDecided:true}))).status,403);
+  const response=await POST(mcpRequest("owner","list_quote_follow_ups",{includeDecided:true,search:"QT TEST123",offset:0,businessId:"business-b"}));
+  const payload=await response.json();
+  assert.deepEqual(JSON.parse(payload.result.content[0].text),{businessId:"business-a",search:"QT TEST123",offset:0,includeDecided:true});
 });
 
 test("owner knowledge search uses the owner's business and does not feed the Unanswered page", async (t) => {

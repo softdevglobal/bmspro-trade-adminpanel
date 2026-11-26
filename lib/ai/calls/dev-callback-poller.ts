@@ -3,6 +3,7 @@ import "server-only";
 import { runSophieCallbacks } from "@/lib/ai/calls/run-sophie-callbacks";
 import { runOverdueInvoiceCalls } from "@/lib/ai/calls/run-overdue-invoice-calls";
 import { runScheduledSophieCallbacks } from "@/lib/ai/calls/run-scheduled-callbacks";
+import {runQuotationFollowUps} from "./run-quotation-follow-ups";
 
 const missedCallPollMs = 15_000;
 const otherCallPollMs = 60_000;
@@ -59,4 +60,10 @@ export function startDevSophieCallbackPoller(): void {
   setTimeout(pollMissedCalls, missedCallPollMs).unref();
   setTimeout(pollInvoiceCalls, 15_000).unref();
   setTimeout(pollScheduledCalls, 15_000).unref();
+  async function pollQuotationCalls(){
+    try { const result=await runQuotationFollowUps(); if(result.processed||result.errors||result.skipped)console.info("[sophie-quotation-calls] Dev poll result:",result); }
+    catch {console.error("[sophie-quotation-calls] Dev poll failed.");}
+    finally{setTimeout(pollQuotationCalls,otherCallPollMs).unref();}
+  }
+  setTimeout(pollQuotationCalls,15_000).unref();
 }
