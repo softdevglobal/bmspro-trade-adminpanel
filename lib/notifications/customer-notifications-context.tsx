@@ -108,29 +108,19 @@ export function CustomerNotificationsProvider({
     const refresh = createCoalescedRefresh(() => reloadRef.current());
     refresh.request();
 
-    let disconnectStream: (() => void) | undefined;
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const token = await getIdToken();
-        if (!token || cancelled) return;
-        disconnectStream = connectCustomerNotificationStream(token, () => {
-          refresh.request();
-        });
-      } catch {
-        /* SSE optional */
-      }
-    })();
+    // Reconnects fetch a current token, so the stream outlives the 1-hour token.
+    const disconnectStream = connectCustomerNotificationStream(
+      async () => (await getIdToken()) ?? null,
+      () => refresh.request(),
+    );
 
     const onFocus = () => refresh.request();
     window.addEventListener("focus", onFocus);
     const interval = window.setInterval(() => refresh.request(), 120_000);
 
     return () => {
-      cancelled = true;
       refresh.dispose();
-      disconnectStream?.();
+      disconnectStream();
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);
     };

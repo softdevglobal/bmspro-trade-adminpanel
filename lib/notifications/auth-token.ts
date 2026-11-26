@@ -7,7 +7,11 @@ export type BusinessOwnerAuth =
   | { ok: true; businessId: string }
   | { ok: false; status: number; error: string };
 
-/** Bearer token from header or `access_token` query (for EventSource). */
+/**
+ * Bearer token from the Authorization header. The `access_token` query is
+ * still read for mobile app versions already on phones, but current web and
+ * app clients send the header: tokens in URLs end up in request logs.
+ */
 export function extractBearerToken(request: Request): string | null {
   const authHeader = request.headers.get("authorization") ?? "";
   const headerMatch = authHeader.match(/^Bearer (.+)$/);
