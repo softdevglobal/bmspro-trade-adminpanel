@@ -110,29 +110,19 @@ export function BusinessNotificationsProvider({ children }: { children: ReactNod
     const refresh = createCoalescedRefresh(() => reloadRef.current());
     refresh.request();
 
-    let disconnectStream: (() => void) | undefined;
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const token = await user.getIdToken();
-        if (cancelled) return;
-        disconnectStream = connectBusinessNotificationStream(token, () => {
-          refresh.request();
-        });
-      } catch {
-        /* SSE optional; polling on focus still applies */
-      }
-    })();
+    // Reconnects fetch a current token, so the stream outlives the 1-hour token.
+    const disconnectStream = connectBusinessNotificationStream(
+      () => user.getIdToken(),
+      () => refresh.request(),
+    );
 
     const onFocus = () => refresh.request();
     window.addEventListener("focus", onFocus);
     const interval = window.setInterval(() => refresh.request(), 120_000);
 
     return () => {
-      cancelled = true;
       refresh.dispose();
-      disconnectStream?.();
+      disconnectStream();
       window.removeEventListener("focus", onFocus);
       window.clearInterval(interval);
     };

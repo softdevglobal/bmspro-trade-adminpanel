@@ -132,42 +132,102 @@ export async function fetchCustomerNotifications(
   return body.notifications;
 }
 
+/** A fixed ID token, or a function that returns a current one. */
+export type StreamTokenSource = string | (() => Promise<string | null>);
+
+/** Events in a server-sent-events text chunk that should trigger a refresh. */
+export function countRefreshEvents(blocks: string[]): number {
+  let count = 0;
+  for (const block of blocks) {
+    let event = "";
+    let hasData = false;
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith(":")) continue; // keep-alive comment
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) hasData = true;
+    }
+    // Same as EventSource: "refresh" events, and unnamed messages with data.
+    if (event === "refresh" || (event === "" && hasData)) count += 1;
+  }
+  return count;
+}
+
 /**
- * Opens an SSE stream; calls `onRefresh` when the server signals new activity.
- * Uses query token because EventSource cannot set Authorization headers.
+ * Listens to a notification stream with the ID token in the Authorization
+ * header. (EventSource can only send it in the URL, which writes the login
+ * token into server and hosting request logs.) The server closes the stream
+ * every few minutes; it reconnects with a current token each time, backing
+ * off after errors, and stops for good on 401/403.
  */
-export function connectBusinessNotificationStream(
-  idToken: string,
+function connectNotificationStream(
+  path: string,
+  token: StreamTokenSource,
   onRefresh: () => void,
 ): () => void {
-  const url = `/api/notifications/stream?access_token=${encodeURIComponent(idToken)}`;
-  const source = new EventSource(url);
+  const controller = new AbortController();
+  let stopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 1_000;
 
-  const handleRefresh = () => onRefresh();
-  source.addEventListener("refresh", handleRefresh);
-  source.onmessage = handleRefresh;
+  const wait = (ms: number) =>
+    new Promise<void>((resolve) => {
+      retryTimer = setTimeout(resolve, ms);
+    });
+
+  void (async () => {
+    while (!stopped) {
+      try {
+        const idToken = typeof token === "string" ? token : await token();
+        if (!idToken || stopped) return;
+        const response = await fetch(path, {
+          headers: { authorization: `Bearer ${idToken}`, accept: "text/event-stream" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.status === 401 || response.status === 403) return;
+        if (!response.ok || !response.body) throw new Error("stream unavailable");
+        retryDelay = 1_000;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split(/\r?\n\r?\n/);
+          buffer = blocks.pop() ?? "";
+          for (let i = countRefreshEvents(blocks); i > 0; i -= 1) onRefresh();
+        }
+      } catch {
+        if (stopped) return;
+      }
+      if (stopped) return;
+      await wait(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30_000);
+    }
+  })();
 
   return () => {
-    source.removeEventListener("refresh", handleRefresh);
-    source.close();
+    stopped = true;
+    controller.abort();
+    if (retryTimer) clearTimeout(retryTimer);
   };
 }
 
-export function connectCustomerNotificationStream(
-  idToken: string,
+/** Calls `onRefresh` when the server signals new business notifications. */
+export function connectBusinessNotificationStream(
+  token: StreamTokenSource,
   onRefresh: () => void,
 ): () => void {
-  const url = `/api/customer/notifications/stream?access_token=${encodeURIComponent(idToken)}`;
-  const source = new EventSource(url);
+  return connectNotificationStream("/api/notifications/stream", token, onRefresh);
+}
 
-  const handleRefresh = () => onRefresh();
-  source.addEventListener("refresh", handleRefresh);
-  source.onmessage = handleRefresh;
-
-  return () => {
-    source.removeEventListener("refresh", handleRefresh);
-    source.close();
-  };
+/** Calls `onRefresh` when the server signals new customer notifications. */
+export function connectCustomerNotificationStream(
+  token: StreamTokenSource,
+  onRefresh: () => void,
+): () => void {
+  return connectNotificationStream("/api/customer/notifications/stream", token, onRefresh);
 }
 
 export async function patchBusinessNotification(

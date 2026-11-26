@@ -43,6 +43,12 @@ const DASHBOARD_PAGES: Record<string, DashboardPageMeta> = {
     subtitle: "Create and send invoices to your customers.",
     icon: "receipt_long",
   },
+  "/dashboard/expenses": {
+    title: "Expenses",
+    subtitle:
+      "Receipts your team captures, read by Sophie and approved by you.",
+    icon: "payments",
+  },
   "/dashboard/emails": {
     title: "Emails",
     subtitle:

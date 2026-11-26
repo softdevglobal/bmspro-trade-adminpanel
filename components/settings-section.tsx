@@ -8,6 +8,8 @@ type SettingsSectionProps = {
   icon?: string;
   children: ReactNode;
   className?: string;
+  /** Anchor so other pages can link straight to this section. */
+  id?: string;
 };
 
 export function SettingsSection({
@@ -16,10 +18,12 @@ export function SettingsSection({
   icon,
   children,
   className = "",
+  id,
 }: SettingsSectionProps) {
   return (
     <section
-      className={`rounded-2xl border border-outline-variant/80 bg-surface-container-lowest shadow-sm ${className}`}
+      id={id}
+      className={`scroll-mt-24 rounded-2xl border border-outline-variant/80 bg-surface-container-lowest shadow-sm ${className}`}
     >
       <div className="border-b border-outline-variant/50 px-4 py-3.5 sm:px-6 sm:py-4">
         <div className="flex items-start gap-3">

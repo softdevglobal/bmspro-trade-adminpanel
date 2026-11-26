@@ -648,6 +648,7 @@ export async function updateBusinessProfile(
       quotations: updates.enabledModules.quotations,
       invoices: updates.enabledModules.invoices,
       jobs: updates.enabledModules.jobs,
+      expenses: updates.enabledModules.expenses,
     };
   }
 
@@ -675,6 +676,7 @@ export async function updateTenantModules(
       quotations: enabledModules.quotations,
       invoices: enabledModules.invoices,
       jobs: enabledModules.jobs,
+      expenses: enabledModules.expenses,
     },
     updatedAt: FieldValue.serverTimestamp(),
   });

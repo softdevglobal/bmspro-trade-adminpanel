@@ -16,6 +16,8 @@
     "test:careplus-records": "tsx --test scripts/test-careplus-capture-records.ts",
     "test:invoice-customer": "tsx --test scripts/test-invoice-customer.ts",
     "test:invoice-due-calendar": "tsx --test scripts/test-invoice-due-calendar.ts",
+    "test:expenses": "tsx --test scripts/test-expenses.ts",
+    "test:notification-stream": "tsx --test scripts/test-notification-stream.ts",
     "test:owner-day-activity": "tsx --test scripts/test-owner-day-activity.ts",
     "test:email-integration": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-email-integration.ts",
     "test:ai-staff-assignment": "tsx --import ./scripts/stub-server-only.mjs --test scripts/test-ai-staff-assignment.ts scripts/test-ai-assignment-transaction.ts",

@@ -142,6 +142,7 @@ export async function PATCH(request: Request) {
       quotations: boolean;
       invoices: boolean;
       jobs: boolean;
+      expenses: boolean;
       requests: boolean;
     };
     feePayerMode?: "business" | "customer";
