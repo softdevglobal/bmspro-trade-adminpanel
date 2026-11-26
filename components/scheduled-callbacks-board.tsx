@@ -16,9 +16,9 @@ const labels: Record<string, string> = {
   FAILED: "Call failed", CANCELLED: "Cancelled", SKIPPED: "Skipped", UNKNOWN: "Outcome unverified",
 };
 
-export function ScheduledCallbacksBoard({ user }: { user: User }) {
+export function ScheduledCallbacksBoard({ user, initialDate }: { user: User; initialDate?: string }) {
   const [calls, setCalls] = useState<ScheduledCall[] | null>(null);
-  const [date, setDate] = useState(() => platformTodayIso());
+  const [date, setDate] = useState(() => initialDate ?? platformTodayIso());
   const [error, setError] = useState("");
   const [conversation,setConversation]=useState<Record<string,{loading?:boolean;error?:string;turns?:{speaker:string;text:string}[]}>>({});
   const [cancelling,setCancelling]=useState<string|null>(null);
@@ -85,6 +85,7 @@ export function ScheduledCallbacksBoard({ user }: { user: User }) {
         <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-lowest text-on-surface-variant">
           <tr>
             <th scope="col" className="px-3 py-2.5 font-semibold">Scheduled time</th>
+            <th scope="col" className="px-3 py-2.5 font-semibold">Call ID</th>
             <th scope="col" className="px-3 py-2.5 font-semibold">Recipient</th>
             <th scope="col" className="px-3 py-2.5 font-semibold">Business number</th>
             <th scope="col" className="px-3 py-2.5 font-semibold">Call type</th>
@@ -95,6 +96,9 @@ export function ScheduledCallbacksBoard({ user }: { user: User }) {
           {calls.map(call => <tr key={call.id} className="align-top hover:bg-surface-container-lowest/80">
             <td className="whitespace-nowrap px-3 py-2.5 text-on-surface-variant">
               {formatTenantDate(call.scheduledAt ?? call.attemptedAt ?? call.completedAt ?? null)}
+            </td>
+            <td className="max-w-56 break-all px-3 py-2.5 font-mono text-[11px] text-on-surface-variant select-text" title={call.callLogId || "The call log ID appears once the conversation is saved."}>
+              {call.callLogId || "—"}
             </td>
             <td className="px-3 py-2.5 text-on-surface">
               {call.customerName && <p className="font-semibold">{call.customerName}</p>}

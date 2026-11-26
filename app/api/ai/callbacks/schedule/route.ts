@@ -77,8 +77,13 @@ export async function POST(request: Request) {
     if(ownerAttempt.exists&&ownerAttempt.get("purpose")==="owner_requested"){
       const parent=ownerAttempt.data()!;const details=ownerCallRecordInput.safeParse(parent);
       if(!ownerScheduledCallsEnabled()||!details.success||parent.businessId!==businessId||parent.did!==auth.did||parent.numberKey!==numberKey||!["CALLING","ANSWERED","UNKNOWN"].includes(parent.status))return json({status:"REJECTED",code:"ATTEMPT_MISMATCH"},403);
-      const customer=(await adminDb.collection("customers").doc(details.data.customerId).get()).data();
-      if(!customer||customer.registeredBusinessId!==businessId||normalizeInvoiceCallbackNumber(String(customer.phone??""))!==number)return json({status:"REJECTED",code:"CUSTOMER_CHANGED"},409);
+      if(details.data.recipientSource==="owner_number"){
+        const {isDirectOwnerCallNumberAllowed}=await import("@/lib/ai/calls/owner-number-destination");
+        if(parent.number!==number||route.business.ownerUid!==parent.requestedBy||!await isDirectOwnerCallNumberAllowed(number))return json({status:"REJECTED",code:"CONTACT_CHANGED"},409);
+      }else{
+        const customer=(await adminDb.collection("customers").doc(details.data.customerId!).get()).data();
+        if(!customer||customer.registeredBusinessId!==businessId||normalizeInvoiceCallbackNumber(String(customer.phone??""))!==number)return json({status:"REJECTED",code:"CUSTOMER_CHANGED"},409);
+      }
       purpose="owner_requested";customerName=details.data.customerName;
       ownerDetails={...details.data,requestedBy:parent.requestedBy,source:"customer_requested",expiresAt:when+2*3600000,originalScheduledAt:when};
     }else if (invoiceAttempt.exists) {
@@ -124,7 +129,7 @@ export async function POST(request: Request) {
       const record = {
         businessId, did: auth.did, number, numberKey, purpose,
         sourceAttemptId: callbackAttemptId, scheduledAt: when, timezone: businessTimezone,
-        status: "SCHEDULED", createdAt: now, updatedAt: now,
+        status: ownerDetails.recipientSource==="owner_number"?"OWNER_NUMBER_SCHEDULED":"SCHEDULED", createdAt: now, updatedAt: now,
         ...ownerDetails,
         ...(invoiceId && { invoiceId }), ...(customerName && { customerName }), ...(missedAt && { missedAt }),
       };

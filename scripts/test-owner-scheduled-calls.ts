@@ -28,7 +28,7 @@ const fixtures={
  'lib/ai/config':`exports.authenticateVoiceBridgeCredential=request=>request.headers.get('authorization')==='Bearer bridge-fixture'?{ok:true,did:'0359111403'}:{ok:false,status:401};exports.authenticateVoiceBridge=request=>request.headers.get('authorization')==='Bearer bridge-fixture'?{ok:true,binding:{businessId:'business-a',did:'0359111403'}}:{ok:false,status:401};`,
  'lib/onboarding/services/server':`exports.requireBusinessOwner=async request=>request.headers.get('authorization')==='Bearer owner'?{ok:true,businessId:'business-a',uid:'owner-a'}:{ok:false,status:403,error:'Owner required'};`,
  'lib/onboarding/server':`exports.getBusinessProfile=async()=>({timezone:'Australia/Melbourne'});`,
- 'lib/ai/calls/due-scheduled-callbacks':`exports.loadDueScheduledCallbacks=async db=>(await db.collection('ai_scheduled_callbacks').get()).docs.filter(doc=>['SCHEDULED','OWNER_SCHEDULED'].includes(doc.get('status')));`,
+ 'lib/ai/calls/due-scheduled-callbacks':`exports.loadDueScheduledCallbacks=async db=>(await db.collection('ai_scheduled_callbacks').get()).docs.filter(doc=>['SCHEDULED','OWNER_SCHEDULED','OWNER_NUMBER_SCHEDULED'].includes(doc.get('status')));`,
  'lib/ai/calls/request-callback':`exports.requestSophieCallback=async input=>{globalThis.__scheduled.dials.push(input);return globalThis.__scheduled.busy?new Response(null,{status:429}):Response.json({status:'ANSWERED'})};`,
  'lib/ai/calls/invoice-call-history':`exports.INVOICE_CALL_ATTEMPTS_COLLECTION='ai_invoice_call_attempts';`,
  'lib/invoices/server':`exports.INVOICE_COLLECTION='invoices';exports.mapInvoiceDoc=()=>null;`,
@@ -62,7 +62,7 @@ test('prepare does not create a call; confirmation saves the customer, purpose, 
 });
 test('ambiguous customers, foreign customers, past dates, missing purpose, off-hours and opt-outs are refused',async()=>{
  const {prepareOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');
- for(const patch of [{date:'2020-01-01'},{date:'2099-01-01'},{instructions:''},{number:'0411111111'},{businessId:'other'}])assert.equal((await prepareOwnerScheduledCall(owner,{...args(),...patch})).ok,false);
+ for(const patch of [{date:'2020-01-01'},{date:'2099-01-01'},{instructions:''},{number:'not-a-number'},{businessId:'other'}])assert.equal((await prepareOwnerScheduledCall(owner,{...args(),...patch})).ok,false);
  assert.equal((await prepareOwnerScheduledCall({...owner,businessId:'foreign'},args())).ok,false);
  state.rows.set('customers:duplicate',{...state.rows.get('customers:customer-a')!,email:'other@example.test'});
  assert.equal((await prepareOwnerScheduledCall(owner,args())).ok,false);
@@ -71,6 +71,34 @@ test('ambiguous customers, foreign customers, past dates, missing purpose, off-h
  state.optedOut=false;state.hours=false;assert.equal((await prepareOwnerScheduledCall(owner,args())).ok,false);
  assert.equal(state.writes,0);
 });
+test('owner-supplied number schedules without a customer name, record or previous call',async()=>{
+ const {prepareOwnerScheduledCall,confirmOwnerScheduledCall,findOwnerCallCustomers}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');
+ state.rows.delete('customers:customer-a');const {customerName,...request}=args();void customerName;
+ const lookup=await findOwnerCallCustomers(owner,{search:'+61 412 345 678'});assert.equal(lookup.number,'0412345678');
+ const prepared=await prepareOwnerScheduledCall(owner,{...request,number:'+61 412 345 678',customerName:null,customerEmail:''});assert.equal(prepared.ok,true,JSON.stringify(prepared));if(!prepared.ok)return;
+ assert.equal(prepared.payload.customerId,null);assert.equal(prepared.payload.recipientSource,'owner_number');assert.equal(prepared.payload.recipientNameKnown,false);assert.match(prepared.summary,/0412345678/);assert.equal(state.writes,0);
+ assert.equal((await confirmOwnerScheduledCall(owner,prepared.payload)).status,'DONE');const row=state.rows.get('ai_scheduled_callbacks:'+prepared.payload.id)!;assert.equal(row.status,'OWNER_NUMBER_SCHEDULED');row.scheduledAt=Date.now()-1;
+ const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');await runScheduledSophieCallbacks();assert.equal(row.status,'ANSWERED');assert.equal(state.dials.length,1);assert.equal(state.dials[0].number,'0412345678');assert.equal((state.dials[0].ownerRequest as Row).recipientNameKnown,false);
+});
+
+test('number-only scheduling still rejects opt-outs, reception DIDs and invalid numbers',async()=>{
+ const {prepareOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');const {customerName,...request}=args();void customerName;
+ assert.equal((await prepareOwnerScheduledCall(owner,{...request,number:'0359111403'})).ok,false);
+ assert.equal((await prepareOwnerScheduledCall(owner,{...request,number:'123'})).ok,false);
+ state.optedOut=true;assert.equal((await prepareOwnerScheduledCall(owner,{...request,number:'0412345678'})).ok,false);
+ state.optedOut=false;const prepared=await prepareOwnerScheduledCall(owner,{...request,number:'0412345678'});assert.equal(prepared.ok,true);if(!prepared.ok)return;
+ state.rows.set('ai_did_mappings:61412345678',{businessId:'another'});
+ const {confirmOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');assert.equal((await confirmOwnerScheduledCall(owner,prepared.payload)).status,'REJECTED');
+});
+
+test('a number-only recipient can request a later call without a customer record',async()=>{
+ const {prepareOwnerScheduledCall,confirmOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');const {customerName,...request}=args();void customerName;state.rows.delete('customers:customer-a');
+ const prepared=await prepareOwnerScheduledCall(owner,{...request,number:'0412345678'});assert.equal(prepared.ok,true);if(!prepared.ok)return;await confirmOwnerScheduledCall(owner,prepared.payload);
+ const row=state.rows.get('ai_scheduled_callbacks:'+prepared.payload.id)!;row.status='ANSWERED';
+ const {POST}=await import('../app/api/ai/callbacks/schedule/route');const response=await POST(new Request('http://localhost',{method:'POST',headers:{Authorization:'Bearer bridge-fixture','Content-Type':'application/json'},body:JSON.stringify({callbackAttemptId:prepared.payload.id,number:'0412345678',scheduledAt:new Date(prepared.payload.scheduledAt+3600000).toISOString()})}));
+ assert.equal(response.status,200);const followup=[...state.rows].filter(([key])=>key.startsWith('ai_scheduled_callbacks:')&&key!=='ai_scheduled_callbacks:'+prepared.payload.id).map(([,row])=>row)[0];assert.equal(followup.recipientSource,'owner_number');assert.equal(followup.customerId,null);assert.equal(followup.recipientNameKnown,false);
+});
+
 test('changed contacts and new opt-outs are rechecked before the schedule is saved',async()=>{
  const {prepareOwnerScheduledCall,confirmOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');
  const p=await prepareOwnerScheduledCall(owner,args());assert.equal(p.ok,true);if(!p.ok)return;

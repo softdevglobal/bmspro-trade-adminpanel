@@ -116,6 +116,7 @@ export async function POST(request: Request) {
         typeof payload.validUntil === "string" ? payload.validUntil : null,
       imageUrls: Array.isArray(payload.imageUrls) ? payload.imageUrls : [],
       depositRequest: payload.depositRequest ?? null,
+      sophieFollowUpEnabled: payload.sophieFollowUpEnabled === true,
       send,
     });
 
@@ -259,6 +260,7 @@ export async function POST(request: Request) {
             },
           }
         : {}),
+      sophieFollowUpEnabled: payload.sophieFollowUpEnabled === true,
       send,
     },
     auth.role,

@@ -98,3 +98,12 @@ test('owner pending calls are isolated from old workers and share the six-call b
     const due=await loadDueScheduledCallbacks(fixture(rows).db,10);assert.equal(due.length,6);assert.deepEqual(due.map(d=>d.id),['owner-0','owner-1','owner-2','owner-3','owner-4','owner-5']);
   }finally{if(previous===undefined)delete process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED;else process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED=previous;}
 });
+
+test('number-only calls use their own pending state and the existing due-time index',async()=>{
+ const previous=process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED;
+ try{
+  const rows:Row[]=[{id:'saved',status:'SCHEDULED',scheduledAt:8},{id:'number',status:'OWNER_NUMBER_SCHEDULED',scheduledAt:2},{id:'future-number',status:'OWNER_NUMBER_SCHEDULED',scheduledAt:11}];
+  process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED='false';assert.deepEqual((await loadDueScheduledCallbacks(fixture(rows).db,10)).map(doc=>doc.id),['saved']);
+  process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED='true';assert.deepEqual((await loadDueScheduledCallbacks(fixture(rows).db,10)).map(doc=>doc.id),['number','saved']);
+ }finally{if(previous===undefined)delete process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED;else process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED=previous;}
+});

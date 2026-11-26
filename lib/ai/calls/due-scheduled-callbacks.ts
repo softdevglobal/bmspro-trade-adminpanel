@@ -16,8 +16,12 @@ export async function loadDueScheduledCallbacks(db: Firestore, now: number) {
     ? getIndexedQuery("owner-inspection-notifications",
       ownerScheduled.where("scheduledAt", "<=", now).orderBy("scheduledAt", "asc").limit(6), ownerScheduled.limit(500))
     : Promise.resolve(null);
-  const [snapshot, ownerSnapshot] = await Promise.all([customerQuery, ownerQuery]);
-  return [...snapshot.docs, ...(ownerSnapshot?.docs ?? [])]
+  const numberScheduled=db.collection("ai_scheduled_callbacks").where("status","==","OWNER_NUMBER_SCHEDULED");
+  const numberQuery=process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED==="true"
+    ? getIndexedQuery("owner-number-scheduled-calls",numberScheduled.where("scheduledAt","<=",now).orderBy("scheduledAt","asc").limit(6),numberScheduled.limit(500))
+    : Promise.resolve(null);
+  const [snapshot, ownerSnapshot,numberSnapshot] = await Promise.all([customerQuery, ownerQuery,numberQuery]);
+  return [...snapshot.docs, ...(ownerSnapshot?.docs ?? []),...(numberSnapshot?.docs??[])]
     .filter(doc => typeof doc.get("scheduledAt") === "number" && Number.isFinite(doc.get("scheduledAt")) && doc.get("scheduledAt") <= now)
     .sort((a, b) => a.get("scheduledAt") - b.get("scheduledAt"))
     .slice(0, 6);
