@@ -61,6 +61,12 @@ export function BusinessModuleSettings({
     }
   }, [enabledModules]);
 
+  // "Go to Settings" on a turned-off module links to #modules.
+  useEffect(() => {
+    if (loading || window.location.hash !== "#modules") return;
+    document.getElementById("modules")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [loading]);
+
   function toggleModule(
     key: Exclude<BusinessModuleKey, "requests">,
     next: boolean,
@@ -88,6 +94,7 @@ export function BusinessModuleSettings({
             quotations: modules.quotations,
             invoices: modules.invoices,
             jobs: modules.jobs,
+            expenses: modules.expenses,
           },
         }),
       });
@@ -119,8 +126,9 @@ export function BusinessModuleSettings({
 
   return (
     <SettingsSection
+      id="modules"
       title="Trade modules"
-      description="Turn on quotations, invoices, and jobs when your business is ready. Site inspections stay available so customers can request them."
+      description="Turn on quotations, invoices, jobs and expenses when your business is ready. Site inspections stay available so customers can request them."
       icon="tune"
     >
       {loading ? (
@@ -262,7 +270,7 @@ export function ModuleDisabledMessage({
         ready to use it.
       </p>
       <Link
-        href="/dashboard/settings"
+        href="/dashboard/settings#modules"
         className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-body text-[13px] font-semibold text-on-primary transition-colors hover:bg-primary/90"
       >
         <span className="material-symbols-outlined text-[18px]">settings</span>

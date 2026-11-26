@@ -572,6 +572,7 @@ function TenantModuleToggles({
               quotations: modules.quotations,
               invoices: modules.invoices,
               jobs: modules.jobs,
+              expenses: modules.expenses,
             },
           }),
         },

@@ -185,21 +185,29 @@ export function ExpenseSettingsPanel({
   );
 }
 
+/** Same switch as the Trade modules settings: the knob sits at a fixed left offset. */
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <label className="flex cursor-pointer items-center gap-3">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? "bg-primary" : "bg-outline-variant"}`}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+    >
+      <span
+        aria-hidden
+        className={`relative block h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ${
+          checked ? "bg-primary" : "bg-outline-variant/80"
+        }`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[22px]" : "translate-x-0.5"}`}
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-all duration-200 ${
+            checked ? "left-[22px]" : "left-0.5"
+          }`}
         />
-      </button>
+      </span>
       <span className="font-body text-[14px] text-on-surface">{label}</span>
-    </label>
+    </button>
   );
 }
