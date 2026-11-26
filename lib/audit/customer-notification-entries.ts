@@ -33,6 +33,8 @@ export const CUSTOMER_NOTIFICATION_TYPE_LABELS: Record<NotificationType, string>
     leave_assignment_conflict: "Schedule conflict",
     staff_off_day: "Staff off day",
     schedule_reminder: "Schedule reminder",
+    expense_approval_needed: "Expense approval",
+    expense_report_ready: "Expense report",
     system_message: "System message",
   };
 

@@ -16,6 +16,7 @@ const MODULE_ICONS: Record<Exclude<BusinessModuleKey, "requests">, string> = {
   quotations: "request_quote",
   invoices: "receipt_long",
   jobs: "assignment",
+  expenses: "payments",
 };
 
 const MODULE_DESCRIPTIONS: Record<
@@ -26,6 +27,8 @@ const MODULE_DESCRIPTIONS: Record<
     "Create and send quotes to customers after inspection requests.",
   invoices: "Issue invoices and track payments.",
   jobs: "Schedule and manage booked jobs.",
+  expenses:
+    "Staff photograph receipts, Sophie reads them, and you approve the expenses.",
 };
 
 type Props = {
@@ -46,6 +49,7 @@ export function BusinessModuleSettings({
     quotations: false,
     invoices: false,
     jobs: false,
+    expenses: false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

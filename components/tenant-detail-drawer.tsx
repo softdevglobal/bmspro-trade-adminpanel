@@ -517,6 +517,7 @@ const MODULE_ICONS: Record<Exclude<BusinessModuleKey, "requests">, string> = {
   quotations: "request_quote",
   invoices: "receipt_long",
   jobs: "assignment",
+  expenses: "payments",
 };
 
 function TenantModuleToggles({
