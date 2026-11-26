@@ -241,7 +241,7 @@ function Recordings({ user, businessId, initialView, initialDate, initialCallId,
         </button>
       ))}
     </div>}
-    {view === "scheduled" ? <ScheduledCallbacksBoard user={user} /> : view === "ai" ? <AiCallsBoard initialCallId={initialCallId} /> : <>
+    {view === "scheduled" ? <ScheduledCallbacksBoard user={user} initialDate={initialDate} /> : view === "ai" ? <AiCallsBoard initialCallId={initialCallId} /> : <>
     {readError && <p role="alert" className="text-sm text-error">{readError}</p>}
     <div className="flex flex-wrap items-end justify-between gap-3">
       <form onSubmit={applyDates} onReset={(event) => {

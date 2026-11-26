@@ -4,6 +4,22 @@
       "collectionGroup": "quotations",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "sophieFollowUpDueAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ai_invoice_call_attempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "businessId", "order": "ASCENDING" },
+        { "fieldPath": "attemptedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quotations",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "sophieFollowUpStatus", "order": "ASCENDING" },
         { "fieldPath": "sophieFollowUpDueAt", "order": "ASCENDING" }
       ]

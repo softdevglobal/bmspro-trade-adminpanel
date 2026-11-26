@@ -16,9 +16,9 @@ const labels: Record<string, string> = {
   FAILED: "Call failed", CANCELLED: "Cancelled", SKIPPED: "Skipped", UNKNOWN: "Outcome unverified",
 };
 
-export function ScheduledCallbacksBoard({ user }: { user: User }) {
+export function ScheduledCallbacksBoard({ user, initialDate }: { user: User; initialDate?: string }) {
   const [calls, setCalls] = useState<ScheduledCall[] | null>(null);
-  const [date, setDate] = useState(() => platformTodayIso());
+  const [date, setDate] = useState(() => initialDate ?? platformTodayIso());
   const [error, setError] = useState("");
   const [conversation,setConversation]=useState<Record<string,{loading?:boolean;error?:string;turns?:{speaker:string;text:string}[]}>>({});
   const [cancelling,setCancelling]=useState<string|null>(null);

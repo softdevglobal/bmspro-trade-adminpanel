@@ -50,6 +50,8 @@ import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types
 import { useCalendarFilterOptions } from "@/lib/calendar/use-calendar-filter-options";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
+import { SOPHIE_CALENDAR_TYPES, type SophieCalendarKind } from "@/lib/calendar/sophie-events";
+import { useSophieEvents } from "@/lib/calendar/use-sophie-events";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { useCalendarSlotOccupancy } from "@/lib/calendar/use-calendar-slot-occupancy";
@@ -358,7 +360,7 @@ function CalendarDayTimeSlots({
     [events],
   );
   const scheduleEvents = useMemo(
-    () => events.filter((event) => !event.invoiceDue),
+    () => events.filter((event) => !event.invoiceDue && !event.sophieEvent),
     [events],
   );
   const occupancyRefreshKey = useMemo(
@@ -414,6 +416,22 @@ function CalendarDayTimeSlots({
       ) : null}
       {invoiceDues.length > 0 ? (
         <InvoiceDueSection dues={invoiceDues} onOpenLink={onOpenLink} />
+      ) : null}
+      {events.some(event => event.sophieEvent) ? (
+        <section className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+          <h4 className="font-semibold text-sky-900">Sophie calendar</h4>
+          <p className="mt-1 text-xs text-sky-800">Times shown in the business timezone. Calls depend on calling hours and availability.</p>
+          <div className="mt-3 space-y-2">
+            {events.flatMap(event => event.sophieEvent ? [event.sophieEvent] : []).sort((a,b)=>a.at-b.at).map(item => (
+              <Link key={item.id} href={item.href} onClick={onOpenLink} className="block rounded-lg border border-sky-200 bg-white p-3 text-sm hover:border-sky-500">
+                <p className="font-semibold">{item.time} · {item.title}</p>
+                <p>{[item.recipient,item.reference].filter(Boolean).join(" · ")}</p>
+                <p className="text-xs text-sky-800">{item.statusLabel} · {item.timing === "queued" ? "Queued at" : item.timing === "attempted" ? "Attempted at" : "Scheduled for"} {item.time}</p>
+                {item.reason ? <p className="mt-1 text-xs">{item.reason}</p> : null}
+              </Link>
+            ))}
+          </div>
+        </section>
       ) : null}
       {calendarSessions.map(({ session, slots }) => {
         const meta = sessionMeta[session];
@@ -999,6 +1017,7 @@ function CalendarDayEventCards({
 }
 
 function calendarEventTitle(event: CalendarEvent): string {
+  if (event.sophieEvent) return calendarEventSummary(event);
   if (event.invoiceDue) {
     const due = event.invoiceDue;
     return `${due.isOverdue ? "Overdue" : "Due"} ${formatAud(due.outstandingAud)} · ${due.customerName || due.invoiceCode}`;
@@ -1010,6 +1029,7 @@ function calendarEventTitle(event: CalendarEvent): string {
 }
 
 function weekChipClass(event: CalendarEvent): string {
+  if (event.sophieEvent) return "border-sky-200 bg-sky-50 text-sky-900";
   if (event.invoiceDue) {
     return event.invoiceDue.isOverdue
       ? "border-red-200 bg-red-50 text-red-800"
@@ -1100,6 +1120,8 @@ export function CalendarBoard() {
   const jobsModuleEnabled = canUseModule("jobs");
   const invoicesModuleEnabled = canUseModule("invoices");
   const [showPaymentsDue, setShowPaymentsDue] = useState(true);
+  const [showSophie, setShowSophie] = useState(false);
+  const [sophieKinds, setSophieKinds] = useState<Set<SophieCalendarKind>>(() => new Set(Object.keys(SOPHIE_CALENDAR_TYPES) as SophieCalendarKind[]));
   const { items: invoiceDues } = useInvoiceDueDates(
     invoicesModuleEnabled,
     timeZone,
@@ -1128,6 +1150,13 @@ export function CalendarBoard() {
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(today));
   const [focusDate, setFocusDate] = useState(() => today);
   const [viewTab, setViewTab] = useState<(typeof VIEW_TABS)[number]>("Month");
+  const sophieRange = useMemo(() => {
+    if (viewTab === "Today") return {from:toIsoDateLocal(focusDate),to:toIsoDateLocal(addDays(focusDate,1))};
+    if (viewTab === "Week") return {from:toIsoDateLocal(addDays(focusDate,-7)),to:toIsoDateLocal(addDays(focusDate,8))};
+    return {from:toIsoDateLocal(new Date(viewMonth.getFullYear(),viewMonth.getMonth(),1)),to:toIsoDateLocal(new Date(viewMonth.getFullYear(),viewMonth.getMonth()+1,1))};
+  },[viewMonth,focusDate,viewTab]);
+  const sophie = useSophieEvents(showSophie,sophieRange.from,sophieRange.to);
+  const visibleSophie = useMemo(() => sophie.items.filter(item => sophieKinds.has(item.kind)),[sophie.items,sophieKinds]);
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   useRegisterRightDrawer(bookingDrawerOpen, "md");
@@ -1225,8 +1254,9 @@ export function CalendarBoard() {
         bookings,
         personalEvents,
         showPaymentsDue ? invoiceDues : [],
+        visibleSophie,
       ),
-    [requests, filters, bookings, personalEvents, showPaymentsDue, invoiceDues],
+    [requests, filters, bookings, personalEvents, showPaymentsDue, invoiceDues, visibleSophie],
   );
 
   const monthEventsByDate = useMemo(
@@ -1386,6 +1416,7 @@ export function CalendarBoard() {
   }
 
   function openCalendarEvent(event: CalendarEvent, isoDate: string) {
+    if (event.sophieEvent) { closeBookingDrawer(); router.push(event.sophieEvent.href); return; }
     if (event.invoiceDue) {
       closeBookingDrawer();
       router.push(invoiceDueHref(event.invoiceDue));
@@ -1461,10 +1492,19 @@ export function CalendarBoard() {
 
   function clearAllFilters() {
     setFilters(emptyCalendarFilters(user?.uid ?? null));
+    setShowSophie(false);
+    setSophieKinds(new Set(Object.keys(SOPHIE_CALENDAR_TYPES) as SophieCalendarKind[]));
   }
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
+      {showSophie && role === "business_owner" ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900" aria-live="polite">
+          <span>{sophie.loading ? "Loading Sophie activities…" : sophie.error || `Sophie calendar · ${visibleSophie.length} activities in this range`}</span>
+          {sophie.partial ? <span>Some activities are hidden. Use Week or Today to narrow the range.</span> : null}
+          <button type="button" onClick={sophie.reload} disabled={sophie.loading} className="ml-auto rounded border border-sky-300 px-3 py-1 disabled:opacity-50">Refresh Sophie</button>
+        </div>
+      ) : null}
       {requestsError ? (
         <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
           <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
@@ -1619,6 +1659,7 @@ export function CalendarBoard() {
             {entry.label}
           </span>
         ))}
+        {showSophie && role === "business_owner" ? <span className="inline-flex items-center gap-1.5 text-xs font-semibold"><span className="h-2.5 w-2.5 rounded-full bg-sky-500" />Sophie activity</span> : null}
       </section>
 
       {invoicesModuleEnabled && showPaymentsDue && invoiceDues.length > 0 ? (
@@ -2197,6 +2238,20 @@ export function CalendarBoard() {
           </div>
 
           <div className="flex-1 space-y-6 overflow-y-auto p-5">
+            {role === "business_owner" ? (
+              <section className="space-y-3 rounded-xl border border-sky-200 p-4">
+                <label className="flex items-center gap-2 font-semibold">
+                  <input type="checkbox" checked={showSophie} onChange={event=>setShowSophie(event.target.checked)} /> Sophie calendar
+                </label>
+                <p className="text-xs text-outline">Show Sophie calls and follow-ups alongside your visits.</p>
+                {(Object.entries(SOPHIE_CALENDAR_TYPES) as [SophieCalendarKind, {label:string;icon:string}][]).map(([kind,meta])=>(
+                  <label key={kind} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" disabled={!showSophie} checked={sophieKinds.has(kind)} onChange={()=>setSophieKinds(current=>{const next=new Set(current);if(next.has(kind))next.delete(kind);else next.add(kind);return next;})} />
+                    {meta.label}
+                  </label>
+                ))}
+              </section>
+            ) : null}
             {filterOptionsError ? (
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-700">
