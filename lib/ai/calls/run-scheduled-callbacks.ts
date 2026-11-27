@@ -1,3 +1,5 @@
+import {invoiceContactBlock,holdUnverifiedInvoiceCall} from "./invoice-contact-guard";
+import {scheduleInvoiceNoAnswerRetry} from "./invoice-no-answer-retry";
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -7,7 +9,7 @@ import { getBusinessProfile } from "@/lib/onboarding/server";
 import { resolveInvoicePaymentDue } from "@/lib/invoices/payment-due";
 import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
 import { normalizeInvoiceCallbackNumber } from "./callback-number";
-import { callbackResultStatus, resolveCallback, saveCallbackAttempt } from "./callback-state";
+import { callbackState, callbackResultStatus, resolveCallback, saveCallbackAttempt } from "./callback-state";
 import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "./invoice-call-history";
 import { requestSophieCallback } from "./request-callback";
 import { isCustomerCallOptedOut } from "./call-preferences";
@@ -106,6 +108,17 @@ export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } =
     const claimed = await adminDb.runTransaction(async tx => {
       const snapshot = await tx.get(doc.ref);
       if (snapshot.get("status") !== pendingStatus || (snapshot.get("scheduledAt") as number) > Date.now()) return false;
+      let invoiceLease:FirebaseFirestore.DocumentReference|undefined;
+      if (purpose === "overdue_invoice") {
+        const invoiceDoc=await tx.get(adminDb.collection(INVOICE_COLLECTION).doc(invoiceId));
+        const row=invoiceDoc.data();
+        const blocked=!row||row.businessId!==businessId||normalizeInvoiceCallbackNumber(String(row.customer?.phone||""))!==number||!resolveInvoicePaymentDue(mapInvoiceDoc(invoiceId,row),profile.timezone).isOverdue
+          ? "Invoice or customer changed before dialing." : await invoiceContactBlock(businessId,invoiceId,row,tx,doc.id);
+        if(blocked){tx.update(doc.ref,{status:"CANCELLED",reason:blocked,updatedAt:Date.now()});tx.set(adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(doc.id),{status:"CANCELLED",reason:blocked},{merge:true});return false;}
+        invoiceLease=callbackState(businessId,numberKey);
+        const lease=await tx.get(invoiceLease);
+        if(Math.max(lease.get("manualLeaseUntil")??0,lease.get("leaseUntil")??0)>Date.now())return false;
+      }
       if (purpose === "owner_notification") {
         const settingsRef = adminDb.collection(OWNER_CALL_SETTINGS).doc(businessId);
         const [settings,business] = await Promise.all([tx.get(settingsRef),tx.get(adminDb.collection("businesses").doc(businessId))]);
@@ -121,9 +134,10 @@ export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } =
         }
         tx.update(settingsRef,{lastCallStartedAt:Date.now()});
       }
+      if(invoiceLease)tx.set(invoiceLease,{manualLeaseId:doc.id,manualLeaseUntil:Date.now()+60000},{merge:true});
       tx.update(doc.ref, { status: "CALLING", attemptedAt: Date.now(), updatedAt: Date.now() });
       if (purpose === "overdue_invoice") tx.set(adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(doc.id),
-        { status: "REQUESTED", attemptedAt: Date.now() }, { merge: true });
+        { status: "REQUESTED", numberKey, attemptedAt: Date.now() }, { merge: true });
       return true;
     });
     if (claimed === "owner-deferred") { counts.deferred++; continue; }
@@ -166,8 +180,11 @@ export async function runScheduledSophieCallbacks({ busyRetryMs = 5 * 60_000 } =
     }
 
     await doc.ref.update({ status, ...(reason && { reason }), completedAt: Date.now(), updatedAt: Date.now() });
-    if (purpose === "overdue_invoice") await adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(doc.id)
-      .set({ status, ...(reason && { reason }), attemptedAt: data.scheduledAt, completedAt: Date.now() }, { merge: true });
+    if (purpose === "overdue_invoice") await adminDb.runTransaction(async tx=>{
+      if(status==="UNKNOWN")await holdUnverifiedInvoiceCall(tx,businessId,invoiceId,doc.id);
+      if(status==="NO_ANSWER")await scheduleInvoiceNoAnswerRetry(tx,businessId,invoiceId,doc.id);
+      tx.set(adminDb.collection(INVOICE_CALL_ATTEMPTS_COLLECTION).doc(doc.id),{ status, ...(reason && { reason }), attemptedAt: data.scheduledAt, completedAt: Date.now() }, { merge: true });
+    });
     if (purpose === "missed_call") {
       await saveCallbackAttempt(businessId, numberKey, { id: doc.id, did, missedAt: data.missedAt,
         attemptedAt: data.scheduledAt, scheduledAt: data.scheduledAt, source: "scheduled", status });

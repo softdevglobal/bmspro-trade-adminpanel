@@ -1,3 +1,4 @@
+import {invoiceContactBlock} from "@/lib/ai/calls/invoice-contact-guard";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
@@ -126,6 +127,7 @@ export async function POST(request: Request) {
       const existing = await tx.get(scheduledRef);
       if (existing.exists) return { created: false, status: existing.get("status") as string,
         scheduledAt: existing.get("scheduledAt") as number };
+      if(purpose==="overdue_invoice"&&invoiceId){const fresh=await tx.get(adminDb.collection(INVOICE_COLLECTION).doc(invoiceId));const row=fresh.data();if(!row||row.businessId!==businessId||await invoiceContactBlock(businessId,invoiceId,row,tx))throw Error("Invoice collection paused.");}
       const record = {
         businessId, did: auth.did, number, numberKey, purpose,
         sourceAttemptId: callbackAttemptId, scheduledAt: when, timezone: businessTimezone,
@@ -135,7 +137,7 @@ export async function POST(request: Request) {
       };
       tx.create(scheduledRef, record);
       if (purpose === "overdue_invoice") tx.create(attemptRef, {
-        businessId, invoiceId, did: auth.did, status: "SCHEDULED",
+        businessId, invoiceId, did: auth.did, numberKey, status: "SCHEDULED",
         attemptedAt: now, scheduledAt: when, source: "customer_requested", parentAttemptId: callbackAttemptId,
       });
       return { created: true, status: "SCHEDULED", scheduledAt: when };

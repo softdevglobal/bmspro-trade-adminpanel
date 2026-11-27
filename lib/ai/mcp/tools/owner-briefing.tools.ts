@@ -240,9 +240,13 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
         overdueCount: invoices.length,
         outstandingAud: invoices.reduce((sum, invoice) => sum + Math.round(invoice.outstandingAud * 100), 0) / 100,
         oldestInvoices: invoices.slice(0, 8).map(({ invoiceCode, dueDate, outstandingAud }) => ({ invoiceCode, dueDate, outstandingAud })),
+        pausedFollowUps: invoices.filter(invoice=>invoice.collectionHold).slice(0,20).map(invoice=>({invoiceCode:invoice.invoiceCode,hold:{reason:invoice.collectionHold.reason,createdAt:invoice.collectionHold.createdAt,promisedDate:invoice.collectionHold.promisedDate??null}})),
         reminderCallsAvailable: reminderCalls !== null,
+        reminderResponseScope:"Responses belong to the latest attempt per invoice. Earlier conversations are available in that invoice's call history.",
         moreReminderCalls: reminderCalls?.hasMore ?? false,
-        reminderCalls: reminderCalls?.calls.map(({ invoiceId, customerResponse, status, attemptedAt }) => ({
+        reminderCalls: reminderCalls?.calls.map(({ invoiceId, recordedResponse, responseAt, reason, customerResponse, status, attemptedAt }) => ({
+          recordedResponse,
+          responseAt,reason,
           invoiceCode: invoiceById.get(invoiceId)?.invoiceCode, status,
           date: platformTodayIso(new Date(attemptedAt), timeZone),
           customerResponse: customerResponse ? {

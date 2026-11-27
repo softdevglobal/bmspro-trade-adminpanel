@@ -29,6 +29,7 @@ export type NotificationType =
   | "booking_on_the_way"
   | "job_completed"
   | "invoice_sent"
+  | "invoice_follow_up_review"
   | "quotation_sent"
   | "quotation_accepted"
   | "quotation_rejected"
@@ -87,6 +88,7 @@ export const NOTIFICATION_STATUS_TONE: Record<
 const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
   job_completed: "handyman",
   invoice_sent: "receipt_long",
+  invoice_follow_up_review: "pending_actions",
   quotation_sent: "request_quote",
   quotation_accepted: "check_circle",
   quotation_rejected: "cancel",
@@ -102,6 +104,7 @@ const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
 const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
   job_completed: "text-sky-600",
   invoice_sent: "text-primary",
+  invoice_follow_up_review: "text-amber-600",
   quotation_sent: "text-orange-400",
   quotation_accepted: "text-emerald-600",
   quotation_rejected: "text-rose-600",
