@@ -22,6 +22,7 @@ import type {
   EmailConnectionSummary,
   EmailProvider,
 } from "@/lib/email-integration/types";
+import { purgeSophieData } from "@/lib/ai/email/retention";
 import { adminDb } from "@/lib/firebase/admin";
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -417,6 +418,10 @@ export async function disconnectEmailConnection(
 
   // Synced mail is a cache of the owner's mailbox: remove it with the connection.
   await purgeSyncedMailbox(connection.id);
+  // So is what Sophie learnt from it (docs/sophie-email-learning-and-auto-reply.md §15). A failure
+  // here is logged and never stops the disconnect.
+  await purgeSophieData(adminDb, connection.businessId, connection.id)
+    .catch((error) => console.error("[email/disconnect] Sophie data purge failed", (error as Error)?.name));
 
   await recordEmailEvent({
     businessId: connection.businessId,

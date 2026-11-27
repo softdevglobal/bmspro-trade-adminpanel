@@ -544,7 +544,8 @@ export function retryReadBack(item: EmailSendHistoryItem): { ok: true; summary: 
 export type EmailsBoardState = {
   ready: boolean;
   enabled: boolean;
-  tab: "mailbox" | "log";
+  /** "sophie" is Sophie's email questions; voice opens only mailbox or log. */
+  tab: "mailbox" | "log" | "sophie";
   log: {
     filter: SendLogFilter;
     loadedFilter: SendLogFilter | null;

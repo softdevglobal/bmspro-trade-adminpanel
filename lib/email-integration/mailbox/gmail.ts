@@ -1,5 +1,6 @@
 import "server-only";
 
+import { pickTriageHeaders, TRIAGE_HEADER_NAMES } from "@/lib/ai/email/headers";
 import { EMAIL_PROVIDER_TIMEOUT_MS } from "@/lib/email-integration/config";
 import { htmlToText, sanitizeEmailHtml } from "@/lib/email-integration/mailbox/html";
 import { folderFromLabels } from "@/lib/email-integration/mailbox/parse";
@@ -9,6 +10,7 @@ import {
   type MailboxMetadata,
   type MailboxSearch,
   type MessageBody,
+  type MessageHeaders,
 } from "@/lib/email-integration/mailbox/provider";
 import type { ProviderCredentials } from "@/lib/email-integration/providers/types";
 
@@ -268,6 +270,28 @@ export async function getMessageMetadata(
   }
 }
 
+/** Sophie's triage headers and the labels (incl. inbox category); null when the message is gone. */
+export async function getMessageHeaders(
+  credentials: ProviderCredentials,
+  id: string,
+): Promise<MessageHeaders | null> {
+  try {
+    const message = await gmailGet<{ labelIds?: string[]; payload?: { headers?: RawHeader[] } }>(
+      credentials,
+      `/messages/${encodeURIComponent(id)}`,
+      [["format", "metadata"], ...TRIAGE_HEADER_NAMES.map((name): [string, string] => ["metadataHeaders", name])],
+    );
+    return {
+      headers: pickTriageHeaders(message.payload?.headers),
+      labels: message.labelIds ?? [],
+      inferenceClassification: null,
+    };
+  } catch (error) {
+    if (error instanceof MailboxReadError && error.code === "not_found") return null;
+    throw error;
+  }
+}
+
 // ---- Full message ------------------------------------------------------------
 
 type Part = {
@@ -377,6 +401,33 @@ export async function untrashThread(credentials: ProviderCredentials, threadId: 
   await gmailRequest(credentials, "POST", `/threads/${encodeURIComponent(threadId)}/untrash`);
 }
 
+/** A user label's id by name (any case), created when `create` and it doesn't exist yet. */
+export async function findLabelId(credentials: ProviderCredentials, name: string, create: boolean): Promise<string | null> {
+  const lookup = async () => {
+    const list = await gmailGet<{ labels?: { id: string; name: string }[] }>(credentials, "/labels");
+    return list.labels?.find((label) => label.name.toLowerCase() === name.toLowerCase())?.id ?? null;
+  };
+  const found = await lookup();
+  if (found || !create) return found;
+  try {
+    const created = await gmailRequest<{ id: string }>(credentials, "POST", "/labels", [], {
+      name, labelListVisibility: "labelShow", messageListVisibility: "show",
+    });
+    return created.id;
+  } catch (error) {
+    // Created at the same moment by another run.
+    if (error instanceof MailboxReadError && error.status === 409) return lookup();
+    throw error;
+  }
+}
+
+async function modifyMessage(credentials: ProviderCredentials, id: string, change: { add: string[]; remove: string[] }) {
+  await gmailRequest(credentials, "POST", `/messages/${encodeURIComponent(id)}/modify`, [], {
+    addLabelIds: change.add,
+    removeLabelIds: change.remove,
+  });
+}
+
 // ---- Adapter -----------------------------------------------------------------
 
 /** Everything except spam and drafts (Trash included), newest first. */
@@ -417,6 +468,7 @@ export const gmailMailbox: MailboxAdapter = {
 
   threadMessageIds: getThreadMessageIds,
   getMetadata: getMessageMetadata,
+  getHeaders: getMessageHeaders,
   getBody: getMessageBody,
   getAttachment,
 
@@ -442,5 +494,15 @@ export const gmailMailbox: MailboxAdapter = {
       case "untrash":
         return untrashThread(credentials, threadId);
     }
+  },
+
+  async moveToFolder(credentials, messageIds, folderName) {
+    const label = await findLabelId(credentials, folderName, true);
+    for (const id of messageIds) await modifyMessage(credentials, id, { add: label ? [label] : [], remove: ["INBOX"] });
+  },
+
+  async restoreToInbox(credentials, targets, folderName) {
+    const label = await findLabelId(credentials, folderName, false);
+    for (const target of targets) await modifyMessage(credentials, target.id, { add: ["INBOX"], remove: label ? [label] : [] });
   },
 };

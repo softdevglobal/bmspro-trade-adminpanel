@@ -48,6 +48,8 @@ export type EmailPayloadSnapshot = {
     references: string;
     replyToProviderMessageId?: string | null;
   } | null;
+  /** Sophie's automatic replies (RFC 3834): marked so auto-responders and other assistants never answer them. */
+  autoSubmitted?: boolean;
 };
 
 /** One send attempt as shown in a document's email history. */
@@ -135,6 +137,8 @@ export type MailboxMessageSummary = {
   unread: boolean;
   starred: boolean;
   match: MailboxMatch;
+  /** The type Sophie sorted it as (lib/ai/email/labels.ts), when she has. */
+  sophieKind?: string | null;
 };
 
 export type MailboxThreadMessage = MailboxMessageSummary & {

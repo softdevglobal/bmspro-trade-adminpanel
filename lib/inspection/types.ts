@@ -67,6 +67,8 @@ export const INSPECTION_CREATED_SOURCES = [
   "quotation_direct",
   "invoice_direct",
   "job_direct",
+  /** Added by Sophie from an email, with details the owner confirmed on her card. */
+  "sophie_email",
 ] as const;
 export type InspectionRequestCreatedSource =
   (typeof INSPECTION_CREATED_SOURCES)[number];
@@ -82,6 +84,7 @@ export const CREATED_SOURCE_LABELS: Record<
   quotation_direct: "Quotation",
   invoice_direct: "Invoice",
   job_direct: "Direct job",
+  sophie_email: "Email (Sophie)",
 };
 
 export function isCreatedSource(

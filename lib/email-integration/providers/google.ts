@@ -7,6 +7,7 @@ import {
 } from "@/lib/email-integration/config";
 import { buildMimeMessage } from "@/lib/email-integration/mime";
 import {
+  autoReplyHeaders,
   ProviderOAuthError,
   type ConnectedAccount,
   type EmailSendAdapter,
@@ -257,6 +258,7 @@ export const googleEmailAdapter: EmailSendAdapter = {
           messageId: payload.messageId,
           headers: {
             "X-BMS-Outbox-Id": payload.outboxId,
+            ...autoReplyHeaders(payload),
             ...(payload.thread?.inReplyTo
               ? {
                   "In-Reply-To": payload.thread.inReplyTo,

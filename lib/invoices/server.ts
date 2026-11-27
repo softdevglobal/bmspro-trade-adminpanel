@@ -381,8 +381,11 @@ export async function claimOverdueInvoiceReminder(input: {
     const due = resolveInvoicePaymentDue(invoice, input.timeZone, input.now);
     if (!due.isOverdue) return null;
     const customerEmail = invoice.customer.email?.trim();
+    // Paused when the customer says they've paid or disputes it (Sophie's email action). The owner
+    // still gets their own overdue notice; only the customer stops being chased.
+    const paused = Boolean(data.remindersPause);
     const recipients = {
-      customer: customerEmail && data.overdueReminderCustomerDate !== input.date ? customerEmail : null,
+      customer: customerEmail && !paused && data.overdueReminderCustomerDate !== input.date ? customerEmail : null,
       owner: input.ownerEmail && data.overdueReminderOwnerDate !== input.date ? input.ownerEmail : null,
     };
     const claims = {

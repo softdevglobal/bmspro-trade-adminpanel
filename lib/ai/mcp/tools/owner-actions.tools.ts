@@ -4,6 +4,9 @@ import {prepareOwnerInspectionCreate, confirmOwnerInspectionCreate, type Prepare
 import {ownerVisitsEnabled, type VisitKind, type VisitOperation} from "@/lib/ai/owner-call/owner-visits";
 import {findOwnerCallCustomers,prepareOwnerScheduledCall,confirmOwnerScheduledCall,type PreparedOwnerCall} from "./owner-scheduled-calls.tools";
 import {ownerScheduledCallsEnabled} from "@/lib/ai/owner-call/owner-scheduled-calls";
+import {ownerEmailAutomationEnabled} from "@/lib/ai/owner-call/owner-email-questions";
+import {emailTriageAvailable} from "@/lib/ai/email/settings";
+import {confirmEmailAnswer, prepareEmailAnswer, runOwnerEmailAutomation, type PreparedEmailAnswer} from "./owner-email-questions.tools";
 import "server-only"; // build error if this file is ever imported into browser code
 /**
  * Server side of the owner MCP action tools (see lib/ai/owner-call/owner-actions.ts).
@@ -269,6 +272,15 @@ export function ownerActionTools(owner: ActionOwner) {
       return result.ok ? prepare("job_create", {...result.payload}, result.summary) : result.result;
     },
     async findCallCustomers(args:unknown) {return ownerScheduledCallsEnabled()?findOwnerCallCustomers(owner,args):{status:"UNAVAILABLE"};},
+    /** Sophie's email assistant (lib/ai/owner-call/owner-email-questions.ts): reads and immediate changes, or a prepared answer. */
+    async emailAutomation(name: string, args: unknown) {
+      if (!ownerEmailAutomationEnabled()) return {status:"UNAVAILABLE"};
+      if (name !== "answer_email_question") return runOwnerEmailAutomation(owner, name, args);
+      if (!emailTriageAvailable()) return {status:"UNAVAILABLE"};
+      await pendingRef.delete();
+      const result = await prepareEmailAnswer(owner, args);
+      return result.ok ? prepare("email_automation", {...result.payload}, result.summary) : result.result;
+    },
     async prepareScheduledCall(args:unknown) {
       if(!ownerScheduledCallsEnabled())return {status:"UNAVAILABLE"};
       await pendingRef.delete();
@@ -936,6 +948,11 @@ export function ownerActionTools(owner: ActionOwner) {
         return { status: "LIMIT_REACHED", message: "Too many changes by voice this hour. Ask the owner to use the Trade pages." };
       }
       const { kind, payload, summary } = claimed as { kind: PendingKind; payload: Record<string, unknown>; summary: string };
+      if (kind === "email_automation") {
+        return ownerEmailAutomationEnabled() && emailTriageAvailable()
+          ? confirmEmailAnswer(owner, payload as unknown as PreparedEmailAnswer)
+          : {status:"UNAVAILABLE",message:"Sophie's email assistant is switched off. Nothing was applied."};
+      }
       if(kind==="owner_call_schedule")return ownerScheduledCallsEnabled()?confirmOwnerScheduledCall(owner,payload as unknown as PreparedOwnerCall):{status:"UNAVAILABLE",message:"Owner scheduled calls are disabled."};
       if (kind === "inspection_create") {
         if (!ownerVisitsEnabled()) return {status:"UNAVAILABLE",message:"Voice inspection creation is disabled. Nothing was applied."};

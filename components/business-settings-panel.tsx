@@ -8,6 +8,7 @@ import { BookingLinkCard } from "@/components/booking-link-card";
 import { BusinessGstSettings } from "@/components/business-gst-settings";
 import { BusinessPaymentsSettings } from "@/components/business-payments-settings";
 import { EmailConnectionSettings } from "@/components/email-connection-settings";
+import { EmailSophieSettings } from "@/components/email-sophie-settings";
 import { BusinessProfileSettings } from "@/components/business-profile-settings";
 import { BusinessServiceAreasSettings } from "@/components/business-service-areas-settings";
 import { BusinessSecuritySettings } from "@/components/business-security-settings";
@@ -46,6 +47,7 @@ type ProfileMeta = {
   sophieBookingAuthority: boolean;
   sophieJobAuthority: boolean;
   workingHours: BusinessWorkingHours | null;
+  openDays: number[] | null;
   serviceAreas: string[];
   enabledModules: BusinessModuleSettingsType | null;
 };
@@ -65,6 +67,7 @@ export function BusinessSettingsPanel() {
     sophieBookingAuthority: false,
     sophieJobAuthority: false,
     workingHours: null,
+    openDays: null,
     serviceAreas: [],
     enabledModules: null,
   });
@@ -112,6 +115,7 @@ export function BusinessSettingsPanel() {
             sophieBookingAuthority?: boolean;
             sophieJobAuthority?: boolean;
             workingHours?: BusinessWorkingHours | null;
+            openDays?: number[] | null;
             serviceAreas?: string[];
             enabledModules?: BusinessModuleSettingsType | null;
           };
@@ -148,6 +152,7 @@ export function BusinessSettingsPanel() {
                   endTime: p.workingHours.endTime,
                 }
               : null,
+          openDays: Array.isArray(p.openDays) ? p.openDays : null,
           serviceAreas: Array.isArray(p.serviceAreas) ? p.serviceAreas : [],
           enabledModules: p.enabledModules ?? null,
         });
@@ -194,8 +199,8 @@ export function BusinessSettingsPanel() {
     setMeta((current) => ({ ...current, ...capacity }));
   }
 
-  function handleWorkingHoursSaved(workingHours: BusinessWorkingHours) {
-    setMeta((current) => ({ ...current, workingHours }));
+  function handleWorkingHoursSaved(workingHours: BusinessWorkingHours, openDays?: number[] | null) {
+    setMeta((current) => ({ ...current, workingHours, ...(openDays !== undefined ? { openDays } : {}) }));
     if (businessId) {
       writeBusinessWorkingHoursCache(businessId, workingHours);
     }
@@ -253,6 +258,7 @@ export function BusinessSettingsPanel() {
 
       <BusinessWorkingHoursSettings
         workingHours={meta.workingHours}
+        openDays={meta.openDays}
         loading={metaLoading}
         onSaved={handleWorkingHoursSaved}
       />
@@ -275,6 +281,7 @@ export function BusinessSettingsPanel() {
           <div className="border-t border-outline-variant/50 pt-5">
             <SophieVoicePermissions />
           </div>
+          <EmailSophieSettings />
         </div>
       </SettingsSection>
       <BusinessGstSettings />

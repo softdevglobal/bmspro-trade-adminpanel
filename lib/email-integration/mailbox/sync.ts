@@ -1,5 +1,7 @@
 import "server-only";
 
+import { queueReceivedMail } from "@/lib/ai/email/events";
+import { emailTriageCutoff } from "@/lib/ai/email/settings";
 import {
   EMAIL_SYNC_STATE_COLLECTION,
   MAILBOX_SYNC_BUDGET_MS,
@@ -55,7 +57,14 @@ const FETCH_CONCURRENCY = 5;
 const RATE_LIMIT_PAUSE_MS = 60 * 1000;
 
 export type SyncOutcome =
-  | { ok: true; stored: number; mode: "initial" | "incremental" | "resync"; historyComplete: boolean }
+  | {
+      ok: true;
+      stored: number;
+      mode: "initial" | "incremental" | "resync";
+      historyComplete: boolean;
+      /** New `email.received` events for Sophie. */
+      triageQueued: number;
+    }
   | { ok: false; code: "busy" | "too_soon" | "not_enabled" | string };
 
 function toMillis(value: unknown): number | null {
@@ -92,15 +101,17 @@ function classify(context: IngestContext, message: MailboxMetadata) {
  * Stores every message in `ids` (spam and drafts excepted), labelled with its
  * link to the platform. Already-stored messages are skipped, unless `refresh`
  * (history changes: labels) or `relink` (a customer search: re-label) asks.
- * Returns the threads that became linked to a customer or the platform.
+ * Returns the threads that became linked to a customer or the platform, and
+ * the messages stored for the first time.
  */
 async function ingest(
   context: IngestContext,
   ids: string[],
   options: { refresh?: boolean; relink?: boolean; prefetched?: MailboxMetadata[] } = {},
-): Promise<{ stored: number; newlyLinked: string[] }> {
+): Promise<{ stored: number; newlyLinked: string[]; newMessages: MailboxMetadata[] }> {
   let stored = 0;
   const newlyLinked: string[] = [];
+  const newMessages: MailboxMetadata[] = [];
   // Providers that list full details with the ids (Outlook) skip a fetch per message.
   const prefetched = new Map((options.prefetched ?? []).map((message) => [message.id, message]));
   const uniqueIds = [...new Set(ids)];
@@ -157,14 +168,18 @@ async function ingest(
           message,
           match,
         }).then((result) => {
-          if (result === "stored") stored += 1;
-          else context.knownMessages.delete(message.id);
+          if (result === "stored") {
+            stored += 1;
+            newMessages.push(message);
+          } else {
+            context.knownMessages.delete(message.id);
+          }
         }),
       );
     }
     await Promise.all(writes);
   }
-  return { stored, newlyLinked };
+  return { stored, newlyLinked, newMessages };
 }
 
 /** Pulls in the rest of each conversation (colleagues' replies, own follow-ups). */
@@ -299,15 +314,26 @@ export async function syncMailbox(
 
     let mode: "initial" | "incremental" | "resync" = claimed.historyId ? "incremental" : "initial";
     let stored = 0;
+    let triageQueued = 0;
     let historyId = claimed.historyId;
     let backfill = claimed.backfill ?? EMPTY_BACKFILL;
 
     if (historyId) {
+      // Read before importing: if it fails the run fails and the same changes are retried,
+      // rather than new mail being stored without its event.
+      const triageCutoff = await emailTriageCutoff(adminDb, connection.businessId);
       try {
         const changes = await adapter.changes(credentials.credentials, historyId, MAILBOX_SYNC_MAX_MESSAGES);
         const result = await ingest(context, changes.changedIds, {
           refresh: true,
           prefetched: changes.prefetched,
+        });
+        // Only mail arriving now tells Sophie; the history import and thread expansion never do.
+        triageQueued += await queueReceivedMail(adminDb, {
+          businessId: connection.businessId,
+          connectionId: connection.id,
+          messages: result.newMessages,
+          cutoff: triageCutoff,
         });
         stored += result.stored + (await expandThreads(context, result.newlyLinked));
         await markMessagesDeleted(connection.id, changes.deletedIds);
@@ -345,7 +371,7 @@ export async function syncMailbox(
       lastErrorCode: null,
       pausedUntil: null,
     });
-    return { ok: true, stored, mode, historyComplete: result.state.done };
+    return { ok: true, stored, mode, historyComplete: result.state.done, triageQueued };
   } catch (error) {
     const code = error instanceof MailboxReadError ? error.code : "sync_failed";
     if (code === "rate_limited") {

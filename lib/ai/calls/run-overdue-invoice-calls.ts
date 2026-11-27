@@ -59,6 +59,10 @@ export async function runOverdueInvoiceCalls() {
           tx.update(attempt.ref, { status: "SKIPPED", reason: "The invoice was settled, changed, or has a newer reminder." });
           return null;
         }
+        if (data?.remindersPause) {
+          tx.update(attempt.ref, { status: "SKIPPED", reason: "Reminders are paused: the customer says they've paid or disputes it." });
+          return null;
+        }
         const number = normalizeInvoiceCallbackNumber(invoice.customer.phone);
         const customerName = invoice.customer.fullName.trim().slice(0, 120);
         const key = phoneComparisonKey(number);

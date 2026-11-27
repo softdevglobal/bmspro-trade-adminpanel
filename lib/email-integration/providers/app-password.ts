@@ -13,6 +13,7 @@ import {
 import { createImapClient, serverFor, withImap } from "@/lib/email-integration/imap/session";
 import { buildMimeMessage } from "@/lib/email-integration/mime";
 import {
+  autoReplyHeaders,
   ProviderOAuthError,
   type ConnectedAccount,
   type EmailSendAdapter,
@@ -278,6 +279,7 @@ export function createAppPasswordAdapter(
           messageId: payload.messageId,
           headers: {
             "X-BMS-Outbox-Id": payload.outboxId,
+            ...autoReplyHeaders(payload),
             ...(payload.thread?.inReplyTo
               ? {
                   "In-Reply-To": payload.thread.inReplyTo,

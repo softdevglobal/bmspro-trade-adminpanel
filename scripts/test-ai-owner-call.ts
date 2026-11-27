@@ -834,3 +834,41 @@ test('bridge startup failures identify tool mismatch, instructions, authorizatio
   assert.equal(response.status,502);const data=await response.json();assert.match(data.error,fixture.message);assert.ok(!data.error.includes(secret));
  }
 });
+
+test("per-area modes: email on MCP tools while services and team stay on page tools", async (t) => {
+  const { ownerAreaModes } = await import("../lib/ai/owner-call/owner-actions");
+  assert.equal(ownerAreaModes({}).email, false);
+  assert.equal(ownerAreaModes({ AI_OWNER_VOICE_TOOL_MODE: "mcp" }).team, true);
+  const mixed = ownerAreaModes({ AI_OWNER_VOICE_TOOL_MODE: "browser", AI_OWNER_VOICE_EMAIL_TOOL_MODE: "mcp", AI_OWNER_VOICE_KNOWLEDGE_TOOL_MODE: "nonsense" });
+  assert.deepEqual(mixed, { services: false, team: false, drafts: false, customers: false, items: false, sms: false, email: true });
+  assert.equal(ownerAreaModes({ AI_OWNER_VOICE_TOOL_MODE: "mcp", AI_OWNER_VOICE_SMS_TOOL_MODE: "browser" }).sms, false, "an area can opt back to the page");
+
+  setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: "browser", AI_OWNER_VOICE_EMAIL_TOOL_MODE: "mcp" });
+  const session = await startSession(t);
+  const names = session.tools.map(tool => tool.name);
+  for (const name of ["prepare_email_send", "get_emails", "get_email_counts", "confirm_owner_change"]) assert.ok(names.includes(name), name);
+  for (const name of [...BROWSER_EMAIL_TOOLS]) assert.ok(!names.includes(name), `${name} is replaced by the MCP email tools`);
+  for (const name of [...BROWSER_SERVICE_TOOLS, ...BROWSER_TEAM_TOOLS, ...BROWSER_ITEM_TOOLS, ...BROWSER_PAGE_TOOLS]) assert.ok(names.includes(name), name);
+  for (const name of ["get_staff", "prepare_staff_create", "get_items", "prepare_sms_send"]) assert.ok(!names.includes(name), `${name} stays page-only`);
+  assert.equal(new Set(names).size, names.length, "no repeated names");
+  assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
+});
+
+test("mode both: an area offers its page tools and its server tools together", async (t) => {
+  const { ownerAreaModes, ownerAreaBrowser } = await import("../lib/ai/owner-call/owner-actions");
+  const env = { AI_OWNER_VOICE_TOOL_MODE: "browser", AI_OWNER_VOICE_EMAIL_TOOL_MODE: "both" };
+  assert.equal(ownerAreaModes(env).email, true);
+  assert.equal(ownerAreaBrowser(env).email, true);
+  assert.equal(ownerAreaModes(env).team, false);
+  assert.equal(ownerAreaBrowser({ AI_OWNER_VOICE_TOOL_MODE: "mcp" }).email, false);
+  assert.equal(ownerAreaModes({ AI_OWNER_VOICE_TOOL_MODE: "both" }).sms && ownerAreaBrowser({ AI_OWNER_VOICE_TOOL_MODE: "both" }).sms, true);
+
+  setEnv(t, { ...ALL_FLAGS, AI_OWNER_VOICE_TOOL_MODE: "both" });
+  const session = await startSession(t);
+  const names = session.tools.map(tool => tool.name);
+  for (const name of [...BROWSER_EMAIL_TOOLS, "prepare_email_send", "get_email_counts", "confirm_owner_change", ...BROWSER_TEAM_TOOLS, "get_staff", ...BROWSER_PAGE_TOOLS]) {
+    assert.ok(names.includes(name), name);
+  }
+  assert.equal(new Set(names).size, names.length, "no repeated names");
+  assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
+});
