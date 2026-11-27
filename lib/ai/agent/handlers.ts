@@ -340,8 +340,8 @@ export function emailActionDeps(db: Firestore): ActionDeps {
     async ensureCustomer(input) {
       const account = await ensureCustomerAccount({
         email: input.email, fullName: input.fullName, phone: input.phone, businessId: input.businessId,
-        // The customer didn't ask for an account: no welcome email, and an existing profile is never changed.
-        sendWelcomeEmail: false, preserveExistingProfile: true, context: "inspection",
+        // Same invite as Add Customer in the dashboard (activation link). An existing profile is never changed.
+        sendWelcomeEmail: true, preserveExistingProfile: true, context: "onboarding",
       });
       if (account.created) {
         await logAuditEvent({
@@ -351,7 +351,7 @@ export function emailActionDeps(db: Firestore): ActionDeps {
           targetId: account.uid, targetLabel: input.fullName,
         });
       }
-      return { uid: account.uid, created: account.created };
+      return { uid: account.uid, created: account.created, welcomeEmailSent: account.welcomeEmailSent };
     },
 
     async findCustomer(businessId, email) {

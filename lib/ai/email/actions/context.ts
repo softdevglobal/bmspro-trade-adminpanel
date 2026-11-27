@@ -49,10 +49,11 @@ export type ActionDeps = {
   /** An undone decision is no longer a clean example for Sophie's memory (§7.2). */
   retireExample?(businessId: string, exampleId: string): Promise<unknown>;
   /**
-   * Saves a customer account without a welcome email (lib/customer/server.ts ensureCustomerAccount).
+   * Saves a customer account and emails the same activation invite as Add Customer
+   * (lib/customer/server.ts ensureCustomerAccount).
    * Throws when the address already belongs to a customer with different details.
    */
-  ensureCustomer(input: { businessId: string; email: string; fullName: string; phone: string; actorUid: string }): Promise<{ uid: string; created: boolean }>;
+  ensureCustomer(input: { businessId: string; email: string; fullName: string; phone: string; actorUid: string }): Promise<{ uid: string; created: boolean; welcomeEmailSent?: boolean }>;
   /** The one customer of this business with this email, or null. */
   findCustomer(businessId: string, email: string): Promise<string | null>;
   /** Adds a pending request under a fixed id; returns the existing one when it was already added. */

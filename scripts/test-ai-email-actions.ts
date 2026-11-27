@@ -108,7 +108,7 @@ function setup(options: { actions: EmailAction[]; triage?: Row; message?: Row | 
       const existing = customers.get(input.email);
       if (existing) return { uid: existing, created: false };
       customers.set(input.email, "cust-1");
-      return { uid: "cust-1", created: true };
+      return { uid: "cust-1", created: true, welcomeEmailSent: true };
     },
     findCustomer: async (_businessId, email) => customers.get(email) ?? null,
     async createRequest(input) {
@@ -428,7 +428,7 @@ test("an inspection request: the customer is saved, then a pending request is ad
   assert.equal(s.calls.requests.length, 1);
   const added = s.calls.requests[0];
   assert.deepEqual([added.requestId, added.customerId, added.kind, added.triageId], [emailRequestId(TRIAGE_ID, "inspection_request"), "cust-1", "inspection_request", TRIAGE_ID]);
-  assert.match(s.decision().results.save_customer.summary, /No welcome email/);
+  assert.match(s.decision().results.save_customer.summary, /emailed them an invite/);
   assert.match(s.decision().results.create_inspection.summary, /INS-REQ 1\. It's pending/);
 });
 

@@ -30,7 +30,12 @@ export const saveCustomer: ActionHandler = {
         businessId: context.businessId, email, fullName: confirmed.fullName, phone: confirmed.phone, actorUid: context.actorUid,
       });
       return account.created
-        ? { status: "done", summary: `Saved ${confirmed.fullName} as a customer. No welcome email was sent.` }
+        ? {
+            status: "done",
+            summary: account.welcomeEmailSent
+              ? `Saved ${confirmed.fullName} as a customer and emailed them an invite to activate their account.`
+              : `Saved ${confirmed.fullName} as a customer, but the invite email could not be sent. Resend it under Customers.`,
+          }
         : { status: "skipped", summary: `${confirmed.fullName} is already a customer. Nothing was changed.` };
     } catch {
       return { status: "needs_details", summary: `${email} is already a customer with different details. Check them under Customers.` };
