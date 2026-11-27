@@ -1,4 +1,9 @@
-export type BusinessModuleKey = "requests" | "quotations" | "invoices" | "jobs";
+export type BusinessModuleKey =
+  | "requests"
+  | "quotations"
+  | "invoices"
+  | "jobs"
+  | "expenses";
 
 export type BusinessModuleSettings = Record<BusinessModuleKey, boolean>;
 
@@ -8,14 +13,19 @@ export const NEW_BUSINESS_MODULE_DEFAULTS: BusinessModuleSettings = {
   quotations: false,
   invoices: false,
   jobs: false,
+  expenses: false,
 };
 
-/** Existing tenants without `enabledModules` keep all modules on. */
+/**
+ * Existing tenants without `enabledModules` keep the original modules on.
+ * Expenses came later, so the owner turns it on in Settings.
+ */
 export const LEGACY_BUSINESS_MODULE_DEFAULTS: BusinessModuleSettings = {
   requests: true,
   quotations: true,
   invoices: true,
   jobs: true,
+  expenses: false,
 };
 
 export const BUSINESS_MODULE_LABELS: Record<BusinessModuleKey, string> = {
@@ -23,11 +33,12 @@ export const BUSINESS_MODULE_LABELS: Record<BusinessModuleKey, string> = {
   quotations: "Quotations",
   invoices: "Invoices",
   jobs: "Jobs",
+  expenses: "Expenses",
 };
 
 export const OWNER_TOGGLEABLE_MODULES: Array<
   Exclude<BusinessModuleKey, "requests">
-> = ["quotations", "invoices", "jobs"];
+> = ["quotations", "invoices", "jobs", "expenses"];
 
 export function parseBusinessModuleSettings(
   data: Record<string, unknown> | null | undefined,
@@ -43,6 +54,7 @@ export function parseBusinessModuleSettings(
     quotations: Boolean(modules.quotations),
     invoices: Boolean(modules.invoices),
     jobs: Boolean(modules.jobs),
+    expenses: Boolean(modules.expenses),
   };
 }
 

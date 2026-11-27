@@ -19,6 +19,7 @@ export const didMappingInput = z.object({
   callback: callbackSettings.nullable().optional(),
 }).strict();
 export type DidMappingInput = z.infer<typeof didMappingInput>;
+export const didMappingDeleteInput = didMappingInput.pick({ did: true, version: true }).strict();
 export type StoredDidMapping = VoiceBusiness & { isActive: boolean; version: number; forwardingExtension?: string | null; callback?: z.infer<typeof callbackSettings> | null };
 export type DidMappingRow = StoredDidMapping & {
   businessName: string; businessActive: boolean; source: "dashboard" | "setup"; updatedAt: number | null;

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, type QuerySnapshot } from "firebase-admin/firestore";
 import { listCallRecordings, recordingConfig } from "@/lib/ai/calls/recordings";
 import { recentOverdueInvoiceCalls } from "@/lib/ai/calls/invoice-call-history";
 import { missedCallCallbackDetails } from "@/lib/ai/owner-call/missed-call-details";
@@ -43,10 +43,10 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
   const requests = adminDb.collection(REQUESTS_COLLECTION).where("businessId", "==", businessId);
   const jobs = adminDb.collection(JOBS_COLLECTION).where("businessId", "==", businessId);
 
-  async function todaysVisits(date: string) {
+  async function todaysVisits(date: string, existingJobs?: QuerySnapshot, existingRequests?: QuerySnapshot) {
     const [jobDocs, inspectionDocs] = await Promise.all([
-      jobs.get(),
-      requests.where("scheduledSlot.date", "==", date).get(),
+      existingJobs ?? jobs.get(),
+      existingRequests ?? requests.where("scheduledSlot.date", "==", date).get(),
     ]);
     const jobVisits = jobDocs.docs.flatMap((doc) => {
       const job = mapBookingDoc(doc.id, doc.data());
@@ -56,7 +56,7 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
         startTime: day.startTime, endTime: day.endTime, staffUid: job.assignedTo?.uid,
       }] : [];
     });
-    const inspections = inspectionDocs.docs.map((doc) => {
+    const inspections = inspectionDocs.docs.filter(doc => !existingRequests || doc.get("scheduledSlot.date") === date).map((doc) => {
       const inspection = mapInspectionDoc(doc.id, doc.data());
       return {
         code: inspection.requestCode, service: inspection.serviceName ?? inspection.customRequest?.title,
@@ -94,17 +94,19 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
   const since = (date: string) => Timestamp.fromMillis(Date.parse(`${date}T00:00:00Z`) - 180 * 86_400_000);
 
   async function activityRecords(date: string) {
-    const [jobDocs, requestDocs, quoteDocs, invoiceDocs, sentDocs, visits] = await Promise.all([
+    const [jobDocs, requestDocs, quoteDocs, invoiceDocs, sentDocs] = await Promise.all([
       jobs.get(),
       requests.get(),
       adminDb.collection(QUOTATION_COLLECTION).where("businessId", "==", businessId)
-        .where("createdAt", ">=", since(date)).get(),
+        .where("createdAt", ">=", since(date)).orderBy("createdAt", "desc").get(),
       adminDb.collection(INVOICE_COLLECTION).where("businessId", "==", businessId)
-        .where("createdAt", ">=", since(date)).get(),
+        .where("createdAt", ">=", since(date)).orderBy("createdAt", "desc").get(),
       adminDb.collection(AUDIT_COLLECTION).where("businessId", "==", businessId)
         .where("action", "==", "quotation.sent").get(),
-      todaysVisits(date),
     ]);
+    // Activity already loaded these tenant-scoped records. Reuse them instead
+    // of issuing a second jobs read and another inspection query for the schedule.
+    const visits = await todaysVisits(date, jobDocs, requestDocs);
     const jobRows: ActivityJob[] = jobDocs.docs.map((doc) => {
       const job = mapBookingDoc(doc.id, doc.data());
       return {
@@ -238,9 +240,13 @@ export function ownerBriefingTools(businessId: string, timezone: string | null) 
         overdueCount: invoices.length,
         outstandingAud: invoices.reduce((sum, invoice) => sum + Math.round(invoice.outstandingAud * 100), 0) / 100,
         oldestInvoices: invoices.slice(0, 8).map(({ invoiceCode, dueDate, outstandingAud }) => ({ invoiceCode, dueDate, outstandingAud })),
+        pausedFollowUps: invoices.filter(invoice=>invoice.collectionHold).slice(0,20).map(invoice=>({invoiceCode:invoice.invoiceCode,hold:{reason:invoice.collectionHold.reason,createdAt:invoice.collectionHold.createdAt,promisedDate:invoice.collectionHold.promisedDate??null}})),
         reminderCallsAvailable: reminderCalls !== null,
+        reminderResponseScope:"Responses belong to the latest attempt per invoice. Earlier conversations are available in that invoice's call history.",
         moreReminderCalls: reminderCalls?.hasMore ?? false,
-        reminderCalls: reminderCalls?.calls.map(({ invoiceId, customerResponse, status, attemptedAt }) => ({
+        reminderCalls: reminderCalls?.calls.map(({ invoiceId, recordedResponse, responseAt, reason, customerResponse, status, attemptedAt }) => ({
+          recordedResponse,
+          responseAt,reason,
           invoiceCode: invoiceById.get(invoiceId)?.invoiceCode, status,
           date: platformTodayIso(new Date(attemptedAt), timeZone),
           customerResponse: customerResponse ? {

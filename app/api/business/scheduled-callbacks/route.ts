@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     }).map(doc => {
       const data = doc.data();
       const digits = typeof data.number === "string" ? data.number.replace(/\D/g, "") : "";
-      const status = typeof data.status === "string" && statuses.has(data.status) ? data.status : "FAILED";
+      const status = ["OWNER_SCHEDULED","OWNER_NUMBER_SCHEDULED"].includes(data.status) ? "SCHEDULED" : typeof data.status === "string" && statuses.has(data.status) ? data.status : "FAILED";
       return {
         id: doc.id,
         status,
@@ -44,9 +44,9 @@ export async function GET(request: Request) {
         customerName: typeof data.customerName === "string" ? data.customerName : null,
         callerLastFour: digits.length >= 4 ? digits.slice(-4) : null,
         did: typeof data.did === "string" ? data.did : null,
-        purpose: data.purpose === "owner_requested" ? "Owner-requested call" : data.purpose === "overdue_invoice" ? "Overdue invoice" : "Missed-call follow-up",
+        purpose: data.purpose === "owner_notification" ? "Owner notification · New inspection" : data.purpose === "owner_requested" ? "Owner-requested call" : data.purpose === "overdue_invoice" ? "Overdue invoice" : "Missed-call follow-up",
         category:data.purpose==="owner_requested"&&typeof data.category==="string"?data.category:null,
-        instructions:data.purpose==="owner_requested"&&typeof data.instructions==="string"?data.instructions:null,
+        instructions:data.purpose==="owner_notification"?`Notify the business owner about inspection ${String(data.requestCode??"").slice(0,80)}.`:data.purpose==="owner_requested"&&typeof data.instructions==="string"?data.instructions:null,
         callLogId:typeof data.callLogId==="string"&&/^[a-f0-9-]{36}$/i.test(data.callLogId)?data.callLogId:null,
         reason: typeof data.reason === "string" ? data.reason : null,
       };
@@ -65,8 +65,8 @@ export async function PATCH(request:Request){
   const ref=adminDb.collection("ai_scheduled_callbacks").doc(body.id);
   const result=await adminDb.runTransaction(async tx=>{
     const snap=await tx.get(ref);const row=snap.data();
-    if(!row||row.businessId!==auth.businessId||row.purpose!=="owner_requested")return {status:404,error:"Scheduled owner call not found."};
-    if(row.status!=="SCHEDULED")return {status:409,error:"This call was already processed or has started dialing."};
+    if(!row||row.businessId!==auth.businessId||!["owner_requested","owner_notification"].includes(row.purpose))return {status:404,error:"Scheduled owner call not found."};
+    if(!["SCHEDULED","OWNER_SCHEDULED","OWNER_NUMBER_SCHEDULED"].includes(row.status))return {status:409,error:"This call was already processed or has started dialing."};
     tx.update(ref,{status:"CANCELLED",reason:"Cancelled by the business owner.",updatedAt:Date.now()});return {status:200};
   });
   return result.status===200?json({ok:true}):json({error:result.error},result.status);

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useBusinessProfile, useBusinessProfileActions } from "@/lib/business/use-business-profile";
+import { OwnerCallNotifications } from "@/components/owner-call-notifications";
 
 type Permission = "sophieTalkEnabled" | "sophieLiveListenEnabled" | "sophieMissedCallbacksEnabled" | "sophieInvoiceCallsEnabled";
 const options: { key: Permission; label: string; description: string }[] = [
@@ -22,7 +23,9 @@ export function SophieVoicePermissions() {
   const [hoursSaved, setHoursSaved] = useState(false);
 
   useEffect(() => {
-    if (profile?.sophieCallingHours) setHours(profile.sophieCallingHours);
+    let active = true;
+    queueMicrotask(() => { if (active && profile?.sophieCallingHours) setHours(profile.sophieCallingHours); });
+    return () => { active = false; };
   }, [profile?.sophieCallingHours]);
 
   async function save(patch: Record<string, unknown>) {
@@ -53,6 +56,7 @@ export function SophieVoicePermissions() {
   return (
     <div className="space-y-3">
       <h4 className="font-display text-sm font-semibold text-on-surface">Voice permissions</h4>
+      <OwnerCallNotifications />
       <div className="space-y-3">
         {options.map(({ key, label, description }) => (
           <label key={key} className="flex items-center justify-between gap-3 rounded-xl border border-outline-variant px-3 py-3">

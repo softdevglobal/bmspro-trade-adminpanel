@@ -1,3 +1,4 @@
+import {quotationFollowUpFields} from "@/lib/ai/calls/quotation-follow-up-policy";
 import "server-only";
 
 import { logQuotationAuditForActor } from "@/lib/audit/action-logs";
@@ -305,6 +306,7 @@ export function mapQuotationDoc(
         ? data.customerDecision
         : null,
     customerDecisionAt: toMillis(data.customerDecisionAt),
+    sophieFollowUpEnabled: data.sophieFollowUpEnabled === true,
     bookingId: typeof data.bookingId === "string" ? data.bookingId : null,
     bookingCode:
       typeof data.bookingCode === "string" && data.bookingCode.trim()
@@ -731,6 +733,7 @@ export async function createQuotationForInspection(
   await requestSnap.ref.set(requestUpdate, { merge: true });
 
   await ref.set({
+    ...quotationFollowUpFields((input.sophieFollowUpEnabled === true), false),
     quotationCode,
     businessId,
     inspectionRequestId: inspectionId,
@@ -842,6 +845,7 @@ export async function createQuotationForInspection(
     if (shouldSend) {
       await ref.set(
         {
+          ...quotationFollowUpFields((input.sophieFollowUpEnabled === true), false),
           status: "sent",
           ...awaitingBookingFields(),
           updatedAt: FieldValue.serverTimestamp(),
@@ -1150,6 +1154,7 @@ export async function updateDraftQuotation(
 
   await quotationRef.set(
     {
+      ...quotationFollowUpFields((input.sophieFollowUpEnabled ?? quotationData.sophieFollowUpEnabled === true), false),
       serviceTitle,
       serviceDescription,
       customer,
@@ -1256,6 +1261,7 @@ export async function updateDraftQuotation(
     if (shouldSend && previousStatus !== "sent") {
       await quotationRef.set(
         {
+          ...quotationFollowUpFields((input.sophieFollowUpEnabled ?? quotationData.sophieFollowUpEnabled === true), false),
           status: "sent",
           ...awaitingBookingFields(),
           updatedAt: FieldValue.serverTimestamp(),
@@ -1266,6 +1272,7 @@ export async function updateDraftQuotation(
     } else if (shouldSend) {
       await quotationRef.set(
         {
+          ...quotationFollowUpFields((input.sophieFollowUpEnabled ?? quotationData.sophieFollowUpEnabled === true), false),
           status: "sent",
           updatedAt: FieldValue.serverTimestamp(),
         },
@@ -1659,6 +1666,7 @@ export type StandaloneQuotationInput = {
   depositRequest?: unknown;
   /** When true, emails/SMS the customer and marks the quotation as sent. */
   send?: boolean;
+  sophieFollowUpEnabled?: boolean;
   /** How the backing request is tagged. Defaults to `quotation_direct`. */
   createdSource?: "quotation_direct" | "invoice_direct";
 };
@@ -1946,6 +1954,7 @@ export async function createStandaloneQuotation(
   const quotationCode = await allocateQuotationCode(businessId);
 
   await ref.set({
+    ...quotationFollowUpFields((input.sophieFollowUpEnabled === true), false),
     quotationCode,
     businessId,
     inspectionRequestId: inspectionRef.id,
@@ -2049,6 +2058,7 @@ export async function createStandaloneQuotation(
     if (shouldSend) {
       await ref.set(
         {
+          ...quotationFollowUpFields((input.sophieFollowUpEnabled === true), false),
           status: "sent",
           ...awaitingBookingFields(),
           updatedAt: FieldValue.serverTimestamp(),
@@ -2711,6 +2721,9 @@ async function sendQuotationCreatedEmail(
   const email = customer.email?.trim();
   if (!email) return;
 
+  const followUpRef = quotation.sophieFollowUpEnabled ? adminDb.collection(QUOTATION_COLLECTION).doc(quotation.id) : null;
+  const followUpVersion = followUpRef ? (await followUpRef.get()).get("sophieFollowUpVersion") : null;
+
   const { sendQuotationSentEmail } = await import(
     "@/lib/email/templates/quotation-sent"
   );
@@ -2736,6 +2749,12 @@ async function sendQuotationCreatedEmail(
     pdfBytes,
     pdfFileName: `${quoteCode || "quotation"}.pdf`.replace(/[^a-z0-9.\-]+/gi, "-"),
   });
+  if (followUpRef) await adminDb.runTransaction(async tx => {
+    const current=await tx.get(followUpRef);
+    if(current.get("businessId")===businessId && current.get("status")==="sent" && current.get("sophieFollowUpEnabled")===true && current.get("sophieFollowUpVersion")===followUpVersion && !current.get("customerDecision"))
+      tx.update(followUpRef,quotationFollowUpFields(true,true));
+  });
+
 }
 
 /**

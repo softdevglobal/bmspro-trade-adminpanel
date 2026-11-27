@@ -68,10 +68,11 @@ test("mapping validation preserves leading zeros and stale versions cannot overw
 });
 
 test("super-admin API rejects other callers before reading or mutating mappings", async () => {
-  const { GET, PUT } = await import("../app/api/admin/ai/did-mappings/route");
+  const { GET, PUT, DELETE } = await import("../app/api/admin/ai/did-mappings/route");
   for (const token of ["", "owner", "bridge-secret"]) {
     assert.equal((await GET(request(token))).status, token ? 403 : 401);
     assert.equal((await PUT(request(token))).status, token ? 403 : 401);
+    assert.equal((await DELETE(request(token))).status, token ? 403 : 401);
   }
   assert.equal(state.reads, 0);
   assert.equal(state.writes, 0);
@@ -360,4 +361,41 @@ test("bridge joins use verified UUID calls, never guessed PBX channels, and reje
   assert.equal((await joinBridgeCall(config, "business-a", id)).status, 404);
   assert.equal(posts, 1);
   assert.equal((await joinBridgeCall(config, "business-a", "PJSIP/2000-anything")).status, 400);
+});
+
+test("deletion blocks routing, preserves recording ownership and cannot reuse old period IDs", async () => {
+  const { GET, PUT, DELETE } = await import("../app/api/admin/ai/did-mappings/route");
+  const { resolveVoiceDidMapping } = await import("../lib/ai/data/did-mappings");
+  const did = "0359111498";
+  const body = { did, businessId: "business-a", isActive: true, version: 0 };
+  assert.equal((await PUT(request("admin", body))).status, 200);
+  assert.equal((await resolveVoiceDidMapping(did))?.businessId, "business-a");
+  const writesBefore = state.writes;
+  assert.equal((await DELETE(request("admin", { did, version: 0 }))).status, 409);
+  assert.equal(state.writes, writesBefore);
+  assert.equal((await DELETE(request("admin", { did: "../bad", version: 1 }))).status, 400);
+  assert.equal((await DELETE(request("admin", { did, version: 1 }))).status, 200);
+  assert.equal(await resolveVoiceDidMapping(did), null);
+  assert.ok(state.docs.get(`ai_did_recording_periods:${did}-1`)?.endedAt);
+  assert.equal(state.docs.get(`ai_did_recording_periods:${did}-1`)?.businessId, "business-a");
+  assert.equal((await (await GET(request())).json()).mappings.some((row: {did:string})=>row.did===did), false);
+  assert.equal((await DELETE(request("admin", { did, version: 1 }))).status, 404);
+  assert.equal((await PUT(request("admin", { ...body, version: 1 }))).status, 409);
+  assert.equal((await PUT(request("admin", { ...body, businessId: "business-b" }))).status, 200);
+  assert.equal(state.docs.get(`ai_did_mappings:${did}`)?.version, 3);
+  assert.equal(state.docs.get(`ai_did_recording_periods:${did}-3`)?.businessId, "business-b");
+  assert.equal(state.docs.get(`ai_did_recording_periods:${did}-1`)?.businessId, "business-a");
+  assert.ok(state.audit.some(row => (row as {action:string}).action === "voice.did_mapping.deleted"));
+});
+
+test("deleting an environment setup entry hides it without allowing fallback routing", async () => {
+  const { GET, DELETE } = await import("../app/api/admin/ai/did-mappings/route");
+  const did = "0359111499";
+  const previous = process.env.AI_VOICE_TRADE_DID_CONFIG_JSON;
+  process.env.AI_VOICE_TRADE_DID_CONFIG_JSON = JSON.stringify([{did,businessId:"business-a"}]);
+  try {
+    assert.equal((await DELETE(request("admin", {did,version:0}))).status,200);
+    assert.equal((await (await GET(request())).json()).mappings.some((row:{did:string})=>row.did===did),false);
+    assert.equal(state.docs.get(`ai_did_mappings:${did}`)?.isActive,false);
+  } finally { if(previous===undefined)delete process.env.AI_VOICE_TRADE_DID_CONFIG_JSON;else process.env.AI_VOICE_TRADE_DID_CONFIG_JSON=previous; }
 });

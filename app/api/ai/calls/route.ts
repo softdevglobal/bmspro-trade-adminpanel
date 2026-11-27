@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 const MAX_BODY_BYTES = 400_000;
 const SUMMARY_FIELDS = ["startedAt", "durationMs", "answered", "endReason", "callerNumber", "outcome",
-  "firstCallerLine", "toolCount", "turnCount", "knowledgeSearches"];
+  "firstCallerLine", "toolCount", "turnCount", "knowledgeSearches", "recipientType"];
 
 export async function POST(request: Request) {
   if (process.env.AI_VOICE_CALL_LOGS_ENABLED === "false") return json({ ok: false, error: "Call logs are disabled." }, 404);

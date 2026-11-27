@@ -99,6 +99,18 @@ export function BusinessNotificationBell() {
   function openNotification(note: NotificationRecord) {
     setPanelOpen(false);
     if (!note.requestId) return;
+    if (note.type === "invoice_follow_up_review") {
+      router.push(`/dashboard/invoices?view=${encodeURIComponent(note.requestId)}`);
+      return;
+    }
+    if (note.type === "expense_approval_needed") {
+      router.push(`/dashboard/expenses?view=${encodeURIComponent(note.requestId)}`);
+      return;
+    }
+    if (note.type === "expense_report_ready") {
+      router.push("/dashboard/expenses?tab=reports");
+      return;
+    }
     router.push(`/dashboard/requests?request=${note.requestId}`);
     window.dispatchEvent(
       new CustomEvent("bmspt:open-inspection-request", {

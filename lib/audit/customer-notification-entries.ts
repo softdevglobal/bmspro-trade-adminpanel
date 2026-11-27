@@ -26,6 +26,7 @@ export const CUSTOMER_NOTIFICATION_TYPE_LABELS: Record<NotificationType, string>
     booking_on_the_way: "Technician on the way",
     job_completed: "Job completed",
     invoice_sent: "Invoice sent",
+    invoice_follow_up_review: "Invoice follow-up review",
     quotation_sent: "Quotation sent",
     quotation_accepted: "Quotation accepted",
     quotation_rejected: "Quotation rejected",
@@ -33,6 +34,8 @@ export const CUSTOMER_NOTIFICATION_TYPE_LABELS: Record<NotificationType, string>
     leave_assignment_conflict: "Schedule conflict",
     staff_off_day: "Staff off day",
     schedule_reminder: "Schedule reminder",
+    expense_approval_needed: "Expense approval",
+    expense_report_ready: "Expense report",
     system_message: "System message",
   };
 

@@ -32,6 +32,7 @@ export type QuotationDepositRequest = {
 export type QuotationStatus = "draft" | "sent" | "cancelled";
 
 export type QuotationDetail = {
+  sophieFollowUpEnabled?: boolean;
   id: string;
   quotationCode: string | null;
   businessId: string;
@@ -106,4 +107,5 @@ export type CreateQuotationInput = {
   };
   /** When true, emails/SMS the customer and marks the quotation as sent. */
   send?: boolean;
+  sophieFollowUpEnabled?: boolean;
 };

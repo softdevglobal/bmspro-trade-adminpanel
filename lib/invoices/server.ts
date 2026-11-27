@@ -1,3 +1,4 @@
+import {invoiceContactBlock} from "@/lib/ai/calls/invoice-contact-guard";
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -358,6 +359,7 @@ export async function listOverdueInvoicePage(businessId: string, timeZone?: stri
         invoiceCode: invoice.invoiceCode,
         dueDate: invoice.dueDate,
         outstandingAud: due.outstandingAud,
+        collectionHold:doc.get("sophieCollectionHold")?.active?doc.get("sophieCollectionHold"):null,
       }] : [];
     }),
     nextCursor: page.size > pageSize ? docs.at(-1)?.id ?? null : null,
@@ -380,12 +382,13 @@ export async function claimOverdueInvoiceReminder(input: {
     const invoice = mapInvoiceDoc(snapshot.id, data);
     const due = resolveInvoicePaymentDue(invoice, input.timeZone, input.now);
     if (!due.isOverdue) return null;
+    const contactBlock=await invoiceContactBlock(input.businessId,input.invoiceId,data,transaction);
     const customerEmail = invoice.customer.email?.trim();
     // Paused when the customer says they've paid or disputes it (Sophie's email action). The owner
     // still gets their own overdue notice; only the customer stops being chased.
     const paused = Boolean(data.remindersPause);
     const recipients = {
-      customer: customerEmail && !paused && data.overdueReminderCustomerDate !== input.date ? customerEmail : null,
+      customer: !contactBlock && customerEmail && !paused && data.overdueReminderCustomerDate !== input.date ? customerEmail : null,
       owner: input.ownerEmail && data.overdueReminderOwnerDate !== input.date ? input.ownerEmail : null,
     };
     const claims = {
@@ -397,7 +400,7 @@ export async function claimOverdueInvoiceReminder(input: {
       invoice,
       outstandingAud: due.outstandingAud,
       recipients,
-      customerStatus: customerEmail ? "ALREADY_ATTEMPTED_TODAY" : "NO_EMAIL",
+      customerStatus: contactBlock ? "PAUSED_FOR_REVIEW" : customerEmail ? "ALREADY_ATTEMPTED_TODAY" : "NO_EMAIL",
       ownerStatus: input.ownerEmail ? "ALREADY_ATTEMPTED_TODAY" : "NO_EMAIL",
     };
   });
@@ -412,9 +415,10 @@ export async function recordOverdueCustomerReminderSent(businessId: string, invo
   await adminDb.runTransaction(async transaction => {
     const invoice = await transaction.get(ref);
     if (invoice.get("businessId") !== businessId) return;
-    const attempt = queueEnabled ? await transaction.get(callRef) : null;
+    const blocked=await invoiceContactBlock(businessId,invoiceId,invoice.data()!,transaction);
+    const attempt = queueEnabled && !blocked ? await transaction.get(callRef) : null;
     transaction.update(ref, { overdueReminderCustomerSentAt: FieldValue.serverTimestamp(),
-      ...(queueEnabled && { overdueReminderCallId: id }) });
+      ...(queueEnabled && !blocked && { overdueReminderCallId: id }) });
     if (attempt && !attempt.exists) {
       transaction.create(callRef, { businessId, invoiceId, source: "overdue_email", status: "QUEUED",
         queuedAt: Date.now(), attemptedAt: Date.now() });

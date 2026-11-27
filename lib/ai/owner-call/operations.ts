@@ -151,20 +151,9 @@ export function ownerOperations(businessId: string, timeZone: string) {
         reserved: false, suggestions, reasons: [...new Set(plans.filter(plan => !plan.assignedTo).map(plan => plan.aiAssignment.reason))] };
     },
 
-    async quoteFollowUps(search?: string, offset = 0) {
-      const term = normalize(search);
-      const snapshot = await owned(QUOTATION_COLLECTION).where("status", "==", "sent").get();
-      const quotes = snapshot.docs.map(doc => mapQuotationDoc(doc.id, doc.data()))
-        .filter(quote => quote.customerDecision === null && (!term || normalize(quote.quotationCode) === term ||
-          normalize(quote.customer.fullName).includes(term)))
-        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-      return {
-        status: "OK", total: quotes.length, nextOffset: offset + pageSize < quotes.length ? offset + pageSize : null,
-        quotes: quotes.slice(offset, offset + pageSize).map(quote => ({
-          reference: quote.quotationCode, customer: quote.customer.fullName, service: quote.serviceTitle,
-          valueAud: quote.finalPriceAud, createdAt: quote.createdAt, validUntil: quote.validUntil,
-        })),
-      };
+    async quoteFollowUps(search?: string, offset = 0, includeDecided = false) {
+      const {quotationFollowUpReport}=await import("./quotation-follow-up-report");
+      return quotationFollowUpReport(adminDb,businessId,search,offset,includeDecided);
     },
 
     async sophieCallSummaries(date?: string, offset = 0) {
@@ -177,7 +166,7 @@ export function ownerOperations(businessId: string, timeZone: string) {
       if (start === null || end === null) return { status: "UNAVAILABLE" };
       const query = owned(CALL_LOGS_COLLECTION).where("startedAt", ">=", Timestamp.fromMillis(start))
         .where("startedAt", "<", Timestamp.fromMillis(end)).orderBy("startedAt", "desc")
-        .select("startedAt", "durationMs", "answered", "endReason", "outcome", "outcomes", "transcript", "firstCallerLine");
+        .select("startedAt", "durationMs", "answered", "endReason", "outcome", "outcomes", "transcript", "firstCallerLine", "recipientType");
       const snapshot = await query.offset(offset).limit(pageSize + 1).get();
       const calls = snapshot.docs.slice(0, pageSize).flatMap(doc => {
         const call = toCallLogDetail(doc.id, doc.data());
@@ -189,6 +178,7 @@ export function ownerOperations(businessId: string, timeZone: string) {
           ...(callerTurns.length === 0 && call.firstCallerLine ? [call.firstCallerLine] : []),
         ])].map(line => line.slice(0, 240));
         return [{ callId: call.id, date: day, startedAt: call.startedAt, durationMs: call.durationMs, outcome: call.outcome,
+          ...(call.recipientType === "owner" ? { recipientType: "owner", purpose: "New inspection notification to the owner; not a customer enquiry" } : {}),
           verifiedToolOutcomes: call.outcomes, excerpts, endReason: call.endReason }];
       });
       return { status: "OK", date: day, timeZone, calls, nextOffset: snapshot.size > pageSize ? offset + pageSize : null };

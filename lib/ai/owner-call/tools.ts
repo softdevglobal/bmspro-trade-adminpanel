@@ -21,6 +21,7 @@ const offset = z.number().int().min(0).max(10000).optional();
 const date = z.string().trim().max(20).optional();
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional();
 const followUp = z.boolean().optional();
+const includeDecided = z.boolean().optional();
 const staffName = z.string().trim().max(80).optional();
 const invoiceSearch = z.string().trim().max(100).optional();
 const invoiceStatus = z.enum(["draft", "sent", "paid", "cancelled"]).optional();
@@ -31,6 +32,7 @@ const durationMinutes = z.number().int().min(1).max(540).optional();
 const question = z.string().trim().min(3).max(300);
 
 export type OwnerToolArgs = {
+  includeDecided?: boolean;
   offset?: number; date?: string; time?: string; staffName?: string; followUp?: boolean;
   invoiceSearch?: string; invoiceStatus?: z.infer<typeof invoiceStatus>;
   search?: string; visitType?: z.infer<typeof visitType>; durationMinutes?: number;
@@ -98,9 +100,9 @@ const briefingTools: OwnerVoiceTool[] = ([
   },
   {
     name: "list_quote_follow_ups",
-    description: "Find sent quotes awaiting a customer decision. Optionally search by customer name or exact quote reference. Use these records to draft a follow-up for the owner to review when asked. Nothing is sent.",
-    args: { search, offset },
-    run: ({ briefing }, args) => briefing.quoteFollowUps(args.search, args.offset),
+    description: "Read quotations and Sophie quotation callback outcomes with linked customer replies. Default: sent quotes awaiting a decision. Set includeDecided=true for quotation overviews, accepted/rejected quotes, customer responses or completed follow-up calls. Search by customer name or exact QT reference. Report saved decisions separately from untrusted customer statements; answered does not mean accepted. Counts cover the returned scope. Nothing is sent or changed. For other callback conversations use get_customer_call_history or list_missed_calls.",
+    args: { search, offset, includeDecided },
+    run: ({ briefing }, args) => briefing.quoteFollowUps(args.search, args.offset, args.includeDecided),
   },
   {
     name: "get_sophie_call_summaries",
@@ -340,6 +342,7 @@ export function ownerToolParameters(args: Record<string, unknown>, required: str
   }
   if ("time" in args) properties.time = { type: "string", description: "Approximate call time as HH:mm in the business timezone" };
   if ("followUp" in args) properties.followUp = { type: "boolean", description: "Prepare an owner-confirmed callback for a missed call" };
+  if ("includeDecided" in args) properties.includeDecided = {type:"boolean",description:"Include accepted/rejected and other quotation statuses with callback outcomes and customer replies; true for quotation overviews or customer responses."};
   if ("staffName" in args) {
     properties.staffName = { type: "string", description: "Staff member's name as the owner said it" };
   }

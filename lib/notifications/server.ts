@@ -347,6 +347,46 @@ export async function notifyBusinessOfStaffLeaveRequest(
   }
 }
 
+/**
+ * Expense alerts for owners and admins (never staff): an expense over the
+ * spending limit waiting for approval, or a weekly/monthly report ready.
+ * `targetId` is the expense id or the report id.
+ */
+export async function notifyBusinessAdminsOfExpense(input: {
+  businessId: string;
+  targetId: string;
+  type: "expense_approval_needed" | "expense_report_ready";
+  title: string;
+  body: string;
+}): Promise<void> {
+  try {
+    await createNotification({
+      audience: "business",
+      businessId: input.businessId,
+      customerId: null,
+      requestId: input.targetId,
+      status: input.type === "expense_approval_needed" ? "pending" : "completed",
+      type: input.type,
+      title: input.title,
+      body: input.body,
+      portalOnly: true,
+    });
+
+    await sendBusinessAdminMobilePush(input.businessId, {
+      title: input.title,
+      body: input.body,
+      data: {
+        type: input.type,
+        requestId: input.targetId,
+        expenseId: input.type === "expense_approval_needed" ? input.targetId : "",
+        audience: "owner",
+      },
+    });
+  } catch {
+    /* notifications are best-effort */
+  }
+}
+
 /** Warn admins when assigning staff who has leave on the scheduled day. */
 export async function notifyBusinessOfStaffOnLeaveAssignment(
   businessId: string,

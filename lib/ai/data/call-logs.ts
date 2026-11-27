@@ -23,6 +23,7 @@ export const callLogInput = z.object({
   callerNumber: z.string().regex(/^\d{6,15}$/).nullable(),
   callbackAttemptId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   ownerScheduledCall: z.literal(true).optional(),
+  quotationFollowUpCall: z.literal(true).optional(),
   tools: z.array(z.object({ name: code, status: code, durationMs: z.number().int().min(0).max(600_000) }).strict()).max(100),
   outcomes: z.array(z.object({
     tool: code, status: code, reference: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).nullable(),
@@ -37,6 +38,7 @@ export type CallLogInput = z.infer<typeof callLogInput>;
 
 export type CallOutcome = "booked" | "request_sent" | "needs_staff" | "no_booking";
 export type CallLogSummary = {
+  recipientType?: "owner";
   id: string;
   startedAt: number | null;
   durationMs: number;
@@ -70,6 +72,7 @@ const millis = (value: unknown) =>
 export function toCallLogSummary(id: string, data: Record<string, unknown>): CallLogSummary {
   return {
     id,
+    ...(data.recipientType === "owner" ? { recipientType: "owner" as const } : {}),
     startedAt: millis(data.startedAt),
     durationMs: Number(data.durationMs ?? 0),
     answered: data.answered === true,

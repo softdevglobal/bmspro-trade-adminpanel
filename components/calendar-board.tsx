@@ -23,6 +23,7 @@ import {
   CUSTOM_SERVICE_KEY,
   DOT_CLASS,
   emptyCalendarFilters,
+  formatAud,
   groupEventsByDate,
   isoDateFromParts,
   toIsoDateLocal,
@@ -49,12 +50,20 @@ import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types
 import { useCalendarFilterOptions } from "@/lib/calendar/use-calendar-filter-options";
 import { staffAvatarUrl } from "@/lib/team/staff-avatar";
 import { useBusinessStaffSummary } from "@/lib/team/use-business-staff-summary";
+import { SOPHIE_CALENDAR_TYPES, type SophieCalendarKind } from "@/lib/calendar/sophie-events";
+import { useSophieEvents } from "@/lib/calendar/use-sophie-events";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useRegisterRightDrawer } from "@/lib/ui/right-drawer-slot";
 import { useCalendarSlotOccupancy } from "@/lib/calendar/use-calendar-slot-occupancy";
 import { occupancyForHour } from "@/lib/calendar/slot-occupancy-types";
 import type { HourSlotOccupancy } from "@/lib/calendar/slot-occupancy-types";
 import { useBusinessClosures } from "@/lib/calendar/use-business-closures";
+import {
+  invoiceDueHref,
+  totalOutstandingAud,
+  type InvoiceDueItem,
+} from "@/lib/invoices/calendar-due";
+import { useInvoiceDueDates } from "@/lib/invoices/use-invoice-due-dates";
 import { useBusinessModuleSettings } from "@/lib/business/use-business-module-settings";
 import { useBusinessProfile } from "@/lib/business/use-business-profile";
 import {
@@ -87,6 +96,14 @@ const WEEKDAY_LABELS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as cons
 const MONTH_FORMAT = new Intl.DateTimeFormat("en-AU", {
   month: "long",
   year: "numeric",
+});
+
+const MONTH_NAME_FORMAT = new Intl.DateTimeFormat("en-AU", { month: "long" });
+
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("en-AU", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
 });
 
 const DAY_FORMAT = new Intl.DateTimeFormat("en-AU", {
@@ -335,9 +352,20 @@ function CalendarDayTimeSlots({
     () => calendarSessionMeta(workingHours),
     [workingHours],
   );
-  const occupancyRefreshKey = useMemo(
-    () => events.map((event) => event.key).join("|"),
+  // Invoice due dates are all-day money to collect, not visits: they get
+  // their own section and never touch the hourly slots.
+  const invoiceDues = useMemo(
+    () =>
+      events.flatMap((event) => (event.invoiceDue ? [event.invoiceDue] : [])),
     [events],
+  );
+  const scheduleEvents = useMemo(
+    () => events.filter((event) => !event.invoiceDue && !event.sophieEvent),
+    [events],
+  );
+  const occupancyRefreshKey = useMemo(
+    () => scheduleEvents.map((event) => event.key).join("|"),
+    [scheduleEvents],
   );
   const {
     slots: occupancySlots,
@@ -346,16 +374,16 @@ function CalendarDayTimeSlots({
   } = useCalendarSlotOccupancy(isoDate, occupancyRefreshKey);
 
   const placementsByHour = useMemo(
-    () => calendarEventPlacementsForDay(events, workingHours),
-    [events, workingHours],
+    () => calendarEventPlacementsForDay(scheduleEvents, workingHours),
+    [scheduleEvents, workingHours],
   );
 
   const unslottedEvents = useMemo(
     () =>
-      events.filter(
+      scheduleEvents.filter(
         (event) => calendarEventHourSlots(event, workingHours).length === 0,
       ),
-    [events, workingHours],
+    [scheduleEvents, workingHours],
   );
 
   function handleAddEvent(
@@ -385,6 +413,25 @@ function CalendarDayTimeSlots({
             this date. Reactivate the day to schedule again.
           </p>
         </div>
+      ) : null}
+      {invoiceDues.length > 0 ? (
+        <InvoiceDueSection dues={invoiceDues} onOpenLink={onOpenLink} />
+      ) : null}
+      {events.some(event => event.sophieEvent) ? (
+        <section className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+          <h4 className="font-semibold text-sky-900">Sophie calendar</h4>
+          <p className="mt-1 text-xs text-sky-800">Times shown in the business timezone. Calls depend on calling hours and availability.</p>
+          <div className="mt-3 space-y-2">
+            {events.flatMap(event => event.sophieEvent ? [event.sophieEvent] : []).sort((a,b)=>a.at-b.at).map(item => (
+              <Link key={item.id} href={item.href} onClick={onOpenLink} className="block rounded-lg border border-sky-200 bg-white p-3 text-sm hover:border-sky-500">
+                <p className="font-semibold">{item.time} · {item.title}</p>
+                <p>{[item.recipient,item.reference].filter(Boolean).join(" · ")}</p>
+                <p className="text-xs text-sky-800">{item.statusLabel} · {item.timing === "queued" ? "Queued at" : item.timing === "attempted" ? "Attempted at" : "Scheduled for"} {item.time}</p>
+                {item.reason ? <p className="mt-1 text-xs">{item.reason}</p> : null}
+              </Link>
+            ))}
+          </div>
+        </section>
       ) : null}
       {calendarSessions.map(({ session, slots }) => {
         const meta = sessionMeta[session];
@@ -448,6 +495,260 @@ function CalendarDayTimeSlots({
         </section>
       ) : null}
     </div>
+  );
+}
+
+function InvoiceDueSection({
+  dues,
+  onOpenLink,
+}: {
+  dues: InvoiceDueItem[];
+  onOpenLink?: () => void;
+}) {
+  const total = totalOutstandingAud(dues);
+  return (
+    <section
+      aria-label="Payments to collect"
+      className="rounded-xl border border-teal-200 bg-surface-container-lowest"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-teal-200 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700">
+            <span className="material-symbols-outlined material-symbols-filled text-[18px]">
+              payments
+            </span>
+          </span>
+          <div className="min-w-0">
+            <p className="font-body text-[13px] font-bold text-on-surface">
+              Payments to collect
+            </p>
+            <p className="font-body text-[11px] text-on-surface-variant">
+              {dues.length} {dues.length === 1 ? "invoice" : "invoices"} due
+            </p>
+          </div>
+        </div>
+        <p className="shrink-0 font-numeric text-[15px] font-bold text-teal-800">
+          {formatAud(total)}
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 p-3 sm:p-4">
+        {dues.map((due) => (
+          <Link
+            key={due.invoiceId}
+            href={invoiceDueHref(due)}
+            onClick={onOpenLink}
+            className={`block ${
+              due.isOverdue
+                ? "rounded-xl border border-red-200 bg-red-50 p-3 transition-all hover:border-red-400 hover:shadow-md"
+                : "rounded-xl border border-teal-200 bg-teal-50 p-3 transition-all hover:border-teal-400 hover:shadow-md"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-[12px] font-bold tracking-wide text-on-surface">
+                    {due.invoiceCode}
+                  </span>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 font-body text-[10px] font-bold uppercase tracking-wider ${
+                      due.isOverdue
+                        ? "border border-red-200 bg-white text-red-700"
+                        : "border border-teal-200 bg-white text-teal-800"
+                    }`}
+                  >
+                    {due.isOverdue ? "Overdue" : "Due"}
+                  </span>
+                </div>
+                <p className="mt-1 truncate font-body text-[14px] font-semibold text-on-surface">
+                  {due.customerName || "Customer"}
+                </p>
+                {due.serviceTitle ? (
+                  <p className="truncate font-body text-[12px] text-on-surface-variant">
+                    {due.serviceTitle}
+                  </p>
+                ) : null}
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="font-numeric text-[15px] font-bold text-on-surface">
+                  {formatAud(due.outstandingAud)}
+                </p>
+                {due.outstandingAud !== due.totalAud ? (
+                  <p className="font-body text-[11px] text-on-surface-variant">
+                    of {formatAud(due.totalAud)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function daysBetweenIso(fromIso: string, toIso: string): number {
+  const from = Date.UTC(
+    Number(fromIso.slice(0, 4)),
+    Number(fromIso.slice(5, 7)) - 1,
+    Number(fromIso.slice(8, 10)),
+  );
+  const to = Date.UTC(
+    Number(toIso.slice(0, 4)),
+    Number(toIso.slice(5, 7)) - 1,
+    Number(toIso.slice(8, 10)),
+  );
+  return Math.round((to - from) / 86_400_000);
+}
+
+function invoiceCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "invoice" : "invoices"}`;
+}
+
+/**
+ * Money to collect at a glance: due in the month on screen, overdue (any
+ * month), and the next payment coming up.
+ */
+function PaymentsSummary({
+  monthLabel,
+  monthDues,
+  overdueDues,
+  allDues,
+  todayIso,
+}: {
+  monthLabel: string;
+  monthDues: InvoiceDueItem[];
+  overdueDues: InvoiceDueItem[];
+  allDues: InvoiceDueItem[];
+  todayIso: string;
+}) {
+  const monthOpen = monthDues.filter((due) => !due.isOverdue);
+  const nextDue = allDues.find((due) => !due.isOverdue) ?? null;
+  const oldestOverdue = overdueDues[0] ?? null;
+  const oldestDays = oldestOverdue
+    ? daysBetweenIso(oldestOverdue.date, todayIso)
+    : 0;
+  const nextInDays = nextDue ? daysBetweenIso(todayIso, nextDue.date) : 0;
+
+  const tile =
+    "group flex min-w-0 flex-col gap-1 rounded-xl border p-4 transition-all hover:shadow-md";
+
+  return (
+    <section
+      aria-label="Payments to collect"
+      className="rounded-xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm sm:p-5"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700">
+            <span className="material-symbols-outlined material-symbols-filled text-[20px]">
+              payments
+            </span>
+          </span>
+          <div className="min-w-0">
+            <h3 className="font-display text-[16px] font-bold text-on-surface">
+              Payments to collect
+            </h3>
+            <p className="font-body text-[12px] text-on-surface-variant">
+              Issued invoices with money still owed
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/dashboard/invoices"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 font-body text-[13px] font-semibold text-primary hover:bg-primary/5"
+        >
+          View invoices
+          <span className="material-symbols-outlined text-[16px]">
+            arrow_forward
+          </span>
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className={`${tile} border-teal-200 bg-teal-50/70`}>
+          <span className="font-body text-[11px] font-bold uppercase tracking-wider text-teal-800">
+            Due in {monthLabel}
+          </span>
+          <span className="font-numeric text-[26px] font-bold leading-tight text-teal-900">
+            {formatAud(totalOutstandingAud(monthOpen))}
+          </span>
+          <span className="font-body text-[12px] text-teal-800">
+            {monthOpen.length > 0
+              ? invoiceCountLabel(monthOpen.length)
+              : "Nothing else due this month"}
+          </span>
+        </div>
+
+        {overdueDues.length > 0 ? (
+          <Link
+            href="/dashboard/invoices?filter=overdue"
+            className={`${tile} border-red-200 bg-red-50 hover:border-red-400`}
+          >
+            <span className="flex items-center gap-1 font-body text-[11px] font-bold uppercase tracking-wider text-red-700">
+              <span className="material-symbols-outlined text-[15px]">
+                warning
+              </span>
+              Overdue
+            </span>
+            <span className="font-numeric text-[26px] font-bold leading-tight text-red-700">
+              {formatAud(totalOutstandingAud(overdueDues))}
+            </span>
+            <span className="font-body text-[12px] text-red-800">
+              {invoiceCountLabel(overdueDues.length)} · oldest {oldestDays}{" "}
+              {oldestDays === 1 ? "day" : "days"} late
+            </span>
+          </Link>
+        ) : (
+          <div className={`${tile} border-green-200 bg-green-50`}>
+            <span className="font-body text-[11px] font-bold uppercase tracking-wider text-green-700">
+              Overdue
+            </span>
+            <span className="font-numeric text-[26px] font-bold leading-tight text-green-700">
+              {formatAud(0)}
+            </span>
+            <span className="font-body text-[12px] text-green-800">
+              Nothing overdue
+            </span>
+          </div>
+        )}
+
+        {nextDue ? (
+          <Link
+            href={invoiceDueHref(nextDue)}
+            className={`${tile} border-outline-variant bg-surface-container-low hover:border-primary/40`}
+          >
+            <span className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Next payment due
+            </span>
+            <span className="font-numeric text-[26px] font-bold leading-tight text-on-surface">
+              {formatAud(nextDue.outstandingAud)}
+            </span>
+            <span className="truncate font-body text-[12px] text-on-surface-variant">
+              {SHORT_DATE_FORMAT.format(new Date(`${nextDue.date}T12:00:00`))}
+              {" · "}
+              {nextInDays === 0
+                ? "today"
+                : nextInDays === 1
+                  ? "tomorrow"
+                  : `in ${nextInDays} days`}
+              {nextDue.customerName ? ` · ${nextDue.customerName}` : ""}
+            </span>
+          </Link>
+        ) : (
+          <div className={`${tile} border-outline-variant bg-surface-container-low`}>
+            <span className="font-body text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Next payment due
+            </span>
+            <span className="font-numeric text-[26px] font-bold leading-tight text-outline">
+              —
+            </span>
+            <span className="font-body text-[12px] text-on-surface-variant">
+              No upcoming payments
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -716,10 +1017,27 @@ function CalendarDayEventCards({
 }
 
 function calendarEventTitle(event: CalendarEvent): string {
+  if (event.sophieEvent) return calendarEventSummary(event);
+  if (event.invoiceDue) {
+    const due = event.invoiceDue;
+    return `${due.isOverdue ? "Overdue" : "Due"} ${formatAud(due.outstandingAud)} · ${due.customerName || due.invoiceCode}`;
+  }
   if (event.personalEvent) return event.personalEvent.title;
   if (event.booking) return bookingTitle(event.booking);
   if (event.request) return requestTitle(event.request);
   return "—";
+}
+
+function weekChipClass(event: CalendarEvent): string {
+  if (event.sophieEvent) return "border-sky-200 bg-sky-50 text-sky-900";
+  if (event.invoiceDue) {
+    return event.invoiceDue.isOverdue
+      ? "border-red-200 bg-red-50 text-red-800"
+      : "border-teal-200 bg-teal-50 text-teal-800";
+  }
+  return event.source === "jobs"
+    ? "border-primary/25 bg-primary/10 text-primary"
+    : "border-green-200 bg-green-50 text-green-800";
 }
 
 function eventTimeLabel(
@@ -800,6 +1118,14 @@ export function CalendarBoard() {
   const timeZone = profile?.timezone;
   const { canUseModule } = useBusinessModuleSettings();
   const jobsModuleEnabled = canUseModule("jobs");
+  const invoicesModuleEnabled = canUseModule("invoices");
+  const [showPaymentsDue, setShowPaymentsDue] = useState(true);
+  const [showSophie, setShowSophie] = useState(false);
+  const [sophieKinds, setSophieKinds] = useState<Set<SophieCalendarKind>>(() => new Set(Object.keys(SOPHIE_CALENDAR_TYPES) as SophieCalendarKind[]));
+  const { items: invoiceDues } = useInvoiceDueDates(
+    invoicesModuleEnabled,
+    timeZone,
+  );
   const { workingHours } = useBusinessWorkingHours();
   const workingHoursLabel = useMemo(
     () => describeWorkingHoursWindow(workingHours),
@@ -824,6 +1150,13 @@ export function CalendarBoard() {
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(today));
   const [focusDate, setFocusDate] = useState(() => today);
   const [viewTab, setViewTab] = useState<(typeof VIEW_TABS)[number]>("Month");
+  const sophieRange = useMemo(() => {
+    if (viewTab === "Today") return {from:toIsoDateLocal(focusDate),to:toIsoDateLocal(addDays(focusDate,1))};
+    if (viewTab === "Week") return {from:toIsoDateLocal(addDays(focusDate,-7)),to:toIsoDateLocal(addDays(focusDate,8))};
+    return {from:toIsoDateLocal(new Date(viewMonth.getFullYear(),viewMonth.getMonth(),1)),to:toIsoDateLocal(new Date(viewMonth.getFullYear(),viewMonth.getMonth()+1,1))};
+  },[viewMonth,focusDate,viewTab]);
+  const sophie = useSophieEvents(showSophie,sophieRange.from,sophieRange.to);
+  const visibleSophie = useMemo(() => sophie.items.filter(item => sophieKinds.has(item.kind)),[sophie.items,sophieKinds]);
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   useRegisterRightDrawer(bookingDrawerOpen, "md");
@@ -920,8 +1253,10 @@ export function CalendarBoard() {
         filters,
         bookings,
         personalEvents,
+        showPaymentsDue ? invoiceDues : [],
+        visibleSophie,
       ),
-    [requests, filters, bookings, personalEvents],
+    [requests, filters, bookings, personalEvents, showPaymentsDue, invoiceDues, visibleSophie],
   );
 
   const monthEventsByDate = useMemo(
@@ -968,6 +1303,15 @@ export function CalendarBoard() {
     }
     return { prev: "Previous month", next: "Next month" };
   }, [viewTab]);
+
+  const monthPaymentDues = useMemo(() => {
+    const prefix = isoDateFromParts(viewMonth, 1).slice(0, 7);
+    return invoiceDues.filter((due) => due.date.startsWith(prefix));
+  }, [invoiceDues, viewMonth]);
+  const overdueDues = useMemo(
+    () => invoiceDues.filter((due) => due.isOverdue),
+    [invoiceDues],
+  );
 
   const leadingBlanks = mondayOffset(viewMonth);
   const totalDays = daysInMonth(viewMonth);
@@ -1072,6 +1416,12 @@ export function CalendarBoard() {
   }
 
   function openCalendarEvent(event: CalendarEvent, isoDate: string) {
+    if (event.sophieEvent) { closeBookingDrawer(); router.push(event.sophieEvent.href); return; }
+    if (event.invoiceDue) {
+      closeBookingDrawer();
+      router.push(invoiceDueHref(event.invoiceDue));
+      return;
+    }
     if (event.personalEvent) {
       openEditPersonalEvent(event.personalEvent);
       return;
@@ -1142,10 +1492,19 @@ export function CalendarBoard() {
 
   function clearAllFilters() {
     setFilters(emptyCalendarFilters(user?.uid ?? null));
+    setShowSophie(false);
+    setSophieKinds(new Set(Object.keys(SOPHIE_CALENDAR_TYPES) as SophieCalendarKind[]));
   }
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
+      {showSophie && role === "business_owner" ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900" aria-live="polite">
+          <span>{sophie.loading ? "Loading Sophie activities…" : sophie.error || `Sophie calendar · ${visibleSophie.length} activities in this range`}</span>
+          {sophie.partial ? <span>Some activities are hidden. Use Week or Today to narrow the range.</span> : null}
+          <button type="button" onClick={sophie.reload} disabled={sophie.loading} className="ml-auto rounded border border-sky-300 px-3 py-1 disabled:opacity-50">Refresh Sophie</button>
+        </div>
+      ) : null}
       {requestsError ? (
         <div className="flex items-start gap-2 rounded-lg border border-error/30 bg-error-container/60 px-3 py-2.5 font-body text-[13px] text-on-error-container">
           <span className="material-symbols-outlined material-symbols-filled mt-0.5 text-[18px] text-error">
@@ -1243,6 +1602,31 @@ export function CalendarBoard() {
               {unassignedCount}
             </span>
           </button>
+          {invoicesModuleEnabled ? (
+            <button
+              type="button"
+              aria-pressed={showPaymentsDue}
+              onClick={() => setShowPaymentsDue((current) => !current)}
+              title={
+                showPaymentsDue
+                  ? "Hide invoice due dates on the calendar"
+                  : "Show invoice due dates on the calendar"
+              }
+              className={`flex shrink-0 items-center gap-2 rounded-lg border px-4 py-2 font-body text-[13px] font-semibold whitespace-nowrap transition-colors ${
+                showPaymentsDue
+                  ? "border-teal-300 bg-teal-50 text-teal-800"
+                  : "border-outline-variant bg-surface-container-lowest text-on-surface-variant"
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">
+                {showPaymentsDue ? "payments" : "visibility_off"}
+              </span>
+              Payments due
+              <span className="rounded-full bg-teal-600 px-2 py-0.5 font-numeric text-[10px] text-white">
+                {invoiceDues.length}
+              </span>
+            </button>
+          ) : null}
         </div>
         <button
           type="button"
@@ -1259,7 +1643,11 @@ export function CalendarBoard() {
         aria-label="Calendar legend"
         className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-outline-variant bg-surface-container-low px-4 py-2.5"
       >
-        {CALENDAR_LEGEND.map((entry) => (
+        {CALENDAR_LEGEND.filter(
+          (entry) =>
+            (invoicesModuleEnabled && showPaymentsDue) ||
+            (entry.dot !== "teal-500" && entry.dot !== "error"),
+        ).map((entry) => (
           <span
             key={entry.label}
             className="inline-flex items-center gap-1.5 font-body text-[12px] font-semibold text-on-surface-variant"
@@ -1271,7 +1659,18 @@ export function CalendarBoard() {
             {entry.label}
           </span>
         ))}
+        {showSophie && role === "business_owner" ? <span className="inline-flex items-center gap-1.5 text-xs font-semibold"><span className="h-2.5 w-2.5 rounded-full bg-sky-500" />Sophie activity</span> : null}
       </section>
+
+      {invoicesModuleEnabled && showPaymentsDue && invoiceDues.length > 0 ? (
+        <PaymentsSummary
+          monthLabel={MONTH_NAME_FORMAT.format(viewMonth)}
+          monthDues={monthPaymentDues}
+          overdueDues={overdueDues}
+          allDues={invoiceDues}
+          todayIso={todayIso}
+        />
+      ) : null}
 
       {/* Calendar */}
       <section className="relative flex flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
@@ -1312,6 +1711,9 @@ export function CalendarBoard() {
               { color: "bg-sky-500", label: "Completed" },
               { color: "bg-amber-500", label: "Site inspections" },
               { color: "bg-violet-500", label: "Personal" },
+              ...(invoicesModuleEnabled && showPaymentsDue
+                ? [{ color: "bg-teal-500", label: "Payments due" }]
+                : []),
             ].map((item) => (
               <div
                 key={item.label}
@@ -1498,9 +1900,7 @@ export function CalendarBoard() {
                             type="button"
                             onClick={() => openCalendarEvent(event, isoDate)}
                             className={`w-full rounded-xl border px-3 py-2.5 text-left font-body text-[13px] font-semibold leading-snug transition-opacity active:opacity-90 ${
-                              event.source === "jobs"
-                                ? "border-primary/25 bg-primary/10 text-primary"
-                                : "border-green-200 bg-green-50 text-green-800"
+                              weekChipClass(event)
                             }`}
                           >
                             {calendarEventTitle(event)}
@@ -1598,9 +1998,7 @@ export function CalendarBoard() {
                               type="button"
                               onClick={() => openCalendarEvent(event, isoDate)}
                               className={`w-full truncate rounded-lg border px-2 py-1.5 text-left font-body text-[11px] font-semibold transition-opacity hover:opacity-90 ${
-                                event.source === "jobs"
-                                  ? "border-primary/25 bg-primary/10 text-primary"
-                                  : "border-green-200 bg-green-50 text-green-800"
+                                weekChipClass(event)
                               }`}
                             >
                               {calendarEventTitle(event)}
@@ -1840,6 +2238,20 @@ export function CalendarBoard() {
           </div>
 
           <div className="flex-1 space-y-6 overflow-y-auto p-5">
+            {role === "business_owner" ? (
+              <section className="space-y-3 rounded-xl border border-sky-200 p-4">
+                <label className="flex items-center gap-2 font-semibold">
+                  <input type="checkbox" checked={showSophie} onChange={event=>setShowSophie(event.target.checked)} /> Sophie calendar
+                </label>
+                <p className="text-xs text-outline">Show Sophie calls and follow-ups alongside your visits.</p>
+                {(Object.entries(SOPHIE_CALENDAR_TYPES) as [SophieCalendarKind, {label:string;icon:string}][]).map(([kind,meta])=>(
+                  <label key={kind} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" disabled={!showSophie} checked={sophieKinds.has(kind)} onChange={()=>setSophieKinds(current=>{const next=new Set(current);if(next.has(kind))next.delete(kind);else next.add(kind);return next;})} />
+                    {meta.label}
+                  </label>
+                ))}
+              </section>
+            ) : null}
             {filterOptionsError ? (
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <span className="material-symbols-outlined shrink-0 text-[18px] text-amber-700">

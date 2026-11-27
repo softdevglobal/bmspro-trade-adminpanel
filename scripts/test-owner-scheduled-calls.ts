@@ -15,6 +15,7 @@ const state={rows:new Map<string,Row>(),writes:0,optedOut:false,hours:true,busy:
 (globalThis as {__scheduled?:typeof state}).__scheduled=state;
 const folder=mkdtempSync(join(tmpdir(),'owner-scheduled-'));
 const fixtures={
+ 'lib/security/rate-limit':`exports.consumeRateLimits=async()=>true;`,
  'lib/firebase/admin':`
  const f=globalThis.__scheduled;
  const doc=(name,id)=>({id,path:name+':'+id,get:async()=>snap(name,id),create:async data=>{if(f.rows.has(name+':'+id))throw {code:6};f.rows.set(name+':'+id,data);f.writes++},update:async data=>{Object.assign(f.rows.get(name+':'+id),data);f.writes++},set:async(data)=>{f.rows.set(name+':'+id,{...f.rows.get(name+':'+id),...data});f.writes++}});
@@ -25,9 +26,9 @@ const fixtures={
  'lib/ai/calls/call-preferences':`exports.isCustomerCallOptedOut=async()=>globalThis.__scheduled.optedOut;exports.setCustomerCallOptOut=async()=>{globalThis.__scheduled.optedOut=true};`,
  'lib/ai/calls/calling-hours':`exports.isWithinSophieCallingHours=()=>globalThis.__scheduled.hours;`,
  'lib/ai/config':`exports.authenticateVoiceBridgeCredential=request=>request.headers.get('authorization')==='Bearer bridge-fixture'?{ok:true,did:'0359111403'}:{ok:false,status:401};exports.authenticateVoiceBridge=request=>request.headers.get('authorization')==='Bearer bridge-fixture'?{ok:true,binding:{businessId:'business-a',did:'0359111403'}}:{ok:false,status:401};`,
- 'lib/onboarding/services/server':`exports.requireBusinessOwner=async request=>request.headers.get('authorization')==='Bearer owner'?{ok:true,businessId:'business-a'}:{ok:false,status:403,error:'Owner required'};`,
+ 'lib/onboarding/services/server':`exports.requireBusinessOwner=async request=>request.headers.get('authorization')==='Bearer owner'?{ok:true,businessId:'business-a',uid:'owner-a'}:{ok:false,status:403,error:'Owner required'};`,
  'lib/onboarding/server':`exports.getBusinessProfile=async()=>({timezone:'Australia/Melbourne'});`,
- 'lib/ai/calls/due-scheduled-callbacks':`exports.loadDueScheduledCallbacks=async db=>(await db.collection('ai_scheduled_callbacks').where('status','==','SCHEDULED').get()).docs;`,
+ 'lib/ai/calls/due-scheduled-callbacks':`exports.loadDueScheduledCallbacks=async db=>(await db.collection('ai_scheduled_callbacks').get()).docs.filter(doc=>['SCHEDULED','OWNER_SCHEDULED','OWNER_NUMBER_SCHEDULED'].includes(doc.get('status')));`,
  'lib/ai/calls/request-callback':`exports.requestSophieCallback=async input=>{globalThis.__scheduled.dials.push(input);return globalThis.__scheduled.busy?new Response(null,{status:429}):Response.json({status:'ANSWERED'})};`,
  'lib/ai/calls/invoice-call-history':`exports.INVOICE_CALL_ATTEMPTS_COLLECTION='ai_invoice_call_attempts';`,
  'lib/invoices/server':`exports.INVOICE_COLLECTION='invoices';exports.mapInvoiceDoc=()=>null;`,
@@ -37,9 +38,12 @@ const paths=new Map(Object.entries(fixtures).map(([key,source],i)=>{const file=j
 const hooks=registerHooks({resolve(s:string,c:unknown,next:(s:string,c:unknown)=>unknown){const key=s.startsWith('./')&&(c as {parentURL?:string}).parentURL?.includes('/lib/ai/calls/')?'@/lib/ai/calls/'+s.slice(2):s;const url=paths.get(key);return url?{url,format:'commonjs',shortCircuit:true}:next(s,c)}});
 after(()=>{hooks.deregister();rmSync(folder,{recursive:true,force:true})});
 beforeEach(()=>{
+ process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED='true';
  state.rows.clear();state.writes=0;state.optedOut=false;state.hours=true;state.busy=false;state.dials=[];
  process.env.AI_OWNER_VOICE_SCHEDULED_CALLS_ENABLED='true';process.env.AI_SOPHIE_CALLBACK_ENABLED='true';delete process.env.AI_VOICE_CALL_LOGS_ENABLED;
  state.rows.set('customers:customer-a',{registeredBusinessId:'business-a',fullName:'John Smith',email:'john@example.test',phone:'0412345678'});
+ state.rows.set('businesses:business-a',{ownerUid:'owner-a'});
+ state.rows.set('users:owner-a',{fullName:'Owner Fixture'});
  state.rows.set('ai_did_mappings:0359111403',{businessId:'business-a',isActive:true,did:'0359111403'});
 });
 const owner={businessId:'business-a',uid:'owner-a',timezone:'Australia/Melbourne',authorization:'Bearer owner'};
@@ -58,7 +62,7 @@ test('prepare does not create a call; confirmation saves the customer, purpose, 
 });
 test('ambiguous customers, foreign customers, past dates, missing purpose, off-hours and opt-outs are refused',async()=>{
  const {prepareOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');
- for(const patch of [{date:'2020-01-01'},{date:'2099-01-01'},{instructions:''},{number:'0411111111'},{businessId:'other'}])assert.equal((await prepareOwnerScheduledCall(owner,{...args(),...patch})).ok,false);
+ for(const patch of [{date:'2020-01-01'},{date:'2099-01-01'},{instructions:''},{number:'not-a-number'},{businessId:'other'}])assert.equal((await prepareOwnerScheduledCall(owner,{...args(),...patch})).ok,false);
  assert.equal((await prepareOwnerScheduledCall({...owner,businessId:'foreign'},args())).ok,false);
  state.rows.set('customers:duplicate',{...state.rows.get('customers:customer-a')!,email:'other@example.test'});
  assert.equal((await prepareOwnerScheduledCall(owner,args())).ok,false);
@@ -67,6 +71,34 @@ test('ambiguous customers, foreign customers, past dates, missing purpose, off-h
  state.optedOut=false;state.hours=false;assert.equal((await prepareOwnerScheduledCall(owner,args())).ok,false);
  assert.equal(state.writes,0);
 });
+test('owner-supplied number schedules without a customer name, record or previous call',async()=>{
+ const {prepareOwnerScheduledCall,confirmOwnerScheduledCall,findOwnerCallCustomers}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');
+ state.rows.delete('customers:customer-a');const {customerName,...request}=args();void customerName;
+ const lookup=await findOwnerCallCustomers(owner,{search:'+61 412 345 678'});assert.equal(lookup.number,'0412345678');
+ const prepared=await prepareOwnerScheduledCall(owner,{...request,number:'+61 412 345 678',customerName:null,customerEmail:''});assert.equal(prepared.ok,true,JSON.stringify(prepared));if(!prepared.ok)return;
+ assert.equal(prepared.payload.customerId,null);assert.equal(prepared.payload.recipientSource,'owner_number');assert.equal(prepared.payload.recipientNameKnown,false);assert.match(prepared.summary,/0412345678/);assert.equal(state.writes,0);
+ assert.equal((await confirmOwnerScheduledCall(owner,prepared.payload)).status,'DONE');const row=state.rows.get('ai_scheduled_callbacks:'+prepared.payload.id)!;assert.equal(row.status,'OWNER_NUMBER_SCHEDULED');row.scheduledAt=Date.now()-1;
+ const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');await runScheduledSophieCallbacks();assert.equal(row.status,'ANSWERED');assert.equal(state.dials.length,1);assert.equal(state.dials[0].number,'0412345678');assert.equal((state.dials[0].ownerRequest as Row).recipientNameKnown,false);
+});
+
+test('number-only scheduling still rejects opt-outs, reception DIDs and invalid numbers',async()=>{
+ const {prepareOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');const {customerName,...request}=args();void customerName;
+ assert.equal((await prepareOwnerScheduledCall(owner,{...request,number:'0359111403'})).ok,false);
+ assert.equal((await prepareOwnerScheduledCall(owner,{...request,number:'123'})).ok,false);
+ state.optedOut=true;assert.equal((await prepareOwnerScheduledCall(owner,{...request,number:'0412345678'})).ok,false);
+ state.optedOut=false;const prepared=await prepareOwnerScheduledCall(owner,{...request,number:'0412345678'});assert.equal(prepared.ok,true);if(!prepared.ok)return;
+ state.rows.set('ai_did_mappings:61412345678',{businessId:'another'});
+ const {confirmOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');assert.equal((await confirmOwnerScheduledCall(owner,prepared.payload)).status,'REJECTED');
+});
+
+test('a number-only recipient can request a later call without a customer record',async()=>{
+ const {prepareOwnerScheduledCall,confirmOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');const {customerName,...request}=args();void customerName;state.rows.delete('customers:customer-a');
+ const prepared=await prepareOwnerScheduledCall(owner,{...request,number:'0412345678'});assert.equal(prepared.ok,true);if(!prepared.ok)return;await confirmOwnerScheduledCall(owner,prepared.payload);
+ const row=state.rows.get('ai_scheduled_callbacks:'+prepared.payload.id)!;row.status='ANSWERED';
+ const {POST}=await import('../app/api/ai/callbacks/schedule/route');const response=await POST(new Request('http://localhost',{method:'POST',headers:{Authorization:'Bearer bridge-fixture','Content-Type':'application/json'},body:JSON.stringify({callbackAttemptId:prepared.payload.id,number:'0412345678',scheduledAt:new Date(prepared.payload.scheduledAt+3600000).toISOString()})}));
+ assert.equal(response.status,200);const followup=[...state.rows].filter(([key])=>key.startsWith('ai_scheduled_callbacks:')&&key!=='ai_scheduled_callbacks:'+prepared.payload.id).map(([,row])=>row)[0];assert.equal(followup.recipientSource,'owner_number');assert.equal(followup.customerId,null);assert.equal(followup.recipientNameKnown,false);
+});
+
 test('changed contacts and new opt-outs are rechecked before the schedule is saved',async()=>{
  const {prepareOwnerScheduledCall,confirmOwnerScheduledCall}=await import('../lib/ai/mcp/tools/owner-scheduled-calls.tools');
  const p=await prepareOwnerScheduledCall(owner,args());assert.equal(p.ok,true);if(!p.ok)return;
@@ -143,6 +175,63 @@ test('the callback client selects distinct owner, invoice and missed-call bridge
  const paths:string[]=[];t.mock.method(globalThis,'fetch',async(url:URL,init:RequestInit)=>{paths.push(url.pathname);assert.equal(init.method,'POST');return Response.json({status:'ANSWERED'})});
  const base={id:'a'.repeat(64),did:'0359111403',businessId:'business-a',number:'0412345678'};
  await requestSophieCallback({...base,customerName:'John Smith',ownerRequest:{category:'invoice',instructions:'Ask whether the customer received the invoice.'}});
- await requestSophieCallback({...base,customerName:'John Smith'});await requestSophieCallback(base);
- assert.deepEqual(paths,['/sophie-owner-call','/sophie-invoice-call','/sophie-callback']);
+ await requestSophieCallback({...base,customerName:'John Smith'});await requestSophieCallback(base);await requestSophieCallback({...base,customerName:'Owner Fixture',ownerNotification:{requestCode:'INS-REQ TEST123'}});
+ assert.deepEqual(paths,['/sophie-owner-call','/sophie-invoice-call','/sophie-callback','/sophie-owner-notification']);
 });
+
+async function ownerAlertSettings(){
+ const {saveOwnerNotificationSettings}=await import('../lib/ai/calls/owner-notifications');
+ return saveOwnerNotificationSettings('business-a','owner-a',{enabled:true,newInspections:true,phone:'0412345678',did:'0359111403',consent:true});
+}
+function inspectionFixture(){state.rows.set('requests:request-a',{businessId:'business-a',status:'pending',requestCode:'INS-REQ TEST123',createdSource:'booking_engine',createdAt:Date.now()});}
+test('owner alerts are opt-in, bind the actual owner and reject reception numbers',async()=>{
+ const {saveOwnerNotificationSettings,queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');inspectionFixture();
+ assert.equal((await queueOwnerInspectionCall('business-a','request-a',{automatic:true})).status,'DISABLED');
+ await assert.rejects(saveOwnerNotificationSettings('business-a','foreign',{enabled:true,newInspections:true,phone:'0412345678',did:'0359111403',consent:true}));
+ await assert.rejects(saveOwnerNotificationSettings('business-a','owner-a',{enabled:true,newInspections:true,phone:'0359111403',did:'0359111403',consent:true}));
+ await ownerAlertSettings();process.env.AI_SOPHIE_OWNER_NOTIFICATIONS_ENABLED='false';assert.equal((await queueOwnerInspectionCall('business-a','request-a',{automatic:true})).status,'DISABLED');assert.equal(state.dials.length,0);
+});
+test('new inspection alert is persisted once, and the worker sends an owner notification without customer instructions',async()=>{
+ const {queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');await ownerAlertSettings();inspectionFixture();
+ const first=await queueOwnerInspectionCall('business-a','request-a',{automatic:true});assert.equal(first.status,'SCHEDULED');assert.equal((await queueOwnerInspectionCall('business-a','request-a',{automatic:true})).status,'ALREADY_QUEUED');assert.equal(state.dials.length,0);
+ const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');await runScheduledSophieCallbacks();assert.equal(state.dials.length,1);assert.deepEqual(state.dials[0].ownerNotification,{requestCode:'INS-REQ TEST123'});assert.equal(state.dials[0].ownerRequest,undefined);
+ await runScheduledSophieCallbacks();assert.equal(state.dials.length,1);
+});
+test('owner alert worker cancels changed consent/contact, expired alerts and cancelled inspections',async()=>{
+ const {queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');await ownerAlertSettings();inspectionFixture();
+ const queued=await queueOwnerInspectionCall('business-a','request-a',{automatic:true});const row=state.rows.get('ai_scheduled_callbacks:'+queued.id)!;
+ const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');
+ state.rows.get('ai_owner_call_settings:business-a')!.phone='0411111111';await runScheduledSophieCallbacks();assert.equal(row.status,'CANCELLED');assert.equal(state.dials.length,0);
+ state.rows.get('ai_owner_call_settings:business-a')!.phone='0412345678';row.status='OWNER_SCHEDULED';row.expiresAt=Date.now()-1;await runScheduledSophieCallbacks();assert.equal(row.status,'CANCELLED');
+ row.status='OWNER_SCHEDULED';row.expiresAt=Date.now()+10000;state.rows.get('requests:request-a')!.status='cancelled';await runScheduledSophieCallbacks();assert.equal(row.status,'CANCELLED');assert.equal(state.dials.length,0);
+});
+test('manual owner notification API is removed while settings remain available',async()=>{
+ const route=await import('../app/api/business/owner-call-notifications/route');
+ assert.equal('POST' in route,false);assert.equal(typeof route.GET,'function');assert.equal(typeof route.PATCH,'function');
+ assert.equal(state.dials.length,0);
+});
+
+test('owner alerts respect calling hours, keep customer opt-outs separate and never retry an answered call',async()=>{
+ await ownerAlertSettings();inspectionFixture();const {queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');const queued=await queueOwnerInspectionCall('business-a','request-a',{automatic:true});
+ const row=state.rows.get('ai_scheduled_callbacks:'+queued.id)!;const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');
+ state.hours=false;const result=await runScheduledSophieCallbacks();assert.equal(result.deferred,1);assert.equal(state.dials.length,0);
+ row.scheduledAt=Date.now()-1;state.hours=true;state.optedOut=true;await runScheduledSophieCallbacks();assert.equal(state.dials.length,1);assert.equal(row.status,'ANSWERED');
+});
+
+test('bursts of new inspections cannot call the owner at the same time',async()=>{
+ await ownerAlertSettings();inspectionFixture();
+ state.rows.set('requests:request-b',{businessId:'business-a',status:'pending',requestCode:'INS-REQ TEST456',createdSource:'call_center',createdAt:Date.now()});
+ const {queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');
+ await queueOwnerInspectionCall('business-a','request-a',{automatic:true});await queueOwnerInspectionCall('business-a','request-b',{automatic:true});
+ const {runScheduledSophieCallbacks}=await import('../lib/ai/calls/run-scheduled-callbacks');const result=await runScheduledSophieCallbacks();
+ assert.equal(state.dials.length,1);assert.equal(result.deferred,1);
+});
+
+ test('owner notification conversations link to the same tenant and are labelled as owner calls',async()=>{
+  await ownerAlertSettings();inspectionFixture();const {queueOwnerInspectionCall}=await import('../lib/ai/calls/owner-notifications');const queued=await queueOwnerInspectionCall('business-a','request-a',{automatic:true});
+  const {saveCallLog}=await import('../lib/ai/calls/call-log');
+  const callId='2a41e31d-0620-47d1-9ef9-c9c60cef73a8';
+  await saveCallLog({businessId:'business-a',did:'0359111403'},{callId,startedAt:new Date().toISOString(),answeredAt:new Date().toISOString(),endedAt:new Date().toISOString(),durationMs:1000,setupMs:100,endReason:'hangup',callerNumber:'0412345678',callbackAttemptId:queued.id,ownerScheduledCall:true,tools:[],outcomes:[],transcript:[{speaker:'caller',atMs:0,text:'I will review it in Trade.'}]});
+  assert.equal(state.rows.get('ai_scheduled_callbacks:'+queued.id)!.callLogId,callId);
+  assert.equal(state.rows.get('ai_call_logs:'+callId)!.recipientType,'owner');
+ });

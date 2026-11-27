@@ -50,6 +50,7 @@ export function useBusinessStaffSummary(): {
         const response = await fetch("/api/team/staff?summary=1", {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (!response.ok) return;
         const payload = (await response.json()) as {
           ok?: boolean;
           staff?: {
@@ -77,6 +78,9 @@ export function useBusinessStaffSummary(): {
           }));
         setStaff(next);
         writeStaffSummaryCache(businessId, next);
+      } catch {
+        // A cold/restarting dev server may return HTML or lose the connection.
+        // Keep the last staff list rather than reject an unawaited effect.
       } finally {
         setLoading(false);
       }

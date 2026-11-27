@@ -119,6 +119,12 @@ const NAV_ITEMS: NavItem[] = [
     businessOwner: true,
   },
   {
+    href: "/dashboard/expenses",
+    label: "Expenses",
+    icon: "payments",
+    businessOwner: true,
+  },
+  {
     href: "/dashboard/emails",
     label: "Emails",
     icon: "forward_to_inbox",

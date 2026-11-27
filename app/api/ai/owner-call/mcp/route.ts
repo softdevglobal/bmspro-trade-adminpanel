@@ -95,11 +95,12 @@ export async function POST(request: Request) {
       } catch (error) {
         // Never log customer arguments, credentials or upstream error messages.
         const code = (error as { code?: unknown } | null)?.code;
+        const diagnosticCode = typeof code === "number" || (typeof code === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(code)) ? code : "unknown";
         console.error("[owner-voice] Tool failed", {
           tool: tool.name,
-          code: typeof code === "number" || (typeof code === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(code)) ? code : "unknown",
+          code: diagnosticCode,
         });
-        return { isError: true, ...output({ status: "UNAVAILABLE" }) }; // never leak server errors to the model
+        return { isError: true, ...output({ status: "UNAVAILABLE", diagnosticCode }) }; // never leak raw errors or customer data
       }
     });
   }

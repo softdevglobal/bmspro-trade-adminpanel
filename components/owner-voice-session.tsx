@@ -23,6 +23,7 @@ import { isOwnerKnowledgeTool, runOwnerKnowledgeTool } from "@/lib/ai/owner-call
 import { CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, OWNER_PREPARE_TOOL_NAMES } from "@/lib/ai/owner-call/owner-actions";
 import { CONTROL_PAGE_TOOL, runControlPageTool } from "@/lib/ai/owner-call/owner-page";
 import { notifyStaffChanged } from "@/lib/team/staff-summary-cache";
+import { createOwnerDeepgramAudio, type OwnerAudioChannel } from "@/lib/ai/owner-call/deepgram-browser";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -92,7 +93,7 @@ export function OwnerVoiceSession() {
   async function start(firstQuestion?: string, voice = false) {
     if (!user || current.current || activeCallback.current) return;
     const chatMode = firstQuestion !== undefined && !voice;
-    if (typeof RTCPeerConnection === "undefined" || (!chatMode && !navigator.mediaDevices?.getUserMedia)) {
+    if ((chatMode && typeof RTCPeerConnection === "undefined") || (!chatMode && !navigator.mediaDevices?.getUserMedia)) {
       setMessage(chatMode ? "Open Trade in a browser that supports WebRTC." :
         "Open Trade on HTTPS or localhost in a browser with microphone support.");
       return;
@@ -102,6 +103,7 @@ export function OwnerVoiceSession() {
     const sessionId = crypto.randomUUID();
     let stream: MediaStream | undefined;
     let peer: RTCPeerConnection | undefined;
+    let deepgramAudio: Awaited<ReturnType<typeof createOwnerDeepgramAudio>> | undefined;
     let timer: ReturnType<typeof setTimeout>;
     let responseInProgress = false;
     /**
@@ -150,6 +152,7 @@ export function OwnerVoiceSession() {
         controller.abort();
         clearTimeout(timer);
         peer?.close();
+        deepgramAudio?.close();
         stream?.getTracks().forEach((track) => track.stop());
         if (audioRef.current) audioRef.current.srcObject = null;
         setAudioBlocked(false);
@@ -245,6 +248,12 @@ export function OwnerVoiceSession() {
     }
 
     try {
+      let deepgram = false;
+      if (!chatMode) {
+        const settings = await fetch("/api/ai/owner-call", { headers: { Authorization: `Bearer ${await user.getIdToken()}` }, signal: controller.signal, cache: "no-store" });
+        if (!settings.ok) throw new Error("Could not check Sophie’s audio settings. Sign in again and retry.");
+        deepgram = (await settings.json()).provider === "deepgram";
+      }
       if (!chatMode) {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true },
@@ -254,26 +263,36 @@ export function OwnerVoiceSession() {
           return;
         }
       }
-      peer = new RTCPeerConnection();
-      if (stream) {
-        for (const track of stream.getAudioTracks()) peer.addTrack(track, stream);
-      } else {
-        peer.addTransceiver("audio", { direction: "recvonly" });
+      if (deepgram && stream) {
+        deepgramAudio = await createOwnerDeepgramAudio(stream, fail);
+        if (controller.signal.aborted) { deepgramAudio.close(); return; }
       }
-      peer.ontrack = (event) => {
-        const audio = audioRef.current;
-        if (chatMode || !audio || controller.signal.aborted) return;
-        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void audio.play().catch(() => {
-          if (!controller.signal.aborted) setAudioBlocked(true);
-        });
-      };
-      peer.onconnectionstatechange = () => {
-        if (peer?.connectionState === "failed" || peer?.connectionState === "closed") {
-          fail("The Sophie connection ended. Start a new session to continue.");
+      let channel: RTCDataChannel | OwnerAudioChannel;
+      if (deepgramAudio) {
+        channel = deepgramAudio.channel;
+      } else {
+        if (typeof RTCPeerConnection === "undefined") throw new Error("This browser does not support Sophie’s current audio connection.");
+        peer = new RTCPeerConnection();
+        if (stream) {
+          for (const track of stream.getAudioTracks()) peer.addTrack(track, stream);
+        } else {
+          peer.addTransceiver("audio", { direction: "recvonly" });
         }
-      };
-      const channel = peer.createDataChannel("oai-events");
+        peer.ontrack = (event) => {
+          const audio = audioRef.current;
+          if (chatMode || !audio || controller.signal.aborted) return;
+          audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+          void audio.play().catch(() => {
+            if (!controller.signal.aborted) setAudioBlocked(true);
+          });
+        };
+        peer.onconnectionstatechange = () => {
+          if (peer?.connectionState === "failed" || peer?.connectionState === "closed") {
+            fail("The Sophie connection ended. Start a new session to continue.");
+          }
+        };
+        channel = peer.createDataChannel("oai-events");
+      }
       const send = (event: object) => {
         if (channel.readyState === "open" && !controller.signal.aborted) channel.send(JSON.stringify(event));
       };
@@ -309,7 +328,7 @@ export function OwnerVoiceSession() {
         timer = setTimeout(() => fail("This briefing ended after 10 minutes. Start a new session to continue."), 600_000);
         // Turn on speech-to-text for the owner's side, for the live transcript and the
         // save confirmation check. If it is not available, Sophie still works normally.
-        if (!chatMode) {
+        if (!chatMode && !deepgramAudio) {
           send({
             type: "session.update",
             session: { type: "realtime", audio: { input: { transcription: { model: TRANSCRIPTION_MODEL, language: "en" } } } },
@@ -323,10 +342,10 @@ export function OwnerVoiceSession() {
           requestResponse();
         }
         else send({ type: "response.create", response: { tool_choice: "none",
-          instructions: "Say only: Hi, it’s Sophie. How can I help? Then wait for the owner." } });
+          instructions: "Say only: Hey, it’s Sophie. What can I help you with today? Then wait for the owner." } });
       };
       channel.onclose = () => fail("The Sophie connection ended. Start a new session to continue.");
-      channel.onmessage = async ({ data }) => {
+      channel.onmessage = async ({ data }: { data: unknown }) => {
         if (typeof data !== "string" || controller.signal.aborted) return;
         let event: RealtimeEvent;
         try { event = JSON.parse(data) as RealtimeEvent; } catch { return; }
@@ -612,7 +631,12 @@ export function OwnerVoiceSession() {
                 const text = result.result?.content?.find((item: { type: string }) => item.type === "text")?.text;
                 if (result.error || result.result?.isError || typeof text !== "string") {
                   const code = typeof result.error?.code === "number" ? `RPC ${result.error.code}` : result.result?.isError ? "TOOL_ERROR" : "EMPTY_RESULT";
-                  setMessage(`Sophie could not complete the request (${code}). Please share this code with support.`);
+                  let diagnostic = "";
+                  try {
+                    const value = JSON.parse(text ?? "{}").diagnosticCode;
+                    if (typeof value === "number" || (typeof value === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(value))) diagnostic = `, code ${value}`;
+                  } catch { /* SDK validation errors must not expose raw arguments. */ }
+                  setMessage(`Sophie could not complete ${call.name} (${code}${diagnostic}). Please share this code with support.`);
                 }
                 if (typeof text === "string" && !result.result?.isError) {
                   output = text;
@@ -712,8 +736,8 @@ export function OwnerVoiceSession() {
         }
       };
 
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
+      const offer = peer ? await peer.createOffer() : { sdp: "v=0\r\n" };
+      if (peer) await peer.setLocalDescription(offer);
       const response = await fetch("/api/ai/owner-call", {
         method: "POST",
         headers: { Authorization: `Bearer ${await user.getIdToken()}`, "Content-Type": "application/sdp",
@@ -725,8 +749,31 @@ export function OwnerVoiceSession() {
         const body = await response.json().catch(() => null);
         throw new Error(body?.error || "Could not connect to Sophie.");
       }
-      const sdp = await response.text();
-      if (!controller.signal.aborted) await peer.setRemoteDescription({ type: "answer", sdp });
+      const audioTicketResponse = response.headers.get("content-type")?.split(";")[0] === "application/json";
+      if (audioTicketResponse) {
+        const ticket = await response.json();
+        if (ticket.provider !== "deepgram") throw new Error("Sophie returned an unsupported audio connection. Refresh and retry.");
+        // The setting may change between transport discovery and session creation.
+        // Treat the POST response as authoritative, never parse a ticket as SDP.
+        if (!deepgramAudio) {
+          if (!stream) throw new Error("Microphone audio is required for Sophie’s voice connection.");
+          const handlers = channel as unknown as OwnerAudioChannel;
+          const callbacks = { onopen: handlers.onopen, onclose: handlers.onclose, onmessage: handlers.onmessage };
+          channel.onclose = null;
+          if (peer) { peer.onconnectionstatechange = null; peer.close(); peer = undefined; }
+          deepgramAudio = await createOwnerDeepgramAudio(stream, fail);
+          deepgramAudio.channel.onopen = () => callbacks.onopen?.();
+          deepgramAudio.channel.onclose = () => callbacks.onclose?.();
+          deepgramAudio.channel.onmessage = (event) => callbacks.onmessage?.(event);
+          channel = deepgramAudio.channel;
+        }
+        if (!controller.signal.aborted) deepgramAudio.connect(ticket.url, ticket.token);
+      } else {
+        if (deepgramAudio) throw new Error("Sophie’s audio setting changed. Close this panel, refresh and reconnect.");
+        const sdp = await response.text();
+        if (!/^v=0\r?\n/.test(sdp)) throw new Error("Sophie returned an invalid voice connection. Refresh and retry.");
+        if (!controller.signal.aborted) await peer?.setRemoteDescription({ type: "answer", sdp });
+      }
     } catch (error) {
       fail(error instanceof DOMException && error.name === "NotAllowedError"
         ? "Allow microphone access in your browser to talk to Sophie."

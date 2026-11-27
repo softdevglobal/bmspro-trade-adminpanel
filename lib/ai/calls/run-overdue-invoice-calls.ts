@@ -1,3 +1,5 @@
+import {invoiceContactBlock,holdUnverifiedInvoiceCall} from "./invoice-contact-guard";
+import {scheduleInvoiceNoAnswerRetry} from "./invoice-no-answer-retry";
 import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -9,7 +11,7 @@ import { phoneComparisonKey } from "@/lib/users/phone-uniqueness";
 import { callbackResultStatus, callbackState } from "./callback-state";
 import { normalizeInvoiceCallbackNumber } from "./callback-number";
 import { INVOICE_CALL_ATTEMPTS_COLLECTION } from "./invoice-call-history";
-import { requestSophieCallback } from "./request-callback";
+import { requestSophieCallback,callbackTransportCode } from "./request-callback";
 import { isCustomerCallOptedOut } from "./call-preferences";
 import { isWithinSophieCallingHours } from "./calling-hours";
 
@@ -63,6 +65,8 @@ export async function runOverdueInvoiceCalls() {
           tx.update(attempt.ref, { status: "SKIPPED", reason: "Reminders are paused: the customer says they've paid or disputes it." });
           return null;
         }
+        const block=await invoiceContactBlock(businessId,invoiceId,data!,tx);
+        if(block){tx.update(attempt.ref,{status:"SKIPPED",reason:block});return null;}
         const number = normalizeInvoiceCallbackNumber(invoice.customer.phone);
         const customerName = invoice.customer.fullName.trim().slice(0, 120);
         const key = phoneComparisonKey(number);
@@ -81,7 +85,7 @@ export async function runOverdueInvoiceCalls() {
         const state = await tx.get(lease);
         const now = Date.now();
         if (Math.max(state.get("manualLeaseUntil") ?? 0, state.get("leaseUntil") ?? 0) > now) return null;
-        tx.update(attempt.ref, { status: "REQUESTED", did, attemptedAt: now });
+        tx.update(attempt.ref, { status: "REQUESTED", did, numberKey:key, attemptedAt: now });
         tx.set(lease, { manualLeaseId: attempt.id, manualLeaseUntil: now + 60_000 }, { merge: true });
         return { number, customerName, lease };
       });
@@ -100,12 +104,15 @@ export async function runOverdueInvoiceCalls() {
         }
         if (status === "QUEUED") counts.deferred++;
         else counts.processed++;
-      } catch {
-        reason = "Could not verify the voice bridge response.";
+      } catch (error) {
+        reason = `Could not verify the voice bridge response (${callbackTransportCode(error)}).`;
+        console.error("[sophie-invoice-calls] Bridge request unverified",{attemptId:attempt.id.slice(0,8),code:callbackTransportCode(error)});
         counts.errors++;
       } finally {
         await adminDb.runTransaction(async tx => {
           const lease = await tx.get(call.lease);
+          if(status==="UNKNOWN")await holdUnverifiedInvoiceCall(tx,businessId,invoiceId,attempt.id);
+          if(status==="NO_ANSWER")await scheduleInvoiceNoAnswerRetry(tx,businessId,invoiceId,attempt.id);
           tx.update(attempt.ref, { status, reason });
           if (lease.get("manualLeaseId") === attempt.id && status !== "UNKNOWN") tx.update(call.lease, { manualLeaseUntil: 0 });
         });

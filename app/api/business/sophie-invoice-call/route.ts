@@ -1,3 +1,10 @@
+import {invoiceContactBlock,holdUnverifiedInvoiceCall} from "@/lib/ai/calls/invoice-contact-guard";
+import {scheduleInvoiceNoAnswerRetry} from "@/lib/ai/calls/invoice-no-answer-retry";
+import {mapInvoiceDoc} from "@/lib/invoices/server";
+import {callbackTransportCode} from "@/lib/ai/calls/request-callback";
+import {invoiceCallLogMatches} from "@/lib/ai/calls/invoice-follow-up-policy";
+import {requireSophieOwner} from "@/lib/ai/owner-call/auth";
+import {logAuditEvent} from "@/lib/audit/server";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
@@ -32,14 +39,21 @@ export async function GET(request: Request) {
       adminDb.collection(attempts).where("businessId", "==", auth.businessId).where("invoiceId", "==", parsed.data).get(),
     ]);
     if (!invoice || !profile?.enabledModules.invoices) return json({ error: "Invoice unavailable." }, 404);
+    const rawInvoice=(await adminDb.collection("invoices").doc(parsed.data).get()).data();
+    if(rawInvoice?.businessId!==auth.businessId)return json({error:"Invoice unavailable."},404);
+    const collectionHold=rawInvoice.sophieCollectionHold?.active?rawInvoice.sophieCollectionHold:null;
+    const contactBlock=await invoiceContactBlock(auth.businessId,parsed.data,rawInvoice);
     const recent = history.docs.sort((a, b) => b.get("attemptedAt") - a.get("attemptedAt")).slice(0, 10);
     const logs = recent.length ? await adminDb.collection(CALL_LOGS_COLLECTION).where("businessId", "==", auth.businessId)
       .where("callbackAttemptId", "in", recent.map(doc => doc.id)).get() : null;
-    const transcripts = new Map(logs?.docs.map(doc => [doc.get("callbackAttemptId"), toCallLogDetail(doc.id, doc.data())]));
+    const recentById=new Map(recent.map(doc=>[doc.id,doc.data()]));
+    const transcripts = new Map(logs?.docs.filter(doc=>{const attempt=recentById.get(doc.get("callbackAttemptId"));return attempt&&invoiceCallLogMatches(doc.get("callbackAttemptId"),attempt,doc.data());}).map(doc => [doc.get("callbackAttemptId"), toCallLogDetail(doc.id, doc.data())]));
     const callingRoutes = routes.docs.filter(doc => doc.get("callback.callerId")).map(doc => doc.id);
     const destination = normalizeInvoiceCallbackNumber(invoice.customer.phone);
-    let unavailableReason: string | null = null;
-    if (!resolveInvoicePaymentDue(invoice, profile.timezone).isOverdue) {
+    let unavailableReason: string | null = contactBlock;
+    if (contactBlock) {
+      unavailableReason=contactBlock;
+    } else if (!resolveInvoicePaymentDue(invoice, profile.timezone).isOverdue) {
       unavailableReason = "This invoice must be issued, overdue, and have an outstanding balance.";
     } else if (process.env.AI_SOPHIE_CALLBACK_ENABLED !== "true") {
       unavailableReason = "Enable AI_SOPHIE_CALLBACK_ENABLED in Trade and restart the app.";
@@ -51,6 +65,8 @@ export async function GET(request: Request) {
       unavailableReason = "Enable Sophie callbacks on this business’s DID in Super Admin → DID mappings.";
     }
     return json({
+      collectionHold,
+      canResumeHold:collectionHold?.reason!=="wrong_person"||Boolean(destination&&phoneComparisonKey(destination)!==collectionHold.destinationKey),
       routes: callingRoutes,
       canCall: unavailableReason === null,
       unavailableReason,
@@ -58,6 +74,8 @@ export async function GET(request: Request) {
       history: recent.map(doc => {
         const call = transcripts.get(doc.id);
         return { id: doc.id, attemptedAt: doc.get("attemptedAt"), scheduledAt: doc.get("scheduledAt") ?? null,
+          source:doc.get("source")??null,
+          customerResponse:doc.get("customerResponse")??null,
           status: doc.get("status"), reason: doc.get("reason") ?? null, callId: call?.id ?? null,
           responses: call?.transcript.filter(turn => turn.speaker === "caller").map(turn => turn.text.slice(0, 500)).slice(-6) ?? [] };
       }),
@@ -102,27 +120,57 @@ export async function POST(request: Request) {
     const ref = adminDb.collection(attempts).doc(id);
     const lease = callbackState(businessId, key);
     const claimed = await adminDb.runTransaction(async tx => {
-      const [previous, state] = await tx.getAll(ref, lease);
+      const [previous, state, freshInvoice] = await tx.getAll(ref, lease, adminDb.collection("invoices").doc(invoiceId));
+      const row=freshInvoice.data();
+      if(!row||row.businessId!==businessId||normalizeInvoiceCallbackNumber(String(row.customer?.phone||""))!==number||!resolveInvoicePaymentDue(mapInvoiceDoc(invoiceId,row),profile.timezone).isOverdue||await invoiceContactBlock(businessId,invoiceId,row,tx))return false;
       if (previous.exists || Math.max(state.get("manualLeaseUntil") ?? 0, state.get("leaseUntil") ?? 0) > Date.now()) return false;
-      tx.create(ref, { businessId, invoiceId, did, status: "REQUESTED", attemptedAt: Date.now() });
+      tx.create(ref, { businessId, invoiceId, did, numberKey:key, status: "REQUESTED", attemptedAt: Date.now() });
       tx.set(lease, { manualLeaseId: id, manualLeaseUntil: Date.now() + 60_000 }, { merge: true });
       return true;
     });
     if (!claimed) return json({ error: "A call was already requested for this customer." }, 409);
     let status: string = "UNKNOWN";
+    let reason:string|null=null;
     try {
       const response = await requestSophieCallback({ id, did, businessId, number, customerName });
-      status = response.ok ? callbackResultStatus((await response.json()).status) : response.status < 500 ? "FAILED" : "UNKNOWN";
+      const result=response.ok?await response.json():null;
+      status = response.ok ? callbackResultStatus(result?.status) : response.status < 500 ? "FAILED" : "UNKNOWN";
+      if(status==="FAILED"||status==="UNKNOWN")reason=typeof result?.code==="string"&&/^[A-Z0-9_]{1,64}$/.test(result.code)?result.code:response.ok?"Bridge did not confirm the call outcome.":`Bridge returned HTTP ${response.status}.`;
       if (response.status === 404) return json({ error: "Update the voice bridge to enable invoice calls." }, 503);
       return json({ status, attemptId: id });
+    } catch(error) {
+      reason=`Could not verify the voice bridge response (${callbackTransportCode(error)}).`;
+      throw error;
     } finally {
       await adminDb.runTransaction(async tx => {
         const state = await tx.get(lease);
-        tx.update(ref, { status });
+        if(status==="UNKNOWN")await holdUnverifiedInvoiceCall(tx,businessId,invoiceId,id);
+        if(status==="NO_ANSWER")await scheduleInvoiceNoAnswerRetry(tx,businessId,invoiceId,id);
+        tx.update(ref, { status,reason });
         if (state.get("manualLeaseId") === id && status !== "UNKNOWN") tx.update(lease, { manualLeaseUntil: 0 });
       });
     }
   } catch {
     return json({ error: "Could not verify the invoice call outcome. Check the invoice call history." }, 503);
   }
+}
+
+/** Explicit review never changes payment state or places a new call. */
+export async function PATCH(request:Request){
+  const auth=await requireSophieOwner(request);if(!auth.ok)return json({error:auth.error},auth.status);
+  const parsed=z.object({invoiceId:invoiceKey,holdId:z.string().regex(/^[a-f0-9]{64}$/),holdToken:z.string().uuid(),reviewed:z.literal(true)}).strict().safeParse(await request.json().catch(()=>null));
+  if(!parsed.success)return json({error:"Review the invoice and customer response before resuming."},400);
+  try{
+    const ref=adminDb.collection("invoices").doc(parsed.data.invoiceId);
+    const changed=await adminDb.runTransaction(async tx=>{
+      const [invoice,business]=await tx.getAll(ref,adminDb.collection("businesses").doc(auth.businessId));
+      const hold=invoice.get("sophieCollectionHold");
+      if(invoice.get("businessId")!==auth.businessId||business.get("ownerUid")!==auth.uid||business.get("isActive")!==true||business.get("status")==="suspended"||!hold?.active||hold.id!==parsed.data.holdId||hold.reviewToken!==parsed.data.holdToken)return false;
+      if(hold.reason==="wrong_person"&&(!normalizeInvoiceCallbackNumber(String(invoice.get("customer")?.phone||""))||phoneComparisonKey(normalizeInvoiceCallbackNumber(String(invoice.get("customer")?.phone||"")))===hold.destinationKey))return false;
+      tx.update(ref,{sophieCollectionHold:{...hold,active:false,reviewedAt:Date.now(),reviewedBy:auth.uid}});return true;
+    });
+    if(!changed)return json({error:"The review record changed. Refresh before resuming."},409);
+    await logAuditEvent({businessId:auth.businessId,category:"integration",action:"voice.invoice_follow_up.resumed",actor:{uid:auth.uid,role:"owner",email:auth.email??null,name:null},source:"admin_panel",summary:"Owner reviewed and resumed invoice follow-ups.",targetId:parsed.data.invoiceId,metadata:{holdId:parsed.data.holdId}});
+    return json({ok:true});
+  }catch{return json({error:"Could not confirm the review. Refresh invoice call history."},503);}
 }

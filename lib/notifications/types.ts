@@ -29,6 +29,7 @@ export type NotificationType =
   | "booking_on_the_way"
   | "job_completed"
   | "invoice_sent"
+  | "invoice_follow_up_review"
   | "quotation_sent"
   | "quotation_accepted"
   | "quotation_rejected"
@@ -36,6 +37,8 @@ export type NotificationType =
   | "leave_assignment_conflict"
   | "staff_off_day"
   | "schedule_reminder"
+  | "expense_approval_needed"
+  | "expense_report_ready"
   | "system_message";
 
 /** Client-facing notification (timestamps are epoch millis). */
@@ -85,6 +88,7 @@ export const NOTIFICATION_STATUS_TONE: Record<
 const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
   job_completed: "handyman",
   invoice_sent: "receipt_long",
+  invoice_follow_up_review: "pending_actions",
   quotation_sent: "request_quote",
   quotation_accepted: "check_circle",
   quotation_rejected: "cancel",
@@ -92,12 +96,15 @@ const NOTIFICATION_TYPE_ICON: Partial<Record<NotificationType, string>> = {
   leave_assignment_conflict: "warning",
   staff_off_day: "event_busy",
   schedule_reminder: "notifications_active",
+  expense_approval_needed: "price_check",
+  expense_report_ready: "summarize",
   system_message: "campaign",
 };
 
 const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
   job_completed: "text-sky-600",
   invoice_sent: "text-primary",
+  invoice_follow_up_review: "text-amber-600",
   quotation_sent: "text-orange-400",
   quotation_accepted: "text-emerald-600",
   quotation_rejected: "text-rose-600",
@@ -105,6 +112,8 @@ const NOTIFICATION_TYPE_TONE: Partial<Record<NotificationType, string>> = {
   leave_assignment_conflict: "text-orange-600",
   staff_off_day: "text-violet-600",
   schedule_reminder: "text-sky-600",
+  expense_approval_needed: "text-amber-600",
+  expense_report_ready: "text-teal-600",
   system_message: "text-primary",
 };
 

@@ -1,5 +1,7 @@
 "use client";
 
+import {QUOTATION_FOLLOW_UP_DELAY_LABEL} from "@/lib/quotations/follow-up-timing";
+
 import { AuPhoneInput } from "@/components/au-phone-input";
 import { QuotationDocumentPreview } from "@/components/quotation-document-preview";
 import {
@@ -279,6 +281,7 @@ export function CreateQuotationPage() {
 
   const [tab, setTab] = useState<Tab>("create");
   const [submitting, setSubmitting] = useState(false);
+  const [sophieFollowUpEnabled,setSophieFollowUpEnabled]=useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [clientOpen, setClientOpen] = useState(false);
@@ -528,6 +531,7 @@ export function CreateQuotationPage() {
           );
         }
 
+        setSophieFollowUpEnabled(quotation.sophieFollowUpEnabled === true);
         if (quotation.validUntil) {
           const today = todayIso(timeZone);
           const days = daysBetweenIso(today, quotation.validUntil);
@@ -1124,6 +1128,7 @@ export function CreateQuotationPage() {
           : {}),
         termsAndConditions: termsAndConditions.trim() || null,
         notes: comment.trim() || null,
+        sophieFollowUpEnabled,
         validUntil: dueDate,
         imageUrls,
         depositRequest: depositRequest
@@ -2213,6 +2218,13 @@ export function CreateQuotationPage() {
                 emailed to the client only when you click{" "}
                 <strong>Save &amp; send quotation</strong> below.
               </p>
+              <div className="rounded-xl border border-outline-variant p-3">
+                <button type="button" aria-pressed={sophieFollowUpEnabled} disabled={submitting || draftLoading}
+                  onClick={()=>setSophieFollowUpEnabled(value=>!value)} className="rounded-lg border border-primary px-3 py-2 text-sm text-primary">
+                  {sophieFollowUpEnabled ? "Sophie follow-up enabled" : "Enable Sophie follow-up"}
+                </button>
+                <p className="mt-2 text-xs text-on-surface-variant">One customer call {QUOTATION_FOLLOW_UP_DELAY_LABEL} after sending, during business calling hours, if the quotation is still awaiting a decision. Sophie can explain the quote and record an explicitly confirmed acceptance or rejection. Ensure you have permission to contact this customer.</p>
+              </div>
               <button
                 type="button"
                 onClick={() => void save(true)}

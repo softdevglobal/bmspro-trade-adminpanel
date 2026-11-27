@@ -1,5 +1,7 @@
 import type { PersonalCalendarEvent } from "@/lib/calendar/personal-events/types";
 import type { BookingDetail } from "@/lib/bookings/types";
+import type { InvoiceDueItem } from "@/lib/invoices/calendar-due";
+import type { SophieCalendarItem } from "./sophie-events";
 import { bookingScheduleDays } from "@/lib/bookings/map-booking-doc";
 import { BOOKING_STATUS_LABELS } from "@/lib/bookings/types";
 import {
@@ -15,7 +17,7 @@ import {
   type InspectionTimeRange,
 } from "@/lib/inspection/types";
 
-export type CalendarSource = "requests" | "jobs" | "personal";
+export type CalendarSource = "requests" | "jobs" | "personal" | "invoices" | "sophie";
 
 export type DotColor =
   | "primary"
@@ -25,7 +27,8 @@ export type DotColor =
   | "sky-500"
   | "violet-500"
   | "grey-500"
-  | "red-500";
+  | "red-500"
+  | "teal-500";
 
 export type CalendarEvent = {
   key: string;
@@ -37,12 +40,17 @@ export type CalendarEvent = {
   request?: InspectionRequestDetail;
   booking?: BookingDetail;
   personalEvent?: PersonalCalendarEvent;
+  /** An invoice whose payment is due on [date]. */
+  invoiceDue?: InvoiceDueItem;
+  sophieEvent?: SophieCalendarItem;
 };
 
 export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
   jobs: "Job",
   requests: "Request",
   personal: "Personal",
+  invoices: "Payment due",
+  sophie: "Sophie",
 };
 
 /**
@@ -50,13 +58,25 @@ export const CALENDAR_SOURCE_LABELS: Record<CalendarSource, string> = {
  * amber because their time is still only a preference.
  */
 export const CALENDAR_SOURCE_CARD_CLASS: Record<CalendarSource, string> = {
+  sophie: "rounded-xl border border-sky-200 bg-sky-50 p-card-padding",
   jobs:
     "rounded-xl border border-green-200 bg-green-50 p-card-padding transition-all hover:border-green-400 hover:shadow-md",
   requests:
     "rounded-xl border border-amber-200 bg-amber-50 p-card-padding transition-all hover:border-amber-400 hover:shadow-md",
   personal:
     "rounded-xl border border-violet-200 bg-violet-50 p-card-padding transition-all hover:border-violet-400 hover:shadow-md",
+  invoices:
+    "rounded-xl border border-teal-200 bg-teal-50 p-card-padding transition-all hover:border-teal-400 hover:shadow-md",
 };
+
+const AUD = new Intl.NumberFormat("en-AU", {
+  style: "currency",
+  currency: "AUD",
+});
+
+export function formatAud(value: number): string {
+  return AUD.format(value);
+}
 
 /**
  * One-line description of a calendar event, e.g.
@@ -66,7 +86,20 @@ export const CALENDAR_SOURCE_CARD_CLASS: Record<CalendarSource, string> = {
  * colour alone does not say what the event is.
  */
 export function calendarEventSummary(event: CalendarEvent): string {
+  if (event.sophieEvent) {
+    const item = event.sophieEvent;
+    return [item.time, item.title, item.recipient, item.reference, item.statusLabel].filter(Boolean).join(" - ");
+  }
   const parts: string[] = [];
+
+  if (event.source === "invoices") {
+    const due = event.invoiceDue;
+    parts.push(due?.isOverdue ? "Payment overdue" : "Payment due");
+    if (due?.invoiceCode) parts.push(due.invoiceCode);
+    if (due?.customerName) parts.push(due.customerName);
+    if (due) parts.push(formatAud(due.outstandingAud));
+    return parts.join(" - ");
+  }
 
   if (event.source === "personal") {
     parts.push("Personal");
@@ -135,6 +168,8 @@ export const CALENDAR_LEGEND: ReadonlyArray<{
   { dot: "grey-500", label: "Completed" },
   { dot: "red-500", label: "Cancelled" },
   { dot: "violet-500", label: "Personal" },
+  { dot: "teal-500", label: "Payment due" },
+  { dot: "error", label: "Payment overdue" },
 ];
 
 export type CalendarStat = {
@@ -153,6 +188,7 @@ export const DOT_CLASS: Record<DotColor, string> = {
   "violet-500": "bg-violet-500",
   "grey-500": "bg-outline",
   "red-500": "bg-red-500",
+  "teal-500": "bg-teal-500",
 };
 
 export function toIsoDateLocal(date: Date): string {
@@ -563,19 +599,37 @@ export function buildCalendarEvents(
   return buildInspectionCalendarEvents(requests, filters, sourceFilter);
 }
 
-/** Month grid: requests + jobs + personal events. */
+/** Month grid: requests + jobs + personal events + invoice due dates. */
 export function buildMonthGridCalendarEvents(
   requests: InspectionRequestDetail[],
   filters: CalendarFilters,
   bookings: BookingDetail[] = [],
   personalEvents: PersonalCalendarEvent[] = [],
+  invoiceDues: InvoiceDueItem[] = [],
+  sophieEvents: SophieCalendarItem[] = [],
 ): CalendarEvent[] {
   const requestsById = new Map(requests.map((request) => [request.id, request]));
   return [
     ...buildInspectionCalendarEvents(requests, filters),
     ...buildBookingCalendarEvents(bookings, filters, undefined, requestsById),
     ...buildPersonalCalendarEvents(personalEvents),
+    ...buildInvoiceDueCalendarEvents(invoiceDues),
+    ...sophieEvents.map((item): CalendarEvent => ({key:item.id,requestId:item.id,date:item.date,source:"sophie",dotColor:"sky-500",sophieEvent:item})),
   ];
+}
+
+/** One all-day event per invoice on the day its payment is due. */
+export function buildInvoiceDueCalendarEvents(
+  invoiceDues: InvoiceDueItem[],
+): CalendarEvent[] {
+  return invoiceDues.map((due) => ({
+    key: `invoices-${due.invoiceId}-${due.date}`,
+    requestId: due.invoiceId,
+    date: due.date,
+    source: "invoices" as const,
+    dotColor: due.isOverdue ? ("error" as const) : ("teal-500" as const),
+    invoiceDue: due,
+  }));
 }
 
 export function buildPersonalCalendarEvents(

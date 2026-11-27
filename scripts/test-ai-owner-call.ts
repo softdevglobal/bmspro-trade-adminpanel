@@ -38,7 +38,8 @@ const fixtures: Record<string, string> = {
   "lib/onboarding/business-status": `exports.isTenantAccessAllowed = () => true;`,
   "lib/security/rate-limit": `exports.consumeRateLimits = async () => true;`,
   "lib/ai/mcp/tools/owner-briefing.tools": `
-    exports.ownerBriefingTools = businessId => ({ dailySummary: async offset => ({ businessId, offset }) });
+    exports.ownerBriefingTools = businessId => ({ dailySummary: async offset => ({ businessId, offset }),
+      quoteFollowUps: async (search,offset,includeDecided) => ({businessId,search,offset,includeDecided}) });
   `,
   // Records how the owner route builds the knowledge search; no Firestore or OpenAI.
   "lib/ai/mcp/tools/knowledge.tools": `
@@ -200,6 +201,14 @@ test("briefing MCP reads only the authenticated owner's business", async (t) => 
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(JSON.parse(payload.result.content[0].text), { businessId: "business-a", offset: 2 });
+});
+
+test("owner quotation responses include decided quotes without accepting a model business scope", async () => {
+  const {POST}=await import("../app/api/ai/owner-call/mcp/route");
+  assert.equal((await POST(mcpRequest("staff","list_quote_follow_ups",{includeDecided:true}))).status,403);
+  const response=await POST(mcpRequest("owner","list_quote_follow_ups",{includeDecided:true,search:"QT TEST123",offset:0,businessId:"business-b"}));
+  const payload=await response.json();
+  assert.deepEqual(JSON.parse(payload.result.content[0].text),{businessId:"business-a",search:"QT TEST123",offset:0,includeDecided:true});
 });
 
 test("owner knowledge search uses the owner's business and does not feed the Unanswered page", async (t) => {
@@ -871,4 +880,30 @@ test("mode both: an area offers its page tools and its server tools together", a
   }
   assert.equal(new Set(names).size, names.length, "no repeated names");
   assert.ok(session.instructions.length <= 4000, `instructions are ${session.instructions.length} characters`);
+});
+
+test('owner Deepgram voice returns a one-use browser ticket while chat keeps the existing connection',async t=>{
+  setEnv(t,{AI_OWNER_VOICE_BRIDGE_URL:'http://127.0.0.1:18787',AI_VOICE_BRIDGE_SECRET:secret,AI_OWNER_VOICE_DEEPGRAM_ENABLED:'true',AI_OWNER_VOICE_PUBLIC_WS_URL:'wss://voice.example.test/owner-voice/audio'});
+  const {GET,POST}=await import('../app/api/ai/owner-call/route');
+  assert.equal((await GET(offer('staff'))).status,403);
+  assert.equal((await(await GET(offer('owner'))).json()).provider,'deepgram');
+  const upstream=t.mock.method(globalThis,'fetch',async(url:URL,init:RequestInit)=>{
+    const body=JSON.parse(String(init.body));assert.equal(body.origin,'http://localhost');assert.match(body.safetyIdentifier,/^[a-f0-9]{64}$/);
+    assert.equal(url.pathname,'/owner-voice/deepgram-session');
+    return Response.json({token:'b'.repeat(64),expiresIn:30});
+  });
+  const response=await POST(offer('owner'));assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{provider:'deepgram',url:'wss://voice.example.test/owner-voice/audio',token:'b'.repeat(64)});
+  assert.equal(upstream.mock.callCount(),1);
+  t.mock.restoreAll();
+  t.mock.method(globalThis,'fetch',async(url:URL)=>{assert.equal(url.pathname,'/owner-voice/session');return new Response('v=0\r\nanswer',{headers:{'Content-Type':'application/sdp'}})});
+  const request=new Request('http://localhost',{method:'POST',headers:{Authorization:'Bearer owner','Content-Type':'application/sdp','X-Sophie-Mode':'chat'},body:'v=0\r\nfixture'});
+  assert.equal((await POST(request)).status,200);
+});
+
+test('owner Deepgram never silently falls back when public endpoint is missing or insecure',async t=>{
+  setEnv(t,{AI_OWNER_VOICE_BRIDGE_URL:'http://127.0.0.1:18787',AI_VOICE_BRIDGE_SECRET:secret,AI_OWNER_VOICE_DEEPGRAM_ENABLED:'true',AI_OWNER_VOICE_PUBLIC_WS_URL:'ws://public.example.test/owner-voice/audio'});
+  const {POST}=await import('../app/api/ai/owner-call/route');
+  const upstream=t.mock.method(globalThis,'fetch',async()=>{throw Error('must not call provider')});
+  assert.equal((await POST(offer('owner'))).status,503);assert.equal(upstream.mock.callCount(),0);
 });

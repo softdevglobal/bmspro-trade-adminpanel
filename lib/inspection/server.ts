@@ -291,6 +291,15 @@ export async function createInspectionRequest(
   const snap = await ref.get();
   const request = mapInspectionDoc(ref.id, snap.data() ?? {});
 
+  // Persist a deduplicated call intent after the inspection exists; never dial
+  // on this request or fail inspection creation because an alert is unavailable.
+  try {
+    const { queueOwnerInspectionCall } = await import("@/lib/ai/calls/owner-notifications");
+    await queueOwnerInspectionCall(businessId, request.id, { automatic: true });
+  } catch {
+    console.error("[owner-call-notification] Could not queue new inspection alert", { requestId: request.id });
+  }
+
   const notify = async () => {
     const summary = await loadBusinessSummary(businessId);
     await notifyBusinessOfNewRequest(request, summary);

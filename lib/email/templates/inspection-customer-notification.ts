@@ -29,6 +29,7 @@ const EMAIL_PRESENTATION: Record<
   request_completed: { eyebrow: "Visit completed", tone: "success" },
   job_completed: { eyebrow: "Job completed", tone: "success" },
   invoice_sent: { eyebrow: "Invoice", tone: "brand" },
+  invoice_follow_up_review: { eyebrow: "Invoice review", tone: "warning" },
   quotation_sent: { eyebrow: "Quotation", tone: "brand" },
   quotation_accepted: { eyebrow: "Quotation accepted", tone: "success" },
   quotation_rejected: { eyebrow: "Quotation rejected", tone: "danger" },
@@ -36,6 +37,9 @@ const EMAIL_PRESENTATION: Record<
   leave_assignment_conflict: { eyebrow: "Schedule conflict", tone: "warning" },
   staff_off_day: { eyebrow: "Staff off day", tone: "warning" },
   schedule_reminder: { eyebrow: "Schedule reminder", tone: "brand" },
+  // Expense alerts go to owners only (portal and push), never to customers.
+  expense_approval_needed: { eyebrow: "Expense approval", tone: "warning" },
+  expense_report_ready: { eyebrow: "Expense report", tone: "brand" },
   // Custom messages are in-app/push only and never emailed to customers.
   system_message: { eyebrow: "Announcement", tone: "brand" },
 };
