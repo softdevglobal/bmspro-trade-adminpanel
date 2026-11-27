@@ -128,3 +128,17 @@ export function describeWorkingHoursWindow(hours: BusinessWorkingHours): string 
   if (start && end) return `${start} – ${end}`;
   return `${hours.startTime} – ${hours.endTime}`;
 }
+
+/** Weekdays the business is open, 0 = Sunday to 6 = Saturday. */
+export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+/**
+ * The business's open weekdays, or null when the owner hasn't set them. Sophie only answers
+ * "are you open?" by herself once they're set (docs/sophie-email-learning-and-auto-reply.md §8.6).
+ */
+export function parseOpenDays(raw: unknown): number[] | null {
+  if (!Array.isArray(raw)) return null;
+  const days = [...new Set(raw)].filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6);
+  if (days.length !== raw.length || days.length === 0) return null;
+  return days.sort((a, b) => a - b);
+}

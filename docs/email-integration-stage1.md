@@ -347,3 +347,93 @@ Notes:
   only valid for the hosting server's own name, the owner enters that name
   (cPanel shows it under Email Accounts → Connect Devices).
 - Port 25 is not offered: most hosts block it for sending from apps.
+
+## Stage 3: Sophie email assistant
+
+Sophie sorts new mail, asks the owner what to do, learns, and (only where the owner approved) acts by
+herself. The design is `docs/sophie-email-learning-and-auto-reply.md`. Everything is off until the
+switches below are on, and every step can be reversed by turning one off.
+
+### Switches (Vercel environment variables)
+
+Each one needs the one before it. All default to off, except the two dry-run switches, which default
+to on (nothing is changed while they are on).
+
+| Variable | What it allows |
+|---|---|
+| `AI_AGENT_ENABLED=true` | The runner (`/api/cron/agent-run`, every 5 minutes) works through events |
+| `AI_AGENT_DRY_RUN=false` | Actions really happen. While it's on (default) they are only logged |
+| `AI_EMAIL_TRIAGE_ENABLED=true` | Sophie sorts new mail, for businesses that switched it on in Settings |
+| `AI_EMAIL_TRIAGE_DRY_RUN=false` | Cards stop saying "here's what I would have done" and the owner's answers run |
+| `AI_EMAIL_AUTO_ENABLED=true` | An approved rule may act by itself (move, mark read, ignore, notify, link, bills, reminders) |
+| `AI_EMAIL_AUTO_REPLY_ENABLED=true` | An approved rule may also send template replies and resend quotes or invoices |
+| `AI_EMAIL_COMPLAINTS_ENABLED=true` | Complaint cases, the owner's case card, deadlines and return visits |
+| `AI_STAFF_QUESTIONS_ENABLED=true` | Sophie asks the technician what happened (needs the staff-app screen) |
+| `AI_EMAIL_MODEL`, `AI_AGENT_MODEL` | Optional models. `OPENAI_API_KEY` is required for sorting |
+
+Per business, in Settings → Sophie: the switch for sorting new mail (only mail after it's switched on
+is read), Pause, the daily summary hour, private and blocked senders, types to leave alone, the
+owner's own types, how Sophie writes, the safety reply (approved once), and the return-visit rule and
+compensation guide.
+
+### Deploy order
+
+1. Deploy the Firestore rules and indexes first: `firebase deploy --only firestore:rules,firestore:indexes`.
+   They add the `ai_*` collections (server-only), the held-events index, and expiry fields on
+   `ai_agent_events`, `ai_agent_actions`, `ai_email_triage`, `ai_email_summaries`, `ai_complaint_cases`
+   and `ai_staff_questions`. Wait for the indexes to finish building.
+2. Deploy the app. New cron jobs in `vercel.json`: `agent-run` (5 min), `email-daily-summary` (hourly),
+   `email-ai-cleanup` (daily). All need `CRON_SECRET`.
+3. If the owner voice tools are used, **deploy the voice bridge before the app** (its allow-list must
+   know the new tools first). The owner voice tools for email are not built yet, so skip this.
+4. Turn the switches on in the order above, one at a time, one business first.
+
+### Rollout (docs §17)
+
+1. **Shadow.** `AI_AGENT_ENABLED`, `AI_EMAIL_TRIAGE_ENABLED`, both dry runs on. Sophie sorts and asks;
+   nothing is done. Run `npm run report:email-shadow` to see how often her guess matched the owner.
+2. **Asking.** `AI_EMAIL_TRIAGE_DRY_RUN=false` and `AI_AGENT_DRY_RUN=false`. The owner's answers run.
+3. **Learning.** `AI_EMAIL_AUTO_ENABLED=true` for one business. Rules appear after 3 to 5 identical
+   answers, and the owner approves each one.
+4. **Replies.** `AI_EMAIL_AUTO_REPLY_ENABLED=true`, only after a test reply has been sent from each
+   mailbox type (Gmail, Outlook, app password).
+5. **Complaints.** `AI_EMAIL_COMPLAINTS_ENABLED=true`, then the staff questions once the staff app has
+   its Sophie screen.
+
+### Acceptance checks
+
+- Email from a private sender: no card, no AI request, no subject kept.
+- A promotion from a new sender is moved to Advertising after the owner's answer, and Undo moves it back.
+- Pause on: nothing further is done, sorting carries on. Pause off: it resumes.
+- A reply is sent as a threaded reply from the business mailbox, with `Auto-Submitted: auto-replied`,
+  and the customer's "STOP" stops further replies.
+- A safety email: the owner is pushed straight away, and the safety reply goes only when the owner has
+  approved it in Settings.
+- Disconnecting a mailbox leaves no triage rows, examples, decisions, bill items or cases for it.
+
+### Monitoring
+
+- **Queue age:** `ai_agent_events` with `status: "pending"` older than 15 minutes means the runner is
+  stuck; `status: "failed"` is an event that gave up (see its `lastError`).
+- **Audit:** `ai_agent_actions`, one row per action with a safe reason code and never email text.
+- **Unknown types:** a rising count of `unknown` in `ai_email_triage` means a new kind of mail.
+- **Demotions:** rules moved back to asking (`ai_email_rules`, `status: "demoted"`, `stats.undoCount`).
+- **Shadow accuracy:** `npm run report:email-shadow`.
+- **Held replies:** events with `status: "held"` wait for 7 am to 8 pm; many held for days means the
+  mailbox is signed out.
+
+### Rollback
+
+- Stop everything for all businesses: `AI_AGENT_ENABLED=false`. Records are kept.
+- Stop only the learning: `AI_EMAIL_AUTO_ENABLED=false`. Approved rules then only suggest.
+- Stop only replies: `AI_EMAIL_AUTO_REPLY_ENABLED=false`.
+- One business: Pause in Settings → Sophie, or switch off "Sophie sorts new email".
+- Nothing Sophie did is deleted by a rollback. Undo on the Sophie tab reverses folder moves, read
+  marks, bill items, reminders and pending requests; a sent email can't be unsent.
+
+### Before go-live (not code)
+
+Legal and privacy sign-off for reading mailbox content, the OpenAI processing of email text, the
+retention periods (triage 180 days, decisions 24 months, memory examples 12 months, complaint
+cases 180 days, technicians' answers 90 days after a case closes), the privacy policy wording
+(`app/privacy/page.tsx`), and Google's restricted-scope verification for the inbox scopes.

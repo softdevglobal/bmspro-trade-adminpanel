@@ -1,6 +1,8 @@
+import { EMAILS_SOPHIE_LINK, groupedCardsSince } from "@/lib/ai/email/cards";
+import { emailTriageCutoff } from "@/lib/ai/email/settings";
 import { EMAIL_CONNECTIONS_COLLECTION, isEmailSendEnabled } from "@/lib/email-integration/config";
 import { mapConnectionDoc } from "@/lib/email-integration/connections";
-import { digestMessage } from "@/lib/email-integration/mailbox/digest";
+import { digestMessage, waitingDigestMessage } from "@/lib/email-integration/mailbox/digest";
 import { newUnreadInbox } from "@/lib/email-integration/mailbox/store";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveBusinessOwnerUid, sendOwnerMobilePush } from "@/lib/notifications/push";
@@ -60,14 +62,20 @@ export async function GET(request: Request) {
       });
       if (since === null) { result.skipped++; continue; }
 
-      const unread = await newUnreadInbox({ connectionId: connection.id, since, top: 3 });
-      const message = unread ? digestMessage(unread.count, unread.latest) : null;
+      // When Sophie sorts this business's mail, only grouped cards she hasn't pushed are announced.
+      const sorting = (await emailTriageCutoff(adminDb, connection.businessId)) !== null;
+      const mail = sorting
+        ? await groupedCardsSince(adminDb, connection.businessId, since)
+        : await newUnreadInbox({ connectionId: connection.id, since, top: 3 });
+      const message = mail ? (sorting ? waitingDigestMessage : digestMessage)(mail.count, mail.latest) : null;
       if (!message) { result.quiet++; continue; }
       const ownerUid = await resolveBusinessOwnerUid(connection.businessId);
       if (!ownerUid) { result.skipped++; continue; }
       await sendOwnerMobilePush({
         ownerUid, ...message,
-        data: { type: "email_digest", link: "/dashboard/emails", count: String(unread?.count ?? 0) },
+        data: sorting
+          ? { type: "email_waiting", link: EMAILS_SOPHIE_LINK, count: String(mail?.count ?? 0) }
+          : { type: "email_digest", link: "/dashboard/emails", count: String(mail?.count ?? 0) },
       });
       result.pushed++;
     }

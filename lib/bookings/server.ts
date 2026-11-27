@@ -1091,11 +1091,31 @@ export async function completeBusinessBooking(
   const summary = await loadBusinessSummary(businessId);
   await notifyCustomerOfJobCompleted(booking, summary);
   await enqueueCareplusJobCompletedSafe(booking);
+  // A return visit for a complaint: its case moves to follow-up and the owner is told (Sophie email, step 9).
+  if (updated.data()?.returnVisit === true) {
+    await noteReturnVisitCompletedSafe(businessId, booking.id);
+  }
 
   return {
     ok: true,
     booking,
   };
+}
+
+/** Best effort: the job is already completed, so a failure here is only logged. */
+async function noteReturnVisitCompletedSafe(businessId: string, jobId: string): Promise<void> {
+  try {
+    const [{ noteReturnVisitCompleted }, push] = await Promise.all([
+      import("@/lib/ai/email/complaints/follow-up"),
+      import("@/lib/notifications/push"),
+    ]);
+    await noteReturnVisitCompleted(adminDb, { businessId, jobId }, async (id, message) => {
+      const ownerUid = await push.resolveBusinessOwnerUid(id);
+      if (ownerUid) await push.sendOwnerMobilePush({ ownerUid, ...message });
+    });
+  } catch (error) {
+    console.error("[bookings] return visit follow-up failed", (error as Error)?.name);
+  }
 }
 
 function normalizeCompletionPhotoUrls(raw: unknown): string[] {

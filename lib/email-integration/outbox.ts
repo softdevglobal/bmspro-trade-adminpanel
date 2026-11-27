@@ -1,5 +1,7 @@
 import "server-only";
 
+import { agentFlags } from "@/lib/ai/agent/config";
+import { writeAgentEvent } from "@/lib/ai/agent/events";
 import {
   EMAIL_BACKOFF_SECONDS,
   EMAIL_CONNECTIONS_COLLECTION,
@@ -274,6 +276,8 @@ export type EnqueueDocumentEmailInput = {
   cc: unknown;
   subject: unknown;
   bodyText: unknown;
+  /** Sent again by Sophie (step 8b): her own mail, marked as an automatic reply. */
+  agent?: { autoSubmitted: boolean };
 };
 
 export async function enqueueDocumentEmail(
@@ -383,6 +387,7 @@ export async function enqueueDocumentEmail(
     bodyText: content.bodyText,
     attachmentName,
     attachmentBytes: pdf.length,
+    ...(input.agent?.autoSubmitted ? { autoSubmitted: true } : {}),
   };
 
   const pdfStorageKey = await savePdf(input.businessId, outboxId, pdf);
@@ -404,6 +409,7 @@ export async function enqueueDocumentEmail(
     pdfStorageKey,
     idempotencyKey: input.idempotencyKey,
     internetMessageId: generateMessageId(connection.address),
+    ...(input.agent ? { origin: "agent" } : {}),
   });
   if (!created.ok || !created.created) await deletePdf(pdfStorageKey);
   if (!created.ok) return created;
@@ -450,6 +456,11 @@ export async function enqueueMailboxMessage(input: {
   thread: SendThread | null;
   /** What the message replies to or forwards, for the history label. */
   intent: "new" | "reply" | "forward";
+  /**
+   * Sophie's reply (docs/sophie-email-learning-and-auto-reply.md step 8): marked as her own mail, so
+   * it is never learnt from as the owner's, and, when sent without asking, as an automatic reply.
+   */
+  agent?: { autoSubmitted: boolean };
 }): Promise<
   { ok: true; outboxId: string; status: EmailOutboxStatus; created: boolean } | OutboxError
 > {
@@ -502,6 +513,7 @@ export async function enqueueMailboxMessage(input: {
       bodyText: content.bodyText,
       thread: input.thread,
       files: files.map((file) => [file.name, file.hash]),
+      ...(input.agent ? { agent: input.agent } : {}),
     }),
   );
   const outboxId = outboxIdFor(input.businessId, input.idempotencyKey);
@@ -549,6 +561,7 @@ export async function enqueueMailboxMessage(input: {
     attachmentBytes: totalBytes || null,
     attachmentNames: stored.map((file) => file.name),
     thread: input.thread,
+    ...(input.agent?.autoSubmitted ? { autoSubmitted: true } : {}),
   };
   const created = await createOutboxItem(outboxId, payloadHash, {
     kind: "message",
@@ -575,6 +588,7 @@ export async function enqueueMailboxMessage(input: {
     })),
     idempotencyKey: input.idempotencyKey,
     internetMessageId: generateMessageId(input.connection.address),
+    ...(input.agent ? { origin: "agent" } : {}),
   });
   if (!created.ok || !created.created) {
     await Promise.all(stored.map((file) => deletePdf(file.storageKey)));
@@ -779,17 +793,21 @@ export async function processOutboxItem(outboxId: string): Promise<EmailOutboxSt
     outboxId,
     attachments,
     thread: snapshot.thread ?? null,
+    autoSubmitted: snapshot.autoSubmitted === true,
   });
 
   switch (result.kind) {
-    case "accepted":
-      return finish("accepted", "accepted", {
+    case "accepted": {
+      const status = await finish("accepted", "accepted", {
         providerMessageId: result.providerMessageId,
         providerThreadId: result.providerThreadId,
         acceptedAt: FieldValue.serverTimestamp(),
         errorCode: null,
         safeErrorDetail: null,
       });
+      if (status === "accepted") await noteSentByPerson(claimed, businessId, outboxId);
+      return status;
+    }
     case "auth_failure": {
       const status = await finish("blocked_auth", "blocked_auth", {
         errorCode: result.code, safeErrorDetail: result.detail,
@@ -815,6 +833,18 @@ export async function processOutboxItem(outboxId: string): Promise<EmailOutboxSt
         retryAfterSeconds: result.retryAfterSeconds,
       });
   }
+}
+
+/**
+ * Tells Sophie a person at the business sent an email (plan §4.1). Her style guide learns from
+ * these, so test sends and her own mail (`origin: "agent"`) are left out. Best effort: the email
+ * is already sent, and a missed event only means one fewer example.
+ */
+async function noteSentByPerson(item: DocumentData, businessId: string, outboxId: string): Promise<void> {
+  if (!agentFlags().enabled || item.origin === "agent") return;
+  if (item.kind !== "message" && item.kind !== "document") return;
+  await writeAgentEvent(adminDb, { businessId, type: "email.sent_by_owner", entityId: outboxId })
+    .catch((error) => console.error("[email/outbox] agent event failed", (error as Error)?.name));
 }
 
 async function scheduleRetry(

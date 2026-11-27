@@ -229,6 +229,7 @@ export function mapMessageDoc(id: string, data: DocumentData): MailboxMessageSum
       customerName: typeof data.customerName === "string" ? data.customerName : null,
       document: mapDocumentRef(data.platformDocument),
     },
+    sophieKind: typeof data.sophieKind === "string" ? data.sophieKind : null,
   };
 }
 

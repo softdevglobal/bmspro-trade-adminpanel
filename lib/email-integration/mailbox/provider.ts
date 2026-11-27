@@ -42,6 +42,23 @@ export type MessageBody = {
   attachments: MessageAttachment[];
 };
 
+/** One header line as the message carries it. Names are lowercased. */
+export type RawMessageHeader = { name: string; value: string };
+
+/**
+ * The headers and provider labels Sophie's triage reads for one new message
+ * (docs/sophie-email-learning-and-auto-reply.md §4.1, §9.2). Read on demand,
+ * never stored by the sync, so the sync schema stays as it is.
+ */
+export type MessageHeaders = {
+  /** Only the names in TRIAGE_HEADER_NAMES, in message order: the top (newest) line first. */
+  headers: RawMessageHeader[];
+  /** Gmail label ids, e.g. CATEGORY_PROMOTIONS. Empty for other providers. */
+  labels: string[];
+  /** Outlook's Focused Inbox verdict ("focused" or "other"). Null for other providers. */
+  inferenceClassification: string | null;
+};
+
 /** What to look for when importing or searching. */
 export type MailboxSearch =
   | { kind: "customers"; addresses: string[] }
@@ -91,6 +108,8 @@ export interface MailboxAdapter {
   threadMessageIds(credentials: ProviderCredentials, threadId: string): Promise<string[]>;
   /** Null when the message no longer exists. */
   getMetadata(credentials: ProviderCredentials, id: string): Promise<MailboxMetadata | null>;
+  /** One provider call per message, made at triage time. Null when the message no longer exists. */
+  getHeaders(credentials: ProviderCredentials, id: string): Promise<MessageHeaders | null>;
   getBody(credentials: ProviderCredentials, id: string, maxChars: number): Promise<MessageBody | null>;
   getAttachment(credentials: ProviderCredentials, messageId: string, attachmentId: string): Promise<Buffer>;
   /**
@@ -104,4 +123,16 @@ export interface MailboxAdapter {
     action: MailboxAction,
     targets: ActionTarget[],
   ): Promise<void | { moved: { from: string; to: string }[] }>;
+  /**
+   * Moves messages out of the Inbox into the named folder (a label in Gmail), creating it when
+   * missing (Sophie's folder action). Gmail and Outlook keep the ids. IMAP copies get new ids in a
+   * folder the sync doesn't follow, so they simply leave the platform's views.
+   */
+  moveToFolder(credentials: ProviderCredentials, messageIds: string[], folderName: string): Promise<void>;
+  /** Undoes moveToFolder: back to the Inbox. IMAP finds the copies in that folder by Message-ID. */
+  restoreToInbox(
+    credentials: ProviderCredentials,
+    targets: { id: string; messageIdHeader: string }[],
+    folderName: string,
+  ): Promise<void>;
 }

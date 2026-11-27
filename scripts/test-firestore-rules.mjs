@@ -377,7 +377,7 @@ for (const collection of ["account_activations", "security_rate_limits", "paymen
   await expect("client cannot alter " + collection, assertFails(setDoc(doc(asSuperAdmin, collection, "forged"), { businessId: BUSINESS_A })));
 }
 
-console.log("\nbusiness-mailbox data is server-only (Admin SDK)");
+console.log("\nbusiness-mailbox and Sophie engine data is server-only (Admin SDK)");
 const EMAIL_FIXTURES = [
   ["email_connections", "conn-a"],
   ["email_connection_credentials", "conn-a"],
@@ -386,6 +386,26 @@ const EMAIL_FIXTURES = [
   ["email_oauth_states", "state-a"],
   ["email_messages", "message-a"],
   ["email_sync_state", "sync-a"],
+  // Sophie's engine: event queue and audit log.
+  ["ai_agent_events", "email.received:message-a"],
+  ["ai_agent_actions", "action-a"],
+  ["ai_email_settings", BUSINESS_A],
+  ["ai_email_private_senders", "sender-key-a"],
+  ["ai_email_blocked_senders", "sender-key-b"],
+  ["ai_email_triage", "triage-a"],
+  ["ai_email_examples", "decision-a"],
+  ["ai_email_decisions", "decision-a"],
+  ["ai_email_summaries", "business-a_2026-11-26"],
+  ["ai_email_rules", "rule-a"],
+  ["ai_email_kinds", "business-a_council_letters"],
+  ["ai_email_reply_threads", "thread-a"],
+  ["ai_email_reply_optouts", "sender-a"],
+  ["ai_email_style_samples", "business-a"],
+  ["ai_complaint_cases", "case-a"],
+  ["ai_staff_questions", "question-a"],
+  ["ai_reply_templates", "template-a"],
+  ["ai_reply_samples", "business-a_promotion"],
+  ["email_bill_items", "bill-a"],
 ];
 await testEnv.withSecurityRulesDisabled(async (context) => {
   for (const [collection, id] of EMAIL_FIXTURES) {

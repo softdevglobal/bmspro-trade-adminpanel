@@ -1,4 +1,5 @@
 import { INSPECTION_CREATE_TOOL, JOB_CREATE_TOOL, VISIT_PREPARE_TOOLS } from "./owner-visits";
+import { EMAIL_AUTOMATION_DEFINITIONS, EMAIL_AUTOMATION_PREPARE_TOOLS } from "./owner-email-questions";
 import { OWNER_CALL_PREPARE_TOOL } from "./owner-scheduled-calls";
 /**
  * Owner voice actions as MCP (server) tools: the server-side twin of the browser tools for
@@ -26,6 +27,34 @@ export function ownerToolMode(env: Readonly<Record<string, string | undefined>> 
   return env.AI_OWNER_VOICE_TOOL_MODE === "mcp" ? "mcp" : "browser";
 }
 
+/**
+ * Per-area tool mode, so both ways can run side by side: AI_OWNER_VOICE_TOOL_MODE is the default for every area,
+ * and AI_OWNER_VOICE_<AREA>_TOOL_MODE (SERVICES, TEAM, KNOWLEDGE, CUSTOMERS, ITEMS, SMS, EMAIL) overrides it for one.
+ * Example: TOOL_MODE=browser with EMAIL_TOOL_MODE=mcp. A value of "both" offers the page tools AND their server twins
+ * for that area; the browser keeps a separate yes-check for each set, but the model can pick either, so prefer one set
+ * per area when the owner is at the screen.
+ */
+export const OWNER_TOOL_AREAS = ["services", "team", "drafts", "customers", "items", "sms", "email"] as const;
+export type OwnerToolArea = (typeof OWNER_TOOL_AREAS)[number];
+const AREA_ENV: Record<OwnerToolArea, string> = {
+  services: "SERVICES", team: "TEAM", drafts: "KNOWLEDGE", customers: "CUSTOMERS", items: "ITEMS", sms: "SMS", email: "EMAIL",
+};
+/** browser, mcp, or both: AI_OWNER_VOICE_<AREA>_TOOL_MODE, else AI_OWNER_VOICE_TOOL_MODE, else browser. */
+function areaChoice(area: OwnerToolArea, env: Readonly<Record<string, string | undefined>>): "browser" | "mcp" | "both" {
+  for (const value of [env[`AI_OWNER_VOICE_${AREA_ENV[area]}_TOOL_MODE`], env.AI_OWNER_VOICE_TOOL_MODE]) {
+    if (value === "mcp" || value === "browser" || value === "both") return value;
+  }
+  return "browser";
+}
+/** Per area: true when the MCP (server) tools are offered (mode mcp or both). */
+export function ownerAreaModes(env: Readonly<Record<string, string | undefined>> = process.env): Record<OwnerToolArea, boolean> {
+  return Object.fromEntries(OWNER_TOOL_AREAS.map((area) => [area, areaChoice(area, env) !== "browser"])) as Record<OwnerToolArea, boolean>;
+}
+/** Per area: true when the browser (page) tools are offered (mode browser or both). */
+export function ownerAreaBrowser(env: Readonly<Record<string, string | undefined>> = process.env): Record<OwnerToolArea, boolean> {
+  return Object.fromEntries(OWNER_TOOL_AREAS.map((area) => [area, areaChoice(area, env) !== "mcp"])) as Record<OwnerToolArea, boolean>;
+}
+
 export const PENDING_CHANGE_LIMITS = {
   reviewMs: 5_000, // the owner needs time to hear the read-back
   ttlMs: 30 * 60_000, // an older pending change must be prepared again
@@ -37,7 +66,7 @@ export type PendingKind =
   | "staff_create" | "staff_update" | "staff_status" | "staff_delete"
   | "customer_create" | "customer_update"
   | "leave_decision" | "knowledge_entry" | "knowledge_update" | "knowledge_status" | "knowledge_delete"
-  | "item_create" | "item_update" | "item_delete" | "sms_send" | "email_send" | "email_trash" | "email_retry" | "visit_change" | "job_create" | "inspection_create" | "owner_call_schedule";
+  | "item_create" | "item_update" | "item_delete" | "sms_send" | "email_send" | "email_trash" | "email_retry" | "visit_change" | "job_create" | "inspection_create" | "owner_call_schedule" | "email_automation";
 
 export type PendingDecision =
   | { ok: true }
@@ -88,7 +117,7 @@ export const EMAIL_COUNTS_TOOL = "get_email_counts";
 /** Prepare tools: a READY_TO_CONFIRM result starts the browser's yes check in Talk to Sophie. */
 export const OWNER_PREPARE_TOOL_NAMES: readonly string[] = [
   ...OWNER_ACTION_PREPARE_TOOLS.services, ...OWNER_ACTION_PREPARE_TOOLS.team, ...OWNER_ACTION_PREPARE_TOOLS.drafts,
-  ...OWNER_ACTION_PREPARE_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.items, ...OWNER_ACTION_PREPARE_TOOLS.sms, ...OWNER_ACTION_PREPARE_TOOLS.email, ...VISIT_PREPARE_TOOLS, JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, OWNER_CALL_PREPARE_TOOL,
+  ...OWNER_ACTION_PREPARE_TOOLS.customers, ...OWNER_ACTION_PREPARE_TOOLS.items, ...OWNER_ACTION_PREPARE_TOOLS.sms, ...OWNER_ACTION_PREPARE_TOOLS.email, ...VISIT_PREPARE_TOOLS, JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, OWNER_CALL_PREPARE_TOOL, ...EMAIL_AUTOMATION_PREPARE_TOOLS,
 ];
 
 // ---- Attendance date ranges (same periods as the Attendance page) -----------------------------
@@ -162,6 +191,7 @@ export const OWNER_ACTION_DEFINITIONS: Record<string, OwnerActionDefinition> = {
     address:obj({street:str(),suburb:str(),state:str(),postcode:str()},["street","suburb","state","postcode"]),notes:str(),
   },["customerFullName","customerEmail","customerPhone","serviceName","date","startTime","endTime","priceAud","assignTo"])},
   ...visitDefinitions,
+  ...EMAIL_AUTOMATION_DEFINITIONS, // Sophie's email assistant by voice (owner-email-questions.ts)
   get_work_visits: {name: "get_work_visits", description: "List this business's jobs/inspections with references, status, dates, times and assignees. For scheduled jobs use kind=job and status=scheduled; omit date unless the owner specified one. No date means all dates, not today. Use this instead of the daily summary for general scheduled-work questions. Results may be partial; never claim none exist outside the selected date or returned page.", parameters: obj({kind: {type: "string", enum: ["job", "inspection"]}, status: {type: "string", enum: ["scheduled", "awaiting", "pending", "owner_proposed", "ongoing", "completed", "cancelled", "missed"]}, search: str(), date: str("Only when the owner specifies a scheduled date; YYYY-MM-DD")})},
   get_services: {
     name: "get_services",

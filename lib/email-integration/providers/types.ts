@@ -48,7 +48,22 @@ export type SendPayload = {
   attachments: { filename: string; contentType: string; content: Buffer }[];
   /** Replies: keep the conversation threaded at the provider and in clients. */
   thread: SendThread | null;
+  /** An automatic reply from Sophie (see autoReplyHeaders). */
+  autoSubmitted?: boolean;
 };
+
+/**
+ * RFC 3834 marks for an automatic reply. Outlook's API only takes custom headers that start with
+ * "X-", so it gets the X- ones; Sophie's own pre-check reads X-BMS-Auto-Submitted as well.
+ */
+export function autoReplyHeaders(payload: Pick<SendPayload, "autoSubmitted">, xOnly = false): Record<string, string> {
+  if (!payload.autoSubmitted) return {};
+  return {
+    ...(xOnly ? {} : { "Auto-Submitted": "auto-replied" }),
+    "X-Auto-Response-Suppress": "All",
+    "X-BMS-Auto-Submitted": "auto-replied",
+  };
+}
 
 export type SendThread = {
   providerThreadId: string;

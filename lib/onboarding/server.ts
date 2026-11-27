@@ -8,6 +8,7 @@ import { inaccessibleInitialPassword, issueActivationLink } from "@/lib/auth/act
 import { parseSlotCapacityFromBusiness } from "@/lib/calendar/slot-capacity";
 import {
   DEFAULT_WORKING_HOURS,
+  parseOpenDays,
   parseWorkingHoursFromBusiness,
   type BusinessWorkingHours,
 } from "@/lib/calendar/working-hours";
@@ -400,6 +401,8 @@ export type BusinessProfile = {
   sophieInvoiceCallsEnabled: boolean;
   sophieCallingHours: SophieCallingHours;
   workingHours: BusinessWorkingHours;
+  /** Open weekdays (0 = Sunday); null until the owner sets them. */
+  openDays: number[] | null;
   enabledModules: BusinessModuleSettings;
   /** Who covers the Stripe processing fee on customer payments. */
   feePayerMode: FeePayerMode;
@@ -507,6 +510,7 @@ export async function getBusinessProfile(
     })(),
     sophieJobAuthority: data.sophieJobAuthority === true,
     workingHours: parseWorkingHoursFromBusiness(data),
+    openDays: parseOpenDays(data.openDays),
     enabledModules: parseBusinessModuleSettings(data),
     feePayerMode: parseFeePayerMode(data.feePayerMode),
     stripeConnectAccountId:
@@ -551,6 +555,7 @@ export async function updateBusinessProfile(
     sophieBookingAuthority?: boolean;
     sophieJobAuthority?: boolean;
     workingHours?: BusinessWorkingHours;
+    openDays?: number[];
     enabledModules?: BusinessModuleSettings;
     feePayerMode?: FeePayerMode;
     bankTransferDetails?: BankTransferDetails | null;
@@ -640,6 +645,10 @@ export async function updateBusinessProfile(
 
   if ("workingHours" in updates && updates.workingHours) {
     payload.workingHours = updates.workingHours;
+  }
+
+  if ("openDays" in updates && updates.openDays) {
+    payload.openDays = updates.openDays;
   }
 
   if ("enabledModules" in updates && updates.enabledModules) {

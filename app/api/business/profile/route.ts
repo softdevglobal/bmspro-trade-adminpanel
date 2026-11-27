@@ -6,7 +6,7 @@
  */
 
 import { parseSlotCapacityInput } from "@/lib/calendar/slot-capacity";
-import { parseWorkingHoursInput } from "@/lib/calendar/working-hours";
+import { parseOpenDays, parseWorkingHoursInput } from "@/lib/calendar/working-hours";
 import {
   mergeModuleSettings,
   normalizeModuleSettingsPatch,
@@ -138,6 +138,7 @@ export async function PATCH(request: Request) {
     sophieBookingAuthority?: boolean;
     sophieJobAuthority?: boolean;
     workingHours?: { startTime: string; endTime: string };
+    openDays?: number[];
     enabledModules?: {
       quotations: boolean;
       invoices: boolean;
@@ -430,6 +431,17 @@ export async function PATCH(request: Request) {
       );
     }
     updates.workingHours = parsed.value;
+  }
+
+  if ("openDays" in raw) {
+    const openDays = parseOpenDays(raw.openDays);
+    if (!openDays) {
+      return NextResponse.json(
+        { ok: false, error: "Choose at least one day you're open." },
+        { status: 400 },
+      );
+    }
+    updates.openDays = openDays;
   }
 
   const current = await getBusinessProfile(auth.businessId);

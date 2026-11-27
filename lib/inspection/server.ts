@@ -179,11 +179,27 @@ export async function createInspectionRequest(
     assignmentSource?: "sophie" | "customer_portal";
     /** Route handlers can schedule delivery after returning the saved result. */
     scheduleNotifications?: (task: () => Promise<void>) => void;
+    /**
+     * A fixed document id, for callers that may run twice (Sophie's email actions). When a request
+     * with this id already exists for the business it is returned as it is, and nobody is notified again.
+     */
+    requestId?: string;
+    /** Extra fields recording where the request came from, e.g. the email Sophie read. */
+    markers?: { sophieEmailTriageId: string; sophieEmailKind: "inspection_request" | "job_request" };
   },
 ): Promise<
-  | { ok: true; request: InspectionRequestDetail }
+  | { ok: true; request: InspectionRequestDetail; existing?: boolean }
   | { ok: false; error: string }
 > {
+  if (options.requestId) {
+    const existing = await adminDb.collection(REQUESTS_COLLECTION).doc(options.requestId).get();
+    if (existing.exists) {
+      const data = existing.data() ?? {};
+      if (data.businessId !== businessId) return { ok: false, error: "Request not found." };
+      return { ok: true, request: mapInspectionDoc(existing.id, data), existing: true };
+    }
+  }
+
   let serviceName: string | null = null;
   let serviceBusinessType: string | null = null;
 
@@ -196,7 +212,9 @@ export async function createInspectionRequest(
     serviceBusinessType = service.businessType;
   }
 
-  const ref = adminDb.collection(REQUESTS_COLLECTION).doc();
+  const ref = options.requestId
+    ? adminDb.collection(REQUESTS_COLLECTION).doc(options.requestId)
+    : adminDb.collection(REQUESTS_COLLECTION).doc();
   const now = FieldValue.serverTimestamp();
   const requestCode = await allocateInspectionRequestCode();
 
@@ -260,6 +278,7 @@ export async function createInspectionRequest(
     customerNotes: input.customerNotes,
     budgetAud: input.budgetAud,
     customerImageUrls: input.customerImageUrls,
+    ...(options.markers ?? {}),
     createdAt: now,
     updatedAt: now,
   };

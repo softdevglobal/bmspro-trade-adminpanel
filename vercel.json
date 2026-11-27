@@ -29,6 +29,18 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/agent-run",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/email-daily-summary",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/email-ai-cleanup",
+      "schedule": "30 16 * * *"
+    },
+    {
       "path": "/api/cron/expenses",
       "schedule": "0 21 * * *"
     }

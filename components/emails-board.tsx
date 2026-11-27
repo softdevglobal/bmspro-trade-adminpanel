@@ -2,6 +2,7 @@
 
 import { EmailConnectionSettings } from "@/components/email-connection-settings";
 import { EmailSendRow } from "@/components/email-send-row";
+import { EmailSophieQueue, useSophieEmailAvailable } from "@/components/email-sophie-queue";
 import { MailboxPanel } from "@/components/mailbox-panel";
 import { emailsBoardVoice, type EmailsBoardState } from "@/lib/ai/owner-call/owner-email";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -15,12 +16,14 @@ import type { EmailSendHistoryItem } from "@/lib/email-integration/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type EmailFilter = "all" | "attention" | "in_progress" | "accepted";
-type EmailTab = "mailbox" | "log";
+type EmailTab = "mailbox" | "log" | "sophie";
 
 const TABS: { value: EmailTab; label: string; icon: string }[] = [
   { value: "mailbox", label: "Mailbox", icon: "mail" },
   { value: "log", label: "Send log", icon: "receipt_long" },
 ];
+/** Shown when Sophie's email sorting is switched on for the platform. */
+const SOPHIE_TAB = { value: "sophie" as const, label: "Sophie", icon: "smart_toy" };
 
 const FILTERS: { value: EmailFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -51,6 +54,15 @@ export function EmailsBoard() {
   // For Talk to Sophie: which filter last finished loading, and a count of finished loads.
   const [loadedFilter, setLoadedFilter] = useState<EmailFilter | null>(null);
   const [loadSeq, setLoadSeq] = useState(0);
+  const sophieAvailable = useSophieEmailAvailable();
+  const tabs = sophieAvailable ? [...TABS, SOPHIE_TAB] : TABS;
+
+  useEffect(() => {
+    // Sophie's pushes link to /dashboard/emails?tab=sophie.
+    if (new URLSearchParams(window.location.search).get("tab") === "sophie") {
+      queueMicrotask(() => setTab("sophie"));
+    }
+  }, []);
 
   const fetchPage = useCallback(
     async (cursor: string | null) => {
@@ -166,7 +178,7 @@ export function EmailsBoard() {
       <EmailConnectionSettings returnTo="emails" />
 
       <div role="tablist" aria-label="Email views" className="flex gap-1 border-b border-outline-variant/60">
-        {TABS.map((option) => (
+        {tabs.map((option) => (
           <button
             key={option.value}
             type="button"
@@ -186,6 +198,8 @@ export function EmailsBoard() {
       </div>
 
       {tab === "mailbox" ? <MailboxPanel /> : null}
+
+      {tab === "sophie" ? <EmailSophieQueue onEmailCustomer={() => setTab("mailbox")} /> : null}
 
       {tab === "log" ? (
         <>

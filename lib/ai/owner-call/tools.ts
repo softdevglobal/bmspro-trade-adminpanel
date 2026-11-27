@@ -1,5 +1,6 @@
 import { INSPECTION_CREATE_TOOL, JOB_CREATE_TOOL, VISIT_PREPARE_TOOLS } from "./owner-visits";
 import {OWNER_CALL_PREPARE_TOOL} from "./owner-scheduled-calls";
+import {EMAIL_AUTOMATION_TOOL_NAMES} from "./owner-email-questions";
 import { z } from "zod";
 import { ownerBriefingTools } from "@/lib/ai/mcp/tools/owner-briefing.tools";
 import { MAX_LOOKBACK_DAYS } from "@/lib/ai/owner-call/day-activity";
@@ -8,6 +9,7 @@ import {
 } from "@/lib/ai/owner-call/owner-service"; // shared rules (Step 1)
 import {
   CANCEL_CHANGE_TOOL, CONFIRM_CHANGE_TOOL, EMAIL_COUNTS_TOOL, OWNER_ACTION_DEFINITIONS, OWNER_ACTION_PREPARE_TOOLS, OWNER_ACTION_READ_TOOLS,
+  OWNER_TOOL_AREAS, type OwnerToolArea,
 } from "@/lib/ai/owner-call/owner-actions";
 import type { OwnerActionTools } from "@/lib/ai/mcp/tools/owner-actions.tools";
 
@@ -202,6 +204,8 @@ const serviceTools: OwnerVoiceTool[] = [
 const ACTION_RUNNERS: Record<string, (actions: OwnerActionTools, args: unknown) => Promise<unknown>> = {
   find_call_customers:(a,args)=>a.findCallCustomers(args),
   [OWNER_CALL_PREPARE_TOOL]:(a,args)=>a.prepareScheduledCall(args),
+  // Sophie's email assistant by voice (owner-email-questions.ts): every tool runs through one method.
+  ...Object.fromEntries(EMAIL_AUTOMATION_TOOL_NAMES.map((name) => [name, (a: OwnerActionTools, args: unknown) => a.emailAutomation(name, args)])),
   [JOB_CREATE_TOOL]: (a, args) => a.prepareJobCreate(args),
   [INSPECTION_CREATE_TOOL]: (a, args) => a.prepareInspectionCreate(args),
   get_work_visits: (a, args) => a.getWorkVisits(args),
@@ -296,19 +300,28 @@ export function ownerVoiceDraftsEnabled(env: Readonly<Record<string, string | un
  * modes: it runs on the MCP route and has no page twin.
  */
 export function ownerVoiceToolList({
-  knowledge, services = false, team = false, drafts = false, customers = false, items = false, sms = false, email = false, actions = false, visits = false, scheduledCalls = false,
+  knowledge, services = false, team = false, drafts = false, customers = false, items = false, sms = false, email = false, actions = false, visits = false, scheduledCalls = false, emailAutomation = false, mcpAreas = {},
 }: {
-  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; sms?: boolean; email?: boolean; actions?: boolean; visits?: boolean; scheduledCalls?:boolean;
+  knowledge: boolean; services?: boolean; team?: boolean; drafts?: boolean; customers?: boolean; items?: boolean; sms?: boolean; email?: boolean; actions?: boolean; visits?: boolean; scheduledCalls?:boolean; emailAutomation?: boolean;
+  /** Areas offered as MCP tools while the rest stay browser tools (ownerAreaModes). `actions` means every area. */
+  mcpAreas?: Partial<Record<OwnerToolArea, boolean>>;
 }): OwnerVoiceTool[] {
+  const mcp = (area: OwnerToolArea) => actions || mcpAreas[area] === true;
+  const anyMcp = OWNER_TOOL_AREAS.some(mcp);
   return [
     ...briefingTools, // always offered
     ...(knowledge ? [knowledgeTool] : []), // when owner knowledge is on
     ...(services ? serviceTools : []), // when voice service creation is on
-    ...(actions || visits || scheduledCalls ? [
-      ...(actions ? actionTools({ services, team, drafts, customers, items, sms, email }) : []),
+    ...(anyMcp || visits || scheduledCalls ? [
+      ...(anyMcp ? actionTools({
+        services: services && mcp("services"), team: team && mcp("team"), drafts: drafts && mcp("drafts"),
+        customers: customers && mcp("customers"), items: items && mcp("items"), sms: sms && mcp("sms"), email: email && mcp("email"),
+      }) : []),
       ...(visits ? ["get_work_visits", "get_services", "get_staff", JOB_CREATE_TOOL, INSPECTION_CREATE_TOOL, ...VISIT_PREPARE_TOOLS, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : []),
       ...(scheduledCalls?["find_call_customers",OWNER_CALL_PREPARE_TOOL,CONFIRM_CHANGE_TOOL,CANCEL_CHANGE_TOOL].map(actionTool):[]),
     ].filter((tool, index, tools) => tools.findIndex(other => other.name === tool.name) === index) : []), // MCP twins of the browser tools
+    // Sophie's email assistant: server tools with no page twin, offered in both modes, with the yes/no pair.
+    ...(emailAutomation ? [...EMAIL_AUTOMATION_TOOL_NAMES, CONFIRM_CHANGE_TOOL, CANCEL_CHANGE_TOOL].map(actionTool) : []),
     ...(email ? [actionTool(EMAIL_COUNTS_TOOL)] : []), // read only, both modes: counts need no page
   ];
 }

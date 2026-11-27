@@ -1,5 +1,6 @@
 import "server-only";
 
+import { pickTriageHeaders } from "@/lib/ai/email/headers";
 import { EMAIL_PROVIDER_TIMEOUT_MS } from "@/lib/email-integration/config";
 import { htmlToText, sanitizeEmailHtml } from "@/lib/email-integration/mailbox/html";
 import {
@@ -124,6 +125,24 @@ function folderIds(credentials: ProviderCredentials): Promise<FolderIds> {
   if (folderCache.size > 50) folderCache.clear();
   folderCache.set(credentials.accessToken, load);
   return load;
+}
+
+/** A top-level folder's id by name, created when `create` and it doesn't exist yet. */
+export async function findFolderId(credentials: ProviderCredentials, name: string, create: boolean): Promise<string | null> {
+  const lookup = async () => {
+    const filter = encodeURIComponent(`displayName eq '${name.replace(/'/g, "''")}'`);
+    const page = await graphJson<{ value?: { id: string }[] }>(credentials, "GET", `/me/mailFolders?$filter=${filter}&$select=id`);
+    return page.value?.[0]?.id ?? null;
+  };
+  const found = await lookup();
+  if (found || !create) return found;
+  try {
+    return (await graphJson<{ id: string }>(credentials, "POST", "/me/mailFolders", { displayName: name })).id;
+  } catch (error) {
+    // Created at the same moment by another run.
+    if (error instanceof MailboxReadError && error.status === 409) return lookup();
+    throw error;
+  }
 }
 
 /** Outlook folder -> mailbox view. Drafts and junk are never shown. */
@@ -291,6 +310,28 @@ export const microsoftMailbox: MailboxAdapter = {
     }
   },
 
+  async getHeaders(credentials, id) {
+    try {
+      const message = await graphJson<{
+        internetMessageHeaders?: { name?: string; value?: string }[] | null;
+        inferenceClassification?: string | null;
+      }>(
+        credentials,
+        "GET",
+        `/me/messages/${encodeURIComponent(id)}?$select=internetMessageHeaders,inferenceClassification`,
+      );
+      // Mail sent inside the organisation has no internet headers; that's simply an empty list.
+      return {
+        headers: pickTriageHeaders(message.internetMessageHeaders),
+        labels: [],
+        inferenceClassification: message.inferenceClassification ?? null,
+      };
+    } catch (error) {
+      if (error instanceof MailboxReadError && error.code === "not_found") return null;
+      throw error;
+    }
+  },
+
   async getBody(credentials, id, maxChars) {
     let message: { body?: { contentType?: string; content?: string }; hasAttachments?: boolean };
     try {
@@ -391,6 +432,20 @@ export const microsoftMailbox: MailboxAdapter = {
           if (target.folder === "trash") await move(target.id, target.fromSelf ? "sentitems" : "inbox");
           break;
       }
+    }
+  },
+
+  async moveToFolder(credentials, messageIds, folderName) {
+    const destinationId = await findFolderId(credentials, folderName, true);
+    if (!destinationId) throw new MailboxReadError(404, "folder_missing");
+    for (const id of messageIds) {
+      await graphJson(credentials, "POST", `/me/messages/${encodeURIComponent(id)}/move`, { destinationId });
+    }
+  },
+
+  async restoreToInbox(credentials, targets) {
+    for (const target of targets) {
+      await graphJson(credentials, "POST", `/me/messages/${encodeURIComponent(target.id)}/move`, { destinationId: "inbox" });
     }
   },
 };

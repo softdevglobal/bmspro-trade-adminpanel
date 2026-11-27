@@ -1,5 +1,6 @@
 import "server-only";
 
+import { parseHeaderBlock, TRIAGE_HEADER_NAMES } from "@/lib/ai/email/headers";
 import {
   changedFlagUids,
   decodeMessageId,
@@ -238,6 +239,14 @@ function moveDestination(
   }
 }
 
+/** A folder's server path by name or path (any case), created when `create` and it doesn't exist. */
+async function findImapFolder(client: ImapFlow, name: string, create: boolean): Promise<string | null> {
+  const wanted = name.toLowerCase();
+  const found = (await client.list()).find((item) => item.path.toLowerCase() === wanted || item.name.toLowerCase() === wanted);
+  if (found || !create) return found?.path ?? null;
+  return (await client.mailboxCreate(name)).path;
+}
+
 const FLAG_ACTIONS = {
   mark_read: { flag: "\\Seen", add: true },
   mark_unread: { flag: "\\Seen", add: false },
@@ -426,6 +435,28 @@ export function createImapMailbox(server: ImapServerConfig | null): MailboxAdapt
       });
     },
 
+    async getHeaders(credentials, id) {
+      return withImap(server, credentials, async (context) => {
+        const target = await locate(context, id);
+        if (!target) return null;
+        return context.inFolder(target.path, async (mailbox) => {
+          if (String(mailbox.uidValidity) !== target.uidValidity) return null;
+          // BODY.PEEK[HEADER.FIELDS (...)]: only these lines, in message order, without marking it read.
+          const row = await context.client.fetchOne(
+            String(target.uid),
+            { uid: true, headers: [...TRIAGE_HEADER_NAMES] },
+            { uid: true },
+          );
+          if (!row) return null;
+          return {
+            headers: parseHeaderBlock(row.headers?.toString("utf8") ?? ""),
+            labels: [],
+            inferenceClassification: null,
+          };
+        });
+      });
+    },
+
     async getBody(credentials, id, maxChars) {
       const parsed = await withImap(server, credentials, (context) => loadFullMessage(context, id));
       if (!parsed) return null;
@@ -525,6 +556,39 @@ export function createImapMailbox(server: ImapServerConfig | null): MailboxAdapt
           });
         }
         return { moved };
+      });
+    },
+
+    async moveToFolder(credentials, messageIds, folderName) {
+      return withImap(server, credentials, async (context) => {
+        const destination = await findImapFolder(context.client, folderName, true);
+        if (!destination) throw new MailboxReadError(404, "folder_missing");
+        const folders = await context.folders();
+        const refs = messageIds.map(decodeMessageId).filter((ref): ref is NonNullable<typeof ref> => Boolean(ref));
+        for (const folder of IMAP_FOLDERS) {
+          const path = folders.get(folder);
+          const inFolder = refs.filter((ref) => ref.folder === folder);
+          if (!path || inFolder.length === 0) continue;
+          await context.inFolder(path, async (mailbox) => {
+            const uids = inFolder.filter((ref) => ref.uidValidity === String(mailbox.uidValidity)).map((ref) => ref.uid);
+            if (uids.length > 0) await context.client.messageMove(uids, destination, { uid: true });
+          });
+        }
+      });
+    },
+
+    async restoreToInbox(credentials, targets, folderName) {
+      return withImap(server, credentials, async (context) => {
+        const source = await findImapFolder(context.client, folderName, false);
+        const inbox = (await context.folders()).get("inbox") ?? "INBOX";
+        if (!source) return;
+        await context.inFolder(source, async () => {
+          for (const target of targets) {
+            if (!target.messageIdHeader) continue;
+            const uids = await searchUids(context.client, { header: { "message-id": target.messageIdHeader } });
+            if (uids.length > 0) await context.client.messageMove(uids, inbox, { uid: true });
+          }
+        });
       });
     },
   };

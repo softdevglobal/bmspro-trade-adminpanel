@@ -1,5 +1,6 @@
 "use client";
 
+import { SophieKindChip } from "@/components/email-decision-card";
 import { EmailHtmlFrame } from "@/components/email-html-frame";
 import { AttachmentGallery, useInlineImages } from "@/components/mail-attachments";
 import { MailComposer, type ComposerDraft } from "@/components/mail-composer";
@@ -585,6 +586,7 @@ function Mailbox({
                   </span>
                   <span className="flex min-w-0 items-center gap-2">
                     <MatchChip match={item.match} compact />
+                    {item.sophieKind ? <SophieKindChip kind={item.sophieKind} /> : null}
                     <span className="truncate font-body text-[12px] text-on-surface-variant">{item.snippet}</span>
                   </span>
                 </button>

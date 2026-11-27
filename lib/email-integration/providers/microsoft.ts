@@ -6,6 +6,7 @@ import {
   type MicrosoftOAuthConfig,
 } from "@/lib/email-integration/config";
 import {
+  autoReplyHeaders,
   ProviderOAuthError,
   type ConnectedAccount,
   type EmailSendAdapter,
@@ -171,6 +172,11 @@ const recipients = (addresses: string[]) =>
 
 type Draft = { id: string; conversationId?: string };
 
+const graphHeaders = (payload: SendPayload) => [
+  { name: "X-BMS-Outbox-Id", value: payload.outboxId },
+  ...Object.entries(autoReplyHeaders(payload, true)).map(([name, value]) => ({ name, value })),
+];
+
 /** Creates the draft: a reply through Outlook's reply API, or a new message. */
 async function createDraft(credentials: ProviderCredentials, payload: SendPayload): Promise<Draft> {
   const fields = {
@@ -199,7 +205,7 @@ async function createDraft(credentials: ProviderCredentials, payload: SendPayloa
   }
   return graph<Draft>(credentials, "POST", "/me/messages", {
     ...fields,
-    internetMessageHeaders: [{ name: "X-BMS-Outbox-Id", value: payload.outboxId }],
+    internetMessageHeaders: graphHeaders(payload),
   });
 }
 
@@ -264,7 +270,7 @@ async function sendDirect(credentials: ProviderCredentials, payload: SendPayload
         toRecipients: recipients(payload.to),
         ccRecipients: recipients(payload.cc),
         bccRecipients: recipients(payload.bcc),
-        internetMessageHeaders: [{ name: "X-BMS-Outbox-Id", value: payload.outboxId }],
+        internetMessageHeaders: graphHeaders(payload),
         attachments: payload.attachments.map((file) => ({
           "@odata.type": "#microsoft.graph.fileAttachment",
           name: file.filename,

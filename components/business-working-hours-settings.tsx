@@ -5,15 +5,21 @@ import { useAuth } from "@/lib/auth/auth-context";
 import {
   DEFAULT_WORKING_HOURS,
   describeWorkingHoursWindow,
+  WEEKDAY_NAMES,
   type BusinessWorkingHours,
 } from "@/lib/calendar/working-hours";
 import { useEffect, useState } from "react";
 
 type Props = {
   workingHours: BusinessWorkingHours | null;
+  /** Open weekdays (0 = Sunday); null until set. Sophie answers "are you open?" only once they are. */
+  openDays?: number[] | null;
   loading?: boolean;
-  onSaved?: (workingHours: BusinessWorkingHours) => void;
+  onSaved?: (workingHours: BusinessWorkingHours, openDays?: number[] | null) => void;
 };
+
+/** Monday first, as Australian calendars show it. */
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 function toTimeInputValue(clock: string): string {
   return clock.length >= 5 ? clock.slice(0, 5) : clock;
@@ -21,6 +27,7 @@ function toTimeInputValue(clock: string): string {
 
 export function BusinessWorkingHoursSettings({
   workingHours,
+  openDays = null,
   loading = false,
   onSaved,
 }: Props) {
@@ -31,6 +38,7 @@ export function BusinessWorkingHoursSettings({
   const [endTime, setEndTime] = useState(
     toTimeInputValue(workingHours?.endTime ?? DEFAULT_WORKING_HOURS.endTime),
   );
+  const [days, setDays] = useState<number[]>(openDays ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -45,6 +53,14 @@ export function BusinessWorkingHoursSettings({
       toTimeInputValue(workingHours?.endTime ?? DEFAULT_WORKING_HOURS.endTime),
     );
   }, [workingHours?.startTime, workingHours?.endTime]);
+
+  // Follow the saved days when they load, without an effect.
+  const openDaysKey = (openDays ?? []).join(",");
+  const [loadedDaysKey, setLoadedDaysKey] = useState(openDaysKey);
+  if (loadedDaysKey !== openDaysKey) {
+    setLoadedDaysKey(openDaysKey);
+    setDays(openDaysKey ? openDaysKey.split(",").map(Number) : []);
+  }
 
   async function handleSave() {
     if (!user) return;
@@ -61,6 +77,7 @@ export function BusinessWorkingHoursSettings({
         },
         body: JSON.stringify({
           workingHours: { startTime, endTime },
+          ...(days.length > 0 ? { openDays: days } : {}),
         }),
       });
       const payload = (await response.json()) as {
@@ -68,6 +85,7 @@ export function BusinessWorkingHoursSettings({
         error?: string;
         profile?: {
           workingHours?: BusinessWorkingHours | null;
+          openDays?: number[] | null;
         };
       };
       if (!response.ok || !payload.ok) {
@@ -75,10 +93,11 @@ export function BusinessWorkingHoursSettings({
       }
 
       const next = payload.profile?.workingHours;
+      const savedDays = days.length > 0 ? [...days].sort((a, b) => a - b) : openDays;
       if (next?.startTime && next.endTime) {
-        onSaved?.(next);
+        onSaved?.(next, savedDays);
       } else {
-        onSaved?.({ startTime, endTime });
+        onSaved?.({ startTime, endTime }, savedDays);
       }
       setSuccess(true);
     } catch (saveError) {
@@ -126,6 +145,31 @@ export function BusinessWorkingHoursSettings({
           />
         </label>
       </div>
+
+      <fieldset className="mt-4">
+        <legend className="font-body text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          Open days
+        </legend>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {WEEK_ORDER.map((day) => (
+            <label key={day} className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/60 px-2.5 py-1.5 font-body text-[13px] text-on-surface">
+              <input
+                type="checkbox"
+                className="accent-primary"
+                disabled={loading || saving}
+                checked={days.includes(day)}
+                onChange={() => setDays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])}
+              />
+              {WEEKDAY_NAMES[day].slice(0, 3)}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1.5 font-body text-[12px] text-on-surface-variant">
+          {days.length === 0
+            ? "Not set yet. Until it is, Sophie asks you before answering “are you open?” emails."
+            : "Sophie uses these days, your hours and your closed dates to answer “are you open?” emails."}
+        </p>
+      </fieldset>
 
       <p className="mt-3 font-body text-[13px] text-on-surface-variant">
         Calendar window: <span className="font-semibold text-on-surface">{preview}</span>
