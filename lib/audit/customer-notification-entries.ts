@@ -26,6 +26,7 @@ export const CUSTOMER_NOTIFICATION_TYPE_LABELS: Record<NotificationType, string>
     booking_on_the_way: "Technician on the way",
     job_completed: "Job completed",
     invoice_sent: "Invoice sent",
+    invoice_follow_up_review: "Invoice follow-up review",
     quotation_sent: "Quotation sent",
     quotation_accepted: "Quotation accepted",
     quotation_rejected: "Quotation rejected",

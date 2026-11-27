@@ -77,5 +77,15 @@ export async function saveCallLog(binding: VoiceBusiness, input: CallLogInput): 
       if(currentLease.get("manualLeaseId")===input.callbackAttemptId)tx.update(lease,{manualLeaseUntil:0});
     });
   }
+  if(input.callbackAttemptId&&!input.ownerScheduledCall&&!input.quotationFollowUpCall){
+    const saved=!created?(await adminDb.collection(CALL_LOGS_COLLECTION).doc(input.callId).get()).data():null;
+    if(!created&&(saved?.businessId!==binding.businessId||saved.did!==binding.did||saved.callerKey!==phoneComparisonKey(input.callerNumber)||saved.callbackAttemptId!==input.callbackAttemptId))return false;
+    const ref=adminDb.collection("ai_invoice_call_attempts").doc(input.callbackAttemptId);
+    await adminDb.runTransaction(async tx=>{
+      const row=(await tx.get(ref)).data();
+      if(!row||row.businessId!==binding.businessId||row.did!==binding.did||row.numberKey!==phoneComparisonKey(input.callerNumber)||row.callLogId&&row.callLogId!==input.callId)return;
+      tx.update(ref,{callLogId:input.callId,conversationEndedAt:endedAt.getTime()});
+    });
+  }
   return created;
 }
